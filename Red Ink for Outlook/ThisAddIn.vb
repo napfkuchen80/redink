@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 9.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -92,7 +92,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.080225 Gen2 Alpha Test"
+    Public Const Version As String = "V.090225 Gen2 Alpha Test"
 
     ' Hardcoded configuration
 
@@ -2910,6 +2910,7 @@ Public Class ThisAddIn
                             ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
                                 OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
                                 DoMarkup = True
+                                DoInsert = True
                             End If
                             Dim LLMResult As String = ""
                             If Not NoText Then
