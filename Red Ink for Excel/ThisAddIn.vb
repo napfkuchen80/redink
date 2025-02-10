@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 10.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -169,7 +169,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080225 Gen2 Alpha Test"
+    Public Const Version As String = "V.100225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -179,7 +179,7 @@ Public Class ThisAddIn
     Private Const TextPrefix2 As String = "Text:"
     Private Const CellByCellPrefix As String = "CellByCell:"
     Private Const CellByCellPrefix2 As String = "CBC:"
-    Private Const RIMenu = AN ' & " " & ChrW(&HD83D) & ChrW(&HDC09)
+    Private Const RIMenu = AN
     Private Const MinHelperVersion = 1           ' Minimum version of the helper file that is required
 
     ' Definition of the SharedProperties for context for exchanging values with the SharedLibrary

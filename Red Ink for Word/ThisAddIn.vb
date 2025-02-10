@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 10.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -188,7 +188,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080225 Gen2 Alpha Test"
+    Public Const Version As String = "V.100225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -229,7 +229,7 @@ Public Class ThisAddIn
 
     Private Const RegexSeparator1 As String = "|||"  ' Set also in SharedLibrary
     Private Const RegexSeparator2 As String = "§§§"  ' Set also in SharedLibrary 
-    Private Const RIMenu = AN ' & " " & ChrW(&HD83D) & ChrW(&HDC09)
+    Private Const RIMenu = AN
     Private Const OldRIMenu = AN & " " & ChrW(&HD83D) & ChrW(&HDC09)
     Private Const MinHelperVersion = 1 ' Minimum version of the helper file that is required
     Private Const VoskSource = "https://alphacephei.com/vosk/models"
@@ -3023,68 +3023,91 @@ Public Class ThisAddIn
                 Dim selRange As Range = selection.Range
                 Dim docTables As Tables = selRange.Tables
 
-                ' Sort tables by their start positions in the selection
-                Dim tableList As New List(Of Table)
-                For i As Integer = 1 To docTables.Count
-                    tableList.Add(docTables(i))
-                Next
-                tableList.Sort(Function(t1, t2) t1.Range.Start.CompareTo(t2.Range.Start))
+                Dim isEntirelyWithinTable As Boolean = False
+                Dim isWholeTable As Boolean = False
+                Dim isPartialTableSelection As Boolean = False
 
-                Dim lastPos As Integer = selRange.Start
+                If selection.Tables.Count = 1 Then
+                    Dim tbl As Table = selRange.Tables(1)
+                    Dim tblRange As Range = tbl.Range
 
-                Dim splash As New SplashScreen("Processing table(s)... press 'Esc' to abort")
-                splash.Show()
-                splash.Refresh()
+                    ' Check if the selection is entirely within the table boundaries.
+                    isEntirelyWithinTable = (selRange.Start >= tblRange.Start AndAlso selRange.End <= tblRange.End)
 
-                Dim IsExit As Boolean = False
+                    ' Get trimmed texts. Adjust the characters to trim as needed.
+                    Dim selText As String = selRange.Text.Trim(vbCr, vbLf, " "c)
+                    Dim tblText As String = tblRange.Text.Trim(vbCr, vbLf, " "c)
 
-                For Each tbl As Table In tableList
+                    ' Compare the texts. If they differ, then the selection is not the whole table.
+                    isWholeTable = (selText = tblText)
 
-                    System.Windows.Forms.Application.DoEvents()
-
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
-                        Exit For
+                    ' If the selection is fully contained in the table but does not equal the entire table's text,
+                    ' then it is entirely within the table but is only a part of it.
+                    If isEntirelyWithinTable AndAlso Not isWholeTable Then
+                        isPartialTableSelection = True
                     End If
+                End If
 
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Or IsExit Then
-                        ' Exit the loop
-                        Exit For
-                    End If
+                If isEntirelyWithinTable Or isWholeTable Then
 
-                    Dim tblStart As Integer = tbl.Range.Start
-                    Dim tblEnd As Integer = tbl.Range.End
+                    Dim tbl As Table = selRange.Tables(1)
 
-                    ' Text chunk BEFORE the table
-                    If tblStart > lastPos Then
-                        Dim textChunk As Range = selRange.Duplicate
-                        textChunk.Start = lastPos
-                        textChunk.End = tblStart - 1
+                    For Each row As Word.Row In tbl.Rows
+                        ' Cycle through each cell in the current row.
+                        For Each cell As Word.Cell In row.Cells
+                            ' Work with a duplicate of the cell's range.
+                            Dim cellRange As Word.Range = cell.Range.Duplicate
+                            ' Exclude the cell marker.
+                            cellRange.End -= 1
 
-                        ' Double-check you haven't snagged any table content
-                        If textChunk.Tables.Count = 0 Then
-                            ' Also verify it's not empty
-                            If textChunk.Start < textChunk.End Then
-                                textChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
-                                Await System.Threading.Tasks.Task.Delay(500)
+                            ' Check if this cell's range intersects with the selection.
+                            If cellRange.End >= selRange.Start AndAlso cellRange.Start <= selRange.End Then
+                                ' Calculate the intersection between the cell and selection ranges.
+                                Dim intersectionRange As Word.Range = selRange.Duplicate
+                                intersectionRange.Start = Math.Max(cellRange.Start, selRange.Start)
+                                intersectionRange.End = Math.Min(cellRange.End, selRange.End)
+
+                                ' Only process if there is a valid range.
+                                If intersectionRange.Start < intersectionRange.End Then
+                                    ' (Optional) Use DoEvents if you need to keep the UI responsive.
+                                    System.Windows.Forms.Application.DoEvents()
+
+                                    ' Select the intersection (for visual feedback or further processing).
+                                    intersectionRange.Select()
+
+                                    ' Process the selected text.
+                                    ' (Replace the parameters with the ones required by your method.)
+                                    Dim result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken,
+                                                                                KeepFormat, ParaFormatInline, InPlace,
+                                                                                DoMarkup, MarkupMethod, PutInClipboard,
+                                                                                PutInBubbles, SelectionMandatory, UseSecondAPI,
+                                                                                FormattingCap, DoTPMarkup, TPMarkupname)
+                                    ' Optionally delay between processing cells.
+                                    Await System.Threading.Tasks.Task.Delay(500)
+                                End If
                             End If
-                        Else
+                        Next
+                    Next
 
-                            Do
-                                textChunk.Start += 1
-                            Loop While textChunk.Tables.Count <> 0 And Not textChunk.Start = textChunk.End
+                Else
 
-                            If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
-                                textChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
-                                Await System.Threading.Tasks.Task.Delay(500)
-                            End If
+                    ' Sort tables by their start positions in the selection
+                    Dim tableList As New List(Of Table)
+                    For i As Integer = 1 To docTables.Count
+                        tableList.Add(docTables(i))
+                    Next
+                    tableList.Sort(Function(t1, t2) t1.Range.Start.CompareTo(t2.Range.Start))
 
-                        End If
-                    End If
+                    Dim lastPos As Integer = selRange.Start
 
-                    ' Process the table itself (cells)
-                    For Each row As Row In tbl.Rows
+                    Dim splash As New SplashScreen("Processing table(s)... press 'Esc' to abort")
+                    splash.Show()
+                    splash.Refresh()
+
+                    Dim IsExit As Boolean = False
+
+                    For Each tbl As Table In tableList
+
                         System.Windows.Forms.Application.DoEvents()
 
                         If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
@@ -3095,7 +3118,41 @@ Public Class ThisAddIn
                             ' Exit the loop
                             Exit For
                         End If
-                        For Each cell As Cell In row.Cells
+
+                        Dim tblStart As Integer = tbl.Range.Start
+                        Dim tblEnd As Integer = tbl.Range.End
+
+                        ' Text chunk BEFORE the table
+                        If tblStart > lastPos Then
+                            Dim textChunk As Range = selRange.Duplicate
+                            textChunk.Start = lastPos
+                            textChunk.End = tblStart - 1
+
+                            ' Double-check you haven't snagged any table content
+                            If textChunk.Tables.Count = 0 Then
+                                ' Also verify it's not empty
+                                If textChunk.Start < textChunk.End Then
+                                    textChunk.Select()
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Await System.Threading.Tasks.Task.Delay(500)
+                                End If
+                            Else
+
+                                Do
+                                    textChunk.Start += 1
+                                Loop While textChunk.Tables.Count <> 0 And Not textChunk.Start = textChunk.End
+
+                                If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
+                                    textChunk.Select()
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Await System.Threading.Tasks.Task.Delay(500)
+                                End If
+
+                            End If
+                        End If
+
+                        ' Process the table itself (cells)
+                        For Each row As Row In tbl.Rows
                             System.Windows.Forms.Application.DoEvents()
 
                             If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
@@ -3106,46 +3163,58 @@ Public Class ThisAddIn
                                 ' Exit the loop
                                 Exit For
                             End If
-                            Dim cellRange As Range = cell.Range
-                            cellRange.End -= 1  ' Exclude cell marker
-                            If cellRange.Start < cellRange.End Then
-                                cellRange.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
-                                Await System.Threading.Tasks.Task.Delay(500)
-                            End If
+                            For Each cell As Cell In row.Cells
+                                System.Windows.Forms.Application.DoEvents()
+
+                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
+                                    Exit For
+                                End If
+
+                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Or IsExit Then
+                                    ' Exit the loop
+                                    Exit For
+                                End If
+                                Dim cellRange As Range = cell.Range
+                                cellRange.End -= 1  ' Exclude cell marker
+                                If cellRange.Start < cellRange.End Then
+                                    cellRange.Select()
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Await System.Threading.Tasks.Task.Delay(500)
+                                End If
+                            Next
                         Next
+
+                        ' Move lastPos to end of this table
+                        lastPos = tblEnd + 1
                     Next
 
-                    ' Move lastPos to end of this table
-                    lastPos = tblEnd + 1
-                Next
-
-                ' Text chunk AFTER the last table
-                If lastPos <= selRange.End And Not IsExit Then
-                    Dim finalChunk As Range = selRange.Duplicate
-                    finalChunk.Start = lastPos
-                    finalChunk.End = selRange.End
-
-                    If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
-
-                        finalChunk.Select()
-                        Dim text = selection.Text
-                        Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
-                    Else
-                        Do
-                            finalChunk.Start += 1
-                        Loop While finalChunk.Tables.Count <> 0 And Not finalChunk.Start = finalChunk.End
-
+                    ' Text chunk AFTER the last table
+                    If lastPos <= selRange.End And Not IsExit Then
+                        Dim finalChunk As Range = selRange.Duplicate
+                        finalChunk.Start = lastPos
                         finalChunk.End = selRange.End
 
                         If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
+
                             finalChunk.Select()
+                            Dim text = selection.Text
                             Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                        Else
+                            Do
+                                finalChunk.Start += 1
+                            Loop While finalChunk.Tables.Count <> 0 And Not finalChunk.Start = finalChunk.End
+
+                            finalChunk.End = selRange.End
+
+                            If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
+                                finalChunk.Select()
+                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                            End If
                         End If
                     End If
-                End If
 
-                splash.Close()
+                    splash.Close()
+                End If
 
             ElseIf userdialog = 1 Then
 
