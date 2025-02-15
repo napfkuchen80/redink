@@ -67,6 +67,7 @@ Partial Class Ribbon1
         Me.RI_SwitchParty = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
+        Me.RI_Undo = Me.Factory.CreateRibbonButton
         Me.Menu2 = Me.Factory.CreateRibbonMenu
         Me.RI_AdjustHeight = Me.Factory.CreateRibbonButton
         Me.RI_AdjustLegacyNotes = Me.Factory.CreateRibbonButton
@@ -112,6 +113,7 @@ Partial Class Ribbon1
         Me.Menu1.Items.Add(Me.RI_SwitchParty)
         Me.Menu1.Items.Add(Me.RI_FreestyleNM)
         Me.Menu1.Items.Add(Me.RI_FreestyleAM)
+        Me.Menu1.Items.Add(Me.RI_Undo)
         Me.Menu1.Items.Add(Me.Menu2)
         Me.Menu1.Items.Add(Me.Settings)
         Me.Menu1.KeyTip = "S"
@@ -213,6 +215,15 @@ Partial Class Ribbon1
     "e 2nd configured model, if available"
         Me.RI_FreestyleAM.ShowImage = True
         Me.RI_FreestyleAM.Visible = False
+        '
+        'RI_Undo
+        '
+        Me.RI_Undo.Enabled = False
+        Me.RI_Undo.Label = "Undo Last Insert"
+        Me.RI_Undo.Name = "RI_Undo"
+        Me.RI_Undo.OfficeImageId = "Undo"
+        Me.RI_Undo.ScreenTip = "Undo the last AI insertion (the insertion cannot be repeated)"
+        Me.RI_Undo.ShowImage = True
         '
         'Menu2
         '
@@ -343,8 +354,16 @@ Partial Class Ribbon1
         Me.Menu1.SuperTip = $"{AN} " & ThisAddIn.Version &
                         " © by David Rosenthal, VISCHER AG " &
                         "(model: " & ThisAddIn.INI_Model & ")"
+        UpdateUndoButton()
     End Function
 
+    Public Async Function UpdateUndoButton() As Task
+        If ThisAddIn.undoStates Is Nothing OrElse ThisAddIn.undoStates.Count = 0 Then
+            Me.RI_Undo.Enabled = False
+        Else
+            Me.RI_Undo.Enabled = True
+        End If
+    End Function
 
 
     Friend WithEvents Tab1 As Microsoft.Office.Tools.Ribbon.RibbonTab
@@ -370,7 +389,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_AdjustLegacyNotes As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_Regex As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_FreestyleNM2 As Microsoft.Office.Tools.Ribbon.RibbonButton
-
+    Friend WithEvents RI_Undo As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

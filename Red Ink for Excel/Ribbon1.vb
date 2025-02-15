@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 14.2.2025
 
 Imports Microsoft.Office.Tools.Ribbon
 
@@ -79,5 +79,8 @@ Public Class Ribbon1
         Globals.ThisAddIn.RegexSearchReplace()
     End Sub
 
+    Private Sub RI_Undo_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Undo.Click
+        Globals.ThisAddIn.UndoAction()
+    End Sub
 
 End Class

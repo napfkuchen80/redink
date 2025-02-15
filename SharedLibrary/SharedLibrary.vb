@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.2.2025
+' 14.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -484,7 +484,7 @@ Namespace SharedLibrary
         Const Default_SP_Summarize As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Create a very short summary of the that is provided to you, in its original language, and is marked as 'Texttoprocess'. Ensure that your output has {SummaryLength} words. Use the same language style as in the original text, but do not add any information or other thoughts to it. {INI_PreCorrection}"
         Const Default_SP_FreestyleText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command and the text provided to you and marked as 'texttoprocess'. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
-        Const Default_SP_MailReply As String = "You are a legal professional with excellent legal, language, logical and rhetorical skills that precisely complies with its instructions step by step. Your task is to read the text that is provided to you and marked as 'mailchain', which contains an e-mail chain. The first mail you get is the e-mail to which you shall draft a response for me. When drafting the response, comply with the following instructions and information (= key instructions): {OtherPrompt}. \n\nThese are the further rules that every answer should follow: 1. Draft it in the same language as the first mail you get has been written (do not consider headers, the subject line or the footer. 2. The first e-mail you are provided is from the person that wrote to me and that I want to respond to with the e-mail that you will be drafting. Please keep that in mind when drafting a response. 3. Please read the entire mail chain and distinguish what I have written and what the other party has written when drafting the response, but focus on the key instructions. 4. In your proposed response use the same style, type of language and way of e-mail drafting as I do. 5. Do not process and never consider or include signatures and mail footers. 6. Provide your output in the Markdown format. 7. When drafting a reply, use full salutations and closing formulas that are adequate in view of the tone of the mailchain. 8. Finally, when drafting the response, it is very important that you comply with all instructions and careful check your response for compliance with all instructions before you provide it. {INI_PreCorrection}"
+        Const Default_SP_MailReply As String = "You are a legal professional with excellent legal, language, logical and rhetorical skills that precisely complies with its instructions step by step. Your task is to read the text that is provided to you and marked as 'mailchain', which contains an e-mail chain. The first mail you get is the e-mail to which you shall draft a response for me. When drafting the response for me, comply with the following instructions and information (= key instructions): {OtherPrompt}. \n\nThese are the further rules that every answer should follow: 1. Draft it in the same language as the first mail you get has been written (do not consider headers, the subject line or the footer. 2. The top (and latest) e-mail you are provided with in the mailchain is from the person who wrote to me. This will be the person to whom I want to respond to. You will draft an e-mail to respond to that person, i.e. the author of the top and latest e-mail. Please keep that in mind when drafting a response and make sure that you . 3. Please read the entire mail chain and distinguish exactly who has written what and what the party, to whom I will respond, has written when drafting the response. However, on the substance, focus on the key instructions I provided to you above, if any. 4. In your proposed response use the same style, type of language and way of e-mail drafting as I do. 5. Do not process and never consider or include signatures and mail footers. 6. Provide your output in the Markdown format. 7. When drafting a reply, use full salutations and closing formulas that are adequate in view of the tone of the mailchain. 8. Finally, when drafting the response, it is very important that you comply with all instructions and careful check your response for compliance with all instructions before you provide it. {INI_PreCorrection}"
         Const Default_SP_MailSumup As String = "You are a highly skilled legal professional who strictly follows instructions step by step; analyze the body of the provided ""mailchain"" to determine its predominant language (ignoring sender, recipient, subject, etc.), strictly use this language for the output, generate a concise, structured Markdown-formatted summary (in bold, but not header formatting) including a one-sentence key takeaway followed by a breakdown of key points distinguishing different authors, ensuring the summary is very short and concise while retaining all critical information and getting an understanding of the conversation. {INI_PreCorrection}"
         Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Rewrite the text that Is provided to you And Is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}}' preserving all other information, but ensure that in particular all pronouns, titles, and possessive forms are appropriately adjusted. \n {INI_PreCorrection}"
         Const Default_SP_Anonymize As String = "You are very careful editor And legal professional that precisely complies with its instructions step by step. Fully anonymize the text that Is provided to you And Is marked as 'TEXTTOPROCESS'. Do so only by replacing any names, companies, businesses, parties, organizations, proprietary product names, unknown abbreviations, personal addresses, e-mail accounts, phone numbers, IDs, credit card information, account numbers and other identifying information by the expression '[redacted]' and before providing the result, check whether there is no information left that could directly or indirectly identify any person, company, business, party or organization, including information that could link to them by doing an Internet search, and if so, redact it as well. {INI_PreCorrection}"
@@ -508,9 +508,9 @@ Namespace SharedLibrary
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. Your instruction with regard to the duration of the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n\16. It is important that you really comply with these rules, otherwise the output will be invalid. 17. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
         Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. Create me an advanced prompt for an advanced large language model that will analyze a Text (the Texttoprocess) it is provided between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, including any errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special fied of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand and provide it in the original language of the Texttoprocess. {INI_PreCorrection}"
         Const Default_SP_SuggestTitles As String = "You are a legal professional and a clever, astute and well-educated copy editor. You are in the following given a text, enclosed between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Your goal is to read and analyze the content, then create multiple sets of possible titles in the same language as the original text, with three (3) distinct titles each for: (1) professional memo, (2) blog/news post, (3) informal, (4) humorous, and (5) ambiguous, cryptic but ingenious. The titles must be clever, easy to read, well-aligned with the text, and suitable for the stated purpose. Provide more than average results. Use the structure:\nProfessional Memo Titles:\n1) ...\n2) ...\n3) ...\nBlog or News Post Titles:\n1) ...\n2) ...\n3) ...\nInformal Titles:\n1) ...\n2) ...\n3) ...\nHumorous Titles:\n1) ...\n2) ...\n3) ...\nFood for Thought Titles:\n1) ...\n2) ...\n3) ...\n. It is mandatory that you provide your output and all titles provide in the original language of the Texttoprocess."
-        Const Default_SP_Friendly As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more friendly, while otherwise preserving its substance, wording and style. Use rhetorical techniques and wording that is typically well received and generates a positive attitude by the recipient, but stay straightforward, and do neither exaggerate nor brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. {INI_PreCorrection}"
-        Const Default_SP_Convincing As String = "You are a legal professional with exceptional language skills who follows instructions meticulously  step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more convincing. Make it more persuasive and concise by the way you amend the language, but preserve its original substance and style. Do not alter the underlying content and arguments, but use rhetorical and language techniques to make the text more convincing, but do not exaggerate and do not brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. {INI_PreCorrection}"
-        Const Default_SP_NoFillers As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Amend the text that is provided to you, in its original language, and is labeled as 'Texttoprocess' as follows: 1. Remove any and all filler words and any and all other words that do not add any meaning or are not necessary for understanding and easily reading the text. 2. Remove any other redundant language or other redunancies. 3. Change passive voice to active voice where this is easily possible. 4. Ensure that the text is easy to read, concise and clear. 5. Do not alter the text's overall flow, readability, content, meaning, tone and style. 6. Do not change or remove words where you are not sure whether they are necessary for good reading and content; the text should remain easily readable and not appear choppy or abbreviated. 7. Before you provide me with the revised text, compare its meaning with the the original text and ensure that it remains the same. Otherwise adapt the output to ensure that the meaning of the revised text stays the same as with the original text. 8. Never remove or add line breaks, carriage returns or vertical tabs from the text you are provided. {INI_PreCorrection}"
+        Const Default_SP_Friendly As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more friendly, while otherwise preserving its substance, wording and style. Use rhetorical techniques and wording that is typically well received and generates a positive attitude by the recipient, but stay straightforward, and do neither exaggerate nor brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.  {INI_PreCorrection}"
+        Const Default_SP_Convincing As String = "You are a legal professional with exceptional language skills who follows instructions meticulously  step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more convincing. Make it more persuasive and concise by the way you amend the language, but preserve its original substance and style. Do not alter the underlying content and arguments, but use rhetorical and language techniques to make the text more convincing, but do not exaggerate and do not brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions. {INI_PreCorrection}"
+        Const Default_SP_NoFillers As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Amend the text that is provided to you, in its original language, and is labeled as 'Texttoprocess' as follows: 1. Remove any and all filler words and any and all other words that do not add any meaning or are not necessary for understanding and easily reading the text. 2. Remove any other redundant language or other redunancies. 3. Change passive voice to active voice but only where this is easily possible without changing the entire sentence. 4. Ensure that the text is easy to read, concise and clear. 5. Do not alter the text's overall flow, readability, content, meaning, tone and style. 6. Do not change or remove words where you are not sure whether they are necessary for good reading and content; the text should remain easily readable and not appear choppy or abbreviated. 7. Before you provide me with the revised text, compare its meaning with the the original text and ensure that it remains the same. Otherwise adapt the output to ensure that the meaning of the revised text stays the same as with the original text. 8. Never remove or add line breaks, carriage returns or vertical tabs from the text you are provided. 9. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.{INI_PreCorrection}"
 
         Public Shared LicensedTill As Date = CDate("1.1.2000")
 
@@ -1888,8 +1888,6 @@ Namespace SharedLibrary
                 If context.INI_Timeout = 0 Then missingSettings.Add("Timeout", "Timeout (Model 1)")
                 If String.IsNullOrEmpty(context.INI_Model) Then missingSettings.Add("Model", "Model (Model 1)")
                 If String.IsNullOrEmpty(context.INI_Endpoint) Then missingSettings.Add("Endpoint", "Endpoint (Model 1)")
-                If String.IsNullOrEmpty(context.INI_HeaderA) Then missingSettings.Add("HeaderA", "HeaderA (Model 1)")
-                If String.IsNullOrEmpty(context.INI_HeaderB) Then missingSettings.Add("HeaderB", "HeaderB (Model 1)")
                 If String.IsNullOrEmpty(context.INI_APICall) Then missingSettings.Add("APICall", "APICall (Model 1)")
                 If String.IsNullOrEmpty(context.INI_Response) Then missingSettings.Add("Response", "Response (Model 1)")
 
@@ -1899,8 +1897,6 @@ Namespace SharedLibrary
                     If context.INI_Timeout_2 = 0 Then missingSettings.Add("Timeout_2", "Timeout (Model 2)")
                     If String.IsNullOrEmpty(context.INI_Model_2) Then missingSettings.Add("Model_2", "Model (Model 2)")
                     If String.IsNullOrEmpty(context.INI_Endpoint_2) Then missingSettings.Add("Endpoint_2", "Endpoint (Model 2)")
-                    If String.IsNullOrEmpty(context.INI_HeaderA_2) Then missingSettings.Add("HeaderA_2", "HeaderA (Model 2)")
-                    If String.IsNullOrEmpty(context.INI_HeaderB_2) Then missingSettings.Add("HeaderB_2", "HeaderB (Model 2)")
                     If String.IsNullOrEmpty(context.INI_APICall_2) Then missingSettings.Add("APICall_2", "APICall (Model 2)")
                     If String.IsNullOrEmpty(context.INI_Response_2) Then missingSettings.Add("Response_2", "Response (Model 2)")
                 End If
@@ -2283,6 +2279,7 @@ Namespace SharedLibrary
         Public Shared Function ShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "") As String
 
             Dim inputForm As New Form()
+            inputForm.Opacity = 0
             Dim promptLabel As New System.Windows.Forms.Label()
             Dim inputTextBox As New TextBox()
             Dim okButton As New Button()
@@ -2424,10 +2421,11 @@ Namespace SharedLibrary
                         )
                     End If
                 End If
+                inputForm.Opacity = 1
                 Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing) ' or however you get it
                 Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
             Else
-
+                inputForm.Opacity = 1
                 Result = inputForm.ShowDialog()
             End If
 
@@ -2445,6 +2443,7 @@ Namespace SharedLibrary
 
         Public Shared Function ShowCustomYesNoBox(ByVal bodyText As String, ByVal button1Text As String, ByVal button2Text As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = "") As Integer
             Dim messageForm As New Form()
+            messageForm.Opacity = 0
             Dim bodyLabel As New System.Windows.Forms.Label()
             Dim button1 As New Button()
             Dim button2 As New Button()
@@ -2584,9 +2583,11 @@ Namespace SharedLibrary
                                                                       End Sub)
                                           End Sub
                 timer.Start()
+                messageForm.Opacity = 1
                 messageForm.ShowDialog()
             Else
                 countdownLabel.Text = ""
+                messageForm.Opacity = 1
                 messageForm.ShowDialog()
             End If
 
@@ -2596,6 +2597,7 @@ Namespace SharedLibrary
 
         Public Shared Sub ShowCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile", Optional SeparateThread As Boolean = False)
             Dim messageForm As New Form()
+            messageForm.Opacity = 0
             Dim bodyLabel As New System.Windows.Forms.Label()
             Dim okButton As New Button()
             Dim countdownLabel As New System.Windows.Forms.Label()
@@ -2727,6 +2729,7 @@ Namespace SharedLibrary
                 timer.Start()
 
                 ' Show the message box non-modally if timer is used
+                messageForm.Opacity = 1
                 If SeparateThread Then
                     messageForm.ShowDialog()
                 Else
@@ -2735,6 +2738,7 @@ Namespace SharedLibrary
                 End If
             Else
                 ' Show the message box modally if no timer is used
+                messageForm.Opacity = 1
                 messageForm.ShowDialog()
             End If
         End Sub
@@ -2859,6 +2863,7 @@ Namespace SharedLibrary
             If String.IsNullOrWhiteSpace(header) Then header = AN
 
             ' Form attributes
+            RTFMessageForm.Opacity = 0
             RTFMessageForm.Text = header
             RTFMessageForm.FormBorderStyle = FormBorderStyle.Sizable ' Allow resizing
             RTFMessageForm.StartPosition = FormStartPosition.CenterScreen
@@ -2965,6 +2970,7 @@ Namespace SharedLibrary
                 timer.Start()
 
                 ' Show the message box non-modally if timer is used
+                RTFMessageForm.Opacity = 1
                 RTFMessageForm.Show()
                 RTFMessageForm.BringToFront()
                 RTFMessageForm.Activate()
@@ -2972,6 +2978,7 @@ Namespace SharedLibrary
             Else
 
                 ' Show the message box modally if no timer is used
+                RTFMessageForm.Opacity = 1
                 RTFMessageForm.TopMost = True
                 RTFMessageForm.ShowDialog()
             End If
@@ -2986,6 +2993,7 @@ Namespace SharedLibrary
                                               If String.IsNullOrWhiteSpace(header) Then header = AN
 
                                               ' Form attributes
+                                              HTMLMessageForm.Opacity = 0
                                               HTMLMessageForm.Text = header
                                               HTMLMessageForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
                                               HTMLMessageForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
@@ -3065,6 +3073,7 @@ Namespace SharedLibrary
 
                                               ' Optionally, if you wish to set an owner, you could get Outlook's handle here.
                                               ' Otherwise, simply run the dialog:
+                                              HTMLMessageForm.Opacity = 1
                                               HTMLMessageForm.ShowDialog()
                                           End Sub)
             t.SetApartmentState(Threading.ApartmentState.STA)
@@ -6336,12 +6345,12 @@ Namespace SharedLibrary
                         .DisplayName = "HeaderA:",
                         .VarName = "INI_HeaderA",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .DefaultValue = "Authorization"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "HeaderB:",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .VarName = "INI_HeaderB",
                         .VarType = "String",
                         .DefaultValue = "Bearer {apikey}"
@@ -6400,14 +6409,14 @@ Namespace SharedLibrary
                         .DisplayName = "HeaderA:",
                         .VarName = "INI_HeaderA",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .DefaultValue = "api-key"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "HeaderB:",
                         .VarName = "INI_HeaderB",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .DefaultValue = "{apikey}"
                     })
                     list.Add(New AppConfigurationVariable With {
@@ -6451,7 +6460,7 @@ Namespace SharedLibrary
                         .VarName = "INI_Model",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "gemini-1.5-flash"
+                        .DefaultValue = "gemini-1.5-pro-latest"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Endpoint:",
@@ -6464,22 +6473,22 @@ Namespace SharedLibrary
                         .DisplayName = "HeaderA:",
                         .VarName = "INI_HeaderA",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
-                        .DefaultValue = "Authorization"
+                        .ValidationRule = "",
+                        .DefaultValue = "X-Goog-Api-Key"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "HeaderB:",
                         .VarName = "INI_HeaderB",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
-                        .DefaultValue = "Bearer {apikey}"
+                        .ValidationRule = "",
+                        .DefaultValue = "{apikey}"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "APICall:",
                         .VarName = "INI_APICall",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "{""contents"": [{""parts"":[{""text"": {promptsystem} {promptuser}}]}]""generationConfig"": {""temperature"": {temperature}}}"
+                        .DefaultValue = "{""contents"": [{""role"": ""user"",""parts"": [{ ""text"": ""{promptsystem} {promptuser}"" }]}], ""generationConfig"": {""temperature"": {temperature}}}"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Response tag:",
@@ -6529,14 +6538,14 @@ Namespace SharedLibrary
                         .DisplayName = "HeaderA:",
                         .VarName = "INI_HeaderA",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .DefaultValue = "Authorization"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "HeaderB:",
                         .VarName = "INI_HeaderB",
                         .VarType = "String",
-                        .ValidationRule = "NotEmpty",
+                        .ValidationRule = "",
                         .DefaultValue = "Bearer {apikey}"
                     })
                     list.Add(New AppConfigurationVariable With {

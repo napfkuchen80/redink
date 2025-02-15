@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.2.2025
+' 14.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -92,7 +92,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.100225 Gen2 Beta Test"
+    Public Const Version As String = "V.140225 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1455,6 +1455,8 @@ Public Class ThisAddIn
             Else
                 SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
             End If
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
         Catch ex As System.Exception
             System.Windows.Forms.MessageBox.Show("Error in MainMenu: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
@@ -1708,6 +1710,12 @@ Public Class ThisAddIn
             ' Refresh the inspector to show updated content
             inspector.Display()
 
+            ' Release COM objects in reverse order of creation
+            If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
+            If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
         Catch ex As System.Exception
             MessageBox.Show("Error in Freestyle_InsertBefore: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
@@ -1852,6 +1860,14 @@ Public Class ThisAddIn
 
             ' Refresh the inspector to show updated content
             inspector.Display()
+
+            ' Release COM objects in reverse order of creation
+            If range IsNot Nothing Then Marshal.ReleaseComObject(range) : range = Nothing
+            If selection IsNot Nothing Then Marshal.ReleaseComObject(selection) : selection = Nothing
+            If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
+            If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
         Catch ex As System.Exception
             MessageBox.Show("Error in Command_InsertAfter: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -2095,6 +2111,13 @@ Public Class ThisAddIn
             ' Refresh the inspector to show updated content
             inspector.Display()
 
+            ' Release COM objects in reverse order of creation
+            If selection IsNot Nothing Then Marshal.ReleaseComObject(selection) : selection = Nothing
+            If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
+            If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
         Catch ex As System.Exception
             MessageBox.Show("Error in Freestyle_InsertAfter: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
@@ -2167,6 +2190,11 @@ Public Class ThisAddIn
             Else
                 MessageBox.Show("Error in CompareAndInsertTextCompareDocs: The mail compose window is not open (anymore).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
+
+            ' Release COM objects in reverse order of creation
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
         Catch ex As System.Exception
             MessageBox.Show("Error in CompareAndInsertTextCompareDocs: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
 
@@ -2386,6 +2414,10 @@ Public Class ThisAddIn
 
         splash.Close()
 
+        ' Release COM objects in reverse order of creation
+        If objInspector IsNot Nothing Then Marshal.ReleaseComObject(objInspector) : objInspector = Nothing
+        If objWordDoc IsNot Nothing Then Marshal.ReleaseComObject(objWordDoc) : objWordDoc = Nothing
+
     End Sub
 
     Private Sub ParseText(inputText As String, ByRef TextArray() As String, ByRef FormatArray() As Integer)
@@ -2484,6 +2516,13 @@ Public Class ThisAddIn
                                        StringSplitOptions.RemoveEmptyEntries)
             Return words.Length
 
+            ' Release COM objects in reverse order of creation
+            If selection IsNot Nothing Then Marshal.ReleaseComObject(selection) : selection = Nothing
+            If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
+            If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
         Catch ex As System.Exception  ' Explicitly referencing System.Exception per your guideline
             Return 0
         End Try
@@ -2578,6 +2617,7 @@ Public Class ThisAddIn
         ShowSettingsWindow(Settings, SettingsTips)
 
         Globals.Ribbons.Ribbon1.UpdateRibbon()
+        Globals.Ribbons.Ribbon2.UpdateRibbon()
 
     End Sub
 
@@ -2632,7 +2672,78 @@ Public Class ThisAddIn
     End Function
 
 
+
     Private Async Function StartHttpListener() As Task(Of String)
+        Dim prefix As String = "http://127.0.0.1:12333/"
+        Dim consecutiveFailures As Integer = 0
+
+        Try
+            ' Initialize the listener once.
+            If httpListener Is Nothing Then
+                httpListener = New HttpListener()
+                httpListener.Prefixes.Add(prefix)
+                httpListener.Start()
+                Debug.WriteLine("HttpListener started.")
+            End If
+
+            While Not isShuttingDown
+                Dim delayNeeded As Boolean = False
+
+                ' If for some reason the listener is not active, restart it.
+                If httpListener Is Nothing OrElse Not httpListener.IsListening Then
+                    Try
+                        If httpListener IsNot Nothing Then
+                            httpListener.Close()
+                        End If
+                    Catch ex As System.Exception
+                        Debug.WriteLine("Error closing HttpListener: " & ex.Message)
+                    End Try
+
+                    httpListener = New HttpListener()
+                    httpListener.Prefixes.Add(prefix)
+                    httpListener.Start()
+                    Debug.WriteLine("HttpListener restarted.")
+                End If
+
+                Try
+                    ' Asynchronously wait for an incoming request.
+                    Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
+                    Dim result As String = Await HandleHttpRequest(context)
+                    Debug.WriteLine("Request handled successfully.")
+                    ' Reset the failure counter on success.
+                    consecutiveFailures = 0
+                Catch ex As System.ObjectDisposedException
+                    Debug.WriteLine("HttpListener was disposed. Restarting listener...")
+                    consecutiveFailures += 1
+                    delayNeeded = True
+                Catch ex As System.Exception
+                    Debug.WriteLine("Error handling HTTP request: " & ex.Message)
+                    consecutiveFailures += 1
+                    delayNeeded = True
+                End Try
+
+                ' Check if we have reached the maximum number of consecutive failures.
+                If consecutiveFailures >= 10 Then
+                    Debug.WriteLine("Too many consecutive failures. Shutting down.")
+                    isShuttingDown = True
+                    Exit While
+                End If
+
+                ' If an error occurred, delay before restarting.
+                If delayNeeded Then
+                    Await System.Threading.Tasks.Task.Delay(5000)
+                End If
+            End While
+        Catch ex As System.Exception
+            Debug.WriteLine("Error in StartHttpListener: " & ex.Message)
+        End Try
+
+        Return ""
+    End Function
+
+
+
+    Private Async Function oldStartHttpListener() As Task(Of String)
         Dim prefix As String = "http://127.0.0.1:12333/"
         Try
             ' Initialize the listener once.
@@ -2815,6 +2926,10 @@ Public Class ThisAddIn
                                     End If
                                 End If
                             End If
+                            ' Release COM objects in reverse order of creation
+                            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+                            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
                         End If
                         result = ""
 

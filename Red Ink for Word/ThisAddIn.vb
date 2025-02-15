@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.2.2025
+' 14.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -188,7 +188,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.100225 Gen2 Beta Test"
+    Public Const Version As String = "V.140225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2283,7 +2283,7 @@ Public Class ThisAddIn
                     New SLib.InputParameter("Guest name", GuestName),
                     New SLib.InputParameter("Target audience", TargetAudience),
                     New SLib.InputParameter("Context, background info", DialogueContext),
-                    New SLib.InputParameter("Maximum duration", Duration),
+                    New SLib.InputParameter("Duration", Duration),
                     New SLib.InputParameter("Language of dialogue", Language),
                     New SLib.InputParameter("Extra instructions", ExtraInstructions)
                     }
@@ -3223,6 +3223,13 @@ Public Class ThisAddIn
             End If
 
         End If
+
+        If Not PutInClipboard Then
+            selection.Collapse(WdCollapseDirection.wdCollapseEnd)
+            selection.MoveStart(WdUnits.wdCharacter, 0)
+            selection.MoveEnd(WdUnits.wdCharacter, 0)
+        End If
+
         Return ""
 
     End Function

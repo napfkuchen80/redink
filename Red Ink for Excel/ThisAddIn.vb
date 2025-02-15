@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.2.2025
+' 14.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -41,6 +41,7 @@ Module Module1
     <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
     Public Function GetAsyncKeyState(ByVal vKey As Integer) As Short
     End Function
+
 End Module
 
 
@@ -169,7 +170,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.100225 Gen2 Beta Test"
+    Public Const Version As String = "V.140225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1768,6 +1769,15 @@ Public Class ThisAddIn
     Public OldParty, NewParty As String
     Public SelectedText As String
 
+    Public Structure CellState
+        Public CellAddress As String
+        Public OldValue As Object
+        Public HadFormula As Boolean
+        Public OldFormula As String
+    End Structure
+
+    Public Shared undoStates As New List(Of CellState)
+
     Public Async Function InLanguage1() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
         TranslateLanguage = INI_Language1
@@ -2084,6 +2094,8 @@ Public Class ThisAddIn
             SysCommand = InterpolateAtRuntime(SysCommand)
         End If
 
+        undoStates.Clear()
+
         If Not DoRange Then
 
             Dim splash As New SplashScreen("Processing cells... press 'Esc' to abort")
@@ -2122,16 +2134,25 @@ Public Class ThisAddIn
                                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
                                 End If
                                 If Not String.IsNullOrWhiteSpace(LLMResult) Then
+                                    Dim state As New CellState With {
+                                                                    .CellAddress = cell.Address,
+                                                                    .OldValue = cell.Value,
+                                                                    .HadFormula = cell.HasFormula,
+                                                                    .OldFormula = If(cell.HasFormula, cell.Formula, "")
+                                                                }
                                     Try
                                         cell.Formula = LLMResult ' Replace cell formula
+                                        undoStates.Add(state)
                                     Catch ex As Exception
                                         If ex.Message.Contains("HRESULT: 0x800A03EC") Then
                                             Try
                                                 cell.FormulaLocal = LLMResult
+                                                undoStates.Add(state)
                                             Catch ex2 As Exception
                                                 If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
                                                     Try
                                                         cell.FormulaLocal = Trim(ConvertFormulaToLocale(LLMResult, excelApp))
+                                                        undoStates.Add(state)
                                                     Catch ex3 As Exception
                                                         If ex.Message.Contains("HRESULT: 0x800A03EC") Then
                                                             ShowCustomMessageBox($"Error: Excel rejected the formula '{LLMResult}' that {AN} tried to assign to the cell {cell.Address(False, False)}.")
@@ -2149,8 +2170,8 @@ Public Class ThisAddIn
                                     End Try
                                 End If
                             ElseIf Not cell.HasFormula Then
-                                    ' Handle plain text cells
-                                    SelectedText = CStr(cell.Value)
+                                ' Handle plain text cells
+                                SelectedText = CStr(cell.Value)
 
                                 Dim trailingCR As Boolean = (SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbLf) Or SelectedText.EndsWith(vbCr))
 
@@ -2172,7 +2193,14 @@ Public Class ThisAddIn
                                 If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
 
                                 If Not String.IsNullOrWhiteSpace(LLMResult) Then
+                                    Dim state As New CellState With {
+                                                                    .CellAddress = cell.Address,
+                                                                    .OldValue = cell.Value,
+                                                                    .HadFormula = cell.HasFormula,
+                                                                    .OldFormula = If(cell.HasFormula, cell.Formula, "")
+                                                                }
                                     cell.Value = LLMResult ' Set the result back to the cell
+                                    undoStates.Add(state)
                                 End If
                             End If
                         End If
@@ -2245,7 +2273,10 @@ Public Class ThisAddIn
             Catch ex As Exception
                 MessageBox.Show("Error in Range: " & ex.Message)
             End Try
+
         End If
+
+        Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
 
     End Function
 
@@ -2334,6 +2365,8 @@ Public Class ThisAddIn
 
         ii = 0
 
+        undoStates.Clear()
+
         Dim splash As New SplashScreen("Implementing... press 'Esc' to abort")
         splash.Show()
         splash.Refresh()
@@ -2369,19 +2402,28 @@ Public Class ThisAddIn
                                 End If
 
                                 If formulaOrValue.StartsWith("=") Then
+                                    Dim state As New CellState With {
+                                                                    .CellAddress = targetRange.Address,
+                                                                    .OldValue = targetRange.Value,
+                                                                    .HadFormula = targetRange.HasFormula,
+                                                                    .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
+                                                                }
                                     ' Fix cell format issues
                                     targetRange.NumberFormat = "General"
                                     targetRange.Value = ""
                                     Try
                                         targetRange.Formula = formulaOrValue
+                                        undoStates.Add(state)
                                     Catch ex As Exception
                                         If ex.Message.Contains("HRESULT: 0x800A03EC") Then
                                             Try
                                                 targetRange.FormulaLocal = formulaOrValue
+                                                undoStates.Add(state)
                                             Catch ex2 As Exception
                                                 If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
                                                     Try
                                                         targetRange.FormulaLocal = formulaOrValueLocale
+                                                        undoStates.Add(state)
                                                     Catch ex3 As Exception
                                                         If ex3.Message.Contains("HRESULT: 0x800A03EC") Then
                                                             ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
@@ -2398,6 +2440,12 @@ Public Class ThisAddIn
                                         End If
                                     End Try
                                 Else
+                                    Dim state As New CellState With {
+                                                                    .CellAddress = targetRange.Address,
+                                                                    .OldValue = targetRange.Value,
+                                                                    .HadFormula = targetRange.HasFormula,
+                                                                    .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
+                                                                }
                                     ' Assign values properly
                                     If IsNumeric(formulaOrValue) Then
                                         targetRange.Value = formulaOrValue
@@ -2407,6 +2455,7 @@ Public Class ThisAddIn
                                         targetRange.NumberFormat = "@" ' Ensure it's stored as text
                                         targetRange.Value = cleanedValue
                                     End If
+                                    undoStates.Add(state)
                                 End If
                             Else
                                 Debug.WriteLine($"Invalid cell address: {cellAddress}")
@@ -2944,6 +2993,31 @@ Public Class ThisAddIn
         End If
         Return False
     End Function
+
+    Public Sub UndoAction()
+        Try
+            Dim app As Excel.Application = Globals.ThisAddIn.Application
+
+            ' Process each saved state to restore the previous value or formula.
+            For Each state In undoStates
+                Dim rng As Excel.Range = app.Range(state.CellAddress)
+                If state.HadFormula Then
+                    rng.Formula = state.OldFormula
+                Else
+                    rng.Value = state.OldValue
+                End If
+            Next
+
+            ' Clear the undo state after restoring.
+            undoStates.Clear()
+
+            Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
+
+        Catch ex As System.Exception
+            MessageBox.Show("Error during undo (" & ex.Message & ").")
+        End Try
+    End Sub
+
     Public Function InterpolateAtRuntime(ByVal template As String) As String
         If template Is Nothing Then
             MessageBox.Show("Error InterpolateAtRuntime: Template is Nothing.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
