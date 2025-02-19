@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.2.2025
+' 19.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -170,7 +170,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.140225 Gen2 Beta Test"
+    Public Const Version As String = "V.190225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1385,8 +1385,8 @@ Public Class ThisAddIn
     Public Shared Async Function PostCorrection(inputText As String, Optional ByVal UseSecondAPI As Boolean = False) As Task(Of String)
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = True) As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = True, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt)
     End Function
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
         SharedMethods.ShowSettingsWindow(Settings, SettingsTips, _context)
@@ -1763,7 +1763,7 @@ Public Class ThisAddIn
     Public TranslateLanguage As String
     Public ShortenLength As Double
     Public SummaryLength As Integer
-    Public OtherPrompt As String
+    Public OtherPrompt As String = ""
     Public Context As String
     Public SysPrompt As String
     Public OldParty, NewParty As String
@@ -2238,9 +2238,11 @@ Public Class ThisAddIn
                     SelectedText = ConvertRangeToString(selectedRange, DoFormulas)
                 End If
 
-                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False)
+                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False, OtherPrompt)
 
                 LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
+
+                OtherPrompt = ""
 
                 If Not String.IsNullOrEmpty(LLMResult) Then
                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)

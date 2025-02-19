@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.2.2025
+' 19.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -156,19 +156,48 @@ End Class
 Public Class ThisAddIn
 
     Private mainThreadControl As New System.Windows.Forms.Control()
+    Public StartupInitialized As Boolean = False
     Private WithEvents wordApp As Word.Application
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
         wordApp = Application
-        If wordApp IsNot Nothing Then
-            AddHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
-        Else
-            mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
-        End If
+        Try
+            If wordApp IsNot Nothing Then
+                AddHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
+                AddHandler wordApp.DocumentOpen, AddressOf WordApp_DocumentOpen
+                AddHandler wordApp.NewDocument, AddressOf WordApp_NewDocument
+            Else
+                mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
+                StartupInitialized = True
+            End If
+        Catch ex As System.Exception
+            ' Handle exceptions gracefully.
+        End Try
+    End Sub
+
+    Private Sub RemoveStartupHandlers()
+        StartupInitialized = True
+        Try
+            RemoveHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
+            RemoveHandler wordApp.DocumentOpen, AddressOf WordApp_DocumentOpen
+            RemoveHandler wordApp.NewDocument, AddressOf WordApp_NewDocument
+        Catch ex As System.Exception
+            ' Handle exceptions gracefully.
+        End Try
     End Sub
 
     Private Sub WordApp_WindowActivate(ByVal Doc As Word.Document, ByVal Wn As Word.Window)
-        RemoveHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
+        RemoveStartupHandlers()
+        DelayedStartupTasks()
+    End Sub
+
+    Private Sub WordApp_DocumentOpen(doc As Word.Document)
+        RemoveStartupHandlers()
+        DelayedStartupTasks()
+    End Sub
+
+    Private Sub WordApp_NewDocument(doc As Word.Document)
+        RemoveStartupHandlers()
         DelayedStartupTasks()
     End Sub
 
@@ -188,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.140225 Gen2 Beta Test"
+    Public Const Version As String = "V.190225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1487,8 +1516,8 @@ Public Class ThisAddIn
     Public Shared Async Function PostCorrection(inputText As String, Optional ByVal UseSecondAPI As Boolean = False) As Task(Of String)
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False) As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt)
     End Function
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
         SharedMethods.ShowSettingsWindow(Settings, SettingsTips, _context)
@@ -2077,7 +2106,7 @@ Public Class ThisAddIn
     Public TranslateLanguage As String
     Public ShortenLength As Double
     Public SummaryLength As Integer
-    Public OtherPrompt As String
+    Public OtherPrompt As String = ""
     Public SearchTerms As String
     Public SearchContext As String
     Public CurrentDate As String
@@ -2140,15 +2169,37 @@ Public Class ThisAddIn
         chatForm.BringToFront()
     End Sub
 
+    Public Function INILoadFail() As Boolean
+        If Not INIloaded Then
+            If Not StartupInitialized Then
+                DelayedStartupTasks()
+                RemoveStartupHandlers()
+                If Not INIloaded Then Return True
+                Return False
+            Else
+                InitializeConfig(False, False)
+                If Not INIloaded Then
+                    Return True
+                End If
+                Return False
+            End If
+        Else
+            Return False
+        End If
+    End Function
+
     Public Async Sub InLanguage1()
+        If INILoadFail() Then Exit Sub
         TranslateLanguage = INI_Language1
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub InLanguage2()
+        If INILoadFail() Then Exit Sub
         TranslateLanguage = INI_Language2
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub InOther()
+        If INILoadFail() Then Exit Sub
         TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language", $"{AN} Translate", True)
         If Not String.IsNullOrEmpty(TranslateLanguage) Then
             Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
@@ -2156,31 +2207,40 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub Correct()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Correct), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Improve()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Improve), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Friendly()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Friendly), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Convincing()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Convincing), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub NoFillers()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_NoFillers), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Anonymize()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Anonymize), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Explain()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Explain), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub SuggestTitles()
+        If INILoadFail() Then Exit Sub
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_SuggestTitles), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Shorten()
 
+        If INILoadFail() Then Exit Sub
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2208,6 +2268,7 @@ Public Class ThisAddIn
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Improve), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub SwitchParty()
+        If INILoadFail() Then Exit Sub
         Dim UserInput As String
         Do
             UserInput = Trim(SLib.ShowCustomInputBox("Please provide the original party name And the New party name, separated by a comma (example: Elvis Presley, Taylor Swift):", $"{AN} Switch Party", True))
@@ -2230,7 +2291,7 @@ Public Class ThisAddIn
 
     End Sub
     Public Async Sub Summarize()
-
+        If INILoadFail() Then Exit Sub
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2262,7 +2323,7 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub CreatePodcast()
-
+        If INILoadFail() Then Exit Sub
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2314,7 +2375,7 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub CreateAudio()
-
+        If INILoadFail() Then Exit Sub
         Dim Endpoint As String = INI_Endpoint
         Dim Endpoint_2 As String = INI_Endpoint_2
         Dim TTSEndpoint As String = INI_TTSEndpoint
@@ -2381,9 +2442,11 @@ Public Class ThisAddIn
         End If
     End Sub
     Public Async Sub FreeStyleNM()
+        If INILoadFail() Then Exit Sub
         FreeStyle(False)
     End Sub
     Public Async Sub FreeStyleAM()
+        If INILoadFail() Then Exit Sub
         FreeStyle(True)
     End Sub
     Public Async Sub FreeStyle(UseSecondAPI)
@@ -3370,7 +3433,9 @@ Public Class ThisAddIn
 
             End If
 
-            Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI)
+            Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt)
+
+            OtherPrompt = ""
 
             LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
 
@@ -3446,7 +3511,6 @@ Public Class ThisAddIn
                     splash.Show()
                     splash.Refresh()
 
-
                     For Each item In responseItems
 
                         System.Windows.Forms.Application.DoEvents()
@@ -3494,7 +3558,6 @@ Public Class ThisAddIn
 
                     splash.Close()
 
-
                     Dim ErrorList As String = ""
                     If notfoundresponse.Count > 0 Then
                         ErrorList += "The following comments could not be assigned to your text (they were not found):" & vbCrLf
@@ -3532,10 +3595,16 @@ Public Class ThisAddIn
 
                     MarkupSelectedTextWithRegex(RegexResult)
 
+                    ' End Extended Selection Mode
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
 
                 ElseIf NoSelectedText Then
                     selection.TypeText(vbCrLf & vbCrLf)
                     InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+
+                    ' End Extended Selection Mode
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+
                 ElseIf KeepFormat And Not NoFormatting Then
                     SelectedText = selection.Text
                     SLib.InsertTextWithFormat(LLMResult, rng, InPlace)
@@ -3553,71 +3622,79 @@ Public Class ThisAddIn
                             RestoreSpecialTextElements(rng)
                         End If
                     End If
+
+                    ' End Extended Selection Mode
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+
                 Else
                     SelectedText = selection.Text
-                        If InPlace Then
-                            If DoMarkup Then
-                                If MarkupMethod = 2 Or MarkupMethod = 3 Then
-                                    If MarkupMethod = 3 Then
-                                        InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-                                        rng = selection.Range
-                                    End If
-                                    Dim SaveRng As Range = rng.Duplicate
-                                    CompareAndInsert(SelectedText, LLMResult, rng, MarkupMethod = 3, "This is the markup of the text inserted:")
-                                    If Not ParaFormatInline And Not NoFormatting Then
-                                        ApplyParagraphFormat(rng)
-                                    End If
-                                    RestoreSpecialTextElements(SaveRng)
-                                Else
-                                    CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
-                                    RestoreSpecialTextElements(rng)
+                    If InPlace Then
+                        If DoMarkup Then
+                            If MarkupMethod = 2 Or MarkupMethod = 3 Then
+                                If MarkupMethod = 3 Then
+                                    InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                                    rng = selection.Range
                                 End If
+                                Dim SaveRng As Range = rng.Duplicate
+                                CompareAndInsert(SelectedText, LLMResult, rng, MarkupMethod = 3, "This is the markup of the text inserted:")
+                                If Not ParaFormatInline And Not NoFormatting Then
+                                    ApplyParagraphFormat(rng)
+                                End If
+                                RestoreSpecialTextElements(SaveRng)
                             Else
+                                CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
+                                RestoreSpecialTextElements(rng)
+                            End If
+                        Else
                             InsertTextWithMarkdown(selection, LLMResult, trailingCR)
                             rng = selection.Range
-                                Dim SaveRng As Range = rng.Duplicate
-                                If Not ParaFormatInline And Not NoFormatting Then
-                                    ApplyParagraphFormat(rng)
-                                End If
-                                RestoreSpecialTextElements(SaveRng)
+                            Dim SaveRng As Range = rng.Duplicate
+                            If Not ParaFormatInline And Not NoFormatting Then
+                                ApplyParagraphFormat(rng)
                             End If
-
-                        Else
-                            selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                            selection.TypeText(vbCrLf & vbCrLf)
-                            selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                            rng = selection.Range
-                            If DoMarkup Then
-                                If MarkupMethod = 2 Or MarkupMethod = 3 Then
-                                    If MarkupMethod = 3 Then
-                                        SLib.InsertTextWithBoldMarkers(selection, LLMResult)
-                                        rng = selection.Range
-                                    End If
-                                    Dim SaveRng As Range = rng.Duplicate
-                                    CompareAndInsert(SelectedText, LLMResult, rng.Duplicate, MarkupMethod = 3, "This is the markup of the text inserted:")
-                                    If Not ParaFormatInline And Not NoFormatting Then
-                                        ApplyParagraphFormat(rng)
-                                    End If
-                                    RestoreSpecialTextElements(SaveRng)
-                                Else
-                                    CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
-                                    RestoreSpecialTextElements(rng)
-                                End If
-                            Else
-                                SLib.InsertTextWithBoldMarkers(selection, LLMResult)
-                                rng = selection.Range
-                                Dim SaveRng As Range = rng.Duplicate
-                                If Not ParaFormatInline And Not NoFormatting Then
-                                    ApplyParagraphFormat(rng)
-                                End If
-                                RestoreSpecialTextElements(SaveRng)
-                            End If
-
+                            RestoreSpecialTextElements(SaveRng)
                         End If
+
+                    Else
+                        selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                        selection.TypeText(vbCrLf & vbCrLf)
+                        selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                        rng = selection.Range
+                        If DoMarkup Then
+                            If MarkupMethod = 2 Or MarkupMethod = 3 Then
+                                If MarkupMethod = 3 Then
+                                    SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                                    rng = selection.Range
+                                End If
+                                Dim SaveRng As Range = rng.Duplicate
+                                CompareAndInsert(SelectedText, LLMResult, rng.Duplicate, MarkupMethod = 3, "This is the markup of the text inserted:")
+                                If Not ParaFormatInline And Not NoFormatting Then
+                                    ApplyParagraphFormat(rng)
+                                End If
+                                RestoreSpecialTextElements(SaveRng)
+                            Else
+                                CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
+                                RestoreSpecialTextElements(rng)
+                            End If
+                        Else
+                            SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                            rng = selection.Range
+                            Dim SaveRng As Range = rng.Duplicate
+                            If Not ParaFormatInline And Not NoFormatting Then
+                                ApplyParagraphFormat(rng)
+                            End If
+                            RestoreSpecialTextElements(SaveRng)
+                        End If
+
                     End If
 
+                    ' End Extended Selection Mode
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+
+                End If
+
             Else
-                    ShowCustomMessageBox("The LLM did not return any content to process.")
+                ShowCustomMessageBox("The LLM did not return any content to process.")
             End If
 
         Catch ex As System.Exception
@@ -5999,6 +6076,74 @@ Public Class ThisAddIn
 
     Private Async Function StartHttpListener() As Task(Of String)
         Dim prefix As String = "http://127.0.0.1:12334/"
+        Dim consecutiveFailures As Integer = 0
+
+        Try
+            ' Initialize the listener once.
+            If httpListener Is Nothing Then
+                httpListener = New HttpListener()
+                httpListener.Prefixes.Add(prefix)
+                httpListener.Start()
+                Debug.WriteLine("HttpListener started.")
+            End If
+
+            While Not isShuttingDown
+                Dim delayNeeded As Boolean = False
+
+                ' If for some reason the listener is not active, restart it.
+                If httpListener Is Nothing OrElse Not httpListener.IsListening Then
+                    Try
+                        If httpListener IsNot Nothing Then
+                            httpListener.Close()
+                        End If
+                    Catch ex As System.Exception
+                        Debug.WriteLine("Error closing HttpListener: " & ex.Message)
+                    End Try
+
+                    httpListener = New HttpListener()
+                    httpListener.Prefixes.Add(prefix)
+                    httpListener.Start()
+                    Debug.WriteLine("HttpListener restarted.")
+                End If
+
+                Try
+                    ' Asynchronously wait for an incoming request.
+                    Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
+                    Dim result As String = Await HandleHttpRequest(context)
+                    Debug.WriteLine("Request handled successfully.")
+                    ' Reset the failure counter on success.
+                    consecutiveFailures = 0
+                Catch ex As System.ObjectDisposedException
+                    Debug.WriteLine("HttpListener was disposed. Restarting listener...")
+                    consecutiveFailures += 1
+                    delayNeeded = True
+                Catch ex As System.Exception
+                    Debug.WriteLine("Error handling HTTP request: " & ex.Message)
+                    consecutiveFailures += 1
+                    delayNeeded = True
+                End Try
+
+                ' Check if we have reached the maximum number of consecutive failures.
+                If consecutiveFailures >= 10 Then
+                    Debug.WriteLine("Too many consecutive failures. Shutting down.")
+                    isShuttingDown = True
+                    Exit While
+                End If
+
+                ' If an error occurred, delay before restarting.
+                If delayNeeded Then
+                    Await System.Threading.Tasks.Task.Delay(5000)
+                End If
+            End While
+        Catch ex As System.Exception
+            Debug.WriteLine("Error in StartHttpListener: " & ex.Message)
+        End Try
+
+        Return ""
+    End Function
+
+    Private Async Function OldStartHttpListener() As Task(Of String)
+        Dim prefix As String = "http://127.0.0.1:12334/"
         Try
             ' Initialize the listener once.
             If httpListener Is Nothing Then
@@ -6043,25 +6188,6 @@ Public Class ThisAddIn
         Return ""
     End Function
 
-    Private Sub OldStartHttpListener()
-        Try
-            httpListener = New HttpListener()
-
-            ' Listen only on localhost / 127.0.0.1, port 12334.
-            httpListener.Prefixes.Add("http://127.0.0.1:12334/")
-            httpListener.Start()
-
-            While Not isShuttingDown
-                ' This blocks until a request arrives or the listener is stopped
-                Dim context As HttpListenerContext = httpListener.GetContext()
-
-                ' Handle the request in a separate method:
-                HandleHttpRequest(context)
-            End While
-        Catch ex As System.Exception
-            ' Handling errors gracefully
-        End Try
-    End Sub
 
     'Private Sub HandleHttpRequest(ByVal context As HttpListenerContext)
     Private Async Function HandleHttpRequest(ByVal context As HttpListenerContext) As Task(Of String)

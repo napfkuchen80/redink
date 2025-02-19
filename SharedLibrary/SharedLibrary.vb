@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.2.2025
+' 19.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -43,6 +43,7 @@ Imports System.Deployment.Application
 Imports Microsoft.Office.Interop
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary.SharedMethods
+Imports Markdig.Extensions
 
 
 Namespace SharedLibrary
@@ -366,8 +367,6 @@ Namespace SharedLibrary
         <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
         Public Function FindWindow(lpClassName As String, lpWindowName As String) As IntPtr
         End Function
-
-        ' ... other API declarations ...
     End Module
 
     Public Module ProgressBarModule
@@ -1010,7 +1009,7 @@ Namespace SharedLibrary
             Return OutputText
         End Function
 
-        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False) As Task(Of String)
+        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
 
             Dim splash As New SplashScreen("Waiting for the LLM to respond...")
 
@@ -1082,6 +1081,7 @@ Namespace SharedLibrary
                 requestBody = requestBody.Replace("{model}", ModelValue)
                 requestBody = requestBody.Replace("{promptsystem}", CleanString(promptSystem))
                 requestBody = requestBody.Replace("{promptuser}", CleanString(promptUser))
+                requestBody = requestBody.Replace("{userinstruction}", CleanString(AddUserPrompt))
                 requestBody = requestBody.Replace("{temperature}", TemperatureValue)
 
                 Dim Returnvalue As String = ""
@@ -1137,8 +1137,12 @@ Namespace SharedLibrary
                                 Return ""
                             Else
                                 text = FindJsonProperty(jsonObject, ResponseKey)
-                                'text = ExtractJSONValue(responseText, ResponseKey)
-                                'text = ConvertEscapeCharacters(text)
+
+                                text = text & ExtractCitations(jsonObject)
+
+                                ' Previous implementation
+                                ' text = ExtractJSONValue(responseText, ResponseKey)
+                                ' text = ConvertEscapeCharacters(text)
                                 If DoubleS Then
                                     text = text.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
                                 End If
@@ -1151,7 +1155,7 @@ Namespace SharedLibrary
                         End Try
                     End Using ' Dispose HttpClient
                 End Using ' Dispose HttpClientHandler
-                Return returnvalue
+                Return Returnvalue
 
             Catch ex As System.Exception
                 ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}")
@@ -1160,6 +1164,47 @@ Namespace SharedLibrary
                 If Not Hidesplash Then
                     splash.Close()
                 End If
+            End Try
+        End Function
+
+        Private Shared Function ExtractCitations(ByRef jsonObj) As String
+
+            Try
+
+                ' Extract citations
+                Dim citations As JToken = jsonObj.SelectToken("citations")
+                Dim citationList As New List(Of String)
+
+                If citations IsNot Nothing Then
+                    If citations.Type = JTokenType.Array Then
+                        ' Check if the citations array contains simple strings or objects
+                        For Each citation As JToken In citations
+                            If citation.Type = JTokenType.String Then
+                                ' Simple URL format
+                                citationList.Add(citation.ToString())
+                            ElseIf citation.Type = JTokenType.Object Then
+                                ' Extract "url" from the object format
+                                Dim url As JToken = citation.SelectToken("url")
+                                If url IsNot Nothing Then
+                                    citationList.Add(url.ToString())
+                                End If
+                            End If
+                        Next
+                    End If
+                End If
+
+                ExtractCitations = ""
+
+                ' Append citations if found
+                If citationList.Count > 0 Then
+                    ExtractCitations = vbCrLf & vbCrLf
+                    For i As Integer = 0 To citationList.Count - 1
+                        ExtractCitations &= "[" & (i + 1).ToString() & "] " & citationList(i) & vbCrLf
+                    Next
+                End If
+
+            Catch ex As Exception
+                Debug.WriteLine("Error parsing JSON for citations: " & ex.Message)
             End Try
         End Function
 
@@ -1243,30 +1288,34 @@ Namespace SharedLibrary
         Public Shared Function CleanString(ByVal input As String) As String
             Dim cleanedString As String = ""
 
-            For Each currentChar As Char In input
-                Dim charCode As Integer = AscW(currentChar)
+            If Not IsEmptyOrBlank(input) Then
 
-                Select Case charCode
-                    Case 8
-                        cleanedString &= "\b"
-                    Case 9
-                        cleanedString &= "\t"
-                    Case 10
-                        cleanedString &= "\n"
-                    Case 12
-                        cleanedString &= "\f"
-                    Case 13
-                        cleanedString &= "\n"  '\r
-                    Case 34
-                        cleanedString &= "\"""
-                    Case 92
-                        cleanedString &= "\\"
-                    Case 0 To 31
-                        cleanedString &= "\u" & charCode.ToString("X4")
-                    Case Else
-                        cleanedString &= currentChar
-                End Select
-            Next
+                For Each currentChar As Char In input
+                    Dim charCode As Integer = AscW(currentChar)
+
+                    Select Case charCode
+                        Case 8
+                            cleanedString &= "\b"
+                        Case 9
+                            cleanedString &= "\t"
+                        Case 10
+                            cleanedString &= "\n"
+                        Case 12
+                            cleanedString &= "\f"
+                        Case 13
+                            cleanedString &= "\n"  '\r
+                        Case 34
+                            cleanedString &= "\"""
+                        Case 92
+                            cleanedString &= "\\"
+                        Case 0 To 31
+                            cleanedString &= "\u" & charCode.ToString("X4")
+                        Case Else
+                            cleanedString &= currentChar
+                    End Select
+                Next
+
+            End If
 
             ' Condense multiple spaces to a single space
             While cleanedString.Contains("  ")
@@ -3655,7 +3704,13 @@ Namespace SharedLibrary
 
             ' Calculate maximum label width
             For Each setting In Settings
-                Dim textSize As System.Drawing.Size = TextRenderer.MeasureText(setting.Value & ":", standardFont)
+                Dim textSize As System.Drawing.Size
+                If context.INI_SecondAPI Then
+                    textSize = TextRenderer.MeasureText(setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", context.INI_Model_2) & ":", standardFont)
+                Else
+                    textSize = TextRenderer.MeasureText(setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", "2nd model (none)") & ":", standardFont)
+                End If
+
                 maxLabelWidth = Math.Max(maxLabelWidth, textSize.Width)
             Next
 

@@ -94,7 +94,6 @@ Partial Class Ribbon1
         'Group1
         '
         Me.Group1.Items.Add(Me.Menu1)
-        Me.Group1.KeyTip = "R"
         Me.Group1.Label = "Red Ink"
         Me.Group1.Name = "Group1"
         '
@@ -116,7 +115,6 @@ Partial Class Ribbon1
         Me.Menu1.Items.Add(Me.RI_Undo)
         Me.Menu1.Items.Add(Me.Menu2)
         Me.Menu1.Items.Add(Me.Settings)
-        Me.Menu1.KeyTip = "S"
         Me.Menu1.Label = "Task"
         Me.Menu1.Name = "Menu1"
         Me.Menu1.ShowImage = True
@@ -124,7 +122,6 @@ Partial Class Ribbon1
         '
         'RI_Primlang
         '
-        Me.RI_Primlang.KeyTip = "E"
         Me.RI_Primlang.Label = "English"
         Me.RI_Primlang.Name = "RI_Primlang"
         Me.RI_Primlang.OfficeImageId = "TranslateMenu"
@@ -158,7 +155,6 @@ Partial Class Ribbon1
         '
         'RI_Correct
         '
-        Me.RI_Correct.KeyTip = "C"
         Me.RI_Correct.Label = "Correct"
         Me.RI_Correct.Name = "RI_Correct"
         Me.RI_Correct.OfficeImageId = "SpellingAndGrammar"
@@ -183,7 +179,6 @@ Partial Class Ribbon1
         '
         'RI_Anonymize
         '
-        Me.RI_Anonymize.KeyTip = "A"
         Me.RI_Anonymize.Label = "Anonymize"
         Me.RI_Anonymize.Name = "RI_Anonymize"
         Me.RI_Anonymize.OfficeImageId = "ApplyCoAuthoringLock"
@@ -214,7 +209,7 @@ Partial Class Ribbon1
         Me.RI_FreestyleAM.ScreenTip = "Allows you to to enter a prompt and have the result shown (and inserted) using th" &
     "e 2nd configured model, if available"
         Me.RI_FreestyleAM.ShowImage = True
-        Me.RI_FreestyleAM.Visible = False
+        Me.RI_FreestyleAM.Visible = True
         '
         'RI_Undo
         '
@@ -273,14 +268,12 @@ Partial Class Ribbon1
         Me.Group2.Items.Add(Me.RI_PrimLang2)
         Me.Group2.Items.Add(Me.RI_Correct2)
         Me.Group2.Items.Add(Me.RI_FreestyleNM2)
-        Me.Group2.KeyTip = "R"
         Me.Group2.Label = "Red Ink"
         Me.Group2.Name = "Group2"
         Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'RI_PrimLang2
         '
-        Me.RI_PrimLang2.KeyTip = "E"
         Me.RI_PrimLang2.Label = "English"
         Me.RI_PrimLang2.Name = "RI_PrimLang2"
         Me.RI_PrimLang2.OfficeImageId = "TranslateMenu"
@@ -289,7 +282,6 @@ Partial Class Ribbon1
         '
         'RI_Correct2
         '
-        Me.RI_Correct2.KeyTip = "C"
         Me.RI_Correct2.Label = "Correct"
         Me.RI_Correct2.Name = "RI_Correct2"
         Me.RI_Correct2.OfficeImageId = "SpellingAndGrammar"

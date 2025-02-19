@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.2.2025
+' 19.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -48,6 +48,7 @@ End Module
 
 Public Class ThisAddIn
 
+    Public StartupInitialized As Boolean = False
     Private mainThreadControl As New System.Windows.Forms.Control()
     Private WithEvents outlookExplorer As Outlook.Explorer
 
@@ -61,17 +62,18 @@ Public Class ThisAddIn
             AddHandler outlookExplorer.Activate, AddressOf Explorer_Activate
         Else
             mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
+            StartupInitialized = True
         End If
     End Sub
 
     Private Sub Explorer_Activate()
+        StartupInitialized = True
         RemoveHandler outlookExplorer.Activate, AddressOf Explorer_Activate
         DelayedStartupTasks()
     End Sub
 
     Private Sub DelayedStartupTasks()
         Try
-            Debug.WriteLine("DelayedStartupTasks")
             InitializeConfig(True, True)
             UpdateHandler.PeriodicCheckForUpdates(INI_UpdateCheckInterval, "Outlook", INI_UpdatePath)
             Dim result = Globals.Ribbons.Ribbon1.UpdateRibbon()
@@ -92,7 +94,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.140225 Gen2 Beta Test"
+    Public Const Version As String = "V.190225 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1320,8 +1322,8 @@ Public Class ThisAddIn
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
 
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False) As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash, AddUserPrompt)
     End Function
 
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
@@ -1340,6 +1342,22 @@ Public Class ThisAddIn
     End Enum
 
     Public Sub MainMenu(RI_Command As String)
+
+        If Not INIloaded Then
+            If Not StartupInitialized Then
+                Try
+                    DelayedStartupTasks()
+                    RemoveHandler outlookExplorer.Activate, AddressOf Explorer_Activate
+                Catch ex As System.Exception
+                End Try
+                If Not INIloaded Then Exit Sub
+            Else
+                InitializeConfig(False, False)
+                If Not INIloaded Then
+                    Exit Sub
+                End If
+            End If
+        End If
 
         Try
             ' Use fully qualified names to avoid ambiguity
@@ -2049,16 +2067,18 @@ Public Class ThisAddIn
             Dim LLMResult As String
 
             If Not NoText Then
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI, False, OtherPrompt)
 
                 LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
             Else
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText), "", "", "", 0, UseSecondAPI)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText), "", "", "", 0, UseSecondAPI, False, OtherPrompt)
             End If
 
             If INI_PostCorrection <> "" Then
                 LLMResult = Await PostCorrection(LLMResult)
             End If
+
+            OtherPrompt = ""
 
             If DoClipboard Then
                 Dim FinalText As String = SLib.ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, True)
