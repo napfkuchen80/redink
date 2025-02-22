@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 22.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -975,12 +975,22 @@ Public Class frmAIChat
 
                     found = True
 
-                    ' Account for trackchanges being turned on, i.e. the old text remains
-                    Dim currentEnd As Integer = doc.Application.Selection.End + Len(newTextWithMarker)
-                    selectionEnd = selectionEnd + Len(newTextWithMarker)
+                    Dim isDeleted As Boolean = False
+                    For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
+                        If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                            isDeleted = True
+                            Exit For
+                        End If
+                    Next
 
-                    ' Replace the found text
-                    doc.Application.Selection.Text = newTextWithMarker
+                    ' Account for trackchanges being turned on, i.e. the old text remains
+                    Dim currentEnd As Integer = doc.Application.Selection.End
+                    If Not isDeleted Then
+                        currentEnd = currentEnd + Len(newTextWithMarker)
+                        selectionEnd = selectionEnd + Len(newTextWithMarker)
+                        ' Replace the found text
+                        doc.Application.Selection.Text = newTextWithMarker
+                    End If
 
                     ' Check if the collapsed selection has reached the end of the document or the selection
                     If OnlySelection Then
@@ -1001,21 +1011,58 @@ Public Class frmAIChat
 
             Else
                 Dim replacementsMade As Boolean = False
+                Dim initialRangeEnd As Integer = workRange.End
                 Do
+                    'With workRange.Find
+                    '.ClearFormatting()
+                    '.Text = oldText
+                    '.Replacement.ClearFormatting()
+                    '.Replacement.Text = newTextWithMarker
+                    '.Forward = True
+                    '.Wrap = Word.WdFindWrap.wdFindStop
+                    'If .Execute(Replace:=Word.WdReplace.wdReplaceOne) Then
+                    '  replacementsMade = True
+                    '   workRange.Start = workRange.End
+                    'Else
+                    '     Exit Do
+                    '  End If
+                    'End With
+
                     With workRange.Find
                         .ClearFormatting()
                         .Text = oldText
-                        .Replacement.ClearFormatting()
-                        .Replacement.Text = newTextWithMarker
                         .Forward = True
                         .Wrap = Word.WdFindWrap.wdFindStop
-                        If .Execute(Replace:=Word.WdReplace.wdReplaceOne) Then
-                            replacementsMade = True
-                            workRange.Start = workRange.End
+                        ' Use ReplaceNone to get the match without automatically replacing it
+                        If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
+
+                            ' Create a duplicate of the found range for the revision check
+                            Dim foundRange As Word.Range = workRange.Duplicate
+
+                            Dim isDeleted As Boolean = False
+                            For Each rev As Word.Revision In foundRange.Revisions
+                                If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                                    isDeleted = True
+                                    Exit For
+                                End If
+                            Next
+
+                            If Not isDeleted Then
+                                foundRange.Text = newTextWithMarker
+                                replacementsMade = True
+                            End If
+
+                            ' Adjust the initial end based on the difference in length
+                            initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
+                            ' Move the start of workRange to the end of the found match
+                            workRange.Start = foundRange.End
+                            workRange.End = initialRangeEnd
+
                         Else
                             Exit Do
                         End If
                     End With
+
                 Loop
 
                 If Not replacementsMade Then

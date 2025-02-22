@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 19.2.2025
+' 22.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -94,7 +94,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.190225 Gen2 Beta Test"
+    Public Const Version As String = "V.220225 Gen2 Beta Test"
 
     ' Hardcoded configuration
 

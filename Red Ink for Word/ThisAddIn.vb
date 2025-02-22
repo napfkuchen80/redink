@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 19.2.2025
+' 22.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -217,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.190225 Gen2 Beta Test"
+    Public Const Version As String = "V.220225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2228,7 +2228,37 @@ Public Class ThisAddIn
     End Sub
     Public Async Sub Anonymize()
         If INILoadFail() Then Exit Sub
-        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Anonymize), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
+
+        Dim DoMarkup As Boolean = INI_DoMarkupWord
+        Dim DoReplace As Boolean = INI_ReplaceText2
+        If Not DoMarkup Or Not DoReplace Then
+            Dim result2 As Integer = ShowCustomYesNoBox($"As per your current settings no markup will be applied. For anonymizing a larger text, doing a markup may be a better choice. How do you want to continue?", "Continue as is", "Continue with a markup")
+            If result2 = 2 Then
+                DoMarkup = True
+            End If
+        End If
+
+        Dim MarkupMethod As Integer = INI_MarkupMethodWord
+        If INI_DoMarkupWord And MarkupMethod <> 4 Then
+            Dim MarkupNow As String = ""
+            Select Case INI_MarkupMethodWord
+                Case 1
+                    MarkupNow = "Word markup method"
+                Case 2
+                    MarkupNow = "Diff markup method"
+                Case 3
+                    MarkupNow = "Diff markup method (with the output in a separate window)"
+            End Select
+
+            Dim result2 As Integer = ShowCustomYesNoBox($"You have chosen the {MarkupNow}. If you are anonymizing a larger text, the 'Regex' markup method may be a better choice. How do you want to continue?", "Continue as is", "Use Regex")
+            If result2 = 2 Then
+                MarkupMethod = 4
+                DoReplace = True
+            End If
+        End If
+
+
+        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Anonymize), True, INI_KeepFormat2, INI_KeepParaFormatInline, DoReplace, DoMarkup, MarkupMethod, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Explain()
         If INILoadFail() Then Exit Sub
@@ -2287,7 +2317,36 @@ Public Class ThisAddIn
             End If
         Loop
 
-        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_SwitchParty), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
+        Dim DoMarkup As Boolean = INI_DoMarkupWord
+        Dim DoReplace As Boolean = INI_ReplaceText2
+        If Not DoMarkup Or Not DoReplace Then
+            Dim result2 As Integer = ShowCustomYesNoBox($"As per your current settings no markup will be applied. For using 'Switch Party' on a larger texts, markup may be a better choice. How do you want to continue?", "Continue as is", "Continue with a markup")
+            If result2 = 2 Then
+                DoMarkup = True
+                DoReplace = True
+            End If
+        End If
+
+        Dim MarkupMethod As Integer = INI_MarkupMethodWord
+        If INI_DoMarkupWord And MarkupMethod <> 4 Then
+            Dim MarkupNow As String = ""
+            Select Case INI_MarkupMethodWord
+                Case 1
+                    MarkupNow = "Word markup method"
+                Case 2
+                    MarkupNow = "Diff markup method"
+                Case 3
+                    MarkupNow = "Diff markup method (with the output in a separate window)"
+            End Select
+
+            Dim result2 As Integer = ShowCustomYesNoBox($"You have chosen the {MarkupNow}. If you are using 'Switch Party' with a larger text, the 'Regex' markup method may be a better choice. How do you want to continue?", "Continue as is", "Use Regex")
+            If result2 = 2 Then
+                MarkupMethod = 4
+                DoReplace = True
+            End If
+        End If
+
+        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_SwitchParty), True, INI_KeepFormat2, INI_KeepParaFormatInline, DoReplace, DoMarkup, MarkupMethod, False, False, True, False, INI_KeepFormatCap)
 
     End Sub
     Public Async Sub Summarize()
@@ -2459,7 +2518,7 @@ Public Class ThisAddIn
             Dim DoMarkup As Boolean = False
             Dim DoClipboard As Boolean = False
             Dim DoBubbles As Boolean = False
-            Dim DoInplace As Boolean = False
+            Dim DoInplace As Boolean = INI_ReplaceText2
             Dim MarkupMethod As Integer = INI_MarkupMethodWord
             Dim DoLib As Boolean = False
             Dim DoNet As Boolean = False
@@ -2507,7 +2566,7 @@ Public Class ThisAddIn
             If Not NoText Then
                 OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
             Else
-                OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
+                OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
             End If
 
             SLib.RestoreClipboard()
@@ -3404,7 +3463,7 @@ Public Class ThisAddIn
                 End If
 
                 If DoMarkup And MarkupMethod = 2 And Len(SelectedText) > INI_MarkupDiffCap Then
-                    Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
+                    Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
                     Select Case MarkupChange
                         Case 1
                             MarkupMethod = 3
@@ -3416,7 +3475,7 @@ Public Class ThisAddIn
                 End If
 
                 If DoMarkup And MarkupMethod = 4 And Len(SelectedText) > INI_MarkupRegexCap Then
-                    Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Regex markup method at {INI_MarkupRegexCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Word compare instead", "Use Regex")
+                    Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Regex markup method at {INI_MarkupRegexCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}How do you want to continue?", "Use Word compare instead", "Use Regex")
                     Select Case MarkupChange
                         Case 1
                             MarkupMethod = 1
@@ -3541,7 +3600,7 @@ Public Class ThisAddIn
                                         ' If found, selection now covers the entire matched text
                                         Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                     Else
-                                        notfoundresponse.Add("'" & findText & "' " & ChrW(8594) & $" {AN5}: " & commentText & " (Chunk search used)")
+                                        notfoundresponse.Add("'" & findText & "' " & ChrW(8594) & $" {AN5}: " & commentText)
                                     End If
                                 End If
 
@@ -3579,11 +3638,14 @@ Public Class ThisAddIn
                             ErrorList = $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable." & vbCrLf & vbCrLf & ErrorList
                         End If
 
-                        ErrorList = ShowCustomWindow("Errors when implementing the 'bubbles' feedback of the LLM:", ErrorList, "You can choose whether you want to have the original error list put into the clipboard or the text with any changes you have made. If you select Cancel, nothing will be put into the clipboard.", AN)
+                        ErrorList = ShowCustomWindow("Errors when implementing the 'bubbles' feedback of the LLM:", ErrorList, "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN)
 
-                        If ErrorList <> "" Then
+                        If ErrorList <> "" And ErrorList.ToLower() <> "esc" Then
                             SLib.PutInClipboard(ErrorList)
+                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                            Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & ErrorList)
                         End If
+
                     Else
 
                         ShowCustomMessageBox("The bubble comments provided by the LLM have been added to to your text." & If(BubblecutHappened, $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable.", ""))
@@ -3918,38 +3980,83 @@ Public Class ThisAddIn
                 Exit Sub
             End If
 
+            Dim splash As New SplashScreen("Applying changes... press 'Esc' to abort")
+            splash.Show()
+            splash.Refresh()
+
+
             ' Ensure Track Changes is enabled
             Dim originalTrackChangesSetting As Boolean = app.ActiveDocument.TrackRevisions
             Dim originalUserName As String = app.UserName
             app.ActiveDocument.TrackRevisions = True
             app.UserName = AN
 
+            ' Define the character to be replaced
+            Dim specialChar As String = ChrW(&HD83D)
+
             Dim selectedRange As Range = selection.Range
+            Dim Exited As Boolean = False
 
             For Each regexPair In regexList
                 Try
-                    Dim regex As New Regex(regexPair.Pattern)
-                    Dim matches = regex.Matches(selectedRange.Text)
 
-                    ' Iterate through each match and replace it
-                    For Each match As Match In matches
-                        If match.Success Then
-                            Dim matchRange As Range = selectedRange.Duplicate
-                            matchRange.Start = selectedRange.Start + match.Index
-                            matchRange.End = matchRange.Start + match.Length
+                    System.Windows.Forms.Application.DoEvents()
 
-                            ' Replace the match within its specific range
-                            matchRange.Text = regexPair.Replacement
-                        End If
-                    Next
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
+                        Exited = True
+                        Exit For
+                    End If
+
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
+                        Exited = True
+                        Exit For
+                    End If
+
+                    selectedRange.Select()
+                    SearchAndReplace(regexPair.Pattern, regexPair.Replacement, True, specialChar)
+
+                    'Dim regex As New Regex(regexPair.Pattern)
+                    'Dim matches = regex.Matches(selectedRange.Text)
+                    'For Each match As Match In matches
+                    'If match.Success Then
+                    'Dim matchRange As Range = selectedRange.Duplicate
+                    'matchRange.Start = selectedRange.Start + match.Index
+                    'matchRange.End = matchRange.Start + match.Length
+                    'matchRange.Text = regexPair.Replacement
+                    'End If
+                    'Next
                 Catch ex As Exception
                     errorCount += 1
                 End Try
             Next
 
+            selectedRange.Select()
+
+            If Not Exited Then
+                ' Loop through and replace occurrences of the character
+                Dim replacementsMade As Boolean = False
+                Do
+                    With selectedRange.Find
+                        .ClearFormatting()
+                        .Text = specialChar
+                        .Replacement.ClearFormatting()
+                        .Replacement.Text = "" ' Replace with empty string
+                        .Forward = True
+                        .Wrap = Word.WdFindWrap.wdFindStop ' Do not loop around
+                        If .Execute(Replace:=Word.WdReplace.wdReplaceOne) Then
+                            replacementsMade = True
+                        Else
+                            Exit Do
+                        End If
+                    End With
+                Loop
+            End If
+
             ' Restore original Track Changes setting
             app.ActiveDocument.TrackRevisions = originalTrackChangesSetting
             app.UserName = originalUserName
+
+            splash.Close()
 
             If errorCount > 0 Then
                 ShowCustomMessageBox($"Some markups were applied. However, in {errorCount} cases this did not work because the LLM did not return the correct results. You may want to retry.")
@@ -3969,12 +4076,152 @@ Public Class ThisAddIn
             Dim parts() As String = entry.Split(New String() {RegexSeparator1}, StringSplitOptions.None)
 
             If parts.Length = 2 Then
-                result.Add((parts(0).Trim(), parts(1).Trim()))
+                Dim key As String = parts(0).Trim()
+                Dim value As String = parts(1).Trim()
+
+                ' Only add if the tuple does not yet exist in result
+                If Not result.Any(Function(item) item.Item1 = key AndAlso item.Item2 = value) Then
+                    result.Add((key, value))
+                End If
             End If
         Next
 
         Return result
     End Function
+
+    Private Sub SearchAndReplace(oldText As String, newText As String, OnlySelection As Boolean, Marker As String)
+
+        Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
+
+        Dim trackChangesEnabled As Boolean = doc.TrackRevisions
+        Dim originalAuthor As String = doc.Application.UserName
+
+        Try
+
+            Dim workRange As Word.Range
+            If OnlySelection Then
+                If doc.Application.Selection Is Nothing OrElse doc.Application.Selection.Range.Text = "" Then
+                    OnlySelection = False
+                    workRange = doc.Content.Duplicate
+                Else
+                    workRange = doc.Application.Selection.Range.Duplicate
+                End If
+            Else
+                workRange = doc.Content.Duplicate
+            End If
+
+            Debug.WriteLine($"Replacing '{oldText}' with '{newText}'")
+
+            Dim newTextWithMarker As String = ""
+            If newText.Length > 2 And Marker <> "" Then
+                newTextWithMarker = $"{newText.Substring(0, newText.Length - 2)}{Marker}{newText.Substring(newText.Length - 2)}"
+            Else
+                newTextWithMarker = newText
+            End If
+
+
+            If Len(oldText) > 255 Then
+
+                Dim selectionStart As Integer = doc.Application.Selection.Start
+                Dim selectionEnd As Integer = doc.Application.Selection.End
+                doc.Application.Selection.SetRange(workRange.Start, workRange.End)
+                Dim found As Boolean = False
+
+                ' Loop through the content to find and replace all instances
+                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, 255, doc.Application.Selection) = True
+
+                    If doc.Application.Selection Is Nothing Then Exit Do
+
+                    found = True
+
+                    Dim isDeleted As Boolean = False
+                    For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
+                        If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                            isDeleted = True
+                            Exit For
+                        End If
+                    Next
+
+                    ' Account for trackchanges being turned on, i.e. the old text remains
+                    Dim currentEnd As Integer = doc.Application.Selection.End
+
+                    ' Replace the found text
+                    If Not isDeleted Then
+                        currentEnd = currentEnd + Len(newTextWithMarker)
+                        selectionEnd = selectionEnd + Len(newTextWithMarker)
+                        doc.Application.Selection.Text = newTextWithMarker
+                    End If
+
+                    ' Check if the collapsed selection has reached the end of the document or the selection
+                    If OnlySelection Then
+                        If currentEnd >= selectionEnd Then Exit Do
+                        doc.Application.Selection.SetRange(currentEnd, selectionEnd)
+                    Else
+                        If currentEnd >= doc.Content.End Then Exit Do
+                        doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
+                    End If
+                Loop
+
+                If Not found Then
+                    Debug.WriteLine($"Note: The search term was not found (Chunk Search)." & Environment.NewLine)
+                End If
+
+                doc.Application.Selection.SetRange(selectionStart, selectionEnd)
+                doc.Application.Selection.Select()
+
+            Else
+                Dim replacementsMade As Boolean = False
+                ' Capture the initial end of the workRange
+                Dim initialRangeEnd As Integer = workRange.End
+
+                Do
+                    With workRange.Find
+                        .ClearFormatting()
+                        .Text = oldText
+                        .Forward = True
+                        .Wrap = Word.WdFindWrap.wdFindStop
+                        ' Use ReplaceNone to get the match without automatically replacing it
+                        If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
+
+                            ' Create a duplicate of the found range for the revision check
+                            Dim foundRange As Word.Range = workRange.Duplicate
+
+                            Dim isDeleted As Boolean = False
+                            For Each rev As Word.Revision In foundRange.Revisions
+                                If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                                    isDeleted = True
+                                    Exit For
+                                End If
+                            Next
+
+                            If Not isDeleted Then
+                                foundRange.Text = newTextWithMarker
+                                replacementsMade = True
+                            End If
+
+                            ' Adjust the initial end based on the difference in length
+                            initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
+                            ' Move the start of workRange to the end of the found match
+                            workRange.Start = foundRange.End
+                            workRange.End = initialRangeEnd
+
+                        Else
+                            Exit Do
+                        End If
+                    End With
+                Loop
+
+
+                If Not replacementsMade Then
+                    Debug.WriteLine($"Note: The sarch term was not found." & Environment.NewLine)
+                End If
+            End If
+
+        Catch ex As System.Exception
+            MsgBox("Error in SearchReplace: " & ex.Message, MsgBoxStyle.Critical)
+        End Try
+    End Sub
+
 
 
     Public Shared Sub InsertTextWithMarkdown(selection As Microsoft.Office.Interop.Word.Selection, Result As String, Optional TrailingCR As Boolean = False)

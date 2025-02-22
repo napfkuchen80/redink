@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 19.2.2025
+' 22.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -170,7 +170,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.190225 Gen2 Beta Test"
+    Public Const Version As String = "V.220225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2986,7 +2986,7 @@ Public Class ThisAddIn
         ' Return True if all cells are locked and the worksheet is protected
         Return allLocked
     End Function
-    Private Function CellProtected(ByVal cell As Excel.Range) As Boolean
+    Private Function OldCellProtected(ByVal cell As Excel.Range) As Boolean
         ' Check if the cell is locked and the worksheet is protected
         If cell.Worksheet.ProtectContents Then
             If cell.Locked AndAlso Not cell.Worksheet.Protection.AllowEditRanges.Cast(Of Excel.AllowEditRange).Any(Function(r) r.Range.Address = cell.Address) Then
@@ -2995,6 +2995,31 @@ Public Class ThisAddIn
         End If
         Return False
     End Function
+
+    Private Function CellProtected(ByVal cell As Excel.Range) As Boolean
+        ' If the worksheet is not protected, no cell is actually protected
+        If Not cell.Worksheet.ProtectContents Then
+            Return False
+        End If
+
+        ' If the cell is not locked, it is not protected
+        If Not cell.Locked Then
+            Return False
+        End If
+
+        ' Check whether cell is in any AllowEditRange
+        For Each aer As Excel.AllowEditRange In cell.Worksheet.Protection.AllowEditRanges
+            ' If Intersect is not Nothing, the cell is within that allow-edit range
+            If cell.Application.Intersect(aer.Range, cell) IsNot Nothing Then
+                ' The cell can be edited => not protected
+                Return False
+            End If
+        Next
+
+        ' If it is locked, sheet is protected, and no allow-edit range covers the cell => it is effectively protected
+        Return True
+    End Function
+
 
     Public Sub UndoAction()
         Try

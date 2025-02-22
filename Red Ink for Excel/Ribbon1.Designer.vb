@@ -209,7 +209,6 @@ Partial Class Ribbon1
         Me.RI_FreestyleAM.ScreenTip = "Allows you to to enter a prompt and have the result shown (and inserted) using th" &
     "e 2nd configured model, if available"
         Me.RI_FreestyleAM.ShowImage = True
-        Me.RI_FreestyleAM.Visible = True
         '
         'RI_Undo
         '
