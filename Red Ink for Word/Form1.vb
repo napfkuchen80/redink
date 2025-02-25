@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 22.2.2025
+' 25.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -973,6 +973,10 @@ Public Class frmAIChat
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
+                        Exit Do
+                    End If
+
                     found = True
 
                     Dim isDeleted As Boolean = False
@@ -1010,66 +1014,71 @@ Public Class frmAIChat
                 doc.Application.Selection.Select()
 
             Else
-                Dim replacementsMade As Boolean = False
-                Dim initialRangeEnd As Integer = workRange.End
-                Do
-                    'With workRange.Find
-                    '.ClearFormatting()
-                    '.Text = oldText
-                    '.Replacement.ClearFormatting()
-                    '.Replacement.Text = newTextWithMarker
-                    '.Forward = True
-                    '.Wrap = Word.WdFindWrap.wdFindStop
-                    'If .Execute(Replace:=Word.WdReplace.wdReplaceOne) Then
-                    '  replacementsMade = True
-                    '   workRange.Start = workRange.End
-                    'Else
-                    '     Exit Do
-                    '  End If
-                    'End With
 
-                    With workRange.Find
-                        .ClearFormatting()
-                        .Text = oldText
-                        .Forward = True
-                        .Wrap = Word.WdFindWrap.wdFindStop
-                        ' Use ReplaceNone to get the match without automatically replacing it
-                        If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
+                If String.IsNullOrEmpty(oldText) Then
+                    CommandsList = $"Note: The search term was empty (bad LLM response)." & Environment.NewLine & CommandsList
+                Else
 
-                            ' Create a duplicate of the found range for the revision check
-                            Dim foundRange As Word.Range = workRange.Duplicate
+                    Dim replacementsMade As Boolean = False
+                    Dim initialRangeEnd As Integer = workRange.End
+                    Do
 
-                            Dim isDeleted As Boolean = False
-                            For Each rev As Word.Revision In foundRange.Revisions
-                                If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                                    isDeleted = True
-                                    Exit For
-                                End If
-                            Next
-
-                            If Not isDeleted Then
-                                foundRange.Text = newTextWithMarker
-                                replacementsMade = True
-                            End If
-
-                            ' Adjust the initial end based on the difference in length
-                            initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
-                            ' Move the start of workRange to the end of the found match
-                            workRange.Start = foundRange.End
-                            workRange.End = initialRangeEnd
-
-                        Else
+                        If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
                             Exit Do
                         End If
-                    End With
 
-                Loop
+                        With workRange.Find
+                            .ClearFormatting()
+                            .Text = oldText
+                            .Forward = True
+                            .Wrap = Word.WdFindWrap.wdFindStop
+                            .MatchWholeWord = False
+                            ' Use ReplaceNone to get the match without automatically replacing it
+                            If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
 
-                If Not replacementsMade Then
-                    CommandsList = $"Note: The resarch term was not found." & Environment.NewLine & CommandsList
+                                ' Create a duplicate of the found range for the revision check
+                                Dim foundRange As Word.Range = workRange.Duplicate
+
+                                Dim isDeleted As Boolean = False
+                                For Each rev As Word.Revision In foundRange.Revisions
+                                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                                        isDeleted = True
+                                        Exit For
+                                    End If
+                                Next
+
+                                Dim previousStart As Integer = workRange.Start
+
+                                If Not isDeleted Then
+                                    foundRange.Text = newTextWithMarker
+                                    replacementsMade = True
+                                End If
+
+                                ' Adjust the initial end based on the difference in length
+                                initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
+                                ' Move the start of workRange to the end of the found match
+                                workRange.Start = foundRange.End
+
+                                ' Safeguard: Ensure that the search range advances.
+                                If workRange.Start <= previousStart Then
+                                    workRange.Start = previousStart + 1
+                                End If
+
+                                workRange.End = initialRangeEnd
+
+                            Else
+                                Exit Do
+                            End If
+                        End With
+
+                    Loop
+
+                    If Not replacementsMade Then
+                        CommandsList = $"Note: The resarch term was not found." & Environment.NewLine & CommandsList
+                    End If
+
                 End If
             End If
-
 
         Catch ex As System.Exception
             MsgBox("Error in ExecuteReplaceCommand: " & ex.Message, MsgBoxStyle.Critical)

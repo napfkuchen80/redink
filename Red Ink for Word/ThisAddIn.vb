@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.2.2025
+' 25.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -217,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.220225 Gen2 Beta Test"
+    Public Const Version As String = "V.250225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -244,8 +244,8 @@ Public Class ThisAddIn
     Private Const KPFTrigger2 As String = "(kpf)"
     Private Const InPlacePrefix As String = "Replace:"
     Private Const MarkupPrefix As String = "Markup:"
-    Private Const MarkupPrefixDiff As String = "MarkupDiff"
-    Private Const MarkupPrefixDiffW As String = "MarkupDiff"
+    Private Const MarkupPrefixDiff As String = "MarkupDiff:"
+    Private Const MarkupPrefixDiffW As String = "MarkupDiffW:"
     Private Const MarkupPrefixWord As String = "MarkupWord:"
     Private Const MarkupPrefixRegex As String = "MarkupRegex:"
     Private Const MarkupPrefixAll As String = "Markup[Diff|DiffW|Word|Regex]:"
@@ -3980,10 +3980,12 @@ Public Class ThisAddIn
                 Exit Sub
             End If
 
-            Dim splash As New SplashScreen("Applying changes... press 'Esc' to abort")
-            splash.Show()
-            splash.Refresh()
+            'Dim splash As New SplashScreen("Applying changes... press 'Esc' to abort") 
+            'splash.Show()
+            'splash.Refresh()
 
+            ShowProgressBarInSeparateThread($"{AN} Regex Markup", "Applying changes...")
+            ProgressBarModule.CancelOperation = False
 
             ' Ensure Track Changes is enabled
             Dim originalTrackChangesSetting As Boolean = app.ActiveDocument.TrackRevisions
@@ -3996,6 +3998,8 @@ Public Class ThisAddIn
 
             Dim selectedRange As Range = selection.Range
             Dim Exited As Boolean = False
+
+            Dim regexIndex As Integer = 0
 
             For Each regexPair In regexList
                 Try
@@ -4025,6 +4029,15 @@ Public Class ThisAddIn
                     'matchRange.Text = regexPair.Replacement
                     'End If
                     'Next
+
+                    GlobalProgressMax = regexList.Count + 1
+
+                    ' Update the current progress value and status label.
+                    GlobalProgressValue = regexIndex + 1
+                    GlobalProgressLabel = $"Search & Replace command {regexIndex + 1} of {regexList.Count}"
+
+                    regexIndex += 1
+
                 Catch ex As Exception
                     errorCount += 1
                 End Try
@@ -4033,6 +4046,10 @@ Public Class ThisAddIn
             selectedRange.Select()
 
             If Not Exited Then
+
+                GlobalProgressValue = regexIndex + 1
+                GlobalProgressLabel = $"Cleaning up..."
+
                 ' Loop through and replace occurrences of the character
                 Dim replacementsMade As Boolean = False
                 Do
@@ -4052,11 +4069,13 @@ Public Class ThisAddIn
                 Loop
             End If
 
+            ProgressBarModule.CancelOperation = True
+
             ' Restore original Track Changes setting
             app.ActiveDocument.TrackRevisions = originalTrackChangesSetting
             app.UserName = originalUserName
 
-            splash.Close()
+            'splash.Close()
 
             If errorCount > 0 Then
                 ShowCustomMessageBox($"Some markups were applied. However, in {errorCount} cases this did not work because the LLM did not return the correct results. You may want to retry.")
@@ -4132,6 +4151,10 @@ Public Class ThisAddIn
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
+                        Exit Do
+                    End If
+
                     found = True
 
                     Dim isDeleted As Boolean = False
@@ -4170,50 +4193,70 @@ Public Class ThisAddIn
                 doc.Application.Selection.Select()
 
             Else
-                Dim replacementsMade As Boolean = False
-                ' Capture the initial end of the workRange
-                Dim initialRangeEnd As Integer = workRange.End
 
-                Do
-                    With workRange.Find
-                        .ClearFormatting()
-                        .Text = oldText
-                        .Forward = True
-                        .Wrap = Word.WdFindWrap.wdFindStop
-                        ' Use ReplaceNone to get the match without automatically replacing it
-                        If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
+                If String.IsNullOrEmpty(oldText) Then
+                    Debug.WriteLine($"Note: The search term was empty (bad LLM response)." & Environment.NewLine)
+                Else
+                    Dim replacementsMade As Boolean = False
+                    ' Capture the initial end of the workRange
+                    Dim initialRangeEnd As Integer = workRange.End
 
-                            ' Create a duplicate of the found range for the revision check
-                            Dim foundRange As Word.Range = workRange.Duplicate
+                    Do
 
-                            Dim isDeleted As Boolean = False
-                            For Each rev As Word.Revision In foundRange.Revisions
-                                If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                                    isDeleted = True
-                                    Exit For
-                                End If
-                            Next
-
-                            If Not isDeleted Then
-                                foundRange.Text = newTextWithMarker
-                                replacementsMade = True
-                            End If
-
-                            ' Adjust the initial end based on the difference in length
-                            initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
-                            ' Move the start of workRange to the end of the found match
-                            workRange.Start = foundRange.End
-                            workRange.End = initialRangeEnd
-
-                        Else
+                        If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
                             Exit Do
                         End If
-                    End With
-                Loop
+
+                        With workRange.Find
+                            .ClearFormatting()
+                            .Text = oldText
+                            .Forward = True
+                            .Wrap = Word.WdFindWrap.wdFindStop
+                            .MatchWholeWord = True ' Ensures only whole words are matched
+                            .MatchWildcards = False ' Ensure wildcard mode is on
+                            ' Use ReplaceNone to get the match without automatically replacing it
+                            If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
+
+                                ' Create a duplicate of the found range for the revision check
+                                Dim foundRange As Word.Range = workRange.Duplicate
+
+                                Dim isDeleted As Boolean = False
+                                For Each rev As Word.Revision In foundRange.Revisions
+                                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                                        isDeleted = True
+                                        Exit For
+                                    End If
+                                Next
+
+                                Dim previousStart As Integer = workRange.Start
+
+                                If Not isDeleted Then
+                                    foundRange.Text = newTextWithMarker
+                                    replacementsMade = True
+                                End If
+
+                                ' Adjust the initial end based on the difference in length
+                                initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
+                                ' Move the start of workRange to the end of the found match
+                                workRange.Start = foundRange.End
+
+                                ' Safeguard: Ensure that the search range advances.
+                                If workRange.Start <= previousStart Then
+                                    workRange.Start = previousStart + 1
+                                End If
+
+                                workRange.End = initialRangeEnd
+
+                            Else
+                                Exit Do
+                            End If
+                        End With
+                    Loop
 
 
-                If Not replacementsMade Then
-                    Debug.WriteLine($"Note: The sarch term was not found." & Environment.NewLine)
+                    If Not replacementsMade Then
+                        Debug.WriteLine($"Note: The sarch term was not found." & Environment.NewLine)
+                    End If
                 End If
             End If
 

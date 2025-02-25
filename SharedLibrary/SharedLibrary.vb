@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.2.2025
+' 25.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -485,7 +485,7 @@ Namespace SharedLibrary
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_MailReply As String = "You are a legal professional with excellent legal, language, logical and rhetorical skills that precisely complies with its instructions step by step. Your task is to read the text that is provided to you and marked as 'mailchain', which contains an e-mail chain. The first mail you get is the e-mail to which you shall draft a response for me. When drafting the response for me, comply with the following instructions and information (= key instructions): {OtherPrompt}. \n\nThese are the further rules that every answer should follow: 1. Draft it in the same language as the first mail you get has been written (do not consider headers, the subject line or the footer. 2. The top (and latest) e-mail you are provided with in the mailchain is from the person who wrote to me. This will be the person to whom I want to respond to. You will draft an e-mail to respond to that person, i.e. the author of the top and latest e-mail. Please keep that in mind when drafting a response and make sure that you . 3. Please read the entire mail chain and distinguish exactly who has written what and what the party, to whom I will respond, has written when drafting the response. However, on the substance, focus on the key instructions I provided to you above, if any. 4. In your proposed response use the same style, type of language and way of e-mail drafting as I do. 5. Do not process and never consider or include signatures and mail footers. 6. Provide your output in the Markdown format. 7. When drafting a reply, use full salutations and closing formulas that are adequate in view of the tone of the mailchain. 8. Finally, when drafting the response, it is very important that you comply with all instructions and careful check your response for compliance with all instructions before you provide it. {INI_PreCorrection}"
         Const Default_SP_MailSumup As String = "You are a highly skilled legal professional who strictly follows instructions step by step; analyze the body of the provided ""mailchain"" to determine its predominant language (ignoring sender, recipient, subject, etc.), strictly use this language for the output, generate a concise, structured Markdown-formatted summary (in bold, but not header formatting) including a one-sentence key takeaway followed by a breakdown of key points distinguishing different authors, ensuring the summary is very short and concise while retaining all critical information and getting an understanding of the conversation. {INI_PreCorrection}"
-        Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Rewrite the text that Is provided to you And Is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}}' preserving all other information, but ensure that in particular all pronouns, titles, and possessive forms are appropriately adjusted. \n {INI_PreCorrection}"
+        Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Your task is to swap parties in a text and adapt the text to still read correctly. To do so, rewrite the text that is provided to you and is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}' preserving all other information, but ensure that in particular all pronouns, titles, possessive forms and the use of plural and singular are appropriately adjusted. If {OldParty} or {NewParty} is not a name, treat it based on its meaning, even if it starts with a capital letter. \n {INI_PreCorrection}"
         Const Default_SP_Anonymize As String = "You are very careful editor And legal professional that precisely complies with its instructions step by step. Fully anonymize the text that Is provided to you And Is marked as 'TEXTTOPROCESS'. Do so only by replacing any names, companies, businesses, parties, organizations, proprietary product names, unknown abbreviations, personal addresses, e-mail accounts, phone numbers, IDs, credit card information, account numbers and other identifying information by the expression '[redacted]' and before providing the result, check whether there is no information left that could directly or indirectly identify any person, company, business, party or organization, including information that could link to them by doing an Internet search, and if so, redact it as well. {INI_PreCorrection}"
         Const Default_SP_RangeOfCells As String = "You are an expert In analyzing And explaining Excel files To non-experts And In drafting Excel formulas For use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
         Const Default_SP_WriteNeatly As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be a coherent, concise and easy to understand text based the text and keywords in the provided text, without changing or adding any meaning or information to it, but taking into account the following context, if any: '{Context}' {INI_PreCorrection}"
@@ -494,7 +494,7 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text."
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response in portions so that each portion relates to one particular portion of the texttoprocess. When doing so, follow strictly these rules: \n1. For each such portion of the the texttoprocess, provide your response in the the form of a comment to the portion of the text to which it relates. \n2. Provide each portion of your response by first quoting verbatim the relevant portion of the texttoprocess followed by the relevant comment for that portion of the texttorpocess. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the portion of the Texttoprocess exactly as it has been provided to you; do not change anything to the quoted portion of the Texttoprocess, do not add or remove any characters, do not add quotation marks.\n4. Keep the quoted text as short as possible (ensuring that it is still unique in the texttoprocess) and that the comment for such portion is drafted meaningful. \n5. Limit your output to those sections of the texttoprocess where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the texttoprocess for which you have no comment or remark. For example, 'No comment' or the like is a bad, invalid response. If there is a paragraph or section for which you have no meaningfull comment, skip it in your output. \n6. Follow these rules strictly, because your output will otherwise not be valid."
         Const Default_SP_Add_Revisions As String = "Where the instructions refer to markups, changes, insertions, deletions or revisions in the text, they are found within the tags <ins>...</ins> for insertions and within the tags <del> ... </del> for deletions."
-        Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. (e) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
+        Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
         'Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system. I will provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Then, for each distinct difference, produce: 1. A unique Regex pattern that matches ONLY that specific changed string in the original text (no placeholder text like 'Regex Pattern 1'; provide the actual pattern). 2. The replacement text exactly as it appears in the new text. Ensure the Regex patterns do not match identical text in other parts of the document. Your output must be strictly in this format, with no additional commentary or line breaks beyond the separators: RegexThatMatchesChange1{RegexSeparator1}ReplacementForChange1{RegexSeparator2}RegexThatMatchesChange2{RegexSeparator1}ReplacementForChange2{RegexSeparator2}RegexThatMatchesChange3{RegexSeparator1}ReplacementForChange3... - Use '{RegexSeparator1}' to separate the Regex from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Regex Pattern 1') or any extraneous text. Now, here are the texts:"
         Const Default_SP_ChatWord As String = "You are a helpful AI, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or insert text you generate. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether he wishes them to be executed, because they will already have been executed once you provide your output. Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Now another bad example and a mistake: [#REPLACE: @@example@@ §§sample@@#] (Two errors: 1. This does not consider context or changes made by earlier replacements. 2. It does not follow the syntax for the replacement text because the second argument is '§§sample@@' instead of '§§sample§§'). \n\nYou must follow these instructions strictly."
@@ -1168,7 +1168,312 @@ Namespace SharedLibrary
             End Try
         End Function
 
-        Private Shared Function ExtractCitations(ByRef jsonObj) As String
+
+
+        Public Shared Function ExtractCitations(ByRef jsonObj As JObject) As String
+                Try
+                    Dim OriginalJsonObj As JObject = jsonObj.DeepClone()
+                    Dim citationList As New List(Of String)
+                    Dim sourceUris As New HashSet(Of String)
+
+                    ' 1. Attempt extraction from candidates path (if present)
+                    Dim candidateCitations As JToken = jsonObj.SelectToken("candidates[0].content.parts[0].citations")
+                    If candidateCitations IsNot Nothing Then
+                        If candidateCitations.Type = JTokenType.Array Then
+                            For Each citation As JObject In candidateCitations
+                                ProcessCitationObject(citation, citationList, sourceUris)
+                            Next
+                        ElseIf candidateCitations.Type = JTokenType.Object Then
+                            ProcessCitationObject(CType(candidateCitations, JObject), citationList, sourceUris)
+                        End If
+                    End If
+
+                    ' 2. Check for top-level citations (outside of candidates)
+                    Dim topLevelCitations As JToken = jsonObj.SelectToken("citations")
+                    If topLevelCitations IsNot Nothing Then
+                        If topLevelCitations.Type = JTokenType.Array Then
+                            For Each citation As JToken In topLevelCitations
+                                If citation.Type = JTokenType.String Then
+                                    citationList.Add(citation.ToString())
+                                ElseIf citation.Type = JTokenType.Object Then
+                                    ProcessCitationObject(CType(citation, JObject), citationList, sourceUris)
+                                End If
+                            Next
+                        ElseIf topLevelCitations.Type = JTokenType.Object Then
+                            ' Handle Format 2 (fullNote/shortNote) in a top-level object
+                            Dim fullNote As String = topLevelCitations("fullNote")?.ToString()
+                            If Not String.IsNullOrEmpty(fullNote) Then
+                                citationList.Add(fullNote)
+                            End If
+                            Dim shortNote As String = topLevelCitations("shortNote")?.ToString()
+                            If Not String.IsNullOrEmpty(shortNote) Then
+                                citationList.Add(shortNote)
+                            End If
+                            ' In case no fullNote exists, fallback to checking for a URL
+                            Dim url As String = topLevelCitations("url")?.ToString()
+                            If Not String.IsNullOrEmpty(url) Then
+                                citationList.Add(url)
+                            End If
+                        End If
+                    End If
+
+                    ' 3. Check citation metadata sources
+                    Dim metadataSources As JToken = jsonObj.SelectToken("citationMetadata.citationSources")
+                    If metadataSources IsNot Nothing AndAlso metadataSources.Type = JTokenType.Array Then
+                        For Each source As JObject In metadataSources
+                            ProcessMetadataSource(source, citationList, sourceUris)
+                        Next
+                    End If
+
+                    ' 4. Check legacy formats
+                    ExtractLegacyCitations(jsonObj, citationList, sourceUris)
+
+                    Debug.WriteLine("Total citations count: " & citationList.Count.ToString())
+
+                    ' 5. Build output: if any citation was found, format them;
+                    ' otherwise, fall back to the simple citations extractor.
+                    If citationList.Count > 0 Then
+                        Debug.WriteLine("Citations: " & String.Join(", ", citationList))
+                        Return FormatCitations(citationList)
+                    Else
+                        Dim result As String = ExtractSimpleCitations(OriginalJsonObj)
+                        Debug.WriteLine("Fallback Result = " & result)
+                        Return result
+                    End If
+
+                Catch ex As Exception
+                Debug.WriteLine("Error parsing citations: " & ex.Message)
+            End Try
+
+                Return String.Empty
+            End Function
+
+            Private Shared Sub ProcessCitationObject(citation As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+                Try
+                    ' Format 1: Check for a "source" property (MLA/Chicago style)
+                    Dim source = citation.SelectToken("source")
+                    If source IsNot Nothing Then
+                        AddSource(source, citationList, sourceUris)
+                        ' Optionally include an inline citation if available
+                        Dim inlineCitation = citation("inlineCitation")?.ToString()
+                        If Not String.IsNullOrEmpty(inlineCitation) Then
+                            citationList.Add("Inline: " & inlineCitation)
+                        End If
+                        Return
+                    End If
+
+                    ' Format 2: Check for a "fullNote" property (full note/short note format)
+                    Dim fullNote As String = citation("fullNote")?.ToString()
+                    If Not String.IsNullOrEmpty(fullNote) Then
+                        citationList.Add(fullNote)
+                        Return
+                    End If
+
+                    ' Format 3: IEEE style with "referenceEntry"
+                    Dim refEntry As String = citation("referenceEntry")?.ToString()
+                    If Not String.IsNullOrEmpty(refEntry) Then
+                        Dim ieeeUri As String = ExtractIeeeUri(refEntry)
+                        If Not String.IsNullOrEmpty(ieeeUri) AndAlso sourceUris.Add(ieeeUri) Then
+                            citationList.Add($"{refEntry} | Source: {ieeeUri}")
+                        Else
+                            citationList.Add(refEntry)
+                        End If
+                        Return
+                    End If
+
+                    ' Format 4: Harvard style with "referenceList.entry" and optionally "textualCitation"
+                    Dim refListToken As JToken = citation.SelectToken("referenceList.entry")
+                    If refListToken IsNot Nothing Then
+                        Dim refList As String = refListToken.ToString()
+                        Dim harvardUri As String = ExtractHarvardUri(refList)
+                        Dim textualCitation As String = citation("textualCitation")?.ToString()
+                        Dim formattedCitation As String = (If(Not String.IsNullOrEmpty(textualCitation), textualCitation, "") & " | " & refList).Trim(" "c, "|"c)
+                        citationList.Add(formattedCitation)
+                        Return
+                    End If
+
+                    ' Fallback: If the citation object has a "url" property directly, extract it.
+                    Dim url As String = citation("url")?.ToString()
+                    If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
+                        citationList.Add(url)
+                    End If
+
+                Catch ex As Exception
+                Debug.WriteLine("Error processing citation object: " & ex.Message)
+            End Try
+            End Sub
+
+            Private Shared Sub ProcessMetadataSource(source As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+                Try
+                    Dim uri As String = source("uri")?.ToString()
+                    If Not String.IsNullOrEmpty(uri) AndAlso sourceUris.Add(uri) Then
+                        Dim title As String = source("title")?.ToString()
+                        If String.IsNullOrWhiteSpace(title) Then title = "No title"
+                        Dim authors As String = String.Join(", ", source.SelectTokens("authors[*].given").Select(Function(t) t.ToString()))
+                        Dim doi As String = source("doi")?.ToString()
+                        citationList.Add($"Source: {title} | Authors: {If(authors, "Unknown")} | DOI: {If(doi, "N/A")} | URL: {uri}")
+                    End If
+                Catch ex As Exception
+                Debug.WriteLine("Error processing metadata source: " & ex.Message)
+            End Try
+            End Sub
+
+            Private Shared Sub AddSource(source As JToken, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+                Try
+                    Dim uri As String = source("uri")?.ToString()
+                    If String.IsNullOrEmpty(uri) OrElse sourceUris.Contains(uri) Then Return
+
+                    Dim sb As New StringBuilder()
+                    sb.Append("Source: ")
+
+                    ' Build title with container if available
+                    Dim title As String = source("title")?.ToString()
+                    Dim container As String = source("containerTitle")?.ToString()
+                    If Not String.IsNullOrEmpty(container) Then
+                        sb.Append($"{title}. In: {container}")
+                    Else
+                        sb.Append(title)
+                    End If
+
+                    ' Add authors
+                    Dim authors = source.SelectTokens("authors[*]")
+                    If authors IsNot Nothing AndAlso authors.Any() Then
+                        sb.Append(" | Authors: ")
+                        For Each author In authors
+                            Dim given As String = author("given")?.ToString()
+                            Dim family As String = author("family")?.ToString()
+                            If Not String.IsNullOrEmpty(family) Then
+                                sb.Append($"{family}, {given}; ")
+                            End If
+                        Next
+                        If sb.Length > 2 Then
+                            sb.Length -= 2 ' Remove last semicolon and space
+                        End If
+                    End If
+
+                    ' Add publication info
+                    Dim pubDate As String = source("publicationDate")?.ToString()
+                    If Not String.IsNullOrEmpty(pubDate) Then
+                        sb.Append($" | Published: {pubDate}")
+                    End If
+
+                    ' Add DOI if available
+                    Dim doi As String = source("doi")?.ToString()
+                    If Not String.IsNullOrEmpty(doi) Then
+                        sb.Append($" | DOI: {doi}")
+                    End If
+                    sb.Append($" | URL: {uri}")
+
+                    citationList.Add(sb.ToString())
+                    sourceUris.Add(uri)
+                Catch ex As Exception
+                Debug.WriteLine("Error adding source: " & ex.Message)
+            End Try
+            End Sub
+
+            Private Shared Sub ExtractLegacyCitations(jsonObj As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+                Try
+                    ' Old format v0.9 compatibility: look for any "sources" with a URL.
+                    Dim legacyCitations = jsonObj.SelectTokens("$..sources[?(@.url)]")
+                    For Each legacySource In legacyCitations
+                        Dim url As String = legacySource("url")?.ToString()
+                        If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
+                            citationList.Add($"Legacy source: {url}")
+                        End If
+                    Next
+                Catch ex As Exception
+                Debug.WriteLine("Error processing legacy citations: " & ex.Message)
+            End Try
+            End Sub
+
+            Private Shared Function ExtractIeeeUri(refEntry As String) As String
+                Try
+                    Dim doiMatch = Regex.Match(refEntry, "doi:\s*(\S+)")
+                    If doiMatch.Success Then
+                        ' Trim any trailing punctuation
+                        Return $"https://doi.org/{doiMatch.Groups(1).Value.TrimEnd("."c)}"
+                    End If
+                Catch ex As Exception
+                    Debug.WriteLine("DOI extraction error: " & ex.Message)
+                End Try
+                Return String.Empty
+            End Function
+
+            Private Shared Function ExtractHarvardUri(refEntry As String) As String
+                Try
+                    Dim uriMatch = Regex.Match(refEntry, "Available at:\s*(\S+)\s*\(")
+                    If uriMatch.Success Then
+                        Return uriMatch.Groups(1).Value
+                    End If
+                Catch ex As Exception
+                    Debug.WriteLine("Harvard URI extraction error: " & ex.Message)
+                End Try
+                Return String.Empty
+            End Function
+
+            Private Shared Function FormatCitations(citationList As List(Of String)) As String
+                Dim sb As New StringBuilder()
+                sb.AppendLine(vbCrLf & "References:")
+                For i As Integer = 0 To citationList.Count - 1
+                    sb.AppendLine($"[{i + 1}] {citationList(i)}")
+                Next
+                Return sb.ToString()
+            End Function
+
+            Private Shared Function ExtractSimpleCitations(ByRef jsonObj As JObject) As String
+                Try
+                    Dim citations As JToken = jsonObj.SelectToken("citations")
+                    Dim citationList As New List(Of String)
+
+                    If citations IsNot Nothing Then
+                        If citations.Type = JTokenType.Array Then
+                            For Each citation As JToken In citations
+                                If citation.Type = JTokenType.String Then
+                                    citationList.Add(citation.ToString())
+                                ElseIf citation.Type = JTokenType.Object Then
+                                    ' Try to extract URL or fullNote from the object
+                                    Dim url As JToken = citation.SelectToken("url")
+                                    If url IsNot Nothing Then
+                                        citationList.Add(url.ToString())
+                                    Else
+                                        Dim fullNote As String = citation("fullNote")?.ToString()
+                                        If Not String.IsNullOrEmpty(fullNote) Then
+                                            citationList.Add(fullNote)
+                                        End If
+                                    End If
+                                End If
+                            Next
+                        ElseIf citations.Type = JTokenType.Object Then
+                            Dim fullNote As String = citations("fullNote")?.ToString()
+                            If Not String.IsNullOrEmpty(fullNote) Then
+                                citationList.Add(fullNote)
+                            Else
+                                Dim url As String = citations("url")?.ToString()
+                                If Not String.IsNullOrEmpty(url) Then
+                                    citationList.Add(url)
+                                End If
+                            End If
+                        End If
+                    End If
+
+                    Dim simpleCitationOutput As New StringBuilder()
+                    simpleCitationOutput.AppendLine(vbCrLf)
+                    For i As Integer = 0 To citationList.Count - 1
+                        simpleCitationOutput.AppendLine("[" & (i + 1).ToString() & "] " & citationList(i))
+                    Next
+
+                    Return simpleCitationOutput.ToString()
+
+                Catch ex As Exception
+                Debug.WriteLine("Error parsing JSON for simple citations: " & ex.Message)
+            End Try
+
+                Return String.Empty
+            End Function
+
+
+
+            Private Shared Function xxxExtractSimpleCitations(ByRef jsonObj As JObject) As String
 
             Try
 
@@ -1194,18 +1499,21 @@ Namespace SharedLibrary
                     End If
                 End If
 
-                ExtractCitations = ""
+                Dim simpleCitationOutput As String = ""
 
                 ' Append citations if found
                 If citationList.Count > 0 Then
-                    ExtractCitations = vbCrLf & vbCrLf
+                    simpleCitationOutput = vbCrLf & vbCrLf
                     For i As Integer = 0 To citationList.Count - 1
-                        ExtractCitations &= "[" & (i + 1).ToString() & "] " & citationList(i) & vbCrLf
+                        simpleCitationOutput &= "[" & (i + 1).ToString() & "] " & citationList(i) & vbCrLf
                     Next
                 End If
 
+                Return simpleCitationOutput
+
             Catch ex As Exception
-                Debug.WriteLine("Error parsing JSON for citations: " & ex.Message)
+                MessageBox.Show("Error parsing JSON for simple citations: " & ex.Message)
+                Return String.Empty
             End Try
         End Function
 
@@ -5995,16 +6303,15 @@ Namespace SharedLibrary
         Public Shared Function ReadWordDocument(ByVal docPath As String, Optional ReturnErrorInsteadOfEmpty As Boolean = True) As String
             Dim app As Microsoft.Office.Interop.Word.Application = Nothing
             Dim doc As Document = Nothing
+
             Try
-                ' Check if an instance of Word is already running
-                ' We will use the global Word application object if it exists.
-                If Marshal.GetActiveObject("Word.Application") Is Nothing Then
-                    ' If Word is not running, create a new application instance
-                    app = New Microsoft.Office.Interop.Word.Application With {.Visible = False}
-                Else
-                    ' If Word is already running, use the existing instance
+                Try
+                    ' Try to attach to an existing Word instance.
                     app = CType(Marshal.GetActiveObject("Word.Application"), Microsoft.Office.Interop.Word.Application)
-                End If
+                Catch ex As System.Exception
+                    ' If Word is not running, create a new Word application.
+                    app = New Microsoft.Office.Interop.Word.Application With {.Visible = False}
+                End Try
 
                 ' Open the Word document in read-only mode
                 doc = app.Documents.Open(docPath, ReadOnly:=True, Visible:=False)
@@ -6017,15 +6324,18 @@ Namespace SharedLibrary
 
                 ' Return the extracted text
                 Return text
-            Catch ex As Exception
+
+            Catch ex As System.Exception
                 ' Ensure the document is closed in case of an error
                 If doc IsNot Nothing Then
                     doc.Close(SaveChanges:=False)
                 End If
-                ' Return the error message
+
+                ' Return the error message (or empty string if ReturnErrorInsteadOfEmpty=False)
                 Return If(ReturnErrorInsteadOfEmpty, $"Error reading Word document: {ex.Message}", "")
+
             Finally
-                ' Only quit the application if we created it
+                ' Only quit the application if it was newly created
                 If app IsNot Nothing AndAlso app.Visible = False Then
                     app.Quit()
                 End If
