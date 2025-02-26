@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 25.2.2025
+' 26.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -217,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.250225 Gen2 Beta Test"
+    Public Const Version As String = "V.260225 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -3638,7 +3638,7 @@ Public Class ThisAddIn
                             ErrorList = $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable." & vbCrLf & vbCrLf & ErrorList
                         End If
 
-                        ErrorList = ShowCustomWindow("Errors when implementing the 'bubbles' feedback of the LLM:", ErrorList, "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN)
+                        ErrorList = ShowCustomWindow("Errors when implementing the 'bubbles' feedback of the LLM:", ErrorList, "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN, True)
 
                         If ErrorList <> "" And ErrorList.ToLower() <> "esc" Then
                             SLib.PutInClipboard(ErrorList)

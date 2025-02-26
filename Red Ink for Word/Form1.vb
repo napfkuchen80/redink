@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 25.2.2025
+' 26.2.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -621,7 +621,7 @@ Public Class frmAIChat
 
                 ' If arg2 wasn't found, it might be blank
                 If m.Groups("arg2") IsNot Nothing Then
-                    pc.Argument2 = m.Groups("arg2").Value.Trim()
+                    pc.Argument2 = m.Groups("arg2").Value.Trim().Replace("\r\n", vbCrLf).Replace("\n", vbCrLf).Replace("\r", vbCrLf)
                 End If
 
                 If String.IsNullOrEmpty(pc.Argument2) Then
