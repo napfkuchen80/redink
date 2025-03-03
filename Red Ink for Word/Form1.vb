@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 26.2.2025
+' 2.3.2025
 '
 ' The compiled version of Red Ink also ...
 '

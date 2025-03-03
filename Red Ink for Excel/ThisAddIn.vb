@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 23.2.2025
+' 3.3.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -167,7 +167,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.230225 Gen2 Beta Test"
+    Public Const Version As String = "V.030325 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2127,6 +2127,8 @@ Public Class ThisAddIn
 
                                 Dim LLMResult As String = Await LLM(SysCommand & " " & SP_Add_KeepFormulasIntact, If(NoSelectedCells, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, True)
 
+                                LLMResult = Trim(LLMResult)
+
                                 If Not String.IsNullOrEmpty(LLMResult) Then
                                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
                                 End If
@@ -2170,7 +2172,9 @@ Public Class ThisAddIn
                                 ' Handle plain text cells
                                 SelectedText = CStr(cell.Value)
 
-                                Dim trailingCR As Boolean = (SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbLf) Or SelectedText.EndsWith(vbCr))
+                                Dim regex As New Regex("((\r\n)|\n|\r){2,}$")
+                                'Dim trailingCR As Boolean = regex.IsMatch(SelectedText)
+                                'Dim trailingCR As Boolean = (SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbLf) Or SelectedText.EndsWith(vbCr))
 
                                 If DoShorten Then
                                     Dim Textlength As Integer = SelectedText.Length
@@ -2186,8 +2190,13 @@ Public Class ThisAddIn
                                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
                                 End If
 
-                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
-                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+                                'If Not trailingCR And LLMResult.EndsWith(ControlChars.CrLf) Then LLMResult = LLMResult.TrimEnd(ControlChars.CrLf)
+                                'If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
+                                'If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+
+                                LLMResult = Trim(LLMResult).TrimEnd(ControlChars.CrLf).TrimEnd(ControlChars.Lf).TrimEnd(ControlChars.Cr)
+                                LLMResult = Trim(LLMResult).TrimEnd(ControlChars.CrLf).TrimEnd(ControlChars.Lf).TrimEnd(ControlChars.Cr)
+                                LLMResult = Trim(LLMResult).TrimEnd(ControlChars.CrLf).TrimEnd(ControlChars.Lf).TrimEnd(ControlChars.Cr)
 
                                 If Not String.IsNullOrWhiteSpace(LLMResult) Then
                                     Dim state As New CellState With {

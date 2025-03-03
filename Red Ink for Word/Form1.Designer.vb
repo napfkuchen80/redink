@@ -1,4 +1,6 @@
-﻿<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()>
+﻿Imports System.Windows.Forms
+
+<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()>
 Partial Class frmAIChat
     Inherits System.Windows.Forms.Form
 
@@ -23,8 +25,8 @@ Partial Class frmAIChat
     <System.Diagnostics.DebuggerStepThrough()>
     Private Sub InitializeComponent()
         Me.lblInstructions = New System.Windows.Forms.Label()
-        Me.txtChatHistory = New System.Windows.Forms.TextBox()
-        Me.txtUserInput = New System.Windows.Forms.TextBox()
+        Me.txtChatHistory = New MyTextBox()
+        Me.txtUserInput = New MyTextBox()
         Me.SuspendLayout()
         '
         'lblInstructions
@@ -80,3 +82,36 @@ Partial Class frmAIChat
     Friend WithEvents txtUserInput As Windows.Forms.TextBox
 
 End Class
+
+Public Class MyTextBox
+    Inherits TextBox
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        ' Only change the font size if the Ctrl key is pressed.
+        If (Control.ModifierKeys And Keys.Control) = Keys.Control Then
+            Dim currentSize As Single = Me.Font.Size
+            Dim newSize As Single = currentSize
+
+            ' Increase or decrease font size based on wheel direction.
+            If e.Delta > 0 Then
+                newSize += 1
+            ElseIf e.Delta < 0 Then
+                newSize -= 1
+            End If
+
+            ' Prevent the font size from becoming too small.
+            If newSize < 2 Then newSize = 2
+
+            Try
+                ' Update the font while preserving the font family and style.
+                Me.Font = New System.Drawing.Font(Me.Font.FontFamily, newSize, Me.Font.Style)
+            Catch ex As System.Exception
+                MessageBox.Show("Error changing font size: " & ex.Message)
+            End Try
+        End If
+
+        ' Always call the base method for standard processing.
+        MyBase.OnMouseWheel(e)
+    End Sub
+End Class
+
