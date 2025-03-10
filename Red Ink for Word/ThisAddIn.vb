@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 3.3.2025
+' 10.3.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -217,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.030325 Gen2 Beta Test"
+    Public Const Version As String = "V.100325 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1640,7 +1640,7 @@ Public Class ThisAddIn
             For i = 0 To shortcutsArray.Length - 1
                 If shortcutsArray(i).Contains("=") Then
                     shortcutPair = shortcutsArray(i).Split("=")
-                    shortcutDict(Trim(shortcutPair(0))) = Trim(shortcutPair(1))
+                    shortcutDict(shortcutPair(0).Trim()) = shortcutPair(1).Trim()
                 End If
             Next
             myControl.Visible = True
@@ -2282,7 +2282,7 @@ Public Class ThisAddIn
         Dim UserInput As String
         Dim ShortenPercentValue As Integer = 0
         Do
-            UserInput = Trim(SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%"))
+            UserInput = SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%").Trim()
             If String.IsNullOrEmpty(UserInput) Then
                 Exit Sub
             End If
@@ -2301,7 +2301,7 @@ Public Class ThisAddIn
         If INILoadFail() Then Exit Sub
         Dim UserInput As String
         Do
-            UserInput = Trim(SLib.ShowCustomInputBox("Please provide the original party name And the New party name, separated by a comma (example: Elvis Presley, Taylor Swift):", $"{AN} Switch Party", True))
+            UserInput = SLib.ShowCustomInputBox("Please provide the original party name And the New party name, separated by a comma (example: Elvis Presley, Taylor Swift):", $"{AN} Switch Party", True).Trim()
 
             If String.IsNullOrEmpty(UserInput) Then
                 Exit Sub
@@ -2364,7 +2364,7 @@ Public Class ThisAddIn
         SummaryLength = 0
 
         Do
-            UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(CInt(SummaryPercent * Textlength / 100))))
+            UserInput = SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(CInt(SummaryPercent * Textlength / 100))).Trim()
 
             If String.IsNullOrEmpty(UserInput) Then
                 Exit Sub
@@ -2453,11 +2453,11 @@ Public Class ThisAddIn
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
         End If
-        SelectedText = Trim(selection.Text)
+        SelectedText = selection.Text.Trim()
         If SelectedText.Contains("H: ") And SelectedText.Contains("G: ") Then
             ReadPodcast(SelectedText)
         Else
-            If Trim(selection.Text).StartsWith("{") Then
+            If selection.Text.Trim().StartsWith("{") Then
                 Dim selectedoutputpath As String = (If(String.IsNullOrEmpty(My.Settings.TTSOutputPath), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile), My.Settings.TTSOutputPath))
                 selectedoutputpath = ShowCustomInputBox("Where should the audio generated from your JSON TTS file be saved to?", $"{AN} Create Audiobook", True, selectedoutputpath)
                 If String.IsNullOrWhiteSpace(selectedoutputpath) Then
@@ -2564,9 +2564,9 @@ Public Class ThisAddIn
             If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
             If Not NoText Then
-                OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False).Trim()
             Else
-                OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False).Trim()
             End If
 
             SLib.RestoreClipboard()
@@ -3535,7 +3535,7 @@ Public Class ThisAddIn
                         If FinalText = "" Then
                             SLib.PutInClipboard(LLMResult)
                         Else
-                            FinalText = Trim(FinalText)
+                            FinalText = FinalText.Trim()
                             SLib.PutInClipboard(FinalText)
                             If FinalText.Contains("H: ") And FinalText.Contains("G: ") Then ReadPodcast(FinalText)
                         End If
@@ -3545,7 +3545,7 @@ Public Class ThisAddIn
                         If FinalText <> "" Then
                             SLib.PutInClipboard(LLMResult)
                         Else
-                            FinalText = Trim(FinalText)
+                            FinalText = FinalText.Trim()
                             SLib.PutInClipboard(FinalText)
                         End If
                     End If
@@ -3621,7 +3621,7 @@ Public Class ThisAddIn
                     If notfoundresponse.Count > 0 Then
                         ErrorList += "The following comments could not be assigned to your text (they were not found):" & vbCrLf
                         For Each item In notfoundresponse
-                            If Trim(item) <> "" Then ErrorList += Trim("- " & item & vbCrLf)
+                            If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                         Next
                         ErrorList += vbCrLf
                     End If
@@ -3629,7 +3629,7 @@ Public Class ThisAddIn
                     If wrongformatresponse.Count > 0 Then
                         ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf
                         For Each item In wrongformatresponse
-                            If Trim(item) <> "" Then ErrorList += Trim("- " & item & vbCrLf)
+                            If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                         Next
                         ErrorList += vbCrLf
                     End If
@@ -5676,7 +5676,7 @@ Public Class ThisAddIn
 
         Dim lastcontextsearch As String = If(String.IsNullOrWhiteSpace(My.Settings.LastContextSearch), "", My.Settings.LastContextSearch)
 
-        SearchContext = Trim(ShowCustomInputBox($"Enter the search term (start with '{SearchMultiTrigger}' if you want to find and highlight all occurrences at once and add '{SearchAllTrigger}' if you want to search the entire document):", "Context Search", True, lastcontextsearch))
+        SearchContext = ShowCustomInputBox($"Enter the search term (start with '{SearchMultiTrigger}' if you want to find and highlight all occurrences at once and add '{SearchAllTrigger}' if you want to search the entire document):", "Context Search", True, lastcontextsearch).Trim()
         If String.IsNullOrWhiteSpace(SearchContext) Or SearchContext = "ESC" Then Exit Sub
 
         My.Settings.LastContextSearch = SearchContext
@@ -5779,15 +5779,15 @@ Public Class ThisAddIn
 
         Else
             If Not String.IsNullOrWhiteSpace(LLMResult) Then
-                Dim FindText As String = Trim(LLMResult)
-                FindText = FindText.TrimEnd(ControlChars.Lf)
-                FindText = FindText.TrimEnd(ControlChars.Cr)
+                Dim FindText As String = LLMResult.Trim()
 
                 If FindLongTextInChunks(FindText, 255, selection) And selection IsNot Nothing Then
                     wordApp.ActiveWindow.ScrollIntoView(selection.Range, True)
                 Else
-                    ShowCustomMessageBox($"The LLM did not find the context '{SearchContext}'{If(SearchAll, " (searched full document)", " (search direction was down)")}.", "Context Search")
+                    ShowCustomMessageBox($"The LLM found this section:" & vbCrLf & vbCrLf & FindText & vbCrLf & vbCrLf & $"However, {AN} could not locate it in the document for technical reasons (may be due to special characters, line breaks of the LLM not quoting the text properly).", "Context Search")
                 End If
+            Else
+                ShowCustomMessageBox($"The LLM did not find the context '{SearchContext}'{If(SearchAll, " (searched full document)", " (search direction was down)")}.", "Context Search")
             End If
         End If
     End Sub
@@ -8248,7 +8248,7 @@ Public Class ThisAddIn
 
                 Dim jsonPayload As String
 
-                If Trim(input).StartsWith("{") Then
+                If input.Trim().StartsWith("{") Then
                     jsonPayload = input
                 Else
 
