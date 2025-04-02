@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 2.3.2025
+' 2.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -772,7 +772,7 @@ Public Class frmAIChat
 
             ' Enable track changes and set author 
             doc.TrackRevisions = True
-            doc.Application.UserName = AN
+            ' doc.Application.UserName = AN
 
             ' Determine the range to operate on
             Dim rng As Word.Range
@@ -814,7 +814,7 @@ Public Class frmAIChat
         Finally
             ' Restore the original track changes setting and author
             doc.TrackRevisions = trackChangesEnabled
-            doc.Application.UserName = originalAuthor
+            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 
@@ -831,7 +831,7 @@ Public Class frmAIChat
             doc.Activate()
 
             doc.TrackRevisions = True
-            doc.Application.UserName = AN
+            'doc.Application.UserName = AN
 
             ' Define the starting selection based on OnlySelection
             If OnlySelection Then
@@ -916,7 +916,7 @@ Public Class frmAIChat
         Finally
             ' Restore original state of Track Changes and Author
             doc.TrackRevisions = trackChangesEnabled
-            doc.Application.UserName = originalAuthor
+            'doc.Application.UserName = originalAuthor
 
             ' Restore original selection
             doc.Application.Selection.SetRange(selectionStart, selectionEnd)
@@ -938,7 +938,7 @@ Public Class frmAIChat
             doc.Activate()
 
             doc.TrackRevisions = True
-            doc.Application.UserName = AN
+            'doc.Application.UserName = AN
 
             Dim workRange As Word.Range
             If OnlySelection Then
@@ -1085,7 +1085,7 @@ Public Class frmAIChat
 
         Finally
             doc.TrackRevisions = trackChangesEnabled
-            doc.Application.UserName = originalAuthor
+            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 
@@ -1104,7 +1104,7 @@ Public Class frmAIChat
 
             ' Enable Track Changes and set the author to 
             doc.TrackRevisions = True
-            doc.Application.UserName = AN
+            'doc.Application.UserName = AN
 
             ' Determine the range for the search
             Dim workrange As Word.Range
@@ -1198,7 +1198,7 @@ Public Class frmAIChat
         Finally
             ' Restore the original state of Track Changes and Author
             doc.TrackRevisions = trackChangesEnabled
-            doc.Application.UserName = originalAuthor
+            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 
@@ -1218,7 +1218,7 @@ Public Class frmAIChat
 
             ' Enable Track Changes and set the author to 
             doc.TrackRevisions = True
-            doc.Application.UserName = AN
+            'doc.Application.UserName = AN
 
             Dim selection As Word.Selection = doc.Application.Selection
 
@@ -1234,7 +1234,7 @@ Public Class frmAIChat
         Finally
             ' Restore the original state of Track Changes and Author
             doc.TrackRevisions = trackChangesEnabled
-            doc.Application.UserName = originalAuthor
+            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 

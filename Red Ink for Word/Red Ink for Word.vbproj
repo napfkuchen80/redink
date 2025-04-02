@@ -37,7 +37,7 @@
     <PublishUrl>\\192.168.168.5\datastore\Develop\Web\rosenthal.ch\downloads\redink_prerelease\word\</PublishUrl>
     <InstallUrl>https://apps.vischer.com/redink/word/</InstallUrl>
     <TargetCulture>en</TargetCulture>
-    <ApplicationVersion>0.1.1.7</ApplicationVersion>
+    <ApplicationVersion>0.1.1.9</ApplicationVersion>
     <AutoIncrementApplicationRevision>true</AutoIncrementApplicationRevision>
     <UpdateEnabled>false</UpdateEnabled>
     <UpdateInterval>0</UpdateInterval>
@@ -504,6 +504,8 @@
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\Vosk.0.3.38\build\Vosk.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Vosk.0.3.38\build\Vosk.targets'))" />
     <Error Condition="!Exists('..\packages\Whisper.net.Runtime.1.7.4\build\Whisper.net.Runtime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Whisper.net.Runtime.1.7.4\build\Whisper.net.Runtime.targets'))" />
+    <Error Condition="!Exists('..\packages\Whisper.net.Runtime.Cuda.Windows.1.7.4\build\Whisper.net.Runtime.Cuda.Windows.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Whisper.net.Runtime.Cuda.Windows.1.7.4\build\Whisper.net.Runtime.Cuda.Windows.targets'))" />
   </Target>
   <Import Project="..\packages\Whisper.net.Runtime.1.7.4\build\Whisper.net.Runtime.targets" Condition="Exists('..\packages\Whisper.net.Runtime.1.7.4\build\Whisper.net.Runtime.targets')" />
+  <Import Project="..\packages\Whisper.net.Runtime.Cuda.Windows.1.7.4\build\Whisper.net.Runtime.Cuda.Windows.targets" Condition="Exists('..\packages\Whisper.net.Runtime.Cuda.Windows.1.7.4\build\Whisper.net.Runtime.Cuda.Windows.targets')" />
 </Project>

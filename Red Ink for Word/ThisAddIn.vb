@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.3.2025
+' 2.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -217,7 +217,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.100325 Gen2 Beta Test"
+    Public Const Version As String = "V.020425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -3592,7 +3592,7 @@ Public Class ThisAddIn
                                     If selection.Find.Execute(FindText:=findText) Then
                                         Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                     Else
-                                        notfoundresponse.Add("'" & findText & "' " & ChrW(8594) & $" {AN5}: " & commentText)
+                                        notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
                                     End If
                                 Else
                                     ' Use chunk-by-chunk search for > 255 characters
@@ -3600,12 +3600,12 @@ Public Class ThisAddIn
                                         ' If found, selection now covers the entire matched text
                                         Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                     Else
-                                        notfoundresponse.Add("'" & findText & "' " & ChrW(8594) & $" {AN5}: " & commentText)
+                                        notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
                                     End If
                                 End If
 
                             Catch ex As Exception
-                                notfoundresponse.Add("'" & findText & "' " & ChrW(8594) & $" {AN5}: " & commentText & " [Error: " & ex.Message & "]")
+                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & " [Error: " & ex.Message & "]" & vbCrLf & vbCrLf)
                             End Try
 
                         Else
@@ -3619,7 +3619,7 @@ Public Class ThisAddIn
 
                     Dim ErrorList As String = ""
                     If notfoundresponse.Count > 0 Then
-                        ErrorList += "The following comments could not be assigned to your text (they were not found):" & vbCrLf
+                        ErrorList += "The following comments could not be assigned to your text (they were not found):" & vbCrLf & vbCrLf
                         For Each item In notfoundresponse
                             If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                         Next
@@ -3627,7 +3627,7 @@ Public Class ThisAddIn
                     End If
 
                     If wrongformatresponse.Count > 0 Then
-                        ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf
+                        ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf & vbCrLf
                         For Each item In wrongformatresponse
                             If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                         Next
@@ -3991,7 +3991,7 @@ Public Class ThisAddIn
             Dim originalTrackChangesSetting As Boolean = app.ActiveDocument.TrackRevisions
             Dim originalUserName As String = app.UserName
             app.ActiveDocument.TrackRevisions = True
-            app.UserName = AN
+            ' app.UserName = AN
 
             ' Define the character to be replaced
             Dim specialChar As String = ChrW(&HD83D)
@@ -4073,7 +4073,7 @@ Public Class ThisAddIn
 
             ' Restore original Track Changes setting
             app.ActiveDocument.TrackRevisions = originalTrackChangesSetting
-            app.UserName = originalUserName
+            ' app.UserName = originalUserName
 
             'splash.Close()
 
@@ -4692,7 +4692,7 @@ Public Class ThisAddIn
             wordApp.ScreenUpdating = False
 
             ' Set the temporary author name to app
-            wordApp.UserName = AN
+            ' wordApp.UserName = AN
 
             ' Create temporary documents for original and new text
             tempOriginalDoc = wordApp.Documents.Add
@@ -4746,7 +4746,7 @@ Public Class ThisAddIn
             wordApp.ScreenUpdating = originalScreenUpdating
 
             ' Restore the original author name
-            wordApp.UserName = originalAuthor
+            'wordApp.UserName = originalAuthor
 
             ' Clean up temporary documents
             If tempOriginalDoc IsNot Nothing Then tempOriginalDoc.Close(SaveChanges:=False)
@@ -5729,7 +5729,7 @@ Public Class ThisAddIn
                 Dim originalAuthor As String = doc.Application.UserName
 
                 doc.TrackRevisions = True
-                doc.Application.UserName = AN
+                'doc.Application.UserName = AN
 
                 Dim SuccessHits As Integer = 0
 
@@ -5771,7 +5771,7 @@ Public Class ThisAddIn
                 ' Restore the original selection
                 selection.SetRange(originalStart, originalEnd)
                 doc.TrackRevisions = trackChangesEnabled
-                doc.Application.UserName = originalAuthor
+                'doc.Application.UserName = originalAuthor
 
             Else
                 ShowCustomMessageBox($"The LLM has found no hits for the context '{SearchContext}'{If(SearchAll, " (searched full document)", "")}.", "Context Search")

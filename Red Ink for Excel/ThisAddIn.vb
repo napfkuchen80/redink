@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 3.3.2025
+' 2.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -167,7 +167,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.030325 Gen2 Beta Test"
+    Public Const Version As String = "V.020425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2394,8 +2394,6 @@ Public Class ThisAddIn
                 ii += 1
                 Debug.WriteLine($"Processing: Cell='{cellAddress}', Value='{formulaOrValue}'")
 
-                If formulaOrValue.StartsWith("=") Then formulaOrValueLocale = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
-
                 Try
                     If activeSheet IsNot Nothing AndAlso activeSheet.Range(cellAddress) IsNot Nothing Then
                         Dim targetRange As Range
@@ -2430,6 +2428,7 @@ Public Class ThisAddIn
                                             Catch ex2 As Exception
                                                 If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
                                                     Try
+                                                        formulaOrValueLocale = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
                                                         targetRange.FormulaLocal = formulaOrValueLocale
                                                         undoStates.Add(state)
                                                     Catch ex3 As Exception
@@ -2459,11 +2458,12 @@ Public Class ThisAddIn
                                         targetRange.Value = formulaOrValue
                                     Else
                                         ' Remove unwanted apostrophes
-                                        cleanedValue = formulaOrValue.Trim("'")
-                                        targetRange.NumberFormat = "@" ' Ensure it's stored as text
+                                        cleanedValue = CStr(formulaOrValue).Trim("'"c)
+                                        targetRange.NumberFormat = "@"
                                         targetRange.Value = cleanedValue
                                     End If
                                     undoStates.Add(state)
+
                                 End If
                             Else
                                 Debug.WriteLine($"Invalid cell address: {cellAddress}")
