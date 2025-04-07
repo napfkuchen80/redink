@@ -45,6 +45,7 @@ Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
 Imports System.Net
+Imports System.Drawing.Imaging
 
 
 Namespace SharedLibrary
@@ -1185,9 +1186,14 @@ Namespace SharedLibrary
                                 Return ""
                             Else
 
-                                ImageExtractor.ExtractAndSaveImages(jsonObject)
+                                text = ""
 
-                                text = FindJsonProperty(jsonObject, ResponseKey)
+                                Dim ImageFile As String = ImageDecoder.DecodeAndSaveImage(jsonObject)
+                                If Not String.IsNullOrWhiteSpace(ImageFile) Then
+                                    text = vbCrLf & "Image saved to: " & ImageFile & vbCrLf
+                                End If
+
+                                text = text & FindJsonProperty(jsonObject, ResponseKey)
 
                                 text = text & ExtractCitations(jsonObject)
 
@@ -1219,8 +1225,6 @@ Namespace SharedLibrary
                 End If
             End Try
         End Function
-
-
 
 
         Public Shared Function ExtractCitations(ByRef jsonObj As JObject) As String
@@ -7974,152 +7978,164 @@ Namespace SharedLibrary
 
     End Class
 
-    Public Module ImageExtractor
+    Public Class ImageDecoder
 
-        ''' <summary>
-        ''' Extracts all images from the provided JObject and saves them to the user's desktop.
-        ''' Supports data URIs (base64 with header), HTTP URLs, and raw base64 strings.
-        ''' </summary>
-        ''' <param name="jObj">The JObject parsed from JSON returned by an LLM.</param>
-        Public Sub ExtractAndSaveImages(jObj As JObject)
-            ' List to store extracted images along with their file extensions.
-            Dim imageList As New List(Of (ImageData As Byte(), Extension As String))
-            ProcessToken(jObj, imageList)
+        Private Shared Function FindImageData(token As JToken, ByRef imageBytes As Byte(), ByRef mimeType As String) As Boolean
+            If token.Type = JTokenType.String Then
+                If TryGetImageData(token, imageBytes, mimeType) Then
+                    Return True
+                End If
+            End If
 
-            ' Determine the user's desktop path.
-            Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-            Dim counter As Integer = 1
-
-            ' Save each image with a sequential filename.
-            For Each imageData In imageList
-                Dim fileName As String = "LLM_Image_" & counter.ToString() & imageData.Extension
-                Dim filePath As String = Path.Combine(desktopPath, fileName)
-                File.WriteAllBytes(filePath, imageData.ImageData)
-                counter += 1
-            Next
-        End Sub
-
-        ''' <summary>
-        ''' Recursively processes a JToken (or JObject) to find image-containing keys and extract image data.
-        ''' </summary>
-        ''' <param name="token">The current JToken.</param>
-        ''' <param name="imageList">The list to which extracted images are added.</param>
-        Private Sub ProcessToken(token As JToken, ByRef imageList As List(Of (Byte(), String)))
-            If token.Type = JTokenType.Object Then
-                For Each prop As JProperty In token.Children(Of JProperty)()
-                    ' If the property name matches a known image key and its value is a string, process it.
-                    If IsImageKey(prop.Name) AndAlso prop.Value.Type = JTokenType.String Then
-                        Dim result = ProcessImageString(prop.Value.ToString())
-                        If result IsNot Nothing Then
-                            imageList.Add(result)
-                        End If
-                    Else
-                        ' Recursively process the property's value.
-                        ProcessToken(prop.Value, imageList)
+            If token.HasValues Then
+                For Each child In token.Children()
+                    If FindImageData(child, imageBytes, mimeType) Then
+                        Return True
                     End If
                 Next
-            ElseIf token.Type = JTokenType.Array Then
-                For Each item As JToken In token
-                    ProcessToken(item, imageList)
-                Next
             End If
-        End Sub
 
-        ''' <summary>
-        ''' Checks if a given key is one of the known keys that may contain image data.
-        ''' </summary>
-        ''' <param name="key">The JSON property name.</param>
-        ''' <returns>True if the key is recognized as possibly containing image data.</returns>
-        Private Function IsImageKey(key As String) As Boolean
-            Dim imageKeys As String() = {"image", "image_url", "img", "src", "data", "url", "image_base64", "base64", "content"}
-            Return imageKeys.Any(Function(k) String.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+            Return False
         End Function
 
-        ''' <summary>
-        ''' Processes a string that may contain image data in one of several formats.
-        ''' </summary>
-        ''' <param name="imageStr">The string to process.</param>
-        ''' <returns>A tuple with the image data (as a Byte array) and file extension, or Nothing if processing fails.</returns>
-        Private Function ProcessImageString(imageStr As String) As (Byte(), String)?
-            ' Check if the string is a data URI (base64 encoded image with header).
-            If imageStr.StartsWith("data:", StringComparison.OrdinalIgnoreCase) Then
-                ' Expected format: "data:image/png;base64,iVBORw0KGgoAAAANS..."
-                Dim headerEndIndex As Integer = imageStr.IndexOf(",")
-                If headerEndIndex > -1 Then
-                    Dim header As String = imageStr.Substring(0, headerEndIndex)
-                    Dim base64Data As String = imageStr.Substring(headerEndIndex + 1)
-                    Dim ext As String = GetExtensionFromHeader(header)
-                    Dim imageBytes As Byte() = Convert.FromBase64String(base64Data)
-                    Return (imageBytes, ext)
+        Private Shared Function TryGetImageData(token As JToken, ByRef imageBytes As Byte(), ByRef mimeType As String) As Boolean
+            Dim base64Str As String = token.ToString()
+            Try
+                Dim bytes As Byte() = Convert.FromBase64String(base64Str)
+                ' Validate that the byte array represents a valid image.
+                Using ms As New MemoryStream(bytes)
+                    Using img As Image = Image.FromStream(ms)
+                        ' Successfully loaded image
+                    End Using
+                End Using
+
+                imageBytes = bytes
+                ' Try to get the MIME type from a nearby property
+                mimeType = GetMimeTypeFromParent(token)
+                If String.IsNullOrEmpty(mimeType) Then
+                    mimeType = DetectMimeType(bytes)
                 End If
-            ElseIf imageStr.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
-                ' If the string is an HTTP URL, download the image.
-                Try
-                    Dim client As New WebClient()
-                    Dim imageBytes As Byte() = client.DownloadData(imageStr)
-                    Dim ext As String = GetExtensionFromUrl(imageStr)
-                    Return (imageBytes, ext)
-                Catch ex As System.Exception
-                    ' If download fails, return Nothing 
-                    Return Nothing
-                End Try
-            Else
-                ' Possibly a raw base64 string without a data URI header.
-                ' Use a heuristic: if the string is long and contains no spaces, assume it's base64.
-                If imageStr.Length > 100 AndAlso Not imageStr.Contains(" ") Then
-                    Try
-                        Dim imageBytes As Byte() = Convert.FromBase64String(imageStr)
-                        Return (imageBytes, ".png") ' Default extension when none can be determined.
-                    Catch ex As System.Exception
-                        Return Nothing
-                    End Try
+                Return True
+
+            Catch ex As Exception
+                ' Not a valid base64 image.
+                Debug.WriteLine("Decoding error: system.exception: " & ex.Message)
+            End Try
+
+            Return False
+        End Function
+
+        Private Shared Function GetMimeTypeFromParent(token As JToken) As String
+            If token.Parent IsNot Nothing AndAlso TypeOf token.Parent Is JProperty Then
+                Dim parentProp As JProperty = CType(token.Parent, JProperty)
+                Dim parentObj As JObject = TryCast(parentProp.Parent, JObject)
+                If parentObj IsNot Nothing Then
+                    For Each prop As JProperty In parentObj.Properties()
+                        If String.Equals(prop.Name, "mime_type", StringComparison.OrdinalIgnoreCase) Then
+                            Return prop.Value.ToString()
+                        End If
+                    Next
                 End If
             End If
-            Return Nothing
+            Return String.Empty
         End Function
 
-        ''' <summary>
-        ''' Determines the file extension based on the data URI header.
-        ''' </summary>
-        ''' <param name="header">The header portion of the data URI.</param>
-        ''' <returns>The file extension (including the leading dot).</returns>
-        Private Function GetExtensionFromHeader(header As String) As String
-            ' Example header: "data:image/jpeg;base64"
-            Dim parts() As String = header.Split(";")
-            If parts.Length > 0 AndAlso parts(0).StartsWith("data:image", StringComparison.OrdinalIgnoreCase) Then
-                Dim mimeType As String = parts(0).Replace("data:", "").Trim()
-                Select Case mimeType.ToLower()
-                    Case "image/jpeg", "image/jpg"
-                        Return ".jpg"
-                    Case "image/png"
-                        Return ".png"
-                    Case "image/gif"
-                        Return ".gif"
-                    Case "image/bmp"
-                        Return ".bmp"
-                    Case "image/tiff"
-                        Return ".tiff"
-                    Case Else
-                        Return ".png"
-                End Select
+        Private Shared Function DetectMimeType(bytes As Byte()) As String
+            If bytes Is Nothing OrElse bytes.Length < 4 Then Return String.Empty
+
+            ' Check for PNG (89 50 4E 47 0D 0A 1A 0A)
+            If bytes.Length >= 8 AndAlso bytes(0) = &H89 AndAlso bytes(1) = &H50 AndAlso bytes(2) = &H4E AndAlso bytes(3) = &H47 Then
+                Return "image/png"
             End If
-            Return ".png"
+
+            ' Check for JPEG (FF D8)
+            If bytes(0) = &HFF AndAlso bytes(1) = &HD8 Then
+                Return "image/jpeg"
+            End If
+
+            ' Check for GIF (GIF87a or GIF89a)
+            If bytes.Length >= 6 Then
+                Dim header As String = System.Text.Encoding.ASCII.GetString(bytes, 0, 6)
+                If header = "GIF87a" OrElse header = "GIF89a" Then
+                    Return "image/gif"
+                End If
+            End If
+
+            Return String.Empty
         End Function
 
-        ''' <summary>
-        ''' Extracts the file extension from a URL.
-        ''' </summary>
-        ''' <param name="url">The URL string.</param>
-        ''' <returns>The file extension (including the leading dot), or ".png" if none can be determined.</returns>
-        Private Function GetExtensionFromUrl(url As String) As String
-            Dim ext As String = Path.GetExtension(url)
+        Private Shared Function GetExtensionFromMimeType(mimeType As String) As String
+            Select Case mimeType.ToLower()
+                Case "image/jpeg", "jpeg"
+                    Return ".jpg"
+                Case "image/png", "png"
+                    Return ".png"
+                Case "image/gif", "gif"
+                    Return ".gif"
+                Case Else
+                    Return String.Empty
+            End Select
+        End Function
+
+
+        Public Shared Function DecodeAndSaveImage(jsonData As JObject) As String
+            Dim imageBytes As Byte() = Nothing
+            Dim mimeType As String = String.Empty
+
+            ' Recursively search for a valid image in the JSON data.
+            If Not FindImageData(jsonData, imageBytes, mimeType) Then
+                Return ""
+            End If
+
+            Dim ext As String = GetExtensionFromMimeType(mimeType)
             If String.IsNullOrEmpty(ext) Then
-                Return ".png"
+                SharedMethods.ShowCustomMessageBox("The LLM returned an image or other object to your response, but the MIME type (i.e. the format) is not supported: " & mimeType)
+                Return ""
             End If
-            Return ext
+
+            ' Determine the desktop path and generate a unique filename.
+            Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            Dim fileNumber As Integer = 1
+            Dim saveFilePath As String = String.Empty
+
+            Do
+                Dim fileName As String = "AI_Image_" & fileNumber.ToString("D3") & ext
+                saveFilePath = Path.Combine(desktopPath, fileName)
+                If Not File.Exists(saveFilePath) Then
+                    Exit Do
+                End If
+                fileNumber += 1
+            Loop
+
+            ' Save the image to the file.
+            Try
+                Using ms As New MemoryStream(imageBytes)
+                    Using img As Image = Image.FromStream(ms)
+                        Select Case mimeType.ToLower()
+                            Case "image/jpeg", "jpeg"
+                                img.Save(saveFilePath, ImageFormat.Jpeg)
+                            Case "image/png", "png"
+                                img.Save(saveFilePath, ImageFormat.Png)
+                            Case "image/gif", "gif"
+                                img.Save(saveFilePath, ImageFormat.Gif)
+                            Case Else
+                                SharedMethods.ShowCustomMessageBox("The LLM returned an image or other object to your response, but the MIME type (i.e. the format) is not supported: " & mimeType)
+                                Return ""
+                        End Select
+                    End Using
+                End Using
+
+                Debug.WriteLine("Image saved to: " & saveFilePath)
+                Return saveFilePath
+            Catch ex As Exception
+                Debug.WriteLine("Error saving image: system.exception: " & ex.Message)
+                Return ""
+            End Try
         End Function
 
-    End Module
+    End Class
+
+
 
 
     Public Class ModelConfig
