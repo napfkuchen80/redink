@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.2.2025
+' 7.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -94,7 +94,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.220225 Gen2 Beta Test"
+    Public Const Version As String = "V.070425 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1267,6 +1267,16 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_AlternateModelPath As String
+        Get
+            Return _context.INI_AlternateModelPath
+        End Get
+        Set(value As String)
+            _context.INI_AlternateModelPath = value
+        End Set
+    End Property
+
+
     Public Shared Property INI_PromptLibPath_Transcript As String
         Get
             Return _context.INI_PromptLibPath_Transcript
@@ -1912,7 +1922,7 @@ Public Class ThisAddIn
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
             Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use the secondary model ({INI_Model_2})", "")
-            Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-v for your last prompt")
+            Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
 
             Dim AddOnInstruct As String = "; add " & SecondAPIInstruct
 
@@ -1955,17 +1965,17 @@ Public Class ThisAddIn
 
             ' Prompt for the text to process
 
-            SLib.StoreClipboard()
+            'SLib.StoreClipboard()
 
-            If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
+            'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
             If Not NoText Then
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {InplaceInstruct}, {ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False)
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {InplaceInstruct}, {ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
             Else
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False)
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
             End If
 
-            SLib.RestoreClipboard()
+            'SLib.RestoreClipboard()
 
             If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
 

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 2.4.2025
+' 5.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -29,6 +29,7 @@ Imports System.Text.RegularExpressions
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports System.Runtime.InteropServices
 Imports Microsoft.Office.Interop.Word
+Imports Newtonsoft.Json.Linq
 
 Public Class frmAIChat
 
@@ -193,7 +194,8 @@ Public Class frmAIChat
         txtChatHistory.Top = lblInstructions.Bottom + margin
         txtChatHistory.Left = margin
         txtChatHistory.Width = Me.ClientSize.Width - 2 * margin
-        txtChatHistory.Height = Me.ClientSize.Height - txtChatHistory.Top - txtUserInput.Height - pnlButtons.Height - 4 * margin
+        txtChatHistory.Height = Me.ClientSize.Height - txtChatHistory.Top - txtUserInput.Height - pnlCheckboxes.Height - pnlButtons.Height - (3 * margin)
+
 
         ' Resize user input textbox
         txtUserInput.Top = txtChatHistory.Bottom + margin
@@ -295,12 +297,8 @@ Public Class frmAIChat
 
             ' Call the LLM function asynchronously
             Dim aiResponse As String = Await SharedMethods.LLM(_context, SystemPrompt, $"Welcome the user in {UserLanguage} by (1) referring to the time of day based on the current time in {UserLanguage} , such as in 'good morning', and (2) asking in {UserLanguage} what you can do, but do not say your name.", "", "", 0, _useSecondApi, True)
-            aiResponse = aiResponse.TrimEnd(Environment.NewLine)
 
-            ' Once the txtbox has been converted to a webbrowser control we can use this
-            ' Dim aiResponseHtml = ConvertMarkdownToHtml(aiResponse) 
-            ' Dim formattedResponse = ConvertHtmlToPlainText(aiResponseHtml)
-            ' https://chatgpt.com/c/677abca6-f914-800e-9c5b-12e2ee5f3291
+            aiResponse = aiResponse.Replace(vbLf, "").Replace(vbCr, "").Replace(vbCrLf, "") & vbCrLf
 
             aiResponse = aiResponse.Replace("**", "").Replace("_", "").Replace("`", "")
 
@@ -656,7 +654,7 @@ Public Class frmAIChat
             output = regex.Replace(input, "")
 
             ' Collapse multiple consecutive line breaks into a single line break
-            Dim whitespacePattern As String = "[\r\n]{2,}"
+            Dim whitespacePattern As String = "[\r\n]{3,}"
             Dim collapseRegex As New Regex(whitespacePattern)
             output = collapseRegex.Replace(output, Environment.NewLine)
 
@@ -1224,6 +1222,8 @@ Public Class frmAIChat
 
             ' Collapse the selection to the insertion point (start of selection)
             selection.Collapse(Word.WdCollapseDirection.wdCollapseStart)
+
+            newText = newText.Replace("\r\n", vbCrLf).Replace("\n", vbCrLf).Replace("\r", vbCrLf)
 
             ' Insert the new text at the current cursor position
             selection.Text = newText

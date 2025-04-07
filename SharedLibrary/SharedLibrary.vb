@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.4.2025
+' 7.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -44,6 +44,7 @@ Imports Microsoft.Office.Interop
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
+Imports System.Net
 
 
 Namespace SharedLibrary
@@ -190,6 +191,7 @@ Namespace SharedLibrary
             Property INI_ShortcutsWordExcel As String
             Property INI_PromptLib As Boolean
             Property INI_PromptLibPath As String
+            Property INI_AlternateModelPath As String
             Property INI_PromptLibPath_Transcript As String
             Property PromptLibrary() As List(Of String)
             Property PromptTitles() As List(Of String)
@@ -340,6 +342,7 @@ Namespace SharedLibrary
         Public Property INI_ShortcutsWordExcel As String Implements ISharedContext.INI_ShortcutsWordExcel
         Public Property INI_PromptLib As Boolean Implements ISharedContext.INI_PromptLib
         Public Property INI_PromptLibPath As String Implements ISharedContext.INI_PromptLibPath
+        Public Property INI_AlternateModelPath As String Implements ISharedContext.INI_AlternateModelPath
         Public Property INI_PromptLibPath_Transcript As String Implements ISharedContext.INI_PromptLibPath_Transcript
         Public Property PromptLibrary() As List(Of String) Implements ISharedContext.PromptLibrary
         Public Property PromptTitles() As List(Of String) Implements ISharedContext.PromptTitles
@@ -415,6 +418,7 @@ Namespace SharedLibrary
         Public Const AN2 As String = "redink" ' 
         Public Const AN3 As String = "Red Ink" ' Name used for Visual Studio Project 
         Public Const AN4 As String = "https://vischer.com/redink"  ' Name of sub-directory on Website of vischer.com/...  
+        Public Const AN5 As String = "Red%20Ink"  ' Name of sub-directory on Website of vischer.com/...  
         Public Const MaxUseDate As Date = #9/30/2025#
 
         Private Const ISearch_MaxTries = 30          ' maximum number of search hits to be tried
@@ -468,6 +472,12 @@ Namespace SharedLibrary
         Public Shared HelperPaths As New Dictionary(Of String, String) From {
             {"Word", "%AppData%\Microsoft\Word\STARTUP\" & AN2 & "_helper.dotm"},
             {"Excel", "%AppData%\Microsoft\Excel\XLSTART\" & AN2 & "_helper.xlam"}
+        }
+
+        Public Shared UpdatePaths As New Dictionary(Of String, String) From {
+            {"Word", "microsoft-edge:https://apps.vischer.com/redink/word/" & AN5& & "%20for%20Word.vsto"},
+            {"Excel", "microsoft-edge:https://apps.vischer.com/redink/excel/" & AN5& & "%20for%20Excel.vsto"},
+            {"Outlook", "microsoft-edge:https://apps.vischer.com/redink/outlook/" & AN5& & "%20for%20Outlook.vsto"}
         }
 
         Public Shared ExcelHelper As String = AN2 & "_helper.xlam"
@@ -549,23 +559,23 @@ Namespace SharedLibrary
                 ' Create the Label with updated font
                 Label = New System.Windows.Forms.Label()
                 Label.Text = customText
-                label.Font = standardFont
-                label.AutoSize = True
-                label.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+                Label.Font = standardFont
+                Label.AutoSize = True
+                Label.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
 
                 ' Dynamically calculate the label width
-                Dim labelSize As Size = TextRenderer.MeasureText(label.Text, standardFont)
-                label.SetBounds(pictureBox.Right + 10, 15, labelSize.Width, labelSize.Height)
+                Dim labelSize As Size = TextRenderer.MeasureText(Label.Text, standardFont)
+                Label.SetBounds(pictureBox.Right + 10, 15, labelSize.Width, labelSize.Height)
 
                 ' Adjust the form size dynamically based on the provided dimensions
-                Dim contentWidth As Integer = pictureBox.Width + label.Width + 40 ' Add padding for spacing
-                Dim contentHeight As Integer = Math.Max(pictureBox.Height + 20, label.Height + 30) ' Align to bottom of logo
+                Dim contentWidth As Integer = pictureBox.Width + Label.Width + 40 ' Add padding for spacing
+                Dim contentHeight As Integer = Math.Max(pictureBox.Height + 20, Label.Height + 30) ' Align to bottom of logo
                 Me.ClientSize = New System.Drawing.Size(Math.Max(formWidth, contentWidth), contentHeight)
 
 
                 ' Add the controls to the form
                 Me.Controls.Add(pictureBox)
-                Me.Controls.Add(label)
+                Me.Controls.Add(Label)
             End Sub
 
             Public Sub UpdateMessage(newMessage As String)
@@ -1115,22 +1125,6 @@ Namespace SharedLibrary
 
                         ' Send the request
                         Try
-                            'Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-                            'Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
-
-                            ' Check response status
-                            'If Not response.IsSuccessStatusCode Then
-                            'Dim errorContent As String = Await response.Content.ReadAsStringAsync()
-                            'ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: {errorContent}")
-                            'Return ""
-                            'End If
-
-                            ' Read response
-                            'Dim responseText As String = Await response.Content.ReadAsStringAsync()
-
-                            'If context.INI_APIDebug Then
-                            'Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
-                            'End If
 
                             Dim maxRetries As Integer = 3
                             Dim delayIntervals As Integer() = {5000, 10000, 30000} ' delays in milliseconds
@@ -1190,6 +1184,9 @@ Namespace SharedLibrary
                                 ShowCustomMessageBox($"The LLM API generated the following error message: {Environment.NewLine}{text}{Environment.NewLine}{responseText}")
                                 Return ""
                             Else
+
+                                ImageExtractor.ExtractAndSaveImages(jsonObject)
+
                                 text = FindJsonProperty(jsonObject, ResponseKey)
 
                                 text = text & ExtractCitations(jsonObject)
@@ -1205,7 +1202,9 @@ Namespace SharedLibrary
                         Catch ex As System.Net.Http.HttpRequestException
                             ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
                         Catch ex As TaskCanceledException
-                            ShowCustomMessageBox($"The request timed out. Please try again or increase the timeout setting.")
+                            ShowCustomMessageBox($"The request to the LLM timed out. Please try again or increase the timeout setting.")
+                        Catch ex As System.Exception
+                            ShowCustomMessageBox($"The response from the LLM resulted in an error: {ex.Message}")
                         End Try
                     End Using ' Dispose HttpClient
                 End Using ' Dispose HttpClientHandler
@@ -1223,310 +1222,311 @@ Namespace SharedLibrary
 
 
 
-        Public Shared Function ExtractCitations(ByRef jsonObj As JObject) As String
-                Try
-                    Dim OriginalJsonObj As JObject = jsonObj.DeepClone()
-                    Dim citationList As New List(Of String)
-                    Dim sourceUris As New HashSet(Of String)
 
-                    ' 1. Attempt extraction from candidates path (if present)
-                    Dim candidateCitations As JToken = jsonObj.SelectToken("candidates[0].content.parts[0].citations")
-                    If candidateCitations IsNot Nothing Then
-                        If candidateCitations.Type = JTokenType.Array Then
-                            For Each citation As JObject In candidateCitations
-                                ProcessCitationObject(citation, citationList, sourceUris)
-                            Next
-                        ElseIf candidateCitations.Type = JTokenType.Object Then
-                            ProcessCitationObject(CType(candidateCitations, JObject), citationList, sourceUris)
+        Public Shared Function ExtractCitations(ByRef jsonObj As JObject) As String
+            Try
+                Dim OriginalJsonObj As JObject = jsonObj.DeepClone()
+                Dim citationList As New List(Of String)
+                Dim sourceUris As New HashSet(Of String)
+
+                ' 1. Attempt extraction from candidates path (if present)
+                Dim candidateCitations As JToken = jsonObj.SelectToken("candidates[0].content.parts[0].citations")
+                If candidateCitations IsNot Nothing Then
+                    If candidateCitations.Type = JTokenType.Array Then
+                        For Each citation As JObject In candidateCitations
+                            ProcessCitationObject(citation, citationList, sourceUris)
+                        Next
+                    ElseIf candidateCitations.Type = JTokenType.Object Then
+                        ProcessCitationObject(CType(candidateCitations, JObject), citationList, sourceUris)
+                    End If
+                End If
+
+                ' 2. Check for top-level citations (outside of candidates)
+                Dim topLevelCitations As JToken = jsonObj.SelectToken("citations")
+                If topLevelCitations IsNot Nothing Then
+                    If topLevelCitations.Type = JTokenType.Array Then
+                        For Each citation As JToken In topLevelCitations
+                            If citation.Type = JTokenType.String Then
+                                citationList.Add(citation.ToString())
+                            ElseIf citation.Type = JTokenType.Object Then
+                                ProcessCitationObject(CType(citation, JObject), citationList, sourceUris)
+                            End If
+                        Next
+                    ElseIf topLevelCitations.Type = JTokenType.Object Then
+                        ' Handle Format 2 (fullNote/shortNote) in a top-level object
+                        Dim fullNote As String = topLevelCitations("fullNote")?.ToString()
+                        If Not String.IsNullOrEmpty(fullNote) Then
+                            citationList.Add(fullNote)
+                        End If
+                        Dim shortNote As String = topLevelCitations("shortNote")?.ToString()
+                        If Not String.IsNullOrEmpty(shortNote) Then
+                            citationList.Add(shortNote)
+                        End If
+                        ' In case no fullNote exists, fallback to checking for a URL
+                        Dim url As String = topLevelCitations("url")?.ToString()
+                        If Not String.IsNullOrEmpty(url) Then
+                            citationList.Add(url)
                         End If
                     End If
+                End If
 
-                    ' 2. Check for top-level citations (outside of candidates)
-                    Dim topLevelCitations As JToken = jsonObj.SelectToken("citations")
-                    If topLevelCitations IsNot Nothing Then
-                        If topLevelCitations.Type = JTokenType.Array Then
-                            For Each citation As JToken In topLevelCitations
-                                If citation.Type = JTokenType.String Then
-                                    citationList.Add(citation.ToString())
-                                ElseIf citation.Type = JTokenType.Object Then
-                                    ProcessCitationObject(CType(citation, JObject), citationList, sourceUris)
+                ' 3. Check citation metadata sources
+                Dim metadataSources As JToken = jsonObj.SelectToken("citationMetadata.citationSources")
+                If metadataSources IsNot Nothing AndAlso metadataSources.Type = JTokenType.Array Then
+                    For Each source As JObject In metadataSources
+                        ProcessMetadataSource(source, citationList, sourceUris)
+                    Next
+                End If
+
+                ' 4. Check legacy formats
+                ExtractLegacyCitations(jsonObj, citationList, sourceUris)
+
+                Debug.WriteLine("Total citations count: " & citationList.Count.ToString())
+
+                ' 5. Build output: if any citation was found, format them;
+                ' otherwise, fall back to the simple citations extractor.
+                If citationList.Count > 0 Then
+                    Debug.WriteLine("Citations: " & String.Join(", ", citationList))
+                    Return FormatCitations(citationList)
+                Else
+                    Dim result As String = ExtractSimpleCitations(OriginalJsonObj)
+                    Debug.WriteLine("Fallback Result = " & result)
+                    Return result
+                End If
+
+            Catch ex As Exception
+                Debug.WriteLine("Error parsing citations: " & ex.Message)
+            End Try
+
+            Return String.Empty
+        End Function
+
+        Private Shared Sub ProcessCitationObject(citation As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+            Try
+                ' Format 1: Check for a "source" property (MLA/Chicago style)
+                Dim source = citation.SelectToken("source")
+                If source IsNot Nothing Then
+                    AddSource(source, citationList, sourceUris)
+                    ' Optionally include an inline citation if available
+                    Dim inlineCitation = citation("inlineCitation")?.ToString()
+                    If Not String.IsNullOrEmpty(inlineCitation) Then
+                        citationList.Add("Inline: " & inlineCitation)
+                    End If
+                    Return
+                End If
+
+                ' Format 2: Check for a "fullNote" property (full note/short note format)
+                Dim fullNote As String = citation("fullNote")?.ToString()
+                If Not String.IsNullOrEmpty(fullNote) Then
+                    citationList.Add(fullNote)
+                    Return
+                End If
+
+                ' Format 3: IEEE style with "referenceEntry"
+                Dim refEntry As String = citation("referenceEntry")?.ToString()
+                If Not String.IsNullOrEmpty(refEntry) Then
+                    Dim ieeeUri As String = ExtractIeeeUri(refEntry)
+                    If Not String.IsNullOrEmpty(ieeeUri) AndAlso sourceUris.Add(ieeeUri) Then
+                        citationList.Add($"{refEntry} | Source: {ieeeUri}")
+                    Else
+                        citationList.Add(refEntry)
+                    End If
+                    Return
+                End If
+
+                ' Format 4: Harvard style with "referenceList.entry" and optionally "textualCitation"
+                Dim refListToken As JToken = citation.SelectToken("referenceList.entry")
+                If refListToken IsNot Nothing Then
+                    Dim refList As String = refListToken.ToString()
+                    Dim harvardUri As String = ExtractHarvardUri(refList)
+                    Dim textualCitation As String = citation("textualCitation")?.ToString()
+                    Dim formattedCitation As String = (If(Not String.IsNullOrEmpty(textualCitation), textualCitation, "") & " | " & refList).Trim(" "c, "|"c)
+                    citationList.Add(formattedCitation)
+                    Return
+                End If
+
+                ' Fallback: If the citation object has a "url" property directly, extract it.
+                Dim url As String = citation("url")?.ToString()
+                If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
+                    citationList.Add(url)
+                End If
+
+            Catch ex As Exception
+                Debug.WriteLine("Error processing citation object: " & ex.Message)
+            End Try
+        End Sub
+
+        Private Shared Sub ProcessMetadataSource(source As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+            Try
+                Dim uri As String = source("uri")?.ToString()
+                If Not String.IsNullOrEmpty(uri) AndAlso sourceUris.Add(uri) Then
+                    Dim title As String = source("title")?.ToString()
+                    If String.IsNullOrWhiteSpace(title) Then title = "No title"
+                    Dim authors As String = String.Join(", ", source.SelectTokens("authors[*].given").Select(Function(t) t.ToString()))
+                    Dim doi As String = source("doi")?.ToString()
+                    citationList.Add($"Source: {title} | Authors: {If(authors, "Unknown")} | DOI: {If(doi, "N/A")} | URL: {uri}")
+                End If
+            Catch ex As Exception
+                Debug.WriteLine("Error processing metadata source: " & ex.Message)
+            End Try
+        End Sub
+
+        Private Shared Sub AddSource(source As JToken, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+            Try
+                Dim uri As String = source("uri")?.ToString()
+                If String.IsNullOrEmpty(uri) OrElse sourceUris.Contains(uri) Then Return
+
+                Dim sb As New StringBuilder()
+                sb.Append("Source: ")
+
+                ' Build title with container if available
+                Dim title As String = source("title")?.ToString()
+                Dim container As String = source("containerTitle")?.ToString()
+                If Not String.IsNullOrEmpty(container) Then
+                    sb.Append($"{title}. In: {container}")
+                Else
+                    sb.Append(title)
+                End If
+
+                ' Add authors
+                Dim authors = source.SelectTokens("authors[*]")
+                If authors IsNot Nothing AndAlso authors.Any() Then
+                    sb.Append(" | Authors: ")
+                    For Each author In authors
+                        Dim given As String = author("given")?.ToString()
+                        Dim family As String = author("family")?.ToString()
+                        If Not String.IsNullOrEmpty(family) Then
+                            sb.Append($"{family}, {given}; ")
+                        End If
+                    Next
+                    If sb.Length > 2 Then
+                        sb.Length -= 2 ' Remove last semicolon and space
+                    End If
+                End If
+
+                ' Add publication info
+                Dim pubDate As String = source("publicationDate")?.ToString()
+                If Not String.IsNullOrEmpty(pubDate) Then
+                    sb.Append($" | Published: {pubDate}")
+                End If
+
+                ' Add DOI if available
+                Dim doi As String = source("doi")?.ToString()
+                If Not String.IsNullOrEmpty(doi) Then
+                    sb.Append($" | DOI: {doi}")
+                End If
+                sb.Append($" | URL: {uri}")
+
+                citationList.Add(sb.ToString())
+                sourceUris.Add(uri)
+            Catch ex As Exception
+                Debug.WriteLine("Error adding source: " & ex.Message)
+            End Try
+        End Sub
+
+        Private Shared Sub ExtractLegacyCitations(jsonObj As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
+            Try
+                ' Old format v0.9 compatibility: look for any "sources" with a URL.
+                Dim legacyCitations = jsonObj.SelectTokens("$..sources[?(@.url)]")
+                For Each legacySource In legacyCitations
+                    Dim url As String = legacySource("url")?.ToString()
+                    If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
+                        citationList.Add($"Legacy source: {url}")
+                    End If
+                Next
+            Catch ex As Exception
+                Debug.WriteLine("Error processing legacy citations: " & ex.Message)
+            End Try
+        End Sub
+
+        Private Shared Function ExtractIeeeUri(refEntry As String) As String
+            Try
+                Dim doiMatch = Regex.Match(refEntry, "doi:\s*(\S+)")
+                If doiMatch.Success Then
+                    ' Trim any trailing punctuation
+                    Return $"https://doi.org/{doiMatch.Groups(1).Value.TrimEnd("."c)}"
+                End If
+            Catch ex As Exception
+                Debug.WriteLine("DOI extraction error: " & ex.Message)
+            End Try
+            Return String.Empty
+        End Function
+
+        Private Shared Function ExtractHarvardUri(refEntry As String) As String
+            Try
+                Dim uriMatch = Regex.Match(refEntry, "Available at:\s*(\S+)\s*\(")
+                If uriMatch.Success Then
+                    Return uriMatch.Groups(1).Value
+                End If
+            Catch ex As Exception
+                Debug.WriteLine("Harvard URI extraction error: " & ex.Message)
+            End Try
+            Return String.Empty
+        End Function
+
+        Private Shared Function FormatCitations(citationList As List(Of String)) As String
+            Dim sb As New StringBuilder()
+            sb.AppendLine(vbCrLf & "References:")
+            For i As Integer = 0 To citationList.Count - 1
+                sb.AppendLine($"[{i + 1}] {citationList(i)}")
+            Next
+            Return sb.ToString()
+        End Function
+
+        Private Shared Function ExtractSimpleCitations(ByRef jsonObj As JObject) As String
+            Try
+                Dim citations As JToken = jsonObj.SelectToken("citations")
+                Dim citationList As New List(Of String)
+
+                If citations IsNot Nothing Then
+                    If citations.Type = JTokenType.Array Then
+                        For Each citation As JToken In citations
+                            If citation.Type = JTokenType.String Then
+                                citationList.Add(citation.ToString())
+                            ElseIf citation.Type = JTokenType.Object Then
+                                ' Try to extract URL or fullNote from the object
+                                Dim url As JToken = citation.SelectToken("url")
+                                If url IsNot Nothing Then
+                                    citationList.Add(url.ToString())
+                                Else
+                                    Dim fullNote As String = citation("fullNote")?.ToString()
+                                    If Not String.IsNullOrEmpty(fullNote) Then
+                                        citationList.Add(fullNote)
+                                    End If
                                 End If
-                            Next
-                        ElseIf topLevelCitations.Type = JTokenType.Object Then
-                            ' Handle Format 2 (fullNote/shortNote) in a top-level object
-                            Dim fullNote As String = topLevelCitations("fullNote")?.ToString()
-                            If Not String.IsNullOrEmpty(fullNote) Then
-                                citationList.Add(fullNote)
                             End If
-                            Dim shortNote As String = topLevelCitations("shortNote")?.ToString()
-                            If Not String.IsNullOrEmpty(shortNote) Then
-                                citationList.Add(shortNote)
-                            End If
-                            ' In case no fullNote exists, fallback to checking for a URL
-                            Dim url As String = topLevelCitations("url")?.ToString()
+                        Next
+                    ElseIf citations.Type = JTokenType.Object Then
+                        Dim fullNote As String = citations("fullNote")?.ToString()
+                        If Not String.IsNullOrEmpty(fullNote) Then
+                            citationList.Add(fullNote)
+                        Else
+                            Dim url As String = citations("url")?.ToString()
                             If Not String.IsNullOrEmpty(url) Then
                                 citationList.Add(url)
                             End If
                         End If
                     End If
+                End If
 
-                    ' 3. Check citation metadata sources
-                    Dim metadataSources As JToken = jsonObj.SelectToken("citationMetadata.citationSources")
-                    If metadataSources IsNot Nothing AndAlso metadataSources.Type = JTokenType.Array Then
-                        For Each source As JObject In metadataSources
-                            ProcessMetadataSource(source, citationList, sourceUris)
-                        Next
-                    End If
-
-                    ' 4. Check legacy formats
-                    ExtractLegacyCitations(jsonObj, citationList, sourceUris)
-
-                    Debug.WriteLine("Total citations count: " & citationList.Count.ToString())
-
-                    ' 5. Build output: if any citation was found, format them;
-                    ' otherwise, fall back to the simple citations extractor.
-                    If citationList.Count > 0 Then
-                        Debug.WriteLine("Citations: " & String.Join(", ", citationList))
-                        Return FormatCitations(citationList)
-                    Else
-                        Dim result As String = ExtractSimpleCitations(OriginalJsonObj)
-                        Debug.WriteLine("Fallback Result = " & result)
-                        Return result
-                    End If
-
-                Catch ex As Exception
-                Debug.WriteLine("Error parsing citations: " & ex.Message)
-            End Try
-
-                Return String.Empty
-            End Function
-
-            Private Shared Sub ProcessCitationObject(citation As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
-                Try
-                    ' Format 1: Check for a "source" property (MLA/Chicago style)
-                    Dim source = citation.SelectToken("source")
-                    If source IsNot Nothing Then
-                        AddSource(source, citationList, sourceUris)
-                        ' Optionally include an inline citation if available
-                        Dim inlineCitation = citation("inlineCitation")?.ToString()
-                        If Not String.IsNullOrEmpty(inlineCitation) Then
-                            citationList.Add("Inline: " & inlineCitation)
-                        End If
-                        Return
-                    End If
-
-                    ' Format 2: Check for a "fullNote" property (full note/short note format)
-                    Dim fullNote As String = citation("fullNote")?.ToString()
-                    If Not String.IsNullOrEmpty(fullNote) Then
-                        citationList.Add(fullNote)
-                        Return
-                    End If
-
-                    ' Format 3: IEEE style with "referenceEntry"
-                    Dim refEntry As String = citation("referenceEntry")?.ToString()
-                    If Not String.IsNullOrEmpty(refEntry) Then
-                        Dim ieeeUri As String = ExtractIeeeUri(refEntry)
-                        If Not String.IsNullOrEmpty(ieeeUri) AndAlso sourceUris.Add(ieeeUri) Then
-                            citationList.Add($"{refEntry} | Source: {ieeeUri}")
-                        Else
-                            citationList.Add(refEntry)
-                        End If
-                        Return
-                    End If
-
-                    ' Format 4: Harvard style with "referenceList.entry" and optionally "textualCitation"
-                    Dim refListToken As JToken = citation.SelectToken("referenceList.entry")
-                    If refListToken IsNot Nothing Then
-                        Dim refList As String = refListToken.ToString()
-                        Dim harvardUri As String = ExtractHarvardUri(refList)
-                        Dim textualCitation As String = citation("textualCitation")?.ToString()
-                        Dim formattedCitation As String = (If(Not String.IsNullOrEmpty(textualCitation), textualCitation, "") & " | " & refList).Trim(" "c, "|"c)
-                        citationList.Add(formattedCitation)
-                        Return
-                    End If
-
-                    ' Fallback: If the citation object has a "url" property directly, extract it.
-                    Dim url As String = citation("url")?.ToString()
-                    If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
-                        citationList.Add(url)
-                    End If
-
-                Catch ex As Exception
-                Debug.WriteLine("Error processing citation object: " & ex.Message)
-            End Try
-            End Sub
-
-            Private Shared Sub ProcessMetadataSource(source As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
-                Try
-                    Dim uri As String = source("uri")?.ToString()
-                    If Not String.IsNullOrEmpty(uri) AndAlso sourceUris.Add(uri) Then
-                        Dim title As String = source("title")?.ToString()
-                        If String.IsNullOrWhiteSpace(title) Then title = "No title"
-                        Dim authors As String = String.Join(", ", source.SelectTokens("authors[*].given").Select(Function(t) t.ToString()))
-                        Dim doi As String = source("doi")?.ToString()
-                        citationList.Add($"Source: {title} | Authors: {If(authors, "Unknown")} | DOI: {If(doi, "N/A")} | URL: {uri}")
-                    End If
-                Catch ex As Exception
-                Debug.WriteLine("Error processing metadata source: " & ex.Message)
-            End Try
-            End Sub
-
-            Private Shared Sub AddSource(source As JToken, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
-                Try
-                    Dim uri As String = source("uri")?.ToString()
-                    If String.IsNullOrEmpty(uri) OrElse sourceUris.Contains(uri) Then Return
-
-                    Dim sb As New StringBuilder()
-                    sb.Append("Source: ")
-
-                    ' Build title with container if available
-                    Dim title As String = source("title")?.ToString()
-                    Dim container As String = source("containerTitle")?.ToString()
-                    If Not String.IsNullOrEmpty(container) Then
-                        sb.Append($"{title}. In: {container}")
-                    Else
-                        sb.Append(title)
-                    End If
-
-                    ' Add authors
-                    Dim authors = source.SelectTokens("authors[*]")
-                    If authors IsNot Nothing AndAlso authors.Any() Then
-                        sb.Append(" | Authors: ")
-                        For Each author In authors
-                            Dim given As String = author("given")?.ToString()
-                            Dim family As String = author("family")?.ToString()
-                            If Not String.IsNullOrEmpty(family) Then
-                                sb.Append($"{family}, {given}; ")
-                            End If
-                        Next
-                        If sb.Length > 2 Then
-                            sb.Length -= 2 ' Remove last semicolon and space
-                        End If
-                    End If
-
-                    ' Add publication info
-                    Dim pubDate As String = source("publicationDate")?.ToString()
-                    If Not String.IsNullOrEmpty(pubDate) Then
-                        sb.Append($" | Published: {pubDate}")
-                    End If
-
-                    ' Add DOI if available
-                    Dim doi As String = source("doi")?.ToString()
-                    If Not String.IsNullOrEmpty(doi) Then
-                        sb.Append($" | DOI: {doi}")
-                    End If
-                    sb.Append($" | URL: {uri}")
-
-                    citationList.Add(sb.ToString())
-                    sourceUris.Add(uri)
-                Catch ex As Exception
-                Debug.WriteLine("Error adding source: " & ex.Message)
-            End Try
-            End Sub
-
-            Private Shared Sub ExtractLegacyCitations(jsonObj As JObject, ByRef citationList As List(Of String), ByRef sourceUris As HashSet(Of String))
-                Try
-                    ' Old format v0.9 compatibility: look for any "sources" with a URL.
-                    Dim legacyCitations = jsonObj.SelectTokens("$..sources[?(@.url)]")
-                    For Each legacySource In legacyCitations
-                        Dim url As String = legacySource("url")?.ToString()
-                        If Not String.IsNullOrEmpty(url) AndAlso sourceUris.Add(url) Then
-                            citationList.Add($"Legacy source: {url}")
-                        End If
-                    Next
-                Catch ex As Exception
-                Debug.WriteLine("Error processing legacy citations: " & ex.Message)
-            End Try
-            End Sub
-
-            Private Shared Function ExtractIeeeUri(refEntry As String) As String
-                Try
-                    Dim doiMatch = Regex.Match(refEntry, "doi:\s*(\S+)")
-                    If doiMatch.Success Then
-                        ' Trim any trailing punctuation
-                        Return $"https://doi.org/{doiMatch.Groups(1).Value.TrimEnd("."c)}"
-                    End If
-                Catch ex As Exception
-                    Debug.WriteLine("DOI extraction error: " & ex.Message)
-                End Try
-                Return String.Empty
-            End Function
-
-            Private Shared Function ExtractHarvardUri(refEntry As String) As String
-                Try
-                    Dim uriMatch = Regex.Match(refEntry, "Available at:\s*(\S+)\s*\(")
-                    If uriMatch.Success Then
-                        Return uriMatch.Groups(1).Value
-                    End If
-                Catch ex As Exception
-                    Debug.WriteLine("Harvard URI extraction error: " & ex.Message)
-                End Try
-                Return String.Empty
-            End Function
-
-            Private Shared Function FormatCitations(citationList As List(Of String)) As String
-                Dim sb As New StringBuilder()
-                sb.AppendLine(vbCrLf & "References:")
+                Dim simpleCitationOutput As New StringBuilder()
+                simpleCitationOutput.AppendLine(vbCrLf)
                 For i As Integer = 0 To citationList.Count - 1
-                    sb.AppendLine($"[{i + 1}] {citationList(i)}")
+                    simpleCitationOutput.AppendLine("[" & (i + 1).ToString() & "] " & citationList(i))
                 Next
-                Return sb.ToString()
-            End Function
 
-            Private Shared Function ExtractSimpleCitations(ByRef jsonObj As JObject) As String
-                Try
-                    Dim citations As JToken = jsonObj.SelectToken("citations")
-                    Dim citationList As New List(Of String)
+                Return simpleCitationOutput.ToString()
 
-                    If citations IsNot Nothing Then
-                        If citations.Type = JTokenType.Array Then
-                            For Each citation As JToken In citations
-                                If citation.Type = JTokenType.String Then
-                                    citationList.Add(citation.ToString())
-                                ElseIf citation.Type = JTokenType.Object Then
-                                    ' Try to extract URL or fullNote from the object
-                                    Dim url As JToken = citation.SelectToken("url")
-                                    If url IsNot Nothing Then
-                                        citationList.Add(url.ToString())
-                                    Else
-                                        Dim fullNote As String = citation("fullNote")?.ToString()
-                                        If Not String.IsNullOrEmpty(fullNote) Then
-                                            citationList.Add(fullNote)
-                                        End If
-                                    End If
-                                End If
-                            Next
-                        ElseIf citations.Type = JTokenType.Object Then
-                            Dim fullNote As String = citations("fullNote")?.ToString()
-                            If Not String.IsNullOrEmpty(fullNote) Then
-                                citationList.Add(fullNote)
-                            Else
-                                Dim url As String = citations("url")?.ToString()
-                                If Not String.IsNullOrEmpty(url) Then
-                                    citationList.Add(url)
-                                End If
-                            End If
-                        End If
-                    End If
-
-                    Dim simpleCitationOutput As New StringBuilder()
-                    simpleCitationOutput.AppendLine(vbCrLf)
-                    For i As Integer = 0 To citationList.Count - 1
-                        simpleCitationOutput.AppendLine("[" & (i + 1).ToString() & "] " & citationList(i))
-                    Next
-
-                    Return simpleCitationOutput.ToString()
-
-                Catch ex As Exception
+            Catch ex As Exception
                 Debug.WriteLine("Error parsing JSON for simple citations: " & ex.Message)
             End Try
 
-                Return String.Empty
-            End Function
+            Return String.Empty
+        End Function
 
 
 
-            Private Shared Function xxxExtractSimpleCitations(ByRef jsonObj As JObject) As String
+        Private Shared Function xxxExtractSimpleCitations(ByRef jsonObj As JObject) As String
 
             Try
 
@@ -2066,6 +2066,7 @@ Namespace SharedLibrary
                 context.INI_TTSEndpoint = If(configDict.ContainsKey("TTSEndpoint"), configDict("TTSEndpoint"), "")
 
                 context.INI_PromptLibPath = If(configDict.ContainsKey("PromptLib"), configDict("PromptLib"), "")
+                context.INI_AlternateModelPath = If(configDict.ContainsKey("AlternateModelPath"), configDict("AlternateModelPath"), "")
                 context.INI_PromptLibPath_Transcript = If(configDict.ContainsKey("PromptLib_Transcript"), configDict("PromptLib_Transcript"), "")
 
                 ' Process Internet search if enabled
@@ -2363,6 +2364,197 @@ Namespace SharedLibrary
         End Function
 
 
+        ' Creates a ModelConfig object from a dictionary of key/value pairs.
+        Public Shared Function CreateModelConfigFromDict(ByVal configDict As Dictionary(Of String, String), context As ISharedContext, Description As String) As ModelConfig
+            Dim mc As New ModelConfig()
+            Try
+                mc.APIKey = If(configDict.ContainsKey("APIKey"), configDict("APIKey"), "")
+                mc.Endpoint = If(configDict.ContainsKey("Endpoint"), configDict("Endpoint"), "")
+                mc.HeaderA = If(configDict.ContainsKey("HeaderA"), configDict("HeaderA"), "")
+                mc.HeaderB = If(configDict.ContainsKey("HeaderB"), configDict("HeaderB"), "")
+                mc.Response = If(configDict.ContainsKey("Response"), configDict("Response"), "")
+                mc.APICall = If(configDict.ContainsKey("APICall"), configDict("APICall"), "")
+                mc.Timeout = If(configDict.ContainsKey("Timeout"), CLng(configDict("Timeout")), 0)
+                mc.MaxOutputToken = If(configDict.ContainsKey("MaxOutputToken_2"), CInt(configDict("MaxOutputToken")), 0)
+                mc.Temperature = If(configDict.ContainsKey("Temperature"), configDict("Temperature"), "")
+                mc.Model = If(configDict.ContainsKey("Model"), configDict("Model"), "")
+                mc.APIEncrypted = ParseBoolean(configDict, "APIKeyEncrypted")
+                mc.APIKeyPrefix = If(configDict.ContainsKey("APIKeyPrefix"), configDict("APIKeyPrefix"), "")
+                mc.OAuth2 = ParseBoolean(configDict, "OAuth2")
+                mc.OAuth2ClientMail = If(configDict.ContainsKey("OAuth2ClientMail"), configDict("OAuth2ClientMail"), "")
+                mc.OAuth2Scopes = If(configDict.ContainsKey("OAuth2Scopes"), configDict("OAuth2Scopes"), "")
+                mc.OAuth2Endpoint = If(configDict.ContainsKey("OAuth2Endpoint"), configDict("OAuth2Endpoint"), "")
+                mc.OAuth2ATExpiry = If(configDict.ContainsKey("OAuth2ATExpiry"), CLng(configDict("OAuth2ATExpiry")), 3600)
+                mc.ModelDescription = Description
+
+                mc.APIKeyBack = mc.APIKey
+
+                ' Additional configurations for OAuth2
+                mc.TokenExpiry = DateAdd(DateInterval.Year, -1, DateTime.Now)
+                mc.DecodedAPI = ""
+
+                ' Check and decrypt API keys
+                If mc.OAuth2 Then
+                    mc.APIKey = Trim(Replace(RealAPIKeyMC(mc.APIKey, True, mc, context), "\n", ""))
+                Else
+                    mc.DecodedAPI = RealAPIKeyMC(mc.APIKey, False, mc, context)
+                End If
+
+            Catch ex As System.Exception
+                MessageBox.Show("Error in CreateModelConfigFromDict: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+            Return mc
+        End Function
+
+        ' Extracts the current configuration from the shared context using the same style.
+        Public Shared Function GetCurrentConfig(ByVal context As ISharedContext) As ModelConfig
+            Dim mc As New ModelConfig()
+            Try
+                ' Here we simulate reading from a config dictionary by using the context values.
+                mc.APIKey = If(String.IsNullOrEmpty(context.INI_APIKey_2), "", context.INI_APIKey_2)
+                mc.APIKeyBack = If(String.IsNullOrEmpty(context.INI_APIKeyBack_2), "", context.INI_APIKeyBack_2)
+                mc.Endpoint = If(String.IsNullOrEmpty(context.INI_Endpoint_2), "", context.INI_Endpoint_2)
+                mc.HeaderA = If(String.IsNullOrEmpty(context.INI_HeaderA_2), "", context.INI_HeaderA_2)
+                mc.HeaderB = If(String.IsNullOrEmpty(context.INI_HeaderB_2), "", context.INI_HeaderB_2)
+                mc.Response = If(String.IsNullOrEmpty(context.INI_Response_2), "", context.INI_Response_2)
+                mc.APICall = If(String.IsNullOrEmpty(context.INI_APICall_2), "", context.INI_APICall_2)
+                mc.Timeout = context.INI_Timeout_2
+                mc.MaxOutputToken = context.INI_MaxOutputToken_2
+                mc.Temperature = If(String.IsNullOrEmpty(context.INI_Temperature_2), "", context.INI_Temperature_2)
+                mc.Model = If(String.IsNullOrEmpty(context.INI_Model_2), "", context.INI_Model_2)
+                mc.APIEncrypted = context.INI_APIEncrypted_2
+                mc.APIKeyPrefix = If(String.IsNullOrEmpty(context.INI_APIKeyPrefix_2), "", context.INI_APIKeyPrefix_2)
+                mc.OAuth2 = context.INI_OAuth2_2
+                mc.OAuth2ClientMail = If(String.IsNullOrEmpty(context.INI_OAuth2ClientMail_2), "", context.INI_OAuth2ClientMail_2)
+                mc.OAuth2Scopes = If(String.IsNullOrEmpty(context.INI_OAuth2Scopes_2), "", context.INI_OAuth2Scopes_2)
+                mc.OAuth2Endpoint = If(String.IsNullOrEmpty(context.INI_OAuth2Endpoint_2), "", context.INI_OAuth2Endpoint_2)
+                mc.OAuth2ATExpiry = context.INI_OAuth2ATExpiry_2
+                mc.DecodedAPI = context.DecodedAPI_2
+                mc.TokenExpiry = context.TokenExpiry_2
+
+            Catch ex As System.Exception
+                MessageBox.Show("Error in GetCurrentConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+            Return mc
+        End Function
+
+        ' Applies the given ModelConfig to the shared context using the assignment style.
+        Public Shared Sub ApplyModelConfig(ByVal context As ISharedContext, ByVal config As ModelConfig)
+            Try
+                context.INI_APIKey_2 = If(Not String.IsNullOrEmpty(config.APIKey), config.APIKey, "")
+                context.INI_APIKeyBack_2 = If(Not String.IsNullOrEmpty(config.APIKeyBack), config.APIKeyBack, "")
+                context.INI_Endpoint_2 = If(Not String.IsNullOrEmpty(config.Endpoint), config.Endpoint, "")
+                context.INI_HeaderA_2 = If(Not String.IsNullOrEmpty(config.HeaderA), config.HeaderA, "")
+                context.INI_HeaderB_2 = If(Not String.IsNullOrEmpty(config.HeaderB), config.HeaderB, "")
+                context.INI_Response_2 = If(Not String.IsNullOrEmpty(config.Response), config.Response, "")
+                context.INI_APICall_2 = If(Not String.IsNullOrEmpty(config.APICall), config.APICall, "")
+                context.INI_Timeout_2 = If(config.Timeout <> 0, config.Timeout, 0)
+                context.INI_MaxOutputToken_2 = If(config.MaxOutputToken <> 0, config.MaxOutputToken, 0)
+                context.INI_Temperature_2 = If(Not String.IsNullOrEmpty(config.Temperature), config.Temperature, "")
+                context.INI_Model_2 = If(Not String.IsNullOrEmpty(config.Model), config.Model, "")
+                context.INI_APIEncrypted_2 = config.APIEncrypted
+                context.INI_APIKeyPrefix_2 = If(Not String.IsNullOrEmpty(config.APIKeyPrefix), config.APIKeyPrefix, "")
+                context.INI_OAuth2_2 = config.OAuth2
+                context.INI_OAuth2ClientMail_2 = If(Not String.IsNullOrEmpty(config.OAuth2ClientMail), config.OAuth2ClientMail, "")
+                context.INI_OAuth2Scopes_2 = If(Not String.IsNullOrEmpty(config.OAuth2Scopes), config.OAuth2Scopes, "")
+                context.INI_OAuth2Endpoint_2 = If(Not String.IsNullOrEmpty(config.OAuth2Endpoint), config.OAuth2Endpoint, "")
+                context.INI_OAuth2ATExpiry_2 = If(config.OAuth2ATExpiry <> 0, config.OAuth2ATExpiry, 3600)
+                context.DecodedAPI_2 = config.DecodedAPI
+                context.TokenExpiry_2 = config.TokenExpiry
+
+            Catch ex As System.Exception
+                MessageBox.Show("Error in ApplyModelConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End Sub
+
+        ' Restores the default configuration (passed in as originalConfig).
+        Public Shared Sub RestoreDefaults(ByVal context As ISharedContext, ByVal originalConfig As ModelConfig)
+            ApplyModelConfig(context, originalConfig)
+        End Sub
+
+
+        ' Loads alternative model configurations from an INI file.
+        Public Shared Function LoadAlternativeModels(ByVal iniFilePath As String, context As ISharedContext) As List(Of ModelConfig)
+            Dim models As New List(Of ModelConfig)()
+            Try
+                If Not File.Exists(iniFilePath) Then
+                    ShowCustomMessageBox($"INI file for alternative models not found (update {AN2}.ini): " & iniFilePath)
+                    Return models
+                End If
+
+                Dim currentDict As New Dictionary(Of String, String)()
+                Dim Description As String = ""
+                For Each line In File.ReadAllLines(iniFilePath)
+                    Dim trimmedLine As String = line.Trim()
+                    ' Skip empty lines and comments.
+                    If String.IsNullOrEmpty(trimmedLine) OrElse trimmedLine.StartsWith(";") Then
+                        Continue For
+                    End If
+
+                    ' Section header (e.g., [Model1]) indicates a new model.
+                    If trimmedLine.StartsWith("[") AndAlso trimmedLine.EndsWith("]") Then
+                        If currentDict.Count > 0 Then
+                            models.Add(CreateModelConfigFromDict(currentDict, context, Description))
+                            currentDict.Clear()
+                        End If
+                        Description = trimmedLine.Substring(1, trimmedLine.Length - 2).Trim()
+                        Continue For
+                    End If
+
+                    ' Parse key=value lines.
+                    Dim tokens() As String = trimmedLine.Split(New Char() {"="c}, 2)
+                    If tokens.Length = 2 Then
+                        Dim key As String = tokens(0).Trim()
+                        Dim value As String = tokens(1).Trim()
+                        ' Store the key/value pair.
+                        If Not currentDict.ContainsKey(key) Then
+                            currentDict.Add(key, value)
+                        Else
+                            currentDict(key) = value
+                        End If
+                    End If
+                Next
+                ' Add the last model if any.
+                If currentDict.Count > 0 Then
+                    models.Add(CreateModelConfigFromDict(currentDict, context, Description))
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error reading INI file for alternative models ({iniFilePath}): " & ex.Message)
+            End Try
+            Return models
+        End Function
+
+        Public Shared originalConfig As ModelConfig
+        Public Shared originalConfigLoaded As Boolean = False
+
+        ' Displays the model selection form and applies the chosen configuration.
+        Public Shared Function ShowModelSelection(ByVal context As ISharedContext, iniFilePath As String) As Boolean
+            Try
+                ' Back up the current (default) configuration.
+
+                originalConfigLoaded = False
+                originalConfig = GetCurrentConfig(context)
+                originalConfigLoaded = True
+
+                Dim selector As New ModelSelectorForm(iniFilePath, context)
+                If selector.ShowDialog() = DialogResult.OK Then
+                    If selector.UseDefault Then
+                        RestoreDefaults(context, originalConfig)
+                    ElseIf selector.SelectedModel IsNot Nothing Then
+                        ApplyModelConfig(context, selector.SelectedModel)
+                    End If
+                    Return True
+                Else
+                    Return False
+                End If
+            Catch ex As System.Exception
+                MessageBox.Show("Error in ShowModelSelection: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return False
+            End Try
+        End Function
+
+
+
         Public Shared Function RenameFileToBak(filePath As String) As Boolean
             Try
                 ' Rename the file to a .bak file
@@ -2565,6 +2757,43 @@ Namespace SharedLibrary
             Return Result
         End Function
 
+        Public Shared Function RealAPIKeyMC(ByVal APIInput As String, ByVal IgnorePrefix As Boolean, ByVal context As ModelConfig, context2 As ISharedContext) As String
+
+            APIInput = Trim(RemoveCR(APIInput))
+
+            Dim Prefix As String = ""
+            Dim Result As String = APIInput
+
+            ' Determine the prefix based on whether it's the second API and IgnorePrefix is false
+
+            If Not IgnorePrefix Then
+                Prefix = context.APIKeyPrefix
+
+                If Not String.IsNullOrWhiteSpace(Prefix) Then
+                    ' Remove the prefix if present
+                    If APIInput.StartsWith(Prefix) Then
+                        APIInput = APIInput.Substring(Prefix.Length)
+                    End If
+                End If
+            End If
+
+            Result = APIInput
+
+            ' Decode the API key if encryption is enabled for the main API
+            If context.APIEncrypted Then
+                Result = DecodeString(APIInput, context2.Codebasis)
+            End If
+
+            ' Remove any carriage return characters
+            Result = RemoveCR(Result)
+
+            ' Add the prefix back and return the final result
+
+            Result = Prefix & Result
+
+            Return Result
+        End Function
+
         Public Shared Function DecodeBase64(ByVal base64String As String) As Byte()
             Try
                 ' Normalize the input: remove whitespaces and line breaks
@@ -2687,7 +2916,179 @@ Namespace SharedLibrary
             End If
         End Function
 
-        Public Shared Function ShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "") As String
+        Public Shared Function ShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
+
+            Dim inputForm As New Form()
+            inputForm.Opacity = 0
+            Dim promptLabel As New System.Windows.Forms.Label()
+            Dim inputTextBox As New TextBox()
+            Dim okButton As New Button()
+            Dim cancelButton As New Button()
+
+            ' Form attributes
+            inputForm.Text = title
+            inputForm.FormBorderStyle = FormBorderStyle.FixedDialog
+            inputForm.StartPosition = FormStartPosition.CenterScreen
+            inputForm.MaximizeBox = False
+            inputForm.MinimizeBox = False
+            inputForm.ShowInTaskbar = False
+            inputForm.TopMost = True
+
+            ' Set the icon
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+            ' Set predefined font for consistent layout
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            inputForm.Font = standardFont
+
+            ' Prompt label
+            promptLabel.Text = prompt
+            promptLabel.Font = standardFont
+            promptLabel.AutoSize = True
+            promptLabel.MaximumSize = New Size(600, 0) ' Increased maximum width for text wrapping
+            promptLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the prompt
+            inputForm.Controls.Add(promptLabel)
+
+            ' Input TextBox
+            Dim textBoxHeight As Integer = If(SimpleInput, 25, 150)
+            inputTextBox.Multiline = Not SimpleInput
+            inputTextBox.WordWrap = True
+            inputTextBox.ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical)
+            inputTextBox.Location = New System.Drawing.Point(20, promptLabel.Bottom + 20) ' Margin below the prompt
+            inputTextBox.Width = 595
+            inputTextBox.Height = textBoxHeight
+            inputTextBox.Text = DefaultValue ' Set default value if provided
+            inputForm.Controls.Add(inputTextBox)
+
+            ' KeyDown handlers for Enter, Escape, and Ctrl+P insertion
+            If SimpleInput Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True ' Prevent the ding sound
+                                                     End If
+                                                 End Sub
+            Else
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True ' Prevent the ding sound
+                                                     End If
+                                                 End Sub
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Escape Then
+                                                         inputForm.DialogResult = DialogResult.Cancel
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True ' Prevent the ding sound
+                                                     End If
+                                                 End Sub
+            End If
+
+            ' Insert CtrlP text when user presses Ctrl+P, if provided
+            If Not String.IsNullOrEmpty(CtrlP) Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.P AndAlso e.Modifiers = Keys.Control Then
+                                                         Dim selectionStart As Integer = inputTextBox.SelectionStart
+                                                         inputTextBox.Text = inputTextBox.Text.Insert(selectionStart, CtrlP)
+                                                         inputTextBox.SelectionStart = selectionStart + CtrlP.Length
+                                                         e.SuppressKeyPress = True ' Prevent the ding sound
+                                                     End If
+                                                 End Sub
+            End If
+
+            ' Buttons
+            okButton.Text = "OK"
+            cancelButton.Text = "Cancel"
+
+            ' Measure and adjust button sizes based on font
+            Dim okButtonSize As Size = TextRenderer.MeasureText(okButton.Text, standardFont)
+            Dim cancelButtonSize As Size = TextRenderer.MeasureText(cancelButton.Text, standardFont)
+            Dim buttonWidth As Integer = Math.Max(okButtonSize.Width, cancelButtonSize.Width) + 20
+            Dim buttonHeight As Integer = Math.Max(okButtonSize.Height, cancelButtonSize.Height) + 10
+            okButton.Size = New Size(buttonWidth, buttonHeight)
+            cancelButton.Size = New Size(buttonWidth, buttonHeight)
+
+            ' Button positions
+            okButton.Location = New System.Drawing.Point(20, inputTextBox.Bottom + 20) ' Margin below the input box
+            cancelButton.Location = New System.Drawing.Point(okButton.Right + 10, inputTextBox.Bottom + 20) ' Margin between buttons
+            inputForm.Controls.Add(okButton)
+            inputForm.Controls.Add(cancelButton)
+
+            ' Button click handlers
+            AddHandler okButton.Click, Sub(sender, e)
+                                           inputForm.DialogResult = DialogResult.OK
+                                           inputForm.Close()
+                                       End Sub
+            AddHandler cancelButton.Click, Sub(sender, e)
+                                               inputForm.DialogResult = DialogResult.Cancel
+                                               inputForm.Close()
+                                           End Sub
+
+            ' Adjust form size dynamically
+            Dim formWidth As Integer = Math.Max(500, Math.Max(promptLabel.Width + 40, inputTextBox.Width + 40)) ' Adjusted width for the form
+            Dim formHeight As Integer = cancelButton.Bottom + 30
+            inputForm.ClientSize = New Size(formWidth, formHeight)
+
+            ' Show dialog
+            inputForm.TopMost = True
+            inputForm.BringToFront()
+            inputForm.Focus()
+
+            Dim Result As DialogResult
+
+            If title.Contains("Browser") Then
+                Dim outlookApp As Object = CreateObject("Outlook.Application")
+
+                If outlookApp IsNot Nothing Then
+                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
+                "ActiveExplorer",
+                Reflection.BindingFlags.GetProperty,
+                Nothing,
+                outlookApp,
+                Nothing
+            )
+                    If explorer IsNot Nothing Then
+                        ' WindowState = 1 => Normal window (OlWindowState.olNormalWindow)
+                        explorer.GetType().InvokeMember(
+                    "WindowState",
+                    Reflection.BindingFlags.SetProperty,
+                    Nothing,
+                    explorer,
+                    New Object() {1}
+                )
+                        explorer.GetType().InvokeMember(
+                    "Activate",
+                    Reflection.BindingFlags.InvokeMethod,
+                    Nothing,
+                    explorer,
+                    Nothing
+                )
+                    End If
+                End If
+                inputForm.Opacity = 1
+                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing) ' or however you get it
+                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
+            Else
+                inputForm.Opacity = 1
+                Result = inputForm.ShowDialog()
+            End If
+
+            If Result = DialogResult.OK Then
+                Return inputTextBox.Text
+            Else
+                If Not SimpleInput Then
+                    Return "ESC"
+                Else
+                    Return ""
+                End If
+            End If
+        End Function
+
+
+        Public Shared Function xxxxShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
 
             Dim inputForm As New Form()
             inputForm.Opacity = 0
@@ -2718,17 +3119,17 @@ Namespace SharedLibrary
             promptLabel.Text = prompt
             promptLabel.Font = standardFont
             promptLabel.AutoSize = True
-            promptLabel.MaximumSize = New Size(500, 0) ' Increased maximum width for text wrapping
+            promptLabel.MaximumSize = New Size(600, 0) ' Increased maximum width for text wrapping
             promptLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the prompt
             inputForm.Controls.Add(promptLabel)
 
             ' Input TextBox
-            Dim textBoxHeight As Integer = If(SimpleInput, 25, 100)
+            Dim textBoxHeight As Integer = If(SimpleInput, 25, 150)
             inputTextBox.Multiline = Not SimpleInput
             inputTextBox.WordWrap = True
             inputTextBox.ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical)
             inputTextBox.Location = New System.Drawing.Point(20, promptLabel.Bottom + 20) ' Margin below the prompt
-            inputTextBox.Width = 495
+            inputTextBox.Width = 595
             inputTextBox.Height = textBoxHeight
             inputTextBox.Text = DefaultValue ' Set default value if provided
             inputForm.Controls.Add(inputTextBox)
@@ -3650,7 +4051,6 @@ Namespace SharedLibrary
             Else
                 Returnvalue = False
             End If
-
             inputForm.Dispose()
             Return returnvalue
         End Function
@@ -4629,6 +5029,8 @@ Namespace SharedLibrary
                     Return context.INI_ShortcutsWordExcel
                 Case "PromptLibPath"
                     Return context.INI_PromptLibPath
+                Case "AlternateModelPath"
+                    Return context.INI_AlternateModelPath
                 Case "PromptLibPath_Transcript"
                     Return context.INI_PromptLibPath_Transcript
                 Case "SpeechModelPath"
@@ -4787,6 +5189,8 @@ Namespace SharedLibrary
                     context.INI_PromptLibPath = value
                 Case "PromptLibPath_Transcript"
                     context.INI_PromptLibPath_Transcript = value
+                Case "AlternateModelPath"
+                    context.INI_AlternateModelPath = value
                 Case "SpeechModelPath"
                     context.INI_SpeechModelPath = value
                 Case "APIDebug"
@@ -5056,6 +5460,7 @@ Namespace SharedLibrary
                     {"SpeechModelPath", context.INI_SpeechModelPath},
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
+                    {"AlternateModelPath", context.INI_AlternateModelPath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript},
                     {"SP_Translate", context.SP_Translate},
                     {"SP_Correct", context.SP_Correct},
@@ -5251,6 +5656,7 @@ Namespace SharedLibrary
                     {"SpeechModelPath", context.INI_SpeechModelPath},
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
+                    {"AlternateModelPath", context.INI_AlternateModelPath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript}
                 }
 
@@ -5549,6 +5955,7 @@ Namespace SharedLibrary
             variableValues.Add("TTSEndpoint", context.INI_TTSEndpoint)
             variableValues.Add("ShortcutsWordExcel", context.INI_ShortcutsWordExcel)
             variableValues.Add("PromptLib", context.INI_PromptLibPath)
+            variableValues.Add("AlternateModelPath", context.INI_AlternateModelPath)
             variableValues.Add("PromptLib_Transcript", context.INI_PromptLibPath_Transcript)
             variableValues.Add("SP_Translate", context.SP_Translate)
             variableValues.Add("SP_Correct", context.SP_Correct)
@@ -5703,6 +6110,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SpeechModelPath") Then context.INI_SpeechModelPath = updatedValues("SpeechModelPath")
                     If updatedValues.ContainsKey("TTSEndpoint") Then context.INI_TTSEndpoint = updatedValues("TTSEndpoint")
                     If updatedValues.ContainsKey("PromptLib") Then context.INI_PromptLibPath = updatedValues("PromptLib")
+                    If updatedValues.ContainsKey("AlternateModelPath") Then context.INI_AlternateModelPath = updatedValues("AlternateModelPath")
                     If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
 
                     ' Call UpdateAppConfig after all updates
@@ -5936,8 +6344,11 @@ Namespace SharedLibrary
             ' Create a panel for checkboxes
             Dim checkboxPanel As New FlowLayoutPanel With {
                         .FlowDirection = FlowDirection.TopDown,
-                        .Dock = DockStyle.Fill,
-                        .Margin = New Padding(10)
+                        .WrapContents = False,
+                        .Dock = DockStyle.Top,  'Fill
+                        .Margin = New Padding(10),
+                        .AutoSize = True,
+                        .AutoSizeMode = AutoSizeMode.GrowAndShrink
                     }
             layout.Controls.Add(checkboxPanel, 0, 1)
 
@@ -5950,12 +6361,12 @@ Namespace SharedLibrary
                     }
 
             Dim clipboardCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be shown and put in the clipboard",
+                        .Text = "The output shall be put in the clipboard",
                         .AutoSize = True
                     }
 
             Dim bubblesCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be provided in the form of bubbles",
+                        .Text = "The output shall be in the form of bubbles",
                         .AutoSize = True,
                         .Enabled = enableBubbles,
                         .Visible = Not NoBubbles
@@ -7350,8 +7761,6 @@ Namespace SharedLibrary
             End Try
         End Sub
 
-
-
     End Class
 
 
@@ -7360,33 +7769,36 @@ Namespace SharedLibrary
         Public Sub CheckAndInstallUpdates(appname As String, LocalPath As String)
             Try
                 ' Ensure the application is ClickOnce deployed
+
                 If ApplicationDeployment.IsNetworkDeployed And String.IsNullOrWhiteSpace(LocalPath) Then
                     Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
                     Dim currentDate As Date = Date.Now
 
                     ' Check for updates
-                    If deployment.CheckForUpdate() Then
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want to download and install it now? The update will take effect the next time you restart the application. Note: If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
+
+                    If Deployment.CheckForUpdate() Then
+                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update is available online ({Deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
 
                         If dialogResult = 1 Then
-                            ' Download and apply the update
-                            deployment.Update()
+                            ' Download and apply the update -- removed for the time being due to lack of reliability
+                            ' deployment.Update()
 
-                            If dialogResult = 1 Or dialogResult = 2 Then
-                                ' Update the last check time
-                                Select Case Left(appname, 4)
-                                    Case "Word"
-                                        My.Settings.LastUpdateCheckWord = currentDate
-                                    Case "Exce"
-                                        My.Settings.LastUpdateCheckExcel = currentDate
-                                    Case "Outl"
-                                        My.Settings.LastUpdateCheckOutlook = currentDate
-                                End Select
-                                My.Settings.Save()
-                            End If
+                            ' Launch installer on website and update the last check time
+                            Select Case Left(appname, 4)
+                                Case "Word"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Word"))
+                                    My.Settings.LastUpdateCheckWord = currentDate
+                                Case "Exce"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Excel"))
+                                    My.Settings.LastUpdateCheckExcel = currentDate
+                                Case "Outl"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
+                                    My.Settings.LastUpdateCheckOutlook = currentDate
+                            End Select
+                            My.Settings.Save()
 
                             ' Notify the user
-                            SharedMethods.ShowCustomMessageBox("The update process has been performed. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
+                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
                         End If
                     Else
                         SharedMethods.ShowCustomMessageBox($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
@@ -7470,28 +7882,38 @@ Namespace SharedLibrary
 
                         ' Check if an update is available
                         If deployment.CheckForUpdate() Then
-                            Dialogresult = SharedMethods.ShowCustomYesNoBox("An update is available online. Do you want to download and install it now? Note: If you run this within a corporate environment, your firewall may block this.", "Yes", If(checkIntervalInDays < 0, "No (configured to check on next startup)", "No, check again in " & checkIntervalInDays & " days"))
+                            Dialogresult = SharedMethods.ShowCustomYesNoBox("An update is available online. Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", If(checkIntervalInDays < 0, "No (configured to check on next startup)", "No, check again in " & checkIntervalInDays & " days"))
 
                             If Dialogresult = 1 Then
-                                ' Download and apply the update
-                                deployment.Update()
+                                ' Download and apply the update -- removed for the time being due to lack of reliability
+                                ' deployment.Update()
+
+                                Select Case Left(appname, 4)
+                                    Case "Word"
+                                        System.Diagnostics.Process.Start(UpdatePaths("Word"))
+                                    Case "Exce"
+                                        System.Diagnostics.Process.Start(UpdatePaths("Excel"))
+                                    Case "Outl"
+                                        System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
+                                End Select
 
                                 ' Notify the user to restart
-                                If Dialogresult = 1 Or Dialogresult = 2 Then
-                                    ' Update the last check time
-                                    Select Case Left(appname, 4)
-                                        Case "Word"
-                                            My.Settings.LastUpdateCheckWord = currentDate
-                                        Case "Exce"
-                                            My.Settings.LastUpdateCheckExcel = currentDate
-                                        Case "Outl"
-                                            My.Settings.LastUpdateCheckOutlook = currentDate
-                                    End Select
-                                    My.Settings.Save()
-                                End If
-
-                                SharedMethods.ShowCustomMessageBox("The update process has been performed. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
+                                SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
                             End If
+
+                            If Dialogresult = 1 Or Dialogresult = 2 Then
+                                ' Update the last check time
+                                Select Case Left(appname, 4)
+                                    Case "Word"
+                                        My.Settings.LastUpdateCheckWord = currentDate
+                                    Case "Exce"
+                                        My.Settings.LastUpdateCheckExcel = currentDate
+                                    Case "Outl"
+                                        My.Settings.LastUpdateCheckOutlook = currentDate
+                                End Select
+                                My.Settings.Save()
+                            End If
+
                         End If
                         If Dialogresult = 1 Or Dialogresult = 2 Then
                             ' Update the last check time
@@ -7549,6 +7971,309 @@ Namespace SharedLibrary
             End Try
         End Sub
 
+
+    End Class
+
+    Public Module ImageExtractor
+
+        ''' <summary>
+        ''' Extracts all images from the provided JObject and saves them to the user's desktop.
+        ''' Supports data URIs (base64 with header), HTTP URLs, and raw base64 strings.
+        ''' </summary>
+        ''' <param name="jObj">The JObject parsed from JSON returned by an LLM.</param>
+        Public Sub ExtractAndSaveImages(jObj As JObject)
+            ' List to store extracted images along with their file extensions.
+            Dim imageList As New List(Of (ImageData As Byte(), Extension As String))
+            ProcessToken(jObj, imageList)
+
+            ' Determine the user's desktop path.
+            Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            Dim counter As Integer = 1
+
+            ' Save each image with a sequential filename.
+            For Each imageData In imageList
+                Dim fileName As String = "LLM_Image_" & counter.ToString() & imageData.Extension
+                Dim filePath As String = Path.Combine(desktopPath, fileName)
+                File.WriteAllBytes(filePath, imageData.ImageData)
+                counter += 1
+            Next
+        End Sub
+
+        ''' <summary>
+        ''' Recursively processes a JToken (or JObject) to find image-containing keys and extract image data.
+        ''' </summary>
+        ''' <param name="token">The current JToken.</param>
+        ''' <param name="imageList">The list to which extracted images are added.</param>
+        Private Sub ProcessToken(token As JToken, ByRef imageList As List(Of (Byte(), String)))
+            If token.Type = JTokenType.Object Then
+                For Each prop As JProperty In token.Children(Of JProperty)()
+                    ' If the property name matches a known image key and its value is a string, process it.
+                    If IsImageKey(prop.Name) AndAlso prop.Value.Type = JTokenType.String Then
+                        Dim result = ProcessImageString(prop.Value.ToString())
+                        If result IsNot Nothing Then
+                            imageList.Add(result)
+                        End If
+                    Else
+                        ' Recursively process the property's value.
+                        ProcessToken(prop.Value, imageList)
+                    End If
+                Next
+            ElseIf token.Type = JTokenType.Array Then
+                For Each item As JToken In token
+                    ProcessToken(item, imageList)
+                Next
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Checks if a given key is one of the known keys that may contain image data.
+        ''' </summary>
+        ''' <param name="key">The JSON property name.</param>
+        ''' <returns>True if the key is recognized as possibly containing image data.</returns>
+        Private Function IsImageKey(key As String) As Boolean
+            Dim imageKeys As String() = {"image", "image_url", "img", "src", "data", "url", "image_base64", "base64", "content"}
+            Return imageKeys.Any(Function(k) String.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+        End Function
+
+        ''' <summary>
+        ''' Processes a string that may contain image data in one of several formats.
+        ''' </summary>
+        ''' <param name="imageStr">The string to process.</param>
+        ''' <returns>A tuple with the image data (as a Byte array) and file extension, or Nothing if processing fails.</returns>
+        Private Function ProcessImageString(imageStr As String) As (Byte(), String)?
+            ' Check if the string is a data URI (base64 encoded image with header).
+            If imageStr.StartsWith("data:", StringComparison.OrdinalIgnoreCase) Then
+                ' Expected format: "data:image/png;base64,iVBORw0KGgoAAAANS..."
+                Dim headerEndIndex As Integer = imageStr.IndexOf(",")
+                If headerEndIndex > -1 Then
+                    Dim header As String = imageStr.Substring(0, headerEndIndex)
+                    Dim base64Data As String = imageStr.Substring(headerEndIndex + 1)
+                    Dim ext As String = GetExtensionFromHeader(header)
+                    Dim imageBytes As Byte() = Convert.FromBase64String(base64Data)
+                    Return (imageBytes, ext)
+                End If
+            ElseIf imageStr.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
+                ' If the string is an HTTP URL, download the image.
+                Try
+                    Dim client As New WebClient()
+                    Dim imageBytes As Byte() = client.DownloadData(imageStr)
+                    Dim ext As String = GetExtensionFromUrl(imageStr)
+                    Return (imageBytes, ext)
+                Catch ex As System.Exception
+                    ' If download fails, return Nothing 
+                    Return Nothing
+                End Try
+            Else
+                ' Possibly a raw base64 string without a data URI header.
+                ' Use a heuristic: if the string is long and contains no spaces, assume it's base64.
+                If imageStr.Length > 100 AndAlso Not imageStr.Contains(" ") Then
+                    Try
+                        Dim imageBytes As Byte() = Convert.FromBase64String(imageStr)
+                        Return (imageBytes, ".png") ' Default extension when none can be determined.
+                    Catch ex As System.Exception
+                        Return Nothing
+                    End Try
+                End If
+            End If
+            Return Nothing
+        End Function
+
+        ''' <summary>
+        ''' Determines the file extension based on the data URI header.
+        ''' </summary>
+        ''' <param name="header">The header portion of the data URI.</param>
+        ''' <returns>The file extension (including the leading dot).</returns>
+        Private Function GetExtensionFromHeader(header As String) As String
+            ' Example header: "data:image/jpeg;base64"
+            Dim parts() As String = header.Split(";")
+            If parts.Length > 0 AndAlso parts(0).StartsWith("data:image", StringComparison.OrdinalIgnoreCase) Then
+                Dim mimeType As String = parts(0).Replace("data:", "").Trim()
+                Select Case mimeType.ToLower()
+                    Case "image/jpeg", "image/jpg"
+                        Return ".jpg"
+                    Case "image/png"
+                        Return ".png"
+                    Case "image/gif"
+                        Return ".gif"
+                    Case "image/bmp"
+                        Return ".bmp"
+                    Case "image/tiff"
+                        Return ".tiff"
+                    Case Else
+                        Return ".png"
+                End Select
+            End If
+            Return ".png"
+        End Function
+
+        ''' <summary>
+        ''' Extracts the file extension from a URL.
+        ''' </summary>
+        ''' <param name="url">The URL string.</param>
+        ''' <returns>The file extension (including the leading dot), or ".png" if none can be determined.</returns>
+        Private Function GetExtensionFromUrl(url As String) As String
+            Dim ext As String = Path.GetExtension(url)
+            If String.IsNullOrEmpty(ext) Then
+                Return ".png"
+            End If
+            Return ext
+        End Function
+
+    End Module
+
+
+    Public Class ModelConfig
+        Public Property APIKey As String
+        Public Property APIKeyBack As String
+        Public Property Temperature As String
+        Public Property Timeout As Long
+        Public Property MaxOutputToken As Integer
+        Public Property Model As String
+        Public Property Endpoint As String
+        Public Property HeaderA As String
+        Public Property HeaderB As String
+        Public Property APICall As String
+        Public Property Response As String
+        Public Property APIEncrypted As Boolean
+        Public Property APIKeyPrefix As String
+        Public Property OAuth2 As Boolean
+        Public Property OAuth2ClientMail As String
+        Public Property OAuth2Scopes As String
+        Public Property OAuth2Endpoint As String
+        Public Property OAuth2ATExpiry As Long
+        Public Property ModelDescription As String
+        Public Property DecodedAPI As String
+        Public Property TokenExpiry As DateTime
+
+        Public Function Clone() As ModelConfig
+            Return DirectCast(Me.MemberwiseClone(), ModelConfig)
+        End Function
+    End Class
+
+
+    Public Class ModelSelectorForm
+        Inherits Form
+
+        Private lblTitle As System.Windows.Forms.Label
+        Private lstModels As ListBox
+        Private chkReset As System.Windows.Forms.CheckBox
+        Private btnOK As Button
+        Private btnCancel As Button
+
+        Private alternativeModels As List(Of ModelConfig)
+
+        ' The selected alternative model (if any).
+        Public Property SelectedModel As ModelConfig = Nothing
+        ' True if the default configuration is to be used.
+        Public Property UseDefault As Boolean = True
+
+        Public Sub New(ByVal iniFilePath As String, context As ISharedContext)
+            ' Center the form on the screen
+            Me.StartPosition = FormStartPosition.CenterScreen
+
+            ' Increase width and height so everything fits comfortably
+            Me.Width = 580
+            Me.Height = 400
+            ' Prevent the form from being shrunk below its initial size (it can still be enlarged)
+            Me.MinimumSize = New Size(Me.Width, Me.Height)
+
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            Me.Icon = Icon.FromHandle(bmp.GetHicon())
+            Me.Text = "Freestyle"
+
+            ' Create and add the label above the list
+            lblTitle = New System.Windows.Forms.Label() With {
+            .Text = "Select the model you want to use:",
+            .AutoSize = True,
+            .Top = 10,
+            .Left = 10,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
+        }
+            Me.Controls.Add(lblTitle)
+
+            ' Create the list box positioned below the label
+            lstModels = New ListBox() With {
+            .Top = lblTitle.Bottom + 10,
+            .Left = 10,
+            .Width = Me.ClientSize.Width - 20,
+            .Height = 220,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
+        }
+            Me.Controls.Add(lstModels)
+
+            ' Create the checkbox with a bit less gap below the list
+            chkReset = New System.Windows.Forms.CheckBox() With {
+            .Text = "Reset to default model after use",
+            .Checked = True,
+            .Top = lstModels.Bottom + 5,
+            .Left = 11,
+            .AutoSize = True,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
+        }
+            Me.Controls.Add(chkReset)
+
+            ' Create the buttons positioned below the checkbox
+            btnOK = New Button() With {
+            .Text = "OK",
+            .Left = 10,
+            .Top = chkReset.Bottom + 10,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
+        }
+            AddHandler btnOK.Click, AddressOf btnOK_Click
+
+            btnCancel = New Button() With {
+            .Text = "Cancel",
+            .Left = btnOK.Right + 10,
+            .Top = chkReset.Bottom + 10,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
+        }
+            AddHandler btnCancel.Click, AddressOf btnCancel_Click
+
+            Me.Controls.Add(btnOK)
+            Me.Controls.Add(btnCancel)
+
+            ' Set Enter key to trigger OK and Esc key to trigger Cancel.
+            Me.AcceptButton = btnOK
+            Me.CancelButton = btnCancel
+
+            alternativeModels = LoadAlternativeModels(iniFilePath, context)
+            ' First item is always "Default Model"
+            lstModels.Items.Add("Default = " & context.INI_Model_2)
+            For Each model In alternativeModels
+                Dim displayText As String = If(String.IsNullOrEmpty(model.ModelDescription), model.Model, model.ModelDescription)
+                lstModels.Items.Add(displayText)
+            Next
+            lstModels.SelectedIndex = 0
+        End Sub
+
+        Private Sub btnOK_Click(sender As Object, e As EventArgs)
+            Try
+                If lstModels.SelectedIndex = 0 Then
+                    UseDefault = True
+                Else
+                    UseDefault = False
+                    Dim index As Integer = lstModels.SelectedIndex - 1
+                    If index >= 0 AndAlso index < alternativeModels.Count Then
+                        SelectedModel = alternativeModels(index)
+                    End If
+                End If
+
+                ' If the checkbox is unchecked and a non-default model is selected, set OriginalConfigurationLoaded to False.
+                If Not chkReset.Checked AndAlso Not UseDefault Then
+                    originalConfigLoaded = False
+                End If
+
+                Me.DialogResult = DialogResult.OK
+                Me.Close()
+            Catch ex As System.Exception
+                MessageBox.Show("Error processing selection: " & ex.Message)
+            End Try
+        End Sub
+
+        Private Sub btnCancel_Click(sender As Object, e As EventArgs)
+            Me.DialogResult = DialogResult.Cancel
+            Me.Close()
+        End Sub
 
     End Class
 

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.4.2025
+' 7.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -167,7 +167,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.020425 Gen2 Beta Test"
+    Public Const Version As String = "V.070425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1329,6 +1329,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_AlternateModelPath As String
+        Get
+            Return _context.INI_AlternateModelPath
+        End Get
+        Set(value As String)
+            _context.INI_AlternateModelPath = value
+        End Set
+    End Property
+
     Public Shared Property PromptLibrary() As List(Of String)
         Get
             Return _context.PromptLibrary
@@ -1935,7 +1944,7 @@ Public Class ThisAddIn
         Dim DoClipboard As Boolean = False
         Dim DoFormulas As Boolean = True
 
-        Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-v for your last prompt")
+        Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
 
         If selectedRange Is Nothing Then
             NoSelectedCells = True
@@ -1950,18 +1959,18 @@ Public Class ThisAddIn
             PromptLibInstruct = " or press 'OK' for the prompt library"
         End If
 
-        SLib.StoreClipboard()
+        'SLib.StoreClipboard()
 
-        If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
+        'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct})" & PromptLibInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct})" & PromptLibInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
         Else
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
             DoRange = True
         End If
 
-        SLib.RestoreClipboard()
+        'SLib.RestoreClipboard()
 
         If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
 

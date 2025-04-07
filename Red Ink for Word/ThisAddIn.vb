@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.4.2025
+' 7.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -53,6 +53,7 @@ Imports System.Windows
 Imports System.Speech.Synthesis
 Imports Whisper.net.LibraryLoader
 Imports Newtonsoft.Json
+Imports System.Runtime.Remoting.Contexts
 
 
 Module Module1
@@ -217,7 +218,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.020425 Gen2 Beta Test"
+    Public Const Version As String = "V.070425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -249,6 +250,7 @@ Public Class ThisAddIn
     Private Const MarkupPrefixWord As String = "MarkupWord:"
     Private Const MarkupPrefixRegex As String = "MarkupRegex:"
     Private Const MarkupPrefixAll As String = "Markup[Diff|DiffW|Word|Regex]:"
+    Private Const PurePrefix As String = "Pure:"
     Private Const ClipboardPrefix As String = "Clipboard:"
     Private Const ClipboardPrefix2 As String = "Clip:"
     Private Const BubblesPrefix As String = "Bubbles:"
@@ -1463,6 +1465,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_AlternateModelPath As String
+        Get
+            Return _context.INI_AlternateModelPath
+        End Get
+        Set(value As String)
+            _context.INI_AlternateModelPath = value
+        End Set
+    End Property
+
 
     Public Shared Property PromptLibrary() As List(Of String)
         Get
@@ -2140,6 +2151,8 @@ Public Class ThisAddIn
                 Environment.SetEnvironmentVariable("PATH", currentPath & ";" & SpeechPath)
             End If
             RuntimeOptions.LibraryPath = SpeechPath
+            RuntimeOptions.RuntimeLibraryOrder = New List(Of RuntimeLibrary) From {RuntimeLibrary.Cuda, RuntimeLibrary.Cpu}
+
         End If
 
         Dim TranscriptionForm = New TranscriptionForm()
@@ -2188,6 +2201,20 @@ Public Class ThisAddIn
         End If
     End Function
 
+    Public Async Sub ImageGenerator()
+
+        OtherPrompt = SLib.ShowCustomInputBox("Describe the image to generate (the image will be saved to the desktop):", $"{AN} Image Generator", True)
+
+        If String.IsNullOrWhiteSpace(OtherPrompt) Then
+            Exit Sub
+        End If
+
+        Dim result2 As String = Await LLM("You are an image generator. You will complete the following command.", "Create the following image " & OtherPrompt, "", "", 0, True)
+
+        ShowCustomMessageBox(result2)
+
+    End Sub
+
     Public Async Sub InLanguage1()
         If INILoadFail() Then Exit Sub
         TranslateLanguage = INI_Language1
@@ -2232,7 +2259,7 @@ Public Class ThisAddIn
         Dim DoMarkup As Boolean = INI_DoMarkupWord
         Dim DoReplace As Boolean = INI_ReplaceText2
         If Not DoMarkup Or Not DoReplace Then
-            Dim result2 As Integer = ShowCustomYesNoBox($"As per your current settings no markup will be applied. For anonymizing a larger text, doing a markup may be a better choice. How do you want to continue?", "Continue as is", "Continue with a markup")
+            Dim result2 As Integer = ShowCustomYesNoBox($"As per your current settings no markup will be applied. For anonymizing a larger text, doing a markup may be a better choice. How Do you want To Continue?", "Continue As Is", "Continue With a markup")
             If result2 = 2 Then
                 DoMarkup = True
             End If
@@ -2247,7 +2274,7 @@ Public Class ThisAddIn
                 Case 2
                     MarkupNow = "Diff markup method"
                 Case 3
-                    MarkupNow = "Diff markup method (with the output in a separate window)"
+                    MarkupNow = "Diff markup method (With the output In a separate window)"
             End Select
 
             Dim result2 As Integer = ShowCustomYesNoBox($"You have chosen the {MarkupNow}. If you are anonymizing a larger text, the 'Regex' markup method may be a better choice. How do you want to continue?", "Continue as is", "Use Regex")
@@ -2506,7 +2533,18 @@ Public Class ThisAddIn
     End Sub
     Public Async Sub FreeStyleAM()
         If INILoadFail() Then Exit Sub
+
+        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+            If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                originalConfigLoaded = False
+                Exit Sub
+            End If
+
+        End If
+
         FreeStyle(True)
+
     End Sub
     Public Async Sub FreeStyle(UseSecondAPI)
 
@@ -2538,7 +2576,8 @@ Public Class ThisAddIn
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
             Dim LibInstruct As String = $"; add '{LibTrigger}' for library search"
             Dim NetInstruct As String = $"; add '{NetTrigger}' for internet search"
-            Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-v for your last prompt")
+            Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
+            Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
 
             Dim AddOnInstruct As String = TPMarkupInstruct
             AddOnInstruct += NoFormatInstruct.Replace("; add", ", ")
@@ -2559,17 +2598,16 @@ Public Class ThisAddIn
 
             If selection.Type = WdSelectionType.wdSelectionIP Then NoText = True
 
-            SLib.StoreClipboard()
-
-            If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
+            'SLib.StoreClipboard()
+            'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
             If Not NoText Then
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False).Trim()
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
             Else
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False).Trim()
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
             End If
 
-            SLib.RestoreClipboard()
+            ' SLib.RestoreClipboard()
 
             ' Command line commands
 
@@ -2625,6 +2663,7 @@ Public Class ThisAddIn
             If OtherPrompt.StartsWith("switch", StringComparison.OrdinalIgnoreCase) Then
                 selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
                 If INI_SecondAPI Then
+                    SwitchModels(_context)
                     ShowCustomMessageBox("You have temporarily switched the two configured models. Primary is now '" & INI_Model & "', and secondary is '" & INI_Model_2 & "'.")
                 Else
                     ShowCustomMessageBox("You have defined only one model ('" & INI_Model & "').")
@@ -2897,20 +2936,30 @@ Public Class ThisAddIn
                 End If
             End If
 
-            If DoLib Then
-                Dim isSuccess As Boolean = Await ConsultLibrary(DoMarkup) ' updates SysPrompt
-                If Not isSuccess Then Exit Sub
-            ElseIf DoNet Then
-                Dim isSuccess As Boolean = Await ConsultInternet(DoMarkup) ' updates SysPrompt
-                If Not isSuccess Then Exit Sub
-            ElseIf NoText Then
-                SysPrompt = SP_FreestyleNoText
+            If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
+                OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
+                SysPrompt = OtherPrompt
             Else
-                SysPrompt = SP_FreestyleText
-                If DoBubbles Then SysPrompt = SysPrompt & " " & SP_Add_Bubbles
+                If DoLib Then
+                    Dim isSuccess As Boolean = Await ConsultLibrary(DoMarkup) ' updates SysPrompt
+                    If Not isSuccess Then Exit Sub
+                ElseIf DoNet Then
+                    Dim isSuccess As Boolean = Await ConsultInternet(DoMarkup) ' updates SysPrompt
+                    If Not isSuccess Then Exit Sub
+                ElseIf NoText Then
+                    SysPrompt = SP_FreestyleNoText
+                Else
+                    SysPrompt = SP_FreestyleText
+                    If DoBubbles Then SysPrompt = SysPrompt & " " & SP_Add_Bubbles
+                End If
             End If
 
             Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName)
+
+            If UseSecondAPI And originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
 
         Catch ex As System.Exception
             MessageBox.Show("Error in Freestyle: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -6667,7 +6716,6 @@ Public Class ThisAddIn
             End If
 
             AddHandler Me.cultureComboBox.MouseMove, AddressOf cultureComboBox_MouseMove
-            AddHandler Me.cultureComboBox.DropDown, AddressOf cultureComboBox_MouseMove
 
             LoadAudioDevices()
 
@@ -6779,8 +6827,6 @@ Public Class ThisAddIn
             .Checked = My.Settings.LastSpeakerEnabled
         }
 
-            ' Declare the ToolTip at the class level
-
 
             ' Initialize the TextBox and set the ToolTip
             Me.SpeakerDistance = New System.Windows.Forms.TextBox() With {
@@ -6812,7 +6858,7 @@ Public Class ThisAddIn
             ' Panel for Buttons
             Me.ButtonPanel = New Panel() With {
             .Anchor = AnchorStyles.Bottom Or AnchorStyles.Left Or AnchorStyles.Right,
-            .Height = 40
+            .Height = 45
         }
 
             ' --- Layout ---
@@ -6848,8 +6894,6 @@ Public Class ThisAddIn
             SpeakerIdent.Location = New System.Drawing.Point(deviceComboBox.Left + deviceComboBox.Width + horizontalPadding + horizontalPadding, Label1.Top - 1)
             SpeakerDistance.Location = New System.Drawing.Point(SpeakerIdent.Left + SpeakerIdent.PreferredSize.Width + 10, Label1.Top - 1)
 
-
-
             ' Position StatusLabel below the first row with consistent padding
             StatusLabel.Location = New System.Drawing.Point(12, Label1.Bottom + verticalPadding)
 
@@ -6879,7 +6923,7 @@ Public Class ThisAddIn
             processCombobox.Location = New System.Drawing.Point(ProcessButton.Right + buttonPadding, buttonTopMargin)
             processCombobox.Size = New Size(250, 21)
 
-            ButtonPanel.Size = New Size(770, buttonTopMargin + verticalPadding + StartButton.Height)
+            ButtonPanel.Size = New Size(770, buttonTopMargin + verticalPadding + StartButton.Height + 3)
             ButtonPanel.Padding = New Padding(buttonPadding)
 
             Me.ClientSize = New Drawing.Size(800, ButtonPanel.Bottom + verticalPadding)
@@ -7220,7 +7264,7 @@ Public Class ThisAddIn
         Private Sub StartWhisper(Optional language As String = "auto")
             Dim modelpath As String = System.IO.Path.Combine(ExpandEnvironmentVariables(Globals.ThisAddIn.INI_SpeechModelPath), Me.cultureComboBox.SelectedItem.ToString())
 
-            ' Load the model using WhisperFactory
+            ' Load the model using WhisperFactory with the specified runtime options
             Dim factory As WhisperFactory = WhisperFactory.FromPath(modelpath)
 
             ' Configure the builder with language, threads, etc.
