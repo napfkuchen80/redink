@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.4.2025
+' 8.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -167,7 +167,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.070425 Gen2 Beta Test"
+    Public Const Version As String = "V.080425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -177,6 +177,7 @@ Public Class ThisAddIn
     Private Const TextPrefix2 As String = "Text:"
     Private Const CellByCellPrefix As String = "CellByCell:"
     Private Const CellByCellPrefix2 As String = "CBC:"
+    Private Const PurePrefix As String = "Pure:"
     Private Const RIMenu = AN
     Private Const MinHelperVersion = 1           ' Minimum version of the helper file that is required
 
@@ -1934,7 +1935,23 @@ Public Class ThisAddIn
 
     Public Async Function FreestyleAM() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
+
+        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+            If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                originalConfigLoaded = False
+                Exit Function
+            End If
+
+        End If
+
         Dim result As Boolean = Await Freestyle(True)
+
+        If originalConfigLoaded Then
+            RestoreDefaults(_context, originalConfig)
+            originalConfigLoaded = False
+        End If
+
     End Function
 
     Public Async Function Freestyle(ByVal UseSecondAPI As Boolean) As Task(Of Boolean)
@@ -1945,6 +1962,7 @@ Public Class ThisAddIn
         Dim DoFormulas As Boolean = True
 
         Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
+        Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
 
         If selectedRange Is Nothing Then
             NoSelectedCells = True
@@ -1964,9 +1982,9 @@ Public Class ThisAddIn
         'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct})" & PromptLibInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct})" & PromptLibInstruct & PureInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
         Else
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
             DoRange = True
         End If
 
@@ -2013,14 +2031,19 @@ Public Class ThisAddIn
             selectedRange.Select()
         End If
 
-        If Not NoSelectedCells Then
-            If DoRange Then
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
-            Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, False, UseSecondAPI)
-            End If
+        If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
+            OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
+            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
         Else
-            Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+            If Not NoSelectedCells Then
+                If DoRange Then
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+                Else
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, False, UseSecondAPI)
+                End If
+            Else
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+            End If
         End If
 
     End Function
@@ -2424,8 +2447,8 @@ Public Class ThisAddIn
                                                                     .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
                                                                 }
                                     ' Fix cell format issues
-                                    targetRange.NumberFormat = "General"
                                     targetRange.Value = ""
+                                    targetRange.NumberFormat = "General"
                                     Try
                                         targetRange.Formula = formulaOrValue
                                         undoStates.Add(state)

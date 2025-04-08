@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.4.2025
+' 8.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -218,7 +218,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.070425 Gen2 Beta Test"
+    Public Const Version As String = "V.080425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -4779,7 +4779,7 @@ Public Class ThisAddIn
                 CompareFields:=False,
                 CompareComments:=False,
                 CompareMoves:=False,
-                RevisedAuthor:=AN
+                RevisedAuthor:=Application.UserName
             )
 
             ' Copy the comparison document's content while keeping the original format

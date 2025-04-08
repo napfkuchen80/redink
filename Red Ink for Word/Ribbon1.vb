@@ -86,6 +86,10 @@ Public Class Ribbon1
         Globals.ThisAddIn.ImportTextFile()
     End Sub
 
+    Private Sub RI_Halves_Click(sender As Object, e As RibbonControlEventArgs) 'Handles RI_Halves.Click
+        Globals.ThisAddIn.CompareSelectionHalves()
+    End Sub
+
     Private Sub RI_Search_Click(sender As Object, e As RibbonControlEventArgs) 'Handles RI_Import.Click
         Globals.ThisAddIn.ContextSearch()
     End Sub
@@ -124,4 +128,5 @@ Public Class Ribbon1
     Private Sub RI_Convincing_Click(sender As Object, e As RibbonControlEventArgs)
         Globals.ThisAddIn.Convincing()
     End Sub
+
 End Class

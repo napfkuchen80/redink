@@ -80,7 +80,7 @@ Partial Class Ribbon1
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
         Me.RI_Search = Me.Factory.CreateRibbonButton
         Me.Menu2 = Me.Factory.CreateRibbonMenu
-        Me.RI_Halves2 = Me.Factory.CreateRibbonButton
+        Me.RI_Halves = Me.Factory.CreateRibbonButton
         Me.RI_AcceptFormat = Me.Factory.CreateRibbonButton
         Me.RI_TimeSpan = Me.Factory.CreateRibbonButton
         Me.RI_Regex = Me.Factory.CreateRibbonButton
@@ -323,7 +323,7 @@ Partial Class Ribbon1
         '
         'Menu2
         '
-        Me.Menu2.Items.Add(Me.RI_Halves2)
+        Me.Menu2.Items.Add(Me.RI_Halves)
         Me.Menu2.Items.Add(Me.RI_AcceptFormat)
         Me.Menu2.Items.Add(Me.RI_TimeSpan)
         Me.Menu2.Items.Add(Me.RI_Regex)
@@ -334,13 +334,13 @@ Partial Class Ribbon1
         Me.Menu2.ScreenTip = "Provides additional useful tools in word (no AI used)"
         Me.Menu2.ShowImage = True
         '
-        'RI_Halves2
+        'RI_Halves
         '
-        Me.RI_Halves2.Label = "Self-Compare Selection"
-        Me.RI_Halves2.Name = "RI_Halves2"
-        Me.RI_Halves2.OfficeImageId = "ReviewCompareTwoVersions"
-        Me.RI_Halves2.ScreenTip = "Will compare two or more paragraphs with each other"
-        Me.RI_Halves2.ShowImage = True
+        Me.RI_Halves.Label = "Self-Compare Selection"
+        Me.RI_Halves.Name = "RI_Halves"
+        Me.RI_Halves.OfficeImageId = "ReviewCompareTwoVersions"
+        Me.RI_Halves.ScreenTip = "Will compare two or more paragraphs with each other"
+        Me.RI_Halves.ShowImage = True
         '
         'RI_AcceptFormat
         '
@@ -475,6 +475,7 @@ Partial Class Ribbon1
         AddHandler RI_Transcriptor.Click, AddressOf RI_Transcriptor_Click
         AddHandler RI_TimeSpan.Click, AddressOf RI_TimeSpan_Click
         AddHandler RI_AcceptFormat.Click, AddressOf RI_AcceptFormat_Click
+        AddHandler RI_Halves.Click, AddressOf RI_Halves_Click
         AddHandler RI_Translate.Click, AddressOf RI_Translate_Click
         AddHandler Settings.Click, AddressOf Settings_Click
         AddHandler RI_FreestyleAM.Click, AddressOf RI_FreestyleAM_Click
@@ -575,7 +576,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_SecLang As RibbonButton
     Friend WithEvents RI_SwitchParty As RibbonButton
     Friend WithEvents Menu2 As RibbonMenu
-    Friend WithEvents RI_Halves2 As RibbonButton
+    Friend WithEvents RI_Halves As RibbonButton
     Friend WithEvents RI_AcceptFormat As RibbonButton
     Friend WithEvents RI_TimeSpan As RibbonButton
     Friend WithEvents RI_Regex As RibbonButton
