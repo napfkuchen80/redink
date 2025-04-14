@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.4.2025
+' 14.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -54,6 +54,7 @@ Imports System.Speech.Synthesis
 Imports Whisper.net.LibraryLoader
 Imports Newtonsoft.Json
 Imports System.Runtime.Remoting.Contexts
+Imports NAudio
 
 
 Module Module1
@@ -218,7 +219,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080425 Gen2 Beta Test"
+    Public Const Version As String = "V.140425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2516,12 +2517,14 @@ Public Class ThisAddIn
                 GenerateAndPlayAudio(selection.Text, selectedoutputpath, "", "")
                 Exit Sub
             Else
-                Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", False)
+                Dim Voices As Integer = ShowCustomYesNoBox("Do you want to use alternate voices to read the text?", "No, one voice", "Yes, alternate", "Create Audio")
+                If Voices = 0 Then Return
+                Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Google Text-To-Speech - Select Voices", Voices = 2)
                     If frm.ShowDialog() = DialogResult.OK Then
                         Dim selectedVoices As List(Of String) = frm.SelectedVoices
                         Dim selectedLanguage As String = frm.SelectedLanguage
                         Dim outputPath As String = frm.SelectedOutputPath
-                        GenerateAndPlayAudioFromSelectionParagraphs(outputPath, selectedLanguage, selectedVoices(0).Replace(" (male)", "").Replace(" (female)", ""))
+                        GenerateAndPlayAudioFromSelectionParagraphs(outputPath, selectedLanguage, selectedVoices(0).Replace(" (male)", "").Replace(" (female)", ""), If(Voices = 2, selectedVoices(1).Replace(" (male)", "").Replace(" (female)", ""), ""))
                     End If
                 End Using
             End If
@@ -2566,7 +2569,7 @@ Public Class ThisAddIn
             Dim DoKeepFormat As Boolean = INI_KeepFormat2
             Dim DoKeepParaFormat As Boolean = INI_KeepParaFormatInline
 
-            Dim MarkupInstruct As String = $"start with '{MarkupPrefixAll}' for markups"
+            Dim MarkupInstruct As String = $"start With '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"with '{InPlacePrefix}' for replacing the selection"
             Dim BubblesInstruct As String = $"with '{BubblesPrefix}' for having your text commented"
             Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}' for separate output"
@@ -8329,20 +8332,6 @@ Public Class ThisAddIn
                 ' Convert payload to JSON
                 Dim content As New StringContent(jsonPayload, Encoding.UTF8, "application/json")
 
-                ' Allow for Esc to cancel
-                Dim keyListenerTask As System.Threading.Tasks.Task = System.Threading.Tasks.Task.Run(Sub()
-                                                                                                         While Not cts.Token.IsCancellationRequested
-                                                                                                             If Console.KeyAvailable Then
-                                                                                                                 Dim key As ConsoleKeyInfo = Console.ReadKey(True)
-                                                                                                                 If key.Key = ConsoleKey.Escape Then
-                                                                                                                     cts.Cancel()
-                                                                                                                     Exit While
-                                                                                                                 End If
-                                                                                                             End If
-                                                                                                             Thread.Sleep(100) ' Reduce CPU usage
-                                                                                                         End While
-                                                                                                     End Sub)
-
                 Try
                     ' Make API request
 
@@ -8699,7 +8688,7 @@ Public Class ThisAddIn
         Dim hasGuest As Boolean = conversation.Any(Function(t) t.Item1 = "G")
 
         If hasHost AndAlso hasGuest Then
-            Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", true)
+            Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", True)
                 If frm.ShowDialog() = DialogResult.OK Then
                     Dim selectedVoices As List(Of String) = frm.SelectedVoices
                     Dim selectedLanguage As String = frm.SelectedLanguage
@@ -8730,14 +8719,17 @@ Public Class ThisAddIn
     End Sub
 
 
-    Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
+    Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
         Try
 
             Dim Temporary As Boolean = (filepath = "")
+            Dim Alternate As Boolean = True
 
             If Temporary Then
                 filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
             End If
+
+            If voiceNameAlt = "" Then Alternate = False
 
             ' Get the current Word selection.
             Dim app As Word.Application = Globals.ThisAddIn.Application
@@ -8751,34 +8743,55 @@ Public Class ThisAddIn
             Dim Pitch As Double = My.Settings.Pitch
             Dim SpeakingRate As Double = My.Settings.Speakingrate
             Dim ReadTitleNumbers As Boolean = False
+            Dim CleanText As Boolean = False
+            Dim CleanTextPrompt As String = My.Settings.CleanTextPrompt
+            If String.IsNullOrWhiteSpace(CleanTextPrompt) Then CleanTextPrompt = SP_CleanTextPrompt
 
             ' Create an array of InputParameter objects.
             Dim params() As SLib.InputParameter = {
                     New SLib.InputParameter("Pitch", Pitch),
                     New SLib.InputParameter("Speaking Rate", SpeakingRate),
                     New SLib.InputParameter("No SSML", NoSSML),
-                    New SLib.InputParameter("Title Numbers", ReadTitleNumbers)
+                    New SLib.InputParameter("Title Numbers", ReadTitleNumbers),
+                    New SLib.InputParameter("Clean text", CleanText)
                     }
 
             ' Call the procedure (the parameters are passed ByRef).
             If Not ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your audio file based on your text:", $"Create Audio", params) Then Return
 
-
             Pitch = CDbl(params(0).Value)
             SpeakingRate = CDbl(params(1).Value)
             NoSSML = CBool(params(2).Value)
             ReadTitleNumbers = CBool(params(3).Value)
+            CleanText = CBool(params(4).Value)
 
             My.Settings.NoSSML = NoSSML
             My.Settings.Pitch = Pitch
             My.Settings.Speakingrate = SpeakingRate
             My.Settings.Save()
 
+            If CleanText Then
+                CleanTextPrompt = ShowCustomInputBox("Please enter the prompt to 'clean' the text with (each paragraph will be submitted to this prompt)", "Create Audio", False, CleanTextPrompt).Trim()
+                If CleanTextPrompt = "ESC" Then Return
+                If CleanTextPrompt = "" Then
+                    CleanText = False
+                Else
+                    My.Settings.CleanTextPrompt = CleanTextPrompt
+                    My.Settings.Save()
+                End If
+            End If
+
             Dim totalParagraphs As Integer = selection.Paragraphs.Count
             Dim tempFiles As New List(Of String)
             Dim paragraphIndex As Integer = 0
             Dim sentenceEndPunctuation As String() = {".", "!", "?", ";", ":", ",", ")", "]", "}"}
             Dim bracketedTextPattern As String = "^\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$"
+
+            Dim voiceName1 As String = voiceName
+            Dim voiceName2 As String = voiceNameAlt
+            Dim currentVoiceName As String = voiceName1
+            Dim firstTitleEncountered As Boolean = False
+            Dim LastTextWasTitle As Boolean = False
 
             ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
             ProgressBarModule.CancelOperation = False
@@ -8842,9 +8855,36 @@ Public Class ThisAddIn
                 If styleName.Contains("heading") Then
                     isTitle = True
                 Else
-                    ' Also treat very short paragraphs (one or two lines) as titles.
-                    Dim lines() As String = paraText.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
-                    If lines.Length <= 2 Then isTitle = True
+                    Dim lineCount As Long = para.Range.ComputeStatistics(WdStatistic.wdStatisticLines)
+                    If lineCount <= 2 Then
+                        isTitle = True
+                    End If
+                    If Not paraText.EndsWith(".") Then
+                        isTitle = True
+                    End If
+                End If
+
+                Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
+                Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
+
+                If isTitle And Alternate Then
+                    If Not firstTitleEncountered Then
+                        firstTitleEncountered = True
+                        ' For the very first title, keep the current voice unchanged.
+                    Else
+                        If Not LastTextWasTitle Then
+                            ' Switch the voice if the last paragraph was not a title.
+                            Debug.WriteLine("Switching ...")
+                            If currentVoiceName = voiceName1 Then
+                                currentVoiceName = voiceName2
+                            Else
+                                currentVoiceName = voiceName1
+                            End If
+                        End If
+                    End If
+                    LastTextWasTitle = True
+                Else
+                    LastTextWasTitle = False
                 End If
 
                 ' Set the maximum value if you know the total number of steps.
@@ -8860,8 +8900,14 @@ Public Class ThisAddIn
                     If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
                 End If
 
+                If CleanText Then
+                    ' Remove any unwanted characters from the paragraph text.
+                    paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", False, True)
+                    paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
+                End If
+
                 ' Generate the audio for the paragraph via your TTS API.
-                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, voiceName, NoSSML, Pitch, SpeakingRate)
+                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate)
                 If paragraphAudioBytes IsNot Nothing Then
                     Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
                     File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
@@ -8895,7 +8941,7 @@ Public Class ThisAddIn
 
             ' If no valid paragraphs were found, notify the user.
             If tempFiles.Count = 0 Then
-                ShowCustomMessageBox("No valid paragraphs found for audio generation; skipping empty ones and {...}, [...] and (...).")
+                ShowCustomMessageBox("No valid paragraphs found For audio generation; skipping empty ones And {...}, [...] And (...).")
                 Return
             End If
 
@@ -9082,7 +9128,7 @@ Public Class ThisAddIn
             Me.Text = _formTitle
             Me.Font = New Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular)
             Me.StartPosition = FormStartPosition.CenterScreen
-            Me.Size = New Size(660, 500)
+            Me.Size = New Size(750, 550)
             Me.FormBorderStyle = FormBorderStyle.FixedDialog
             Me.MaximizeBox = False
 
@@ -9103,9 +9149,10 @@ Public Class ThisAddIn
         Private Sub CreateControls()
             ' Top label (autosized)
             lblIntro = New Label() With {
-            .Text = _topLabelText,
-            .AutoSize = True
-        }
+                .Text = _topLabelText,
+                .AutoSize = True,
+                .MaximumSize = New Size(700, 0)
+            }
 
             ' Column 1
             lblSet1 = New Label() With {
@@ -9247,8 +9294,6 @@ Public Class ThisAddIn
                 End Select
             End If
 
-
-
             ' --- Change play buttons to display Webdings character 52 ---
             Dim webdingsFont As New Drawing.Font("Webdings", 9.0F)
             btnPlay1A.Font = webdingsFont
@@ -9270,7 +9315,7 @@ Public Class ThisAddIn
             .Width = 330
         }
             chkTemporary = New Forms.CheckBox() With {
-            .Text = "Temporary only",
+            .Text = "Temp only",
             .AutoSize = True
         }
             ' When checked, the output path text box is disabled.
@@ -9394,7 +9439,7 @@ Public Class ThisAddIn
             btnDesktop.Top = btnOK.Top
 
             ' Adjust overall form height if needed.
-            Me.Height = btnCancel.Bottom + 60
+            Me.Height = btnCancel.Bottom + 90
         End Sub
 
         ' --- AddHandlers ---
