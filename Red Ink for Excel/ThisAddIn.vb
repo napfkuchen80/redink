@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.4.2025
+' 15.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -167,7 +167,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080425 Gen2 Beta Test"
+    Public Const Version As String = "V.150425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -806,6 +806,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_MailSumup = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MailSumup2 As String
+        Get
+            Return _context.SP_MailSumup2
+        End Get
+        Set(value As String)
+            _context.SP_MailSumup2 = value
         End Set
     End Property
 
@@ -2589,20 +2598,54 @@ Public Class ThisAddIn
         End If
         Return String.Empty
     End Function
-    Function GetFormulaOrValueFromInstruction(ByVal instruction As String) As String
-        Dim startPos As Integer = -1
 
+    Public Function GetFormulaOrValueFromInstruction(ByVal instruction As String) As String
+        Dim pattern As String = ""
+        ' Determine which marker is present
         If instruction.Contains("[Formula: ") Then
-            startPos = instruction.IndexOf("[Formula: ") + 10
+            pattern = "[Formula: "
         ElseIf instruction.Contains("[Value: ") Then
-            startPos = instruction.IndexOf("[Value: ") + 8
+            pattern = "[Value: "
+        Else
+            Return String.Empty
         End If
 
-        If startPos > -1 Then
-            Dim endPos As Integer = instruction.IndexOf("]", startPos)
-            If endPos > startPos Then
-                Return instruction.Substring(startPos, endPos - startPos).Trim()
+        Dim patternLength As Integer = pattern.Length
+        ' Find the start of the entire bracketed expression (the "[" included in the marker)
+        Dim openingBracketIndex As Integer = instruction.IndexOf(pattern)
+        If openingBracketIndex = -1 Then
+            Return String.Empty
+        End If
+
+        ' Use a bracket counter to handle nested brackets.
+        ' Start scanning from the beginning of the outer bracketed expression.
+        Dim counter As Integer = 0
+        Dim matchingBracketIndex As Integer = -1
+        For i As Integer = openingBracketIndex To instruction.Length - 1
+            Dim c As Char = instruction(i)
+            If c = "["c Then
+                counter += 1
+            ElseIf c = "]"c Then
+                counter -= 1
+                ' When counter reaches zero, we found the closing bracket that matches our opening bracket.
+                If counter = 0 Then
+                    matchingBracketIndex = i
+                    Exit For
+                End If
             End If
+        Next
+
+        ' If no matching closing bracket was found, return empty string.
+        If matchingBracketIndex = -1 Then
+            Return String.Empty
+        End If
+
+        ' The actual content starts right after the marker (e.g. after "[Value: " or "[Formula: ")
+        Dim contentStart As Integer = openingBracketIndex + patternLength
+        Dim contentLength As Integer = matchingBracketIndex - contentStart
+
+        If contentLength > 0 Then
+            Return instruction.Substring(contentStart, contentLength).Trim()
         End If
 
         Return String.Empty

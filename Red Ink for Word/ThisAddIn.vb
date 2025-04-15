@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.4.2025
+' 15.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -219,7 +219,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.140425 Gen2 Beta Test"
+    Public Const Version As String = "V.150425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -937,6 +937,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_MailSumup = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MailSumup2 As String
+        Get
+            Return _context.SP_MailSumup2
+        End Get
+        Set(value As String)
+            _context.SP_MailSumup2 = value
         End Set
     End Property
 

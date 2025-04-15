@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.4.2025
+' 15.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -146,6 +146,7 @@ Namespace SharedLibrary
             Property SP_Summarize As String
             Property SP_MailReply As String
             Property SP_MailSumup As String
+            Property SP_MailSumup2 As String
             Property SP_FreestyleText As String
             Property SP_FreestyleNoText As String
             Property SP_SwitchParty As String
@@ -297,6 +298,7 @@ Namespace SharedLibrary
         Public Property SP_Summarize As String Implements ISharedContext.SP_Summarize
         Public Property SP_MailReply As String Implements ISharedContext.SP_MailReply
         Public Property SP_MailSumup As String Implements ISharedContext.SP_MailSumup
+        Public Property SP_MailSumup2 As String Implements ISharedContext.SP_MailSumup2
         Public Property SP_FreestyleText As String Implements ISharedContext.SP_FreestyleText
         Public Property SP_FreestyleNoText As String Implements ISharedContext.SP_FreestyleNoText
         Public Property SP_SwitchParty As String Implements ISharedContext.SP_SwitchParty
@@ -496,6 +498,7 @@ Namespace SharedLibrary
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_MailReply As String = "You are a legal professional with excellent legal, language, logical and rhetorical skills that precisely complies with its instructions step by step. Your task is to read the text that is provided to you and marked as 'mailchain', which contains an e-mail chain. The first mail you get is the e-mail to which you shall draft a response for me. When drafting the response for me, comply with the following instructions and information (= key instructions): {OtherPrompt}. \n\nThese are the further rules that every answer should follow: 1. Draft it in the same language as the first mail you get has been written (do not consider headers, the subject line or the footer. 2. The top (and latest) e-mail you are provided with in the mailchain is from the person who wrote to me. This will be the person to whom I want to respond to. You will draft an e-mail to respond to that person, i.e. the author of the top and latest e-mail. Please keep that in mind when drafting a response and make sure that you . 3. Please read the entire mail chain and distinguish exactly who has written what and what the party, to whom I will respond, has written when drafting the response. However, on the substance, focus on the key instructions I provided to you above, if any. 4. In your proposed response use the same style, type of language and way of e-mail drafting as I do. 5. Do not process and never consider or include signatures and mail footers. 6. Provide your output in the Markdown format. 7. When drafting a reply, use full salutations and closing formulas that are adequate in view of the tone of the mailchain. 8. Finally, when drafting the response, it is very important that you comply with all instructions and careful check your response for compliance with all instructions before you provide it. {INI_PreCorrection}"
         Const Default_SP_MailSumup As String = "You are a highly skilled legal professional who strictly follows instructions step by step; analyze the body of the provided ""mailchain"" to determine its predominant language (ignoring sender, recipient, subject, etc.), strictly use this language for the output, generate a concise, structured Markdown-formatted summary (in bold, but not header formatting) including a one-sentence key takeaway followed by a breakdown of key points distinguishing different authors, ensuring the summary is very short and concise while retaining all critical information and getting an understanding of the conversation. {INI_PreCorrection}"
+        Const Default_SP_MailSumup2 As String = "You are a highly skilled and very diligent personal assistant who strictly follows instructions step by step. You want to save my team by handling my e-mails. You will be provided with a number of e-mail-chains that I have received. Analyze the latest e-mail in every e-mail-chain, not more. Determine whether this latest mail is either very important or needs urgent attention. Of the three to five most relevant mails, provide me a one sentence substantive update including mandatory follow-ups, if any. Provide this in a bulleted list. Do not add any other comments. Take into account that the present date and time, which is {DateTimeNow}. Each e-mail will be provided to you between the tags <MAILnnnn> and <MAILnnnn>, whereas 'nnnn' represents the number of the e-mail. Provide your response in the main language of the mails. Be short and concise. Use bold face to indicate important elements of your response. Do not include the date and time of the e-mails, just the Sender, if necessary a word about the topic. {INI_PreCorrection}"
         Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Your task is to swap parties in a text and adapt the text to still read correctly. To do so, rewrite the text that is provided to you and is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}' preserving all other information, but ensure that in particular all pronouns, titles, possessive forms and the use of plural and singular are appropriately adjusted. If {OldParty} or {NewParty} is not a name, treat it based on its meaning, even if it starts with a capital letter. \n {INI_PreCorrection}"
         Const Default_SP_Anonymize As String = "You are very careful editor And legal professional that precisely complies with its instructions step by step. Fully anonymize the text that Is provided to you And Is marked as 'TEXTTOPROCESS'. Do so only by replacing any names, companies, businesses, parties, organizations, proprietary product names, unknown abbreviations, personal addresses, e-mail accounts, phone numbers, IDs, credit card information, account numbers and other identifying information by the expression '[redacted]' and before providing the result, check whether there is no information left that could directly or indirectly identify any person, company, business, party or organization, including information that could link to them by doing an Internet search, and if so, redact it as well. {INI_PreCorrection}"
         Const Default_SP_RangeOfCells As String = "You are an expert In analyzing And explaining Excel files To non-experts And In drafting Excel formulas For use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
@@ -2013,6 +2016,7 @@ Namespace SharedLibrary
                 context.SP_FreestyleNoText = If(configDict.ContainsKey("SP_FreestyleNoText"), configDict("SP_FreestyleNoText"), Default_SP_FreestyleNoText)
                 context.SP_MailReply = If(configDict.ContainsKey("SP_MailReply"), configDict("SP_MailReply"), Default_SP_MailReply)
                 context.SP_MailSumup = If(configDict.ContainsKey("SP_MailSumup"), configDict("SP_MailSumup"), Default_SP_MailSumup)
+                context.SP_MailSumup2 = If(configDict.ContainsKey("SP_MailSumup2"), configDict("SP_MailSumup2"), Default_SP_MailSumup2)
                 context.SP_SwitchParty = If(configDict.ContainsKey("SP_SwitchParty"), configDict("SP_SwitchParty"), Default_SP_SwitchParty)
                 context.SP_Anonymize = If(configDict.ContainsKey("SP_Anonymize"), configDict("SP_Anonymize"), Default_SP_Anonymize)
                 context.SP_ContextSearch = If(configDict.ContainsKey("SP_ContextSearch"), configDict("SP_ContextSearch"), Default_SP_ContextSearch)
@@ -2065,7 +2069,7 @@ Namespace SharedLibrary
 
                 ' Other parameters
 
-                context.INI_UpdateCheckInterval = If(configDict.ContainsKey("UpdateCheckInterval"), CInt(configDict("UpdateCheckInterval")), 3)
+                context.INI_UpdateCheckInterval = If(configDict.ContainsKey("UpdateCheckInterval"), CInt(configDict("UpdateCheckInterval")), 7)
                 context.INI_UpdatePath = If(configDict.ContainsKey("UpdatePath"), configDict("UpdatePath"), "")
                 context.INI_SpeechModelPath = If(configDict.ContainsKey("SpeechModelPath"), configDict("SpeechModelPath"), "")
                 context.INI_TTSEndpoint = If(configDict.ContainsKey("TTSEndpoint"), configDict("TTSEndpoint"), "")
@@ -5480,6 +5484,7 @@ Namespace SharedLibrary
                     {"SP_Summarize", context.SP_Summarize},
                     {"SP_MailReply", context.SP_MailReply},
                     {"SP_MailSumup", context.SP_MailSumup},
+                    {"SP_MailSumup2", context.SP_MailSumup2},
                     {"SP_FreestyleText", context.SP_FreestyleText},
                     {"SP_FreestyleNoText", context.SP_FreestyleNoText},
                     {"SP_SwitchParty", context.SP_SwitchParty},
@@ -5515,6 +5520,7 @@ Namespace SharedLibrary
                     {"SP_Summarize", Default_SP_Summarize},
                     {"SP_MailReply", Default_SP_MailReply},
                     {"SP_MailSumup", Default_SP_MailSumup},
+                    {"SP_MailSumup2", Default_SP_MailSumup2},
                     {"SP_FreestyleText", Default_SP_FreestyleText},
                     {"SP_FreestyleNoText", Default_SP_FreestyleNoText},
                     {"SP_SwitchParty", Default_SP_SwitchParty},
@@ -5975,6 +5981,7 @@ Namespace SharedLibrary
             variableValues.Add("SP_Summarize", context.SP_Summarize)
             variableValues.Add("SP_MailReply", context.SP_MailReply)
             variableValues.Add("SP_MailSumup", context.SP_MailSumup)
+            variableValues.Add("SP_MailSumup2", context.SP_MailSumup2)
             variableValues.Add("SP_FreestyleText", context.SP_FreestyleText)
             variableValues.Add("SP_FreestyleNoText", context.SP_FreestyleNoText)
             variableValues.Add("SP_SwitchParty", context.SP_SwitchParty)
@@ -6070,6 +6077,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_Summarize") Then context.SP_Summarize = updatedValues("SP_Summarize")
                     If updatedValues.ContainsKey("SP_MailReply") Then context.SP_MailReply = updatedValues("SP_MailReply")
                     If updatedValues.ContainsKey("SP_MailSumup") Then context.SP_MailSumup = updatedValues("SP_MailSumup")
+                    If updatedValues.ContainsKey("SP_MailSumup2") Then context.SP_MailSumup2 = updatedValues("SP_MailSumup2")
                     If updatedValues.ContainsKey("SP_FreestyleText") Then context.SP_FreestyleText = updatedValues("SP_FreestyleText")
                     If updatedValues.ContainsKey("SP_FreestyleNoText") Then context.SP_FreestyleNoText = updatedValues("SP_FreestyleNoText")
                     If updatedValues.ContainsKey("SP_SwitchParty") Then context.SP_SwitchParty = updatedValues("SP_SwitchParty")

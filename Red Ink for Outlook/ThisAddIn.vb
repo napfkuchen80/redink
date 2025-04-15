@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.4.2025
+' 15.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -94,7 +94,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.070425 Gen2 Beta Test"
+    Public Const Version As String = "V.150425 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -126,6 +126,7 @@ Public Class ThisAddIn
     Public TranslateLanguage As String = ""
     Public OtherPrompt As String = ""
     Public ShortenLength, SummaryLength As Long
+    Public DateTimeNow As String
 
     Public InspectorOpened As Boolean = False
 
@@ -748,6 +749,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_MailSumup = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MailSumup2 As String
+        Get
+            Return _context.SP_MailSumup2
+        End Get
+        Set(value As String)
+            _context.SP_MailSumup2 = value
         End Set
     End Property
 
@@ -1509,37 +1519,68 @@ Public Class ThisAddIn
             ' Check for inline response
             Dim inlineResponse As Object = oExplorer.ActiveInlineResponse
             If inlineResponse Is Nothing Then
-                If Sumup Then
-                    ' Get the current selection in the explorer
-                    Dim selection As Outlook.Selection = oExplorer.Selection
 
-                    ' Check if any item is selected
-                    If selection.Count = 0 Then
-                        ShowCustomMessageBox("No email is selected.")
-                        Return
-                    End If
+                ' Get the current selection in the explorer
+                Dim selection As Outlook.Selection = oExplorer.Selection
 
-                    ' Declare a variable to hold the email content
-                    Dim selectedText As String = String.Empty
-
-                    ' Retrieve the first selected item
-                    Dim selectedItem As Object = selection(1)
-
-                    ' Check if the selected item is a MailItem
-                    If TypeOf selectedItem Is Outlook.MailItem Then
-                        Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
-                        selectedText = mail.Body
-                    Else
-                        ShowCustomMessageBox("The selected item is not an email.")
-                        Return
-                    End If
-
-                    ShowSumup(selectedText)
-
-                Else
-                    ShowCustomMessageBox("You can only use this function when you are editing an e-mail.")
+                ' Check if any item is selected
+                If selection.Count = 0 Then
+                    ShowCustomMessageBox("No email is selected.")
+                    Return
                 End If
-                Return
+
+                If selection.Count > 1 Then
+                    If Not Sumup Then
+                        ShowCustomMessageBox("Multiple emails selected. Please select only one email when not using Sumup mode.")
+                        Return
+                    Else
+                        ' Combine texts from all selected emails.
+                        Dim mailItems As New List(Of Microsoft.Office.Interop.Outlook.MailItem)
+                        For Each item As Object In selection
+                            If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
+                                mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
+                            End If
+                        Next
+
+                        If mailItems.Count = 0 Then
+                            ShowCustomMessageBox("None of the selected items are emails.")
+                            Return
+                        End If
+
+                        ' Order the emails: latest email first (descending order by ReceivedTime)
+                        mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
+
+                        Dim selectedText As String = String.Empty
+                        Dim count As Integer = 1
+                        For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
+                            Dim tag As String = count.ToString("D4") ' Format count with four digits
+                            Dim latestBody As String = GetLatestMailBody(mail.Body)
+                            selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
+                            count += 1
+                        Next
+
+                        ShowSumup2(selectedText)
+                        Return
+                    End If
+                Else
+                    ' Only one email is selected.
+                    If Sumup Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
+                            ShowSumup(selectedText)
+                            Return
+                        Else
+                            ShowCustomMessageBox("The selected item is not an email.")
+                            Return
+                        End If
+                    Else
+                        ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
+                        Return
+                    End If
+                End If
+
             End If
 
             ' Ensure it is a MailItem
@@ -1614,6 +1655,84 @@ Public Class ThisAddIn
         End Try
     End Sub
 
+    Private Function GetLatestMailBody(ByVal fullBody As String) As String
+        Try
+            ' Define an array of candidate markers that are common indicators of quoted messages,
+            ' including localized variants.
+            Dim markers() As String = {
+            "-----Original Message-----",
+            "-----Ursprüngliche Nachricht-----",
+            "-----Vorherige Nachricht-----",
+            "-----Mensaje original-----",
+            "-----Messaggio originale-----",
+            "-----Courrier original-----",
+            "On ",
+            "wrote:"
+        }
+
+            ' Regular expression to detect header lines with a proper email address
+            Dim emailPattern As String = "^(From:|Von:|De:|Da:)\s+[\w\.-]+@[\w\.-]+\.\w+"
+
+            ' Split the email body into lines
+            Dim lines() As String = fullBody.Split(New String() {Environment.NewLine}, StringSplitOptions.None)
+            Dim sb As New StringBuilder()
+
+            For i As Integer = 0 To lines.Length - 1
+                Dim currentLine As String = lines(i)
+                Dim trimmedLine As String = currentLine.TrimStart()
+                Dim isChainMarker As Boolean = False
+
+                ' First, check each line against our list of known chain markers.
+                For Each marker As String In markers
+                    If trimmedLine.StartsWith(marker, StringComparison.InvariantCultureIgnoreCase) Then
+                        ' Only consider short lines (heuristically less than 100 characters) as markers.
+                        If trimmedLine.Length < 100 Then
+                            isChainMarker = True
+                            Exit For
+                        End If
+                    End If
+                Next
+
+                ' If none of the above markers was found, try to detect headers indicating a quoted message.
+                If Not isChainMarker Then
+                    ' Check for email header markers using a regex pattern (with an @ symbol)
+                    If Regex.IsMatch(trimmedLine, emailPattern, RegexOptions.IgnoreCase) Then
+                        isChainMarker = True
+                    Else
+                        ' Additional check: headers with a name or parenthesized comment following the marker.
+                        Dim headerMarkers() As String = {"From:", "Von:", "De:", "Da:"}
+                        For Each header As String In headerMarkers
+                            If trimmedLine.StartsWith(header, StringComparison.InvariantCultureIgnoreCase) Then
+                                ' Extract the text after the header marker.
+                                Dim remainingText As String = trimmedLine.Substring(header.Length).Trim()
+                                ' Check if the remaining text contains a comma (e.g., "Doe, John") or a parenthesized group.
+                                If remainingText.Contains(",") OrElse (remainingText.Contains("(") AndAlso remainingText.Contains(")")) Then
+                                    isChainMarker = True
+                                    Exit For
+                                End If
+                            End If
+                        Next
+                    End If
+                End If
+
+                ' If a marker is confidently detected, assume the latest mail ends here.
+                If isChainMarker Then
+                    Return sb.ToString().TrimEnd()
+                End If
+
+                ' Otherwise, add the current line to the accumulated result.
+                sb.AppendLine(currentLine)
+            Next
+
+            ' No clear marker found; return the full email content.
+            Return fullBody
+        Catch ex As System.Exception
+            ' In case of any error, return the full email body
+            ' (Alternatively, you could log the exception as needed)
+            Return fullBody
+        End Try
+    End Function
+
 
     Private Function GetSelectionOrCaretRangeFromInlineEditor(oExplorer As Outlook.Explorer, ByRef selStart As Integer, ByRef selEnd As Integer) As Boolean
         Try
@@ -1657,6 +1776,25 @@ Public Class ThisAddIn
         Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
 
         ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up")
+
+    End Sub
+
+    Private Async Sub ShowSumup2(selectedtext As String)
+
+        Dim LLMResult As String = ""
+
+        DateTimeNow = DateTime.Now.ToString("yyyy-MMM-dd HH:mm")
+
+        LLMResult = Await LLM(InterpolateAtRuntime(SP_MailSumup2), selectedtext, "", "", 0)
+
+        If INI_PostCorrection <> "" Then
+            LLMResult = Await PostCorrection(LLMResult)
+        End If
+
+        Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
+        Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
+
+        ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up (multimail)")
 
     End Sub
 
