@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.4.2025
+' 21.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -15,6 +15,9 @@
 ' Includes NAudio in unchanged form; Copyright (c) 2024 Mark Heath; licensed under a proprietary open source license (https://www.nuget.org/packages/NAudio/2.2.1/license) at https://github.com/naudio/NAudio
 ' Includes Vosk in unchanged form; Copyright (c) 2024 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/
 ' Includes Whisper.net in unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net
+' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
+' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
+' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -53,9 +56,34 @@ Imports System.Windows
 Imports System.Speech.Synthesis
 Imports Whisper.net.LibraryLoader
 Imports Newtonsoft.Json
-Imports System.Runtime.Remoting.Contexts
-Imports NAudio
+Imports Grpc.Core
+Imports Google.Cloud.Speech.V1
 
+
+Public Class StopForm
+    Inherits Form
+
+    Public Property StopRequested As Boolean = False
+
+    Public Sub New()
+        Me.Text = "Transkription stoppen"
+        Me.FormBorderStyle = FormBorderStyle.FixedDialog
+        Me.StartPosition = FormStartPosition.CenterScreen
+        Me.Width = 200
+        Me.Height = 100
+
+        Dim btnStop As New System.Windows.Forms.Button() With {
+            .Text = "Stop",
+            .Dock = DockStyle.Fill
+        }
+        AddHandler btnStop.Click, Sub(s, e)
+                                      Me.StopRequested = True
+                                      Me.Close()
+                                  End Sub
+
+        Me.Controls.Add(btnStop)
+    End Sub
+End Class
 
 Module Module1
     ' Correct attribute declaration for DllImport
@@ -157,6 +185,7 @@ End Class
 
 Public Class ThisAddIn
 
+
     Private mainThreadControl As New System.Windows.Forms.Control()
     Public StartupInitialized As Boolean = False
     Private WithEvents wordApp As Word.Application
@@ -219,7 +248,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.150425 Gen2 Beta Test"
+    Public Const Version As String = "V.210425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -301,6 +330,30 @@ Public Class ThisAddIn
     Public Shared guestTags As String() = {"G:", "Guest:", "Gast:", "B:", "2:"}
     Public Shared GoogleIdentifier As String = "googleapis.com"
     Public Shared TTSSecondAPI As Boolean = False
+
+    Public Shared GoogleSTT_Desc As String = "Google STT V1 (run in EU)"
+    Public Shared STTEndpoint As String = "eu-speech.googleapis.com"
+
+    Public Shared GoogleSTTsupportedLanguages As String() = {
+    "en-US", "de-DE",
+    "de-AT", "de-CH", "es-AR", "es-BO", "es-CL", "es-CO", "es-CR", "es-DO", "es-EC", "es-ES", "es-GT",
+    "es-HN", "es-MX", "es-NI", "es-PA", "es-PE", "es-PR", "es-PY", "es-SV", "es-UY", "es-VE",
+    "fr-BE", "fr-CA", "fr-CH", "fr-FR", "it-CH", "it-IT", "nl-BE", "nl-NL",
+    "af-ZA", "am-ET", "ar-BH", "ar-DZ", "ar-EG", "ar-IQ", "ar-IL", "ar-JO", "ar-KW", "ar-LB", "ar-MA",
+    "ar-MR", "ar-OM", "ar-PS", "ar-QA", "ar-SA", "ar-SY", "ar-TN", "ar-AE", "ar-YE", "az-AZ", "bg-BG",
+    "bn-BD", "bn-IN", "bs-BA", "ca-ES", "cmn-Hans-CN", "cmn-Hans-HK", "cmn-Hant-TW", "cs-CZ",
+    "da-DK", "el-GR", "en-AU", "en-CA", "en-GH", "en-HK", "en-IE", "en-IN", "en-KE", "en-NG",
+    "en-NZ", "en-PH", "en-PK", "en-SG", "en-TZ", "en-ZA", "et-EE", "eu-ES", "fa-IR", "fi-FI",
+    "fil-PH", "gl-ES", "gu-IN", "hi-IN", "hr-HR", "hu-HU", "hy-AM", "id-ID", "is-IS", "iw-IL",
+    "ja-JP", "jv-ID", "ka-GE", "kk-KZ", "km-KH", "kn-IN", "ko-KR", "lo-LA", "lt-LT", "lv-LV",
+    "ml-IN", "mn-MN", "mr-IN", "ms-MY", "my-MM", "ne-NP", "no-NO", "pa-Guru-IN", "pl-PL",
+    "pt-BR", "pt-PT", "ro-RO", "rw-RW", "si-LK", "sk-SK", "sl-SI", "sr-RS", "ss-Latn-ZA", "st-ZA",
+    "su-ID", "sv-SE", "sw-KE", "sw-TZ", "ta-IN", "ta-LK", "ta-MY", "ta-SG", "te-IN", "th-TH",
+    "tn-Latn-ZA", "tr-TR", "uk-UA", "ur-IN", "ur-PK", "uz-UZ", "ve-ZA", "vi-VN", "xh-ZA",
+    "yue-Hant-HK", "zu-ZA"
+        }
+
+
 
     ' Definition of the SharedProperties for context for exchanging values with the SharedLibrary
 
@@ -1057,6 +1110,16 @@ Public Class ThisAddIn
             _context.SP_Add_Bubbles = value
         End Set
     End Property
+
+    Public Shared Property SP_BubblesExcel As String
+        Get
+            Return _context.SP_BubblesExcel
+        End Get
+        Set(value As String)
+            _context.SP_BubblesExcel = value
+        End Set
+    End Property
+
     Public Shared Property SP_Add_Revisions As String
         Get
             Return _context.SP_Add_Revisions
@@ -1092,7 +1155,23 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_ChatExcel As String
+        Get
+            Return _context.SP_ChatExcel
+        End Get
+        Set(value As String)
+            _context.SP_ChatExcel = value
+        End Set
+    End Property
 
+    Public Shared Property SP_Add_ChatExcel_Commands As String
+        Get
+            Return _context.SP_Add_ChatExcel_Commands
+        End Get
+        Set(value As String)
+            _context.SP_Add_ChatExcel_Commands = value
+        End Set
+    End Property
     Public Shared Property INI_ChatCap As Integer
         Get
             Return _context.INI_ChatCap
@@ -2475,14 +2554,13 @@ Public Class ThisAddIn
         Dim Endpoint As String = INI_Endpoint
         Dim Endpoint_2 As String = INI_Endpoint_2
         Dim TTSEndpoint As String = INI_TTSEndpoint
-        If Endpoint.Contains(GoogleIdentifier) Then
-            If Endpoint.Contains(GoogleIdentifier) Then
-                TTSSecondAPI = False
-            ElseIf Endpoint_2.Contains(GoogleIdentifier) Then
-                TTSSecondAPI = True
-            Else
-                Exit Sub
-            End If
+
+        If Endpoint.Contains(GoogleIdentifier) And INI_OAuth2 Then
+            TTSSecondAPI = False
+        ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
+            TTSSecondAPI = True
+        Else
+            Exit Sub
         End If
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
@@ -3580,14 +3658,13 @@ Public Class ThisAddIn
                     Dim Endpoint As String = INI_Endpoint
                     Dim Endpoint_2 As String = INI_Endpoint_2
                     Dim TTSEndpoint As String = INI_TTSEndpoint
-                    If Endpoint.Contains(GoogleIdentifier) Then
-                        If Endpoint.Contains(GoogleIdentifier) Then
-                            TTSSecondAPI = False
-                            IsGoogle = True
-                        ElseIf Endpoint_2.Contains(GoogleIdentifier) Then
-                            TTSSecondAPI = True
-                            IsGoogle = True
-                        End If
+
+                    If Endpoint.Contains(GoogleIdentifier) And INI_OAuth2 Then
+                        TTSSecondAPI = False
+                        IsGoogle = True
+                    ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
+                        TTSSecondAPI = True
+                        IsGoogle = True
                     End If
 
                     If IsGoogle Then
@@ -3613,10 +3690,15 @@ Public Class ThisAddIn
 
                 ElseIf PutInClipboard Then
 
-                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard.", AN)
+                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True)
 
                     If FinalText <> "" Then
-                        SLib.PutInClipboard(FinalText)
+                        If FinalText = "Markdown" Then
+                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                            InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                        Else
+                            SLib.PutInClipboard(FinalText)
+                        End If
                     End If
 
                 ElseIf PutInBubbles Then
@@ -3627,7 +3709,7 @@ Public Class ThisAddIn
                     Dim originalRange As Word.Range = selection.Range.Duplicate ' Save the original selection range
                     Dim BubblecutHappened As Boolean = False
 
-                    Dim splash As New SplashScreen("Adding bubbles to your text... press 'Esc' to abort")
+                    Dim splash As New SplashScreen("Adding bubbles To your text... press 'Esc' to abort")
                     splash.Show()
                     splash.Refresh()
 
@@ -4080,17 +4162,6 @@ Public Class ThisAddIn
                     selectedRange.Select()
                     SearchAndReplace(regexPair.Pattern, regexPair.Replacement, True, specialChar)
 
-                    'Dim regex As New Regex(regexPair.Pattern)
-                    'Dim matches = regex.Matches(selectedRange.Text)
-                    'For Each match As Match In matches
-                    'If match.Success Then
-                    'Dim matchRange As Range = selectedRange.Duplicate
-                    'matchRange.Start = selectedRange.Start + match.Index
-                    'matchRange.End = matchRange.Start + match.Length
-                    'matchRange.Text = regexPair.Replacement
-                    'End If
-                    'Next
-
                     GlobalProgressMax = regexList.Count + 1
 
                     ' Update the current progress value and status label.
@@ -4340,7 +4411,19 @@ Public Class ThisAddIn
         Dim range As Microsoft.Office.Interop.Word.Range = selection.Range
 
         ' Convert Markdown to HTML using Markdig
-        Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
+        'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
+        'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
+        '.UseAdvancedExtensions() _
+        '.Build()
+
+        Dim markdownpipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
+                        .UseAdvancedExtensions() _
+                        .UseEmojiAndSmiley() _
+                        .UseTaskLists() _
+                        .UseMathematics() _
+                        .UseGenericAttributes() _
+                        .Build()
+
         Dim htmlResult As String = Markdown.ToHtml(Result, markdownPipeline).Trim
 
         ' Load the HTML into HtmlDocument
@@ -4374,326 +4457,238 @@ Public Class ThisAddIn
         For Each childNode As HtmlNode In node.ChildNodes
             Select Case childNode.Name.ToLower()
                 Case "#text"
-                    ' Insert plain text
+                    ' Plain text
                     range.Text = HtmlEntity.DeEntitize(childNode.InnerText)
                     range.Font.Reset()
                     range.Collapse(False)
 
                 Case "strong", "b"
-                    ' Bold text
-                    Dim boldRange As Range = range.Duplicate
+                    ' Bold
+                    Dim boldRange As Microsoft.Office.Interop.Word.Range = range.Duplicate
                     boldRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
                     boldRange.Font.Bold = True
                     boldRange.Collapse(False)
                     range.SetRange(boldRange.End, boldRange.End)
 
                 Case "em", "i"
-                    ' Italic text
-                    Dim italicRange As Range = range.Duplicate
+                    ' Italic
+                    Dim italicRange As Microsoft.Office.Interop.Word.Range = range.Duplicate
                     italicRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
                     italicRange.Font.Italic = True
                     italicRange.Collapse(False)
                     range.SetRange(italicRange.End, italicRange.End)
 
                 Case "u"
-                    ' Underlined text
-                    Dim underlineRange As Range = range.Duplicate
-                    underlineRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
-                    underlineRange.Font.Underline = WdUnderline.wdUnderlineSingle
-                    underlineRange.Collapse(False)
-                    range.SetRange(underlineRange.End, underlineRange.End)
+                    ' Underline
+                    Dim ulRange As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    ulRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    ulRange.Font.Underline = Microsoft.Office.Interop.Word.WdUnderline.wdUnderlineSingle
+                    ulRange.Collapse(False)
+                    range.SetRange(ulRange.End, ulRange.End)
 
                 Case "br"
                     ' Line break
                     range.Text = vbCr
                     range.Collapse(False)
 
-                Case "yyp", "yydiv"
-                    If Not String.IsNullOrWhiteSpace(childNode.InnerText) Then
-                        ParseHtmlNode(childNode, range)
-                        ' Remove the extra vbCr insertion
-                        ' (Or insert it only if absolutely needed)
-                    End If
-
-                Case "p", "div"
-                    If Not String.IsNullOrWhiteSpace(childNode.InnerText) Then
-                        ParseHtmlNode(childNode, range)
-                        If Not childNode.NextSibling Is Nothing Then
-                            range.Text = vbCr ' Only add a line break if there's a sibling
-                            range.Collapse(False)
-                        End If
-                    End If
-
-                Case "a"
-                    ' Hyperlink
-                    Dim hyperlinkRange As Range = range.Duplicate
-                    hyperlinkRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
-                    range.Document.Hyperlinks.Add(hyperlinkRange, childNode.GetAttributeValue("href", ""))
-                    hyperlinkRange.Collapse(False)
-                    range.SetRange(hyperlinkRange.End, hyperlinkRange.End)
-
-
-                Case "ul"
-                    ' 1) Listen-Start merken
-                    Dim startOfList As Integer = range.Start
-
-                    ' 2) Li-Elemente einfügen
-                    For Each listItem As HtmlNode In childNode.SelectNodes("li")
-                        ' Wir wollen den Inhalt des Li rekursiv behandeln,
-                        ' weil es darin z.B. <strong> oder <em> geben kann.
-                        ParseHtmlNode(listItem, range)
-
-                        ' Absatzende
-                        range.Text = vbCr
-                        range.Collapse(False)
-                    Next
-
-                    ' 3) Range für die ganze Liste definieren
-                    Dim bulletListRange As Range = range.Document.Range(startOfList, range.End)
-
-                    ' 4) Bullet-Liste anwenden
-                    bulletListRange.ListFormat.ApplyBulletDefault()
-                    bulletListRange.ListFormat.ListIndent()
-                    With bulletListRange.ParagraphFormat
-                        .LeftIndent = 14.18
-                        .FirstLineIndent = -14.18
-                    End With
-
-                Case "ol"
-                    ' 1) Listen-Start merken
-                    Dim startOfList As Integer = range.Start
-
-                    ' 2) Li-Elemente einfügen
-                    For Each listItem As HtmlNode In childNode.SelectNodes("li")
-                        ' Auch hier wieder rekursiv behandeln
-                        ParseHtmlNode(listItem, range)
-
-                        ' Absatzende
-                        range.Text = vbCr
-                        range.Collapse(False)
-                    Next
-
-                    ' 3) Range für die ganze Liste definieren
-                    Dim numberedListRange As Range = range.Document.Range(startOfList, range.End)
-
-                    ' 4) Nummerierte Liste anwenden
-                    numberedListRange.ListFormat.ApplyNumberDefault()
-                    numberedListRange.ListFormat.ListIndent()
-
-                    With numberedListRange.ParagraphFormat
-                        .LeftIndent = 14.18
-                        .FirstLineIndent = -14.18
-                    End With
-
-
                 Case "h1"
                     ' Heading 1
-                    Dim h1Range As Range = range.Duplicate
-                    h1Range.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
-                    h1Range.Font.Size = 16
-                    h1Range.Font.Bold = True
-                    h1Range.Collapse(False)
-                    range.SetRange(h1Range.End, h1Range.End)
+                    Dim h1 As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    h1.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    h1.Style = Microsoft.Office.Interop.Word.WdBuiltinStyle.wdStyleHeading1
+                    h1.Collapse(False)
+                    range.SetRange(h1.End, h1.End)
 
                 Case "h2"
                     ' Heading 2
-                    Dim h2Range As Range = range.Duplicate
-                    h2Range.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
-                    h2Range.Font.Size = 14
-                    h2Range.Font.Bold = True
-                    h2Range.Collapse(False)
-                    range.SetRange(h2Range.End, h2Range.End)
+                    Dim h2 As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    h2.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    h2.Style = Microsoft.Office.Interop.Word.WdBuiltinStyle.wdStyleHeading2
+                    h2.Collapse(False)
+                    range.SetRange(h2.End, h2.End)
 
                 Case "h3"
                     ' Heading 3
-                    Dim h3Range As Range = range.Duplicate
-                    h3Range.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
-                    h3Range.Font.Size = 12
-                    h3Range.Font.Bold = True
-                    h3Range.Collapse(False)
-                    range.SetRange(h3Range.End, h3Range.End)
+                    Dim h3 As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    h3.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    h3.Style = Microsoft.Office.Interop.Word.WdBuiltinStyle.wdStyleHeading3
+                    h3.Collapse(False)
+                    range.SetRange(h3.End, h3.End)
 
-                Case "code"
-                    ' Inline code
-                    Dim codeRange As Range = range.Duplicate
-                    codeRange.Text = HtmlEntity.DeEntitize(childNode.InnerText)
-                    codeRange.Font.Name = "Courier New"
-                    codeRange.Font.Size = 10
-                    codeRange.Collapse(False)
-                    range.SetRange(codeRange.End, codeRange.End)
+                Case "a"
+                    ' Hyperlink
+                    Dim link As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    link.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    range.Document.Hyperlinks.Add(link, childNode.GetAttributeValue("href", String.Empty))
+                    link.Collapse(False)
+                    range.SetRange(link.End, link.End)
 
-                Case "pre"
-                    ' Code block
-                    Dim preRange As Range = range.Duplicate
-                    preRange.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
-                    preRange.Font.Name = "Courier New"
-                    preRange.Font.Size = 10
-                    preRange.Collapse(False)
-                    range.SetRange(preRange.End, preRange.End)
+                Case "blockquote"
+                    ' Blockquote
+                    Dim q As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    q.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    q.ParagraphFormat.LeftIndent += 18
+                    q.Font.Italic = True
+                    q.Collapse(False)
+                    range.SetRange(q.End, q.End)
+
+                Case "ul"
+                    ' Unordered list
+                    Dim listStart As Integer = range.Start
+                    For Each li As HtmlNode In childNode.SelectNodes("li")
+                        ParseHtmlNode(li, range)
+                        range.Text = vbCr
+                        range.Collapse(False)
+                    Next
+                    Dim ulRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(listStart, range.End)
+                    ulRange.ListFormat.ApplyBulletDefault()
+                    ulRange.ListFormat.ListIndent()
+                    range.SetRange(ulRange.End, ulRange.End)
+
+                Case "ol"
+                    ' Ordered list
+                    Dim numStart As Integer = range.Start
+                    For Each li As HtmlNode In childNode.SelectNodes("li")
+                        ParseHtmlNode(li, range)
+                        range.Text = vbCr
+                        range.Collapse(False)
+                    Next
+                    Dim olRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(numStart, range.End)
+                    olRange.ListFormat.ApplyNumberDefault()
+                    olRange.ListFormat.ListIndent()
+                    range.SetRange(olRange.End, olRange.End)
+
+                Case "dl"
+                    ' Definition list
+                    For Each dt As HtmlNode In childNode.SelectNodes("dt")
+                        ' Term
+                        Dim term As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        term.Text = HtmlEntity.DeEntitize(dt.InnerText) & vbTab
+                        term.Font.Bold = True
+                        term.Collapse(False)
+                        range.SetRange(term.End, term.End)
+                        ' Definition
+                        Dim dd As HtmlNode = dt.NextSibling
+                        If dd IsNot Nothing AndAlso dd.Name.ToLower() = "dd" Then
+                            Dim defn As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                            defn.Text = HtmlEntity.DeEntitize(dd.InnerText) & vbCr
+                            defn.ParagraphFormat.LeftIndent += 18
+                            defn.Collapse(False)
+                            range.SetRange(defn.End, defn.End)
+                        End If
+                    Next
+
+                Case "sup"
+                    ' Superscript
+                    Dim supRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    supRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    supRng.Font.Superscript = True
+                    supRng.Collapse(False)
+                    range.SetRange(supRng.End, supRng.End)
 
                 Case "hr"
                     ' Horizontal rule
                     Dim hrRange As Range = range.Duplicate
-                    hrRange.Text = vbCr & "――――――――――――――――――――――――――――――――――" & vbCr
+                    hrRange.Text = vbCr & "――――――――――――――――――――――――――――――――――――――--" & vbCr
                     hrRange.Collapse(False)
                     range.SetRange(hrRange.End, hrRange.End)
 
-                Case Else
-                    ' Handle other tags recursively
-                    ParseHtmlNode(childNode, range)
-            End Select
-        Next
-    End Sub
+                Case "input"
+                    ' Task list checkbox
+                    If childNode.GetAttributeValue("type", String.Empty).ToLower() = "checkbox" Then
+                        Dim cc As Microsoft.Office.Interop.Word.ContentControl =
+                        range.Document.ContentControls.Add(Microsoft.Office.Interop.Word.WdContentControlType.wdContentControlCheckBox, range)
+                        cc.Checked = (childNode.GetAttributeValue("checked", String.Empty).ToLower() = "checked")
+                        range.SetRange(cc.Range.End, cc.Range.End)
+                    End If
 
-    Private Shared Sub DebugParseHtmlNode(node As HtmlNode, range As Microsoft.Office.Interop.Word.Range)
-        For Each childNode As HtmlNode In node.ChildNodes
-            Select Case childNode.Name.ToLower()
-                Case "#text"
-                    ' Insert plain text
-                    range.Text = childNode.InnerText
-                    range.Collapse(False)
-
-                Case "strong", "b"
-                    ' Bold text
-                    Dim boldRange As Range = range.Duplicate
-                    boldRange.Text = childNode.InnerText
-                    boldRange.Font.Bold = True
-                    boldRange.Collapse(False)
-                    range.SetRange(boldRange.End, boldRange.End)
-
-                Case "em", "i"
-                    ' Italic text
-                    Dim italicRange As Range = range.Duplicate
-                    italicRange.Text = childNode.InnerText
-                    italicRange.Font.Italic = True
-                    italicRange.Collapse(False)
-                    range.SetRange(italicRange.End, italicRange.End)
-
-                Case "u"
-                    ' Underlined text
-                    Dim underlineRange As Range = range.Duplicate
-                    underlineRange.Text = childNode.InnerText
-                    underlineRange.Font.Underline = WdUnderline.wdUnderlineSingle
-                    underlineRange.Collapse(False)
-                    range.SetRange(underlineRange.End, underlineRange.End)
-
-                Case "s", "del", "strike"
-                    ' Strikethrough text
-                    Dim strikeRange As Range = range.Duplicate
-                    strikeRange.Text = childNode.InnerText
-                    strikeRange.Font.StrikeThrough = True
-                    strikeRange.Collapse(False)
-                    range.SetRange(strikeRange.End, strikeRange.End)
-
-                Case "br"
-                    ' Line break
-                    range.Text = vbCr
-                    range.Collapse(False)
-
-                Case "p", "div"
-                    ' Paragraph handling
-                    ParseHtmlNode(childNode, range)
-                    range.Text = vbCr
-                    range.Collapse(False)
-
-                Case "a"
-                    ' Hyperlink
-                    Dim hyperlinkRange As Range = range.Duplicate
-                    hyperlinkRange.Text = childNode.InnerText
-                    range.Document.Hyperlinks.Add(hyperlinkRange, childNode.GetAttributeValue("href", ""))
-                    hyperlinkRange.Collapse(False)
-                    range.SetRange(hyperlinkRange.End, hyperlinkRange.End)
-
-                Case "ul"
-                    ' Unordered list using Word bullet format
-                    Dim listRange As Range = range.Duplicate
-                    listRange.ListFormat.ApplyBulletDefault()
-                    For Each listItem As HtmlNode In childNode.SelectNodes("li")
-                        ParseHtmlNode(listItem, listRange)
-                    Next
-                    ' Turn off bullet formatting after the list
-                    listRange.ListFormat.RemoveNumbers()
-
-                Case "ol"
-                    ' Ordered list using Word numbered format
-                    Dim listRange As Range = range.Duplicate
-                    listRange.ListFormat.ApplyNumberDefault()
-                    For Each listItem As HtmlNode In childNode.SelectNodes("li")
-                        ParseHtmlNode(listItem, listRange)
-                    Next
-                    ' Turn off numbering formatting after the list
-                    listRange.ListFormat.RemoveNumbers()
-
-                Case "li"
-                    ' Handle list item
-                    Dim listItemRange As Range = range.Duplicate
-                    listItemRange.Text = childNode.InnerText & vbCr
-                    listItemRange.Collapse(False)
-                    For Each subNode As HtmlNode In childNode.ChildNodes
-                        If subNode.Name.ToLower() = "ul" OrElse subNode.Name.ToLower() = "ol" Then
-                            ParseHtmlNode(subNode, listItemRange)
-                        End If
-                    Next
-
-                Case "h1"
-                    ' Heading 1
-                    Dim h1Range As Range = range.Duplicate
-                    h1Range.Text = childNode.InnerText & vbCr
-                    h1Range.Font.Size = 16
-                    h1Range.Font.Bold = True
-                    h1Range.Collapse(False)
-                    range.SetRange(h1Range.End, h1Range.End)
-
-                Case "h2"
-                    ' Heading 2
-                    Dim h2Range As Range = range.Duplicate
-                    h2Range.Text = childNode.InnerText & vbCr
-                    h2Range.Font.Size = 14
-                    h2Range.Font.Bold = True
-                    h2Range.Collapse(False)
-                    range.SetRange(h2Range.End, h2Range.End)
-
-                Case "h3"
-                    ' Heading 3
-                    Dim h3Range As Range = range.Duplicate
-                    h3Range.Text = childNode.InnerText & vbCr
-                    h3Range.Font.Size = 12
-                    h3Range.Font.Bold = True
-                    h3Range.Collapse(False)
-                    range.SetRange(h3Range.End, h3Range.End)
-
-                Case "code"
-                    ' Inline code
-                    Dim codeRange As Range = range.Duplicate
-                    codeRange.Text = childNode.InnerText
-                    codeRange.Font.Name = "Courier New"
-                    codeRange.Font.Size = 10
-                    codeRange.Collapse(False)
-                    range.SetRange(codeRange.End, codeRange.End)
+                Case "img"
+                    ' Image
+                    Dim src As String = childNode.GetAttributeValue("src", String.Empty)
+                    If Not String.IsNullOrEmpty(src) Then
+                        Dim pic As Microsoft.Office.Interop.Word.InlineShape =
+                        range.InlineShapes.AddPicture(src, LinkToFile:=False, SaveWithDocument:=True)
+                        range.SetRange(pic.Range.End, pic.Range.End)
+                    End If
 
                 Case "pre"
                     ' Code block
-                    Dim preRange As Range = range.Duplicate
-                    preRange.Text = childNode.InnerText & vbCr
-                    preRange.Font.Name = "Courier New"
-                    preRange.Font.Size = 10
-                    preRange.Collapse(False)
-                    range.SetRange(preRange.End, preRange.End)
+                    Dim codeBlock As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    codeBlock.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    codeBlock.Font.Name = "Courier New"
+                    codeBlock.Font.Size = 10
+                    codeBlock.ParagraphFormat.LeftIndent += 14.18
+                    codeBlock.Collapse(False)
+                    range.SetRange(codeBlock.End, codeBlock.End)
 
-                Case "hr"
-                    ' Horizontal rule
-                    Dim hrRange As Range = range.Duplicate
-                    hrRange.Text = vbCr & "――――――――――――――――――――――――――――――――――" & vbCr
-                    hrRange.Collapse(False)
-                    range.SetRange(hrRange.End, hrRange.End)
+                Case "code"
+                    ' Inline code
+                    Dim codeRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    codeRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    codeRng.Font.Name = "Courier New"
+                    codeRng.Font.Size = 10
+                    codeRng.Shading.BackgroundPatternColor =
+                    Microsoft.Office.Interop.Word.WdColor.wdColorGray25
+                    codeRng.Collapse(False)
+                    range.SetRange(codeRng.End, codeRng.End)
+
+
+                Case "span"
+                    ' Emoji badge or Math span
+                    Dim cls = childNode.GetAttributeValue("class", String.Empty)
+                    If cls.Contains("emoji") Then
+                        Dim emTxt = HtmlEntity.DeEntitize(childNode.InnerText)
+                        Dim emRange As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        emRange.Text = emTxt
+                        emRange.Font.Name = "Segoe UI Emoji"
+                        emRange.Font.Color = Microsoft.Office.Interop.Word.WdColor.wdColorWhite
+                        emRange.Shading.BackgroundPatternColor =
+                        System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.FromArgb(0, 112, 192))
+                        emRange.Collapse(False)
+                        range.SetRange(emRange.End, emRange.End)
+                    ElseIf cls.Contains("math") Then
+                        Dim mRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        mRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                        mRng.OMaths.Add(mRng)
+                        mRng.Collapse(False)
+                        range.SetRange(mRng.End, mRng.End)
+                    Else
+                        ParseHtmlNode(childNode, range)
+                    End If
+
+
+                Case "table"
+                    ' Table
+                    Dim rowList = childNode.SelectNodes(".//tr")
+                    If rowList Is Nothing OrElse rowList.Count = 0 Then Exit Select
+                    Dim firstCells = rowList(0).SelectNodes("th|td")
+                    If firstCells Is Nothing OrElse firstCells.Count = 0 Then Exit Select
+                    Dim tbl As Microsoft.Office.Interop.Word.Table =
+                        range.Document.Tables.Add(range, rowList.Count, firstCells.Count)
+                    Dim r As Integer = 1
+                    For Each tr As HtmlNode In rowList
+                        Dim cells = tr.SelectNodes("th|td")
+                        If cells IsNot Nothing AndAlso cells.Count > 0 Then
+                            Dim c As Integer = 1
+                            For Each cell As HtmlNode In cells
+                                Dim text = HtmlEntity.DeEntitize(cell.InnerText)
+                                tbl.Cell(r, c).Range.Text = text
+                                If cell.Name.Equals("th", StringComparison.OrdinalIgnoreCase) Then
+                                    tbl.Cell(r, c).Range.Font.Bold = True
+                                End If
+                                c += 1
+                            Next
+                        End If
+                        r += 1
+                    Next
+                    range.SetRange(tbl.Range.End, tbl.Range.End)
 
                 Case Else
-                    ' Handle other tags recursively
+                    ' Fallback: recurse
                     ParseHtmlNode(childNode, range)
             End Select
         Next
     End Sub
-
 
 
     Public Function AddMarkupTags(rng As Range, Optional TPMarkupName As String = Nothing) As String
@@ -6493,52 +6488,6 @@ Public Class ThisAddIn
         Return ""
     End Function
 
-    Private Async Function OldStartHttpListener() As Task(Of String)
-        Dim prefix As String = "http://127.0.0.1:12334/"
-        Try
-            ' Initialize the listener once.
-            If httpListener Is Nothing Then
-                httpListener = New HttpListener()
-                httpListener.Prefixes.Add(prefix)
-                httpListener.Start()
-                Debug.WriteLine("HttpListener started.")
-            End If
-
-            While Not isShuttingDown
-                ' If for some reason the listener is not listening (disposed), restart it.
-                If httpListener Is Nothing OrElse Not httpListener.IsListening Then
-                    Try
-                        If httpListener IsNot Nothing Then
-                            httpListener.Close()
-                        End If
-                    Catch ex As System.Exception
-                        Debug.WriteLine("Error closing HttpListener: " & ex.Message)
-                    End Try
-
-                    httpListener = New HttpListener()
-                    httpListener.Prefixes.Add(prefix)
-                    httpListener.Start()
-                    Debug.WriteLine("HttpListener restarted.")
-                End If
-
-                Try
-                    ' Use asynchronous call to wait for an incoming request.
-                    Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
-                    Dim result As String = Await HandleHttpRequest(context)
-                Catch ex As System.ObjectDisposedException
-                    Debug.WriteLine("HttpListener was disposed. Restarting listener...")
-                    ' Continue to the next iteration so that the above block restarts the listener.
-                    Continue While
-                Catch ex As System.Exception
-                    Debug.WriteLine("Error httplistener handling request: " & ex.Message)
-                End Try
-            End While
-        Catch ex As System.Exception
-            Debug.WriteLine("Error in StartHttpListener: " & ex.Message)
-        End Try
-        Return ""
-    End Function
-
 
     'Private Sub HandleHttpRequest(ByVal context As HttpListenerContext)
     Private Async Function HandleHttpRequest(ByVal context As HttpListenerContext) As Task(Of String)
@@ -6646,9 +6595,9 @@ Public Class ThisAddIn
     End Function
 
     Public Class TranscriptionForm
+
         Inherits Form
 
-        ' --- UI Components ---
         Private RichTextBox1 As Forms.RichTextBox
         Private StartButton As Forms.Button
         Private StopButton As Forms.Button
@@ -6670,7 +6619,6 @@ Public Class ThisAddIn
         Private TranscriptPromptsTitles As New List(Of String)
         Private TranscriptPromptsLibrary As New List(Of String)
 
-        ' --- Vosk & Audio State ---
         Private recognizer As VoskRecognizer
         Private waveIn As WaveInEvent
         Private capturing As Boolean = False
@@ -6679,21 +6627,25 @@ Public Class ThisAddIn
         Private Const VoskTooltip = "Only for Vosk: Set similarity threshold for speaker identification (0.5-0.7 for real-time speaker tracking, 1.0-1.5 for meetings/interviews)"
         Private Const VoskToggle = "Iden"
 
-        Private waveInputs As New List(Of WaveInEvent)()
-        Private waveProviders As New List(Of BufferedWaveProvider)()
-        Private waveMixer As MixingSampleProvider
-        Private MultiSource As Boolean = False
-        Private audioThread As Thread
-        Private stopProcessing As Boolean = False
-
         Private WhisperRecognizer As WhisperProcessor
         Private audioBuffer As New List(Of Single)
         Private STTCanceled As Boolean = False
         Private cts As CancellationTokenSource = New CancellationTokenSource()
         Private Const WhisperTooltip = "Only for Whisper: Select if text shall be translated to English and the threshold for detecting voice (default = 0.6, increase for noisy environments)"
         Private Const WhisperToggle = "Trans"
-
         Private STTModel As String = "whisper"
+
+        Private GoogleSpeech As Boolean = False
+        Private STTSecondAPI As Boolean = False
+        Private IsGoogle As Boolean = False
+        Private Const GoogleTooltip = "Only for Google: Set the maximum number of speakers expected for diarization (speaker tracking)"
+        Private Const GoogleToggle = "Iden"
+        Private googleReaderTask As System.Threading.Tasks.Task
+        Private readerCts = New CancellationTokenSource()
+        Private _stream As SpeechClient.StreamingRecognizeStream
+        Private googleTranscriptStart As Integer = 0
+
+
 
         Public Sub New()
             ' Initialize UI Components
@@ -6702,6 +6654,23 @@ Public Class ThisAddIn
             ' Load available Vosk models
             Dim modelPath As String = Globals.ThisAddIn.INI_SpeechModelPath
             Dim modelsexist As Boolean = False
+
+            Dim Endpoint As String = INI_Endpoint
+            Dim Endpoint_2 As String = INI_Endpoint_2
+
+            If Endpoint.Contains(GoogleIdentifier) And INI_OAuth2 Then
+                STTSecondAPI = False
+                IsGoogle = True
+            ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
+                STTSecondAPI = True
+                IsGoogle = True
+            End If
+            If IsGoogle And Not String.IsNullOrWhiteSpace(STTEndpoint) Then
+                GoogleSpeech = True
+                cultureComboBox.Items.Add(GoogleSTT_Desc)
+                modelsexist = True
+            End If
+
             If Directory.Exists(modelPath) Then
                 For Each dir As String In Directory.GetDirectories(modelPath)
                     Dim dirName As String = Path.GetFileName(dir)
@@ -6737,7 +6706,12 @@ Public Class ThisAddIn
 
             Dim index As Integer = Me.cultureComboBox.SelectedIndex
             If index >= 0 Then
-                If Me.cultureComboBox.Items(index).startswith("ggml") Then
+                If Me.cultureComboBox.Items(index).startswith(GoogleSTT_Desc) Then
+                    Me.SpeakerIdent.Text = GoogleToggle
+                    ToolTip.SetToolTip(Me.SpeakerDistance, GoogleTooltip)
+                    ToolTip.SetToolTip(Me.SpeakerIdent, GoogleTooltip)
+
+                ElseIf Me.cultureComboBox.Items(index).startswith("ggml") Then
                     Me.SpeakerIdent.Text = WhisperToggle
                     ToolTip.SetToolTip(Me.SpeakerDistance, WhisperTooltip)
                     ToolTip.SetToolTip(Me.SpeakerIdent, WhisperTooltip)
@@ -6747,6 +6721,7 @@ Public Class ThisAddIn
                     ToolTip.SetToolTip(Me.SpeakerIdent, VoskTooltip)
                 End If
             End If
+
 
 
             ' Wire up event handlers
@@ -6772,7 +6747,11 @@ Public Class ThisAddIn
             Dim index As Integer = Me.cultureComboBox.SelectedIndex
             If index >= 0 Then
                 ToolTip.SetToolTip(Me.cultureComboBox, Me.cultureComboBox.Items(index).ToString())
-                If Me.cultureComboBox.Items(index).startswith("ggml") Then
+                If Me.cultureComboBox.Items(index).startswith(GoogleSTT_Desc) Then
+                    Me.SpeakerIdent.Text = GoogleToggle
+                    ToolTip.SetToolTip(Me.SpeakerDistance, GoogleTooltip)
+                    ToolTip.SetToolTip(Me.SpeakerIdent, GoogleTooltip)
+                ElseIf Me.cultureComboBox.Items(index).startswith("ggml") Then
                     Me.SpeakerIdent.Text = WhisperToggle
                     ToolTip.SetToolTip(Me.SpeakerDistance, WhisperTooltip)
                     ToolTip.SetToolTip(Me.SpeakerIdent, WhisperTooltip)
@@ -6980,13 +6959,9 @@ Public Class ThisAddIn
             End If
         End Sub
 
-
-        Private Sub StopRecording()
-
+        Private Async Function StopRecording() As System.Threading.Tasks.Task
             STTCanceled = True
-
             CancelTranscription()
-
             audioBuffer.Clear()
 
             If WhisperRecognizer IsNot Nothing Then
@@ -6996,41 +6971,36 @@ Public Class ThisAddIn
             End If
 
             If waveIn IsNot Nothing Then
+                If STTModel = "google" Then
+                    RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
+                Else
+                    RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
+                End If
+            End If
+
+            If STTModel = "google" Then
+                Try
+                    Await _stream.WriteCompleteAsync()
+                Catch ex As System.Exception
+                End Try
+
+                readerCts.Cancel()
+                Await googleReaderTask
+                _stream.Dispose()
+            End If
+
+
+            If waveIn IsNot Nothing Then
                 waveIn.StopRecording()
-                RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
+                waveIn.Dispose()
             End If
 
-            If MultiSource Then
-                MultiSource = False
+        End Function
 
-                stopProcessing = True
-
-                If audioThread IsNot Nothing AndAlso audioThread.IsAlive Then
-                    audioThread.Join() ' Wait for the audio thread to finish
-                End If
-
-                For Each waveInDevice As WaveInEvent In waveInputs
-                    waveInDevice.StopRecording()
-                    waveInDevice.Dispose()
-                Next
-                waveInputs.Clear()
-
-                For Each bufferProvider As BufferedWaveProvider In waveProviders
-                    bufferProvider.ClearBuffer()
-                Next
-                waveProviders.Clear()
-
-            Else
-                If waveIn IsNot Nothing Then
-                    waveIn.StopRecording()
-                    waveIn.Dispose()
-                End If
-            End If
-        End Sub
 
         Private Sub StopButton_Click(sender As Object, e As EventArgs)
             If capturing Then
-                StopRecording()
+                StopRecording().Wait()
                 capturing = False
 
                 Me.StartButton.Enabled = True
@@ -7059,7 +7029,7 @@ Public Class ThisAddIn
 
             If e.CloseReason = CloseReason.UserClosing Then
                 If capturing Then
-                    StopRecording()
+                    StopRecording().Wait()
                     capturing = False
                     Me.StartButton.Enabled = True
                     Me.StopButton.Enabled = False
@@ -7074,19 +7044,21 @@ Public Class ThisAddIn
 
         Private Sub QuitButton_Click(sender As Object, e As EventArgs)
             If capturing Then
-                StopRecording()
+                StopRecording().Wait()
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.LoadButton.Enabled = True
                 Me.StopButton.Enabled = False
-                Addline(PartialTextLabel.Text)
+                If STTModel = "vosk" Then
+                    Addline(PartialTextLabel.Text)
+                End If
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
                 capturing = False
             End If
             Me.Close()
         End Sub
 
-        Private Sub LoadButton_Click(sender As Object, e As EventArgs)
+        Private Async Sub LoadButton_Click(sender As Object, e As EventArgs)
             If capturing Then
                 Return
             End If
@@ -7126,14 +7098,89 @@ Public Class ThisAddIn
             splash.Refresh()
 
             Try
-
-                If Me.cultureComboBox.SelectedItem.ToString().StartsWith("ggml") Then
+                If Me.cultureComboBox.SelectedItem.ToString().StartsWith(GoogleSTT_Desc) Then
+                    STTModel = "google"
+                ElseIf Me.cultureComboBox.SelectedItem.ToString().StartsWith("ggml") Then
                     STTModel = "whisper"
                 Else
                     STTModel = "vosk"
                 End If
 
                 Select Case STTModel
+
+                    Case "google"
+
+                        Dim accessToken As String = ""
+                        readerCts = New CancellationTokenSource()
+                        If STTSecondAPI Then
+                            DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
+                            accessToken = DecodedAPI_2
+                        Else
+                            DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
+                            accessToken = DecodedAPI
+                        End If
+
+                        ' Ask user for language code
+                        Dim language As String = ShowSelectionForm("Select the language code you want to transcribe in:", $"{GoogleSTT_Desc}", GoogleSTTsupportedLanguages)
+
+                        language = language.Trim()
+
+                        If String.IsNullOrWhiteSpace(language) OrElse String.Equals(language, "ESC", StringComparison.OrdinalIgnoreCase) Then
+                            splash.Close()
+                            Return
+                        End If
+
+                        If Not GoogleSTTsupportedLanguages.Any(Function(code) code.Trim().Normalize().IndexOf(language, StringComparison.OrdinalIgnoreCase) = 0) Then
+                            splash.Close()
+                            ShowCustomMessageBox("This language code is not supported. Supported are: " & String.Join(", ", GoogleSTTsupportedLanguages))
+                            Return
+                        End If
+
+                        ' Configure the streaming recognizer
+                        Await StartGoogleSTT(accessToken, language)
+
+                        ' Spawn the response‐reader (identical to your live transcription)
+                        googleReaderTask = System.Threading.Tasks.Task.Run(
+                                Async Function()
+                                    Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(readerCts.Token)
+                                    Try
+                                        While Await enumerator.MoveNextAsync()
+                                            For Each result In enumerator.Current.Results
+                                                If result.IsFinal Then
+                                                    If Me.SpeakerIdent.Checked Then
+                                                        Dim lastSpeaker As Integer = 0
+                                                        Dim segment As New System.Text.StringBuilder()
+                                                        For Each w In result.Alternatives(0).Words
+                                                            If w.SpeakerTag <> lastSpeaker Then
+                                                                If segment.Length > 0 Then
+                                                                    Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                                    ReplaceAndAddLine(prevLine)
+                                                                    segment.Clear()
+                                                                End If
+                                                                lastSpeaker = w.SpeakerTag
+                                                            End If
+                                                            segment.Append(w.Word & " ")
+                                                        Next
+                                                        If segment.Length > 0 Then
+                                                            Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                            ReplaceAndAddLine(finalLine)
+                                                        End If
+                                                    Else
+                                                        ' Normales Hinzufügen ohne Speaker-Logik
+                                                        Addline(result.Alternatives(0).Transcript)
+                                                    End If
+                                                Else
+                                                    PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
+                                                End If
+                                            Next
+                                        End While
+                                    Catch ex As OperationCanceledException
+                                        ' normal cancellation
+                                    Catch ex As System.Exception
+                                        Debug.WriteLine($"Reader error: {ex}")
+                                    End Try
+                                End Function
+                            )
 
                     Case "vosk"
                         StartVosk()
@@ -7155,11 +7202,11 @@ Public Class ThisAddIn
 
                         StartWhisper(language)
                         STTCanceled = False
-                        PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Whisper Is listening And working... (no Partial results shown, please wait)")
+                        PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Whisper is listening and working... (no partial results shown, please wait)")
 
                     Case Else
                         splash.Close()
-                        ShowCustomMessageBox($"No valid model selected. Please Select a model.")
+                        ShowCustomMessageBox($"No valid model selected. Please select a model.")
                         Return
 
                 End Select
@@ -7168,9 +7215,13 @@ Public Class ThisAddIn
                 My.Settings.LastSpeechModel = Me.cultureComboBox.SelectedItem.ToString()
                 My.Settings.LastSpeakerEnabled = Me.SpeakerIdent.Checked
                 similarityThreshold = Double.Parse(Me.SpeakerDistance.Text)
-                If similarityThreshold = 0 Then similarityThreshold = 1.0
-                If similarityThreshold < 0.2 Then similarityThreshold = 0.2
-                If similarityThreshold > 2.5 Then similarityThreshold = 2.5
+                If STTModel = "google" Then
+                    If similarityThreshold < 1 Then similarityThreshold = 1.0
+                Else
+                    If similarityThreshold = 0 Then similarityThreshold = 1.0
+                    If similarityThreshold < 0.2 Then similarityThreshold = 0.2
+                    If similarityThreshold > 2.5 Then similarityThreshold = 2.5
+                End If
                 My.Settings.LastSpeakerDistance = similarityThreshold
 
                 My.Settings.Save()
@@ -7186,6 +7237,9 @@ Public Class ThisAddIn
                 splash.Close()
 
                 Select Case STTModel
+                    Case "google"
+                        googleTranscriptStart = RichTextBox1.TextLength
+                        Await GoogleTranscribeAudioFile(filepath)
                     Case "vosk"
                         VoskTranscribeAudioFile(filepath)
                     Case "whisper"
@@ -7236,7 +7290,6 @@ Public Class ThisAddIn
                 Dim capabilities As WaveInCapabilities = WaveInEvent.GetCapabilities(i)
                 deviceComboBox.Items.Add($"{i}: {capabilities.ProductName}")
             Next
-            deviceComboBox.Items.Add($"{i}: Combine all devices ({waveIn.DeviceCount})")
 
             ' Select default device (if available)
             Dim lastAudioSource As String = My.Settings.LastAudioSource
@@ -7264,7 +7317,7 @@ Public Class ThisAddIn
 
                 End If
 
-                Debug.WriteLine("Vosk Recognizer initialized")
+                Debug.WriteLine("Vosk recognizer initialized")
 
             End If
 
@@ -7302,7 +7355,79 @@ Public Class ThisAddIn
             End If
         End Sub
 
-        Private Sub StartButton_Click(sender As Object, e As EventArgs)
+        Private Async Function StartGoogleSTT(accessToken As String, LanguageCode As String) As System.Threading.Tasks.Task
+            ' Innerhalb Deiner Initialisierungsroutine (z. B. StartGoogleSTT):
+            Dim callCreds = CallCredentials.FromInterceptor(
+                Async Function(context, metadata)
+                    metadata.Add("Authorization", $"Bearer {accessToken}")
+                    Await System.Threading.Tasks.Task.CompletedTask
+                End Function)
+
+            Dim channelCreds = ChannelCredentials.Create(
+                ChannelCredentials.SecureSsl,
+                callCreds)
+
+            Dim builder As New SpeechClientBuilder() With {
+                .Endpoint = "eu-speech.googleapis.com",
+                .ChannelCredentials = channelCreds
+            }
+
+            Dim client As SpeechClient = builder.Build()
+
+            Try
+                ' Bidirektionales Streaming öffnen
+
+                If Me.SpeakerIdent.Checked Then
+
+                    _stream = client.StreamingRecognize()
+                    Dim streamingConfig As New StreamingRecognitionConfig With {
+                        .Config = New RecognitionConfig With {
+                            .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
+                            .SampleRateHertz = 16000,
+                            .LanguageCode = LanguageCode,
+                            .EnableAutomaticPunctuation = True,
+                            .EnableSpokenPunctuation = True,
+                            .DiarizationConfig = New SpeakerDiarizationConfig With {
+                                .EnableSpeakerDiarization = Me.SpeakerIdent.Checked,
+                                .MaxSpeakerCount = Me.SpeakerDistance.Text
+                            }
+                        },
+                        .InterimResults = True
+                    }
+                    Await _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig})
+
+                Else
+                    _stream = client.StreamingRecognize()
+                    Dim streamingConfig As New StreamingRecognitionConfig With {
+                    .Config = New RecognitionConfig With {
+                        .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
+                        .SampleRateHertz = 16000,
+                        .LanguageCode = LanguageCode
+                                },
+                                .InterimResults = True
+                            }
+                    Await _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig})
+                End If
+
+            Catch ex As System.Exception
+
+                ShowCustomMessageBox("No speaker diarization available for this language (or other error).", $"{GoogleSTT_Desc} Language Code")
+                _stream = client.StreamingRecognize()
+                Dim streamingConfig As New StreamingRecognitionConfig With {
+                .Config = New RecognitionConfig With {
+                    .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
+                    .SampleRateHertz = 16000,
+                    .LanguageCode = LanguageCode
+                            },
+                            .InterimResults = True
+                        }
+                _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig}).Wait()
+
+            End Try
+
+        End Function
+
+        Private Async Sub StartButton_Click(sender As Object, e As EventArgs)
 
             If capturing Then
                 Return
@@ -7313,14 +7438,108 @@ Public Class ThisAddIn
             splash.Refresh()
 
             Try
-
-                If Me.cultureComboBox.SelectedItem.ToString().StartsWith("ggml") Then
+                If Me.cultureComboBox.SelectedItem.ToString().StartsWith(GoogleSTT_Desc) Then
+                    STTModel = "google"
+                ElseIf Me.cultureComboBox.SelectedItem.ToString().StartsWith("ggml") Then
                     STTModel = "whisper"
                 Else
                     STTModel = "vosk"
                 End If
 
                 Select Case STTModel
+
+                    Case "google"
+
+                        readerCts = New CancellationTokenSource()
+
+                        If STTSecondAPI Then
+                            DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
+                        Else
+                            DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
+                        End If
+                        Dim AccessToken As String = If(STTSecondAPI, DecodedAPI_2, DecodedAPI)
+                        If String.IsNullOrEmpty(AccessToken) Then
+                            ShowCustomMessageBox("Error starting Google STT - authentication failed (no token).")
+                            Return
+                        End If
+
+                        Dim language As String = ShowSelectionForm("Select the language code you want to transcribe in:", $"{GoogleSTT_Desc}", GoogleSTTsupportedLanguages)
+
+                        language = language.Trim()
+
+                        ' first handle empty or escape
+                        If String.IsNullOrWhiteSpace(language) OrElse String.Equals(language, "esc", StringComparison.OrdinalIgnoreCase) Then
+                            splash.Close()
+                            STTCanceled = True
+                            Return
+                        End If
+
+                        ' now do a true case‑insensitive lookup
+                        If Not GoogleSTTsupportedLanguages.Any(
+                                Function(code)
+                                    Return String.Equals(code, language, StringComparison.OrdinalIgnoreCase)
+                                End Function) Then
+                            splash.Close()
+                            ShowCustomMessageBox("This language code is not supported. Supported are: " & String.Join(", ", GoogleSTTsupportedLanguages), $"{GoogleSTT_Desc} Language Code")
+                            STTCanceled = True
+                            Return
+                        End If
+
+                        Try
+                            Await StartGoogleSTT(AccessToken, language)
+                        Catch ex As System.Exception
+                            ShowCustomMessageBox("Error starting transcription service: {ex.Message}", $"{GoogleSTT_Desc}")
+                            STTCanceled = True
+                            Return
+                        End Try
+
+                        If Not StartRecording() Then
+                            splash.Close()
+                            Return
+                        End If
+
+                        googleTranscriptStart = RichTextBox1.TextLength
+
+                        googleReaderTask = System.Threading.Tasks.Task.Run(
+                                                      Async Function()
+                                                          Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(readerCts.Token)
+                                                          Try
+                                                              While Await enumerator.MoveNextAsync()
+                                                                  For Each result In enumerator.Current.Results
+                                                                      If result.IsFinal Then
+                                                                          If Me.SpeakerIdent.Checked Then
+                                                                              Dim lastSpeaker As Integer = 0
+                                                                              Dim segment As New System.Text.StringBuilder()
+                                                                              For Each w In result.Alternatives(0).Words
+                                                                                  If w.SpeakerTag <> lastSpeaker Then
+                                                                                      If segment.Length > 0 Then
+                                                                                          Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                                                          ReplaceAndAddLine(prevLine)
+                                                                                          segment.Clear()
+                                                                                      End If
+                                                                                      lastSpeaker = w.SpeakerTag
+                                                                                  End If
+                                                                                  segment.Append(w.Word & " ")
+                                                                              Next
+                                                                              If segment.Length > 0 Then
+                                                                                  Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                                                  ReplaceAndAddLine(finalLine)
+                                                                              End If
+                                                                          Else
+                                                                              ' Normales Hinzufügen ohne Speaker-Logik
+                                                                              Addline(result.Alternatives(0).Transcript)
+                                                                          End If
+                                                                      Else
+                                                                          PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
+                                                                      End If
+                                                                  Next
+                                                              End While
+                                                          Catch ex As OperationCanceledException
+                                                              ' normal cancellation
+                                                          Catch ex As Exception
+                                                              Debug.WriteLine($"Reader error: {ex}")
+                                                          End Try
+                                                      End Function)
 
                     Case "vosk"
 
@@ -7348,6 +7567,7 @@ Public Class ThisAddIn
                             Return
                         End If
                         StartWhisper(language)
+
                         If Not StartRecording() Then
                             splash.Close()
                             STTCanceled = True
@@ -7366,9 +7586,13 @@ Public Class ThisAddIn
                 My.Settings.LastSpeechModel = Me.cultureComboBox.SelectedItem.ToString()
                 My.Settings.LastSpeakerEnabled = Me.SpeakerIdent.Checked
                 similarityThreshold = Double.Parse(Me.SpeakerDistance.Text)
-                If similarityThreshold = 0 Then similarityThreshold = 1.0
-                If similarityThreshold < 0.5 Then similarityThreshold = 0.5
-                If similarityThreshold > 2.5 Then similarityThreshold = 2.5
+                If STTModel = "google" Then
+                    If similarityThreshold < 1 Then similarityThreshold = 1.0
+                Else
+                    If similarityThreshold = 0 Then similarityThreshold = 1.0
+                    If similarityThreshold < 0.2 Then similarityThreshold = 0.2
+                    If similarityThreshold > 2.5 Then similarityThreshold = 2.5
+                End If
                 My.Settings.LastSpeakerDistance = similarityThreshold
 
                 My.Settings.Save()
@@ -7395,180 +7619,20 @@ Public Class ThisAddIn
 
             Dim selectedDeviceIndex As Integer = deviceComboBox.SelectedIndex
 
-            Debug.WriteLine($"Selected device index: {selectedDeviceIndex}")
-            Debug.WriteLine($"Device count: {waveIn.DeviceCount}")
+            waveIn = New WaveInEvent() With {
+                    .DeviceNumber = selectedDeviceIndex,
+                    .WaveFormat = New WaveFormat(16000, 1)
+                }
 
-            If selectedDeviceIndex < waveIn.DeviceCount Then
-                waveIn = New WaveInEvent() With {
-                        .DeviceNumber = selectedDeviceIndex,
-                        .WaveFormat = New WaveFormat(16000, 1)
-                    }
-                AddHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
-                waveIn.StartRecording()
-
-                Return True
-
+            If STTModel = "google" Then
+                AddHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
             Else
-
-                Dim deviceCount As Integer = waveIn.DeviceCount
-                If deviceCount = 0 Then
-
-                    ShowCustomMessageBox($"No audio devices to mix found.")
-                    Return False
-                End If
-
-                MultiSource = True
-
-                ' Create a list to hold audio sources for the mixer
-                Dim sources As New List(Of ISampleProvider)()
-
-                ' Change waveInputs to store both WaveInEvent and WasapiCapture
-                Dim waveInputs As New List(Of IDisposable)() ' Supports both WaveInEvent and WasapiCapture
-
-                For i As Integer = 0 To deviceCount - 1
-
-
-                    Dim deviceCaps As WaveInCapabilities = WaveInEvent.GetCapabilities(i)
-                    Dim selectedWaveFormat As WaveFormat = New WaveFormat(16000, 1) ' Desired format (16kHz Mono)
-                    Dim useWasapi As Boolean = False ' Initialize useWasapi as False
-                    Dim bufferProvider As BufferedWaveProvider = Nothing
-                    Dim floatProvider As ISampleProvider = Nothing
-
-                    ' Check if the device supports 16 kHz, 1 channel before opening it
-                    If Not IsFormatSupported(i, 16000, 1) Then
-                        ' Get the device's default format instead
-                        selectedWaveFormat = GetDeviceDefaultFormat(i)
-                        Debug.WriteLine($"Device {i} does NOT support 16kHz Mono. Using default: {selectedWaveFormat.SampleRate} Hz, {selectedWaveFormat.Channels} channels.")
-                    Else
-                        Debug.WriteLine($"Device {i} supports 16kHz Mono.")
-                    End If
-
-                    Dim waveInDevice As WaveInEvent = Nothing
-                    Try
-                        useWasapi = False ' Explicitly reset before trying WaveInEvent
-
-                        ' Attempt to open with WaveInEvent first (Shared Mode)
-                        waveInDevice = New WaveInEvent() With {
-                                    .DeviceNumber = i,
-                                    .WaveFormat = selectedWaveFormat
-                                }
-
-                        bufferProvider = New BufferedWaveProvider(waveInDevice.WaveFormat) With {
-                                    .BufferLength = 16384,
-                                    .DiscardOnBufferOverflow = True
-                                    }
-
-                        ' Event handler for processing incoming audio data
-                        AddHandler waveInDevice.DataAvailable, Sub(senderObj As Object, eventArgs As WaveInEventArgs)
-                                                                   bufferProvider.AddSamples(eventArgs.Buffer, 0, eventArgs.BytesRecorded)
-                                                               End Sub
-
-                        waveInputs.Add(waveInDevice) ' Store for cleanup
-                        waveProviders.Add(bufferProvider)
-                        floatProvider = New Pcm16BitToSampleProvider(bufferProvider)
-
-                    Catch ex As System.Exception
-                        Debug.WriteLine($"WaveInEvent failed for device {i}: {ex.Message}")
-                        useWasapi = True ' If WaveInEvent fails, fallback to WASAPI
-                    End Try
-
-                    If useWasapi Then
-                        ' Fallback: Use WASAPI in shared mode
-                        Debug.WriteLine($"Using WASAPI Capture for device {i} instead of WaveInEvent.")
-
-                        Dim enumerator As New MMDeviceEnumerator()
-                        Dim captureDevices As MMDeviceCollection = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
-
-                        If i < captureDevices.Count Then
-                            Dim captureDevice As MMDevice = captureDevices(i)
-                            Dim wasapiCapture As New WasapiCapture(captureDevice) ' Shared mode by default
-                            wasapiCapture.StartRecording()
-
-                            bufferProvider = New BufferedWaveProvider(wasapiCapture.WaveFormat) With {
-                                    .BufferLength = 16384,
-                                    .DiscardOnBufferOverflow = True
-}
-
-                            ' Event handler for processing incoming audio data
-                            AddHandler wasapiCapture.DataAvailable, Sub(senderObj As Object, eventArgs As WaveInEventArgs)
-                                                                        bufferProvider.AddSamples(eventArgs.Buffer, 0, eventArgs.BytesRecorded)
-                                                                    End Sub
-                            floatProvider = New Pcm16BitToSampleProvider(bufferProvider)
-
-                            ' Store WasapiCapture separately since it's not a WaveInEvent
-                            waveInputs.Add(wasapiCapture)
-                            waveProviders.Add(bufferProvider)
-                        End If
-                    End If
-
-                    ' Resample if needed
-                    If selectedWaveFormat.SampleRate <> 16000 OrElse selectedWaveFormat.Channels <> 1 Then
-                        floatProvider = New WdlResamplingSampleProvider(floatProvider, 16000)
-                        floatProvider = New MonoToStereoSampleProvider(floatProvider) ' Convert to mono if needed
-                    End If
-
-                    ' Add to mixer sources
-                    sources.Add(floatProvider)
-
-                    Debug.WriteLine($"Added input device {i}: {deviceCaps.ProductName}")
-
-                Next
-
-
-                ' Start recording on all devices
-                For Each waveInDevice As WaveInEvent In waveInputs
-                    waveInDevice.StartRecording()
-                Next
-
-                ' Create the mixer with all floating-point audio sources
-                waveMixer = New MixingSampleProvider(sources) With {
-                            .ReadFully = True
-                        }
-
-                ' Start processing audio buffer in a separate thread
-                stopProcessing = False
-                audioThread = New Thread(AddressOf ProcessAudio)
-                audioThread.Start()
-
-                Return True
-
+                AddHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
             End If
+            waveIn.StartRecording()
 
+            Return True
 
-        End Function
-
-
-        Function IsFormatSupported(deviceIndex As Integer, sampleRate As Integer, channels As Integer) As Boolean
-            Try
-                Using testWaveIn As New WaveInEvent() With {
-                        .DeviceNumber = deviceIndex,
-                        .WaveFormat = New WaveFormat(sampleRate, channels)
-                         }
-                    ' If no exception occurs, the format is supported
-                    Return True
-                End Using
-            Catch ex As System.Exception
-                Return False ' Format not supported
-            End Try
-        End Function
-
-
-        Function GetDeviceDefaultFormat(deviceIndex As Integer) As WaveFormat
-            Try
-                Dim enumerator As New MMDeviceEnumerator()
-                Dim devices As MMDeviceCollection = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
-
-                If deviceIndex < devices.Count Then
-                    Dim device As MMDevice = devices(deviceIndex)
-                    Dim defaultFormat As WaveFormat = device.AudioClient.MixFormat
-                    Return defaultFormat
-                End If
-            Catch ex As System.Exception
-                Debug.WriteLine($"Error getting default format for device {deviceIndex}: {ex.Message}")
-            End Try
-
-            ' Fallback format
-            Return New WaveFormat(44100, 2)
         End Function
 
 
@@ -7585,21 +7649,15 @@ Public Class ThisAddIn
             Return floatArray
         End Function
 
-        Private Sub ProcessAudio()
-            'Dim buffer(4096 - 1) As Byte
-            Dim buffer(16384 - 1) As Byte
-            Dim waveProvider As New SampleToWaveProvider(waveMixer) ' Convert ISampleProvider to WaveProvider
 
-            While Not stopProcessing
-                Dim bytesRead As Integer = waveProvider.Read(buffer, 0, buffer.Length)
-                If bytesRead > 0 Then
-                    OnAudioDataAvailableMix(buffer, bytesRead)
-                End If
-                'Thread.Sleep(10) ' Allow some time for new audio to be buffered
-            End While
+        Private Async Sub OnGoogleDataAvailable(s As Object, e As WaveInEventArgs)
+            Try
+                Dim chunk = Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+                Await _stream.WriteAsync(New StreamingRecognizeRequest With {.AudioContent = chunk})
+            Catch ex As System.Exception
+                Debug.WriteLine($"Error sending audio to Google STT: {ex.Message}")
+            End Try
         End Sub
-
-        ' --- Process Audio ---
 
         Private Async Sub OnAudioDataAvailable(sender As Object, e As WaveInEventArgs)
 
@@ -7669,42 +7727,7 @@ Public Class ThisAddIn
 
         End Sub
 
-        Private Async Sub OnAudioDataAvailableMix(buffer As Byte(), bytesRecorded As Integer)
 
-            Select Case STTModel
-
-                Case "vosk"
-                    If recognizer IsNot Nothing AndAlso capturing Then
-                        Dim jsonResult As String = If(recognizer.AcceptWaveform(buffer, bytesRecorded),
-                                                  recognizer.Result,
-                                                  recognizer.PartialResult)
-                        ProcessTranscriptionJson(jsonResult)
-                    End If
-
-                Case "whisper"
-
-                    If WhisperRecognizer Is Nothing Then Return
-
-                    Try
-                        ' Convert audio buffer to float array
-                        Dim samples As Single() = ConvertAudioToFloat(buffer)
-
-                        ' Append to buffer
-                        audioBuffer.AddRange(samples)
-                        ' Only process when buffer has enough data 
-                        If audioBuffer.Count < 32000 Then Return ' Adjust threshold based on sample rate
-                        ' Copy buffered audio and clear buffer
-                        Dim processSamples = audioBuffer.ToArray()
-                        audioBuffer.Clear()
-
-                        ' Process transcription asynchronously
-                        Await ProcessWhisper(processSamples)
-                    Catch ex As Exception
-                        Debug.WriteLine($"Error in OnAudioDataAvailable: {ex.Message}")
-                    End Try
-
-            End Select
-        End Sub
 
         Private Async Function ProcessWhisper(samples As Single()) As Threading.Tasks.Task
             Try
@@ -7771,7 +7794,7 @@ Public Class ThisAddIn
                 Await enumerator.DisposeAsync()
 
                 STTCanceled = True
-                StopRecording()
+                StopRecording().Wait()
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
@@ -7826,6 +7849,56 @@ Public Class ThisAddIn
                 End Using
             End Using
         End Function
+
+
+        Public Async Function GoogleTranscribeAudioFile(filepath As String) As System.Threading.Tasks.Task
+            Try
+                PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = $"{GoogleSTT_Desc} is reading and transcribing your file... (press Esc to abort)")
+
+                ' Load raw PCM bytes (16 kHz, 16‑bit, mono) via your existing helper
+                Dim pcmData As Byte() = LoadAudioToPCM(filepath)
+
+                ' Stream in small chunks
+                Const chunkSize As Integer = 4096
+                Dim offset As Integer = 0
+
+                While offset < pcmData.Length
+                    ' Allow user to abort
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
+                        Exit While
+                    End If
+
+                    Dim length = Math.Min(chunkSize, pcmData.Length - offset)
+                    Dim chunk = Google.Protobuf.ByteString.CopyFrom(pcmData, offset, length)
+                    Await _stream.WriteAsync(New StreamingRecognizeRequest With {.AudioContent = chunk})
+                    offset += length
+                End While
+
+                ' Signal end of audio and wait for reader to finish
+                Await _stream.WriteCompleteAsync()
+                Await googleReaderTask
+                _stream.Dispose()
+
+                ' Cleanup & restore UI
+                STTCanceled = True
+                StopRecording().Wait()
+                capturing = False
+                Me.Invoke(Sub()
+                              StartButton.Enabled = True
+                              StopButton.Enabled = False
+                              LoadButton.Enabled = True
+                              cultureComboBox.Enabled = True
+                              deviceComboBox.Enabled = True
+                              SpeakerIdent.Enabled = True
+                              SpeakerDistance.Enabled = True
+                          End Sub)
+
+                ShowCustomMessageBox("The transcription of your file is complete.")
+            Catch ex As System.Exception
+                Debug.WriteLine($"Error in GoogleTranscribeAudioFile: {ex.Message}")
+            End Try
+        End Function
+
 
         Public Async Function VoskTranscribeAudioFile(filepath As String) As Threading.Tasks.Task
             Try
@@ -7899,7 +7972,7 @@ Public Class ThisAddIn
                 ' Reset flags and UI
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
                 STTCanceled = True
-                StopRecording()
+                StopRecording().Wait()
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
@@ -7965,8 +8038,6 @@ Public Class ThisAddIn
                 End Using
             End Using
         End Function
-
-
 
         Private Sub ProcessTranscriptionJson(jsonString As String)
             Try
@@ -8097,6 +8168,8 @@ Public Class ThisAddIn
 
         Private Sub Addline(completedline As String)
 
+            completedline = completedline.Trim()
+
             SyncLock finalText
                 finalText.AppendLine(completedline)
             End SyncLock
@@ -8109,7 +8182,21 @@ Public Class ThisAddIn
                                         RichTextBox1.ScrollToCaret()
                                     End If
                                 End Sub)
+
         End Sub
+
+        Private Sub ReplaceAndAddLine(fullTranscript As String)
+            RichTextBox1.Invoke(Sub()
+                                    ' 1) select everything from the start index to the end…
+                                    RichTextBox1.Select(googleTranscriptStart, RichTextBox1.TextLength - googleTranscriptStart)
+                                    ' 2) replace it with the entire new transcript
+                                    RichTextBox1.SelectedText = fullTranscript & Environment.NewLine
+                                    ' 3) reset the caret to the end
+                                    RichTextBox1.SelectionStart = RichTextBox1.Text.Length
+                                    RichTextBox1.ScrollToCaret()
+                                End Sub)
+        End Sub
+
 
 
         Public Sub LoadAndPopulateProcessComboBox(filePath As String, processComboBox As Forms.ComboBox)
@@ -8195,8 +8282,10 @@ Public Class ThisAddIn
 
     End Class
 
-    Private synth As New SpeechSynthesizer()
 
+    ' Text-to-Speech
+
+    Private synth As New SpeechSynthesizer()
 
     Public Shared Sub SelectVoiceByNumber()
         ' Ensure the SpeechSynthesizer is available

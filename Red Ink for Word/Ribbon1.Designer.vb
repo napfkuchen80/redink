@@ -57,6 +57,7 @@ Partial Class Ribbon1
         Dim RibbonDialogLauncherImpl1 As Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher = Me.Factory.CreateRibbonDialogLauncher
         Me.Tab1 = Me.Factory.CreateRibbonTab
         Me.Group1 = Me.Factory.CreateRibbonGroup
+        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.Menu1 = Me.Factory.CreateRibbonMenu
         Me.RI_Primlang = Me.Factory.CreateRibbonButton
         Me.RI_SecLang = Me.Factory.CreateRibbonButton
@@ -88,7 +89,6 @@ Partial Class Ribbon1
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_Transcriptor = Me.Factory.CreateRibbonButton
         Me.Settings = Me.Factory.CreateRibbonButton
-        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
@@ -113,6 +113,18 @@ Partial Class Ribbon1
         Me.Group1.Label = "Red Ink"
         Me.Group1.Name = "Group1"
         Me.Group1.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
+        '
+        'Group2
+        '
+        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
+        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
+        Me.Group2.Items.Add(Me.RI_PrimLang2)
+        Me.Group2.Items.Add(Me.RI_Correct2)
+        Me.Group2.Items.Add(Me.RI_Chat)
+        Me.Group2.KeyTip = "RIQ"
+        Me.Group2.Label = "Red Ink"
+        Me.Group2.Name = "Group2"
+        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'Menu1
         '
@@ -397,18 +409,6 @@ Partial Class Ribbon1
         Me.Settings.OfficeImageId = "SetupClassicOffline"
         Me.Settings.ScreenTip = "Allows you to temporarily change the settings"
         Me.Settings.ShowImage = True
-        '
-        'Group2
-        '
-        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
-        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
-        Me.Group2.Items.Add(Me.RI_PrimLang2)
-        Me.Group2.Items.Add(Me.RI_Correct2)
-        Me.Group2.Items.Add(Me.RI_Chat)
-        Me.Group2.KeyTip = "RIQ"
-        Me.Group2.Label = "Red Ink"
-        Me.Group2.Name = "Group2"
-        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'RI_PrimLang2
         '

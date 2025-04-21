@@ -75,8 +75,9 @@ Partial Class Ribbon1
         Me.Settings = Me.Factory.CreateRibbonButton
         Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
-        Me.RI_Correct2 = Me.Factory.CreateRibbonButton
+        Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM2 = Me.Factory.CreateRibbonButton
+        Me.RI_Chat = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -114,6 +115,7 @@ Partial Class Ribbon1
         Me.Menu1.Items.Add(Me.RI_FreestyleAM)
         Me.Menu1.Items.Add(Me.RI_Undo)
         Me.Menu1.Items.Add(Me.Menu2)
+        Me.Menu1.Items.Add(Me.RI_Chat)
         Me.Menu1.Items.Add(Me.Settings)
         Me.Menu1.Label = "Task"
         Me.Menu1.Name = "Menu1"
@@ -265,7 +267,7 @@ Partial Class Ribbon1
         'Group2
         '
         Me.Group2.Items.Add(Me.RI_PrimLang2)
-        Me.Group2.Items.Add(Me.RI_Correct2)
+        Me.Group2.Items.Add(Me.RI_Chat2)
         Me.Group2.Items.Add(Me.RI_FreestyleNM2)
         Me.Group2.Label = "Red Ink"
         Me.Group2.Name = "Group2"
@@ -279,13 +281,13 @@ Partial Class Ribbon1
         Me.RI_PrimLang2.ScreenTip = "Will translate the selected text"
         Me.RI_PrimLang2.ShowImage = True
         '
-        'RI_Correct2
+        'RI_Chat2
         '
-        Me.RI_Correct2.Label = "Correct"
-        Me.RI_Correct2.Name = "RI_Correct2"
-        Me.RI_Correct2.OfficeImageId = "SpellingAndGrammar"
-        Me.RI_Correct2.ScreenTip = "Will correct the selected text"
-        Me.RI_Correct2.ShowImage = True
+        Me.RI_Chat2.Label = "Chatbot"
+        Me.RI_Chat2.Name = "RI_Chat2"
+        Me.RI_Chat2.OfficeImageId = "ContactUs"
+        Me.RI_Chat2.ScreenTip = "Will open a window where you can chat with the LLM"
+        Me.RI_Chat2.ShowImage = True
         '
         'RI_FreestyleNM2
         '
@@ -294,6 +296,14 @@ Partial Class Ribbon1
         Me.RI_FreestyleNM2.OfficeImageId = "CustomActionsGallery"
         Me.RI_FreestyleNM2.ScreenTip = "Allows you to to enter a prompt and have the result shown (and inserted)"
         Me.RI_FreestyleNM2.ShowImage = True
+        '
+        'RI_Chat
+        '
+        Me.RI_Chat.Label = "Chatbot"
+        Me.RI_Chat.Name = "RI_Chat"
+        Me.RI_Chat.OfficeImageId = "ContactUs"
+        Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
+        Me.RI_Chat.ShowImage = True
         '
         'Ribbon1
         '
@@ -369,7 +379,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_Primlang As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents Group2 As Microsoft.Office.Tools.Ribbon.RibbonGroup
     Friend WithEvents RI_PrimLang2 As Microsoft.Office.Tools.Ribbon.RibbonButton
-    Friend WithEvents RI_Correct2 As Microsoft.Office.Tools.Ribbon.RibbonButton
+    Friend WithEvents RI_Chat2 As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents Settings As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_FreestyleNM As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_FreestyleAM As Microsoft.Office.Tools.Ribbon.RibbonButton
@@ -381,6 +391,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_Regex As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_FreestyleNM2 As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_Undo As RibbonButton
+    Friend WithEvents RI_Chat As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

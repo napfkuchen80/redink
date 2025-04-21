@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.4.2025
+' 21.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -15,6 +15,9 @@
 ' Includes NAudio in unchanged form; Copyright (c) 2020 Mark Heath; licensed under a proprietary open source license (https://www.nuget.org/packages/NAudio/2.2.1/license) at https://github.com/naudio/NAudio
 ' Includes Vosk in unchanged form; Copyright (c) 2022 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/
 ' Includes Whisper.net in unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net
+' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
+' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
+' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -34,6 +37,7 @@ Imports System.Runtime.InteropServices
 Imports System.IO
 Imports Microsoft.Vbe.Interop
 Imports Microsoft.Office.Tools
+Imports System.Drawing
 
 
 Module Module1
@@ -167,10 +171,11 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.150425 Gen2 Beta Test"
+    Public Const Version As String = "V.210425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
+    Public Const AN5 As String = "RI"
 
     Private Const ShortenPercent As Integer = 20
     Private Const TextPrefix As String = "TextOnly:"
@@ -178,10 +183,14 @@ Public Class ThisAddIn
     Private Const CellByCellPrefix As String = "CellByCell:"
     Private Const CellByCellPrefix2 As String = "CBC:"
     Private Const PurePrefix As String = "Pure:"
+    Private Const BubblesPrefix As String = "Bubbles:"
     Private Const RIMenu = AN
     Private Const MinHelperVersion = 1           ' Minimum version of the helper file that is required
+    Public Const LargeWorksheetSize As Integer = 2500
 
     ' Definition of the SharedProperties for context for exchanging values with the SharedLibrary
+
+    Private chatForm As frmAIChat
 
 #Region "SharedProperties"
 
@@ -916,6 +925,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_BubblesExcel As String
+        Get
+            Return _context.SP_BubblesExcel
+        End Get
+        Set(value As String)
+            _context.SP_BubblesExcel = value
+        End Set
+    End Property
+
     Public Shared Property SP_Add_Bubbles As String
         Get
             Return _context.SP_Add_Bubbles
@@ -959,6 +977,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Add_ChatWord_Commands = value
+        End Set
+    End Property
+
+    Public Shared Property SP_ChatExcel As String
+        Get
+            Return _context.SP_ChatExcel
+        End Get
+        Set(value As String)
+            _context.SP_ChatExcel = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Add_ChatExcel_Commands As String
+        Get
+            Return _context.SP_Add_ChatExcel_Commands
+        End Get
+        Set(value As String)
+            _context.SP_Add_ChatExcel_Commands = value
         End Set
     End Property
 
@@ -1477,6 +1513,7 @@ Public Class ThisAddIn
                 End If
             End If
         Next
+
     End Sub
 
     Private Function ContextMenuExists(cb As CommandBar, menuName As String) As Boolean
@@ -1768,6 +1805,7 @@ Public Class ThisAddIn
                 End If
             End If
         Next
+
     End Sub
 
 
@@ -1797,12 +1835,12 @@ Public Class ThisAddIn
     Public Async Function InLanguage1() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
         TranslateLanguage = INI_Language1
-        Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, False, True, False)
     End Function
     Public Async Function InLanguage2() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
         TranslateLanguage = INI_Language2
-        Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, False, True, False)
     End Function
     Public Async Function InOther() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
@@ -1813,19 +1851,20 @@ Public Class ThisAddIn
                 selectedRange.Select()
             End If
 
-            Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, True, False)
+            Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, False, False, True, False)
         End If
+
     End Function
     Public Async Function InOtherFormulas() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
         TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True)
         If Not String.IsNullOrEmpty(TranslateLanguage) Then
-            Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, True, True, False)
+            Dim result As Boolean = Await ProcessSelectedRange(SP_Translate, True, False, True, False, True, False)
         End If
     End Function
     Public Async Function Correct() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
-        Dim result As Boolean = Await ProcessSelectedRange(SP_Correct, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_Correct, True, False, False, False, True, False)
     End Function
     Public Async Function Improve() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
@@ -1845,12 +1884,12 @@ Public Class ThisAddIn
             selectedRange.Select()
         End If
 
-        Dim result As Boolean = Await ProcessSelectedRange(SP_WriteNeatly, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_WriteNeatly, True, False, False, False, True, False)
 
     End Function
     Public Async Function Anonymize() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
-        Dim result As Boolean = Await ProcessSelectedRange(SP_Anonymize, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_Anonymize, True, False, False, False, True, False)
     End Function
     Public Async Function Shorten() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
@@ -1900,8 +1939,8 @@ Public Class ThisAddIn
             selectedRange.Select()
         End If
 
-
         Dim result As Boolean = Await ProcessSelectedRange(SP_Shorten, True, False, False, True, False, ShortenPercentValue)
+
     End Function
     Public Async Function SwitchParty() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
@@ -1933,9 +1972,33 @@ Public Class ThisAddIn
             selectedRange.Select()
         End If
 
-        Dim result As Boolean = Await ProcessSelectedRange(SP_SwitchParty, True, False, False, True, False)
+        Dim result As Boolean = Await ProcessSelectedRange(SP_SwitchParty, True, False, False, False, True, False)
+
 
     End Function
+
+    Public Sub ShowChatForm()
+        If chatForm Is Nothing OrElse chatForm.IsDisposed Then
+            chatForm = New frmAIChat(_context)
+
+            ' Set the location and size before showing the form
+            If My.Settings.FormLocation <> System.Drawing.Point.Empty AndAlso My.Settings.FormSize <> Size.Empty Then
+                chatForm.StartPosition = FormStartPosition.Manual
+                chatForm.Location = My.Settings.FormLocation
+                chatForm.Size = My.Settings.FormSize
+            Else
+                ' Default to center screen if no settings are available
+                chatForm.StartPosition = FormStartPosition.Manual
+                Dim screenBounds As System.Drawing.Rectangle = Screen.PrimaryScreen.WorkingArea
+                chatForm.Location = New System.Drawing.Point((screenBounds.Width - chatForm.Width) \ 2, (screenBounds.Height - chatForm.Height) \ 2)
+                chatForm.Size = New Size(650, 500) ' Set default size if needed
+            End If
+        End If
+
+        ' Show and bring the form to the front
+        chatForm.Show()
+        chatForm.BringToFront()
+    End Sub
 
     Public Async Function FreestyleNM() As Task(Of Boolean)
         System.Windows.Forms.Application.DoEvents()
@@ -1969,6 +2032,7 @@ Public Class ThisAddIn
         Dim NoSelectedCells As Boolean = False
         Dim DoClipboard As Boolean = False
         Dim DoFormulas As Boolean = True
+        Dim DoBubbles As Boolean = False
 
         Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
         Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -1980,6 +2044,7 @@ Public Class ThisAddIn
         Dim DoRange As Boolean = True
         Dim CBCInstruct As String = $"with '{CellByCellPrefix}' or '{CellByCellPrefix2} if the instruction should be executed cell-by-cell"
         Dim TextInstruct As String = $"use '{TextPrefix}' or '{TextPrefix2}' if the instruction should apply cell-by-cell, but only to text cells"
+        Dim BubblesInstruct As String = $"use '{BubblesPrefix}' for inserting comments only"
 
         Dim PromptLibInstruct As String = ""
         If INI_PromptLib Then
@@ -1991,7 +2056,7 @@ Public Class ThisAddIn
         'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct})" & PromptLibInstruct & PureInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
         Else
             OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
             DoRange = True
@@ -2036,24 +2101,29 @@ Public Class ThisAddIn
             DoRange = False
             DoFormulas = False
         End If
+        If OtherPrompt.StartsWith(BubblesPrefix, StringComparison.OrdinalIgnoreCase) And selectedRange IsNot Nothing Then
+            OtherPrompt = OtherPrompt.Substring(BubblesPrefix.Length).Trim()
+            DoBubbles = True
+        End If
         If selectedRange IsNot Nothing Then
             selectedRange.Select()
         End If
 
         If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
             OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
-            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
         Else
             If Not NoSelectedCells Then
                 If DoRange Then
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
                 Else
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, False, UseSecondAPI)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI)
                 End If
             Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, False, UseSecondAPI, 0, True)
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
             End If
         End If
+
 
     End Function
 
@@ -2065,17 +2135,20 @@ Public Class ThisAddIn
     ' - CheckMaxToken: A boolean value indicating whether the maximum token count should be checked
     ' - DoRange: A boolean value indicating whether the selected range should be processed
     ' - DoFormulas: A boolean value indicating whether formulas should be processed
+    ' - DoBubbles: A boolean value indicating whether to insert comments
     ' - SelectionMandatory: A boolean value indicating whether a selection is mandatory
     ' - UseSecondAPI: A boolean value indicating whether the second API should be used
     ' - Optional: ShortenPercentValue: A percentage value by which the text should be shortened (for calculating the word count for each cell individually)
 
-    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False) As Task(Of Boolean)
+    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False) As Task(Of Boolean)
 
         Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
 
         Dim selectedRange As Excel.Range = TryCast(Globals.ThisAddIn.Application.Selection, Excel.Range)
         Dim NoSelectedCells As Boolean = False
         Dim DoShorten As Boolean = False
+
+        If DoBubbles Then SelectionMandatory = True
 
         ' Get the used range of the active sheet
         Dim activeSheet As Microsoft.Office.Interop.Excel.Worksheet = Globals.ThisAddIn.Application.ActiveSheet
@@ -2128,9 +2201,9 @@ Public Class ThisAddIn
 
         End If
 
-        If Not DoShorten Then
-            SysCommand = InterpolateAtRuntime(SysCommand)
-        End If
+        If Not DoShorten Then SysCommand = InterpolateAtRuntime(SysCommand)
+
+        If DoBubbles Then SysCommand = InterpolateAtRuntime(SP_BubblesExcel)
 
         undoStates.Clear()
 
@@ -2304,9 +2377,8 @@ Public Class ThisAddIn
 
                     ' Handle the user's response
                     If Not String.IsNullOrWhiteSpace(FinalText) Then
-                        Debug.WriteLine("Finaltext=" & FinalText)
                         instructions = ParseLLMResponse(FinalText)
-                        ApplyLLMInstructions(instructions)
+                        ApplyLLMInstructions(instructions, DoBubbles)
                         PutInClipboard(FinalText)
                         ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
                     End If
@@ -2327,11 +2399,12 @@ Public Class ThisAddIn
 
         Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
 
+
     End Function
 
     ' Helpers for the Range Functionality
 
-    Private Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
+    Public Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
         Dim output As String = String.Empty
 
 
@@ -2361,12 +2434,35 @@ Public Class ThisAddIn
                 End If
             End If
 
+            ' Include legacy comment (Note)
+            If cell.Comment IsNot Nothing Then
+                output &= "  Comment: " & cell.Comment.Text() & vbCrLf
+            End If
+
+            ' Include threaded comments (if available)
+            Try
+                Dim threadedComments As Object = cell.GetType().InvokeMember("ThreadedComments", Reflection.BindingFlags.GetProperty, Nothing, cell, Nothing)
+
+                If threadedComments IsNot Nothing Then
+                    For Each comment As Object In threadedComments
+                        ' Access the Text and optionally Author
+                        Dim text As String = comment.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, comment, Nothing).ToString()
+                        Dim author As String = comment.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, comment, Nothing).ToString()
+                        output &= $"  Comment: {text} (by {author})" & vbCrLf
+                    Next
+                End If
+            Catch ex As Exception
+                ' If threaded comments are not available, ignore
+            End Try
+
+
             ' Add a separator line between cells
             output &= New String("-"c, 40) & vbCrLf
         Next
 
         Return output
     End Function
+
     Public Function ParseLLMResponse(ByVal Response As String) As List(Of String)
         Dim instructions As New List(Of String)()
         Dim startPos As Integer, instructionEnd As Integer
@@ -2399,7 +2495,7 @@ Public Class ThisAddIn
 
         Return instructions
     End Function
-    Sub ApplyLLMInstructions(ByVal instructions As List(Of String))
+    Sub ApplyLLMInstructions(ByVal instructions As List(Of String), DoAlsoBubbles As Boolean)
 
         Dim instruction As String
         Dim cellAddress As String
@@ -2431,7 +2527,8 @@ Public Class ThisAddIn
             cellAddress = GetCellFromInstruction(instruction)
             formulaOrValue = GetFormulaOrValueFromInstruction(instruction)
 
-            If Not String.IsNullOrWhiteSpace(cellAddress) AndAlso Not String.IsNullOrWhiteSpace(formulaOrValue) Then
+            'If Not String.IsNullOrWhiteSpace(cellAddress) AndAlso Not String.IsNullOrWhiteSpace(formulaOrValue) Then
+            If Not String.IsNullOrWhiteSpace(cellAddress) Then
                 ii += 1
                 Debug.WriteLine($"Processing: Cell='{cellAddress}', Value='{formulaOrValue}'")
 
@@ -2448,7 +2545,20 @@ Public Class ThisAddIn
                                     targetRange = targetRange.MergeArea.Cells(1, 1)
                                 End If
 
-                                If formulaOrValue.StartsWith("=") Then
+
+                                If DoAlsoBubbles And formulaOrValue.StartsWith($"{AN5}: ") Then
+
+                                    ' Add a comment to the cell
+                                    Dim commentText As String = formulaOrValue.Trim()
+                                    If commentText <> $"{AN5}: " Then
+                                        If targetRange.CommentThreaded Is Nothing Then
+                                            targetRange.AddCommentThreaded(Text:=$"{commentText}")
+                                        Else
+                                            targetRange.CommentThreaded.AddReply(Text:=$"{commentText}")
+                                        End If
+                                    End If
+
+                                ElseIf formulaOrValue.StartsWith("=") Then
                                     Dim state As New CellState With {
                                                                     .CellAddress = targetRange.Address,
                                                                     .OldValue = targetRange.Value,
@@ -2458,35 +2568,38 @@ Public Class ThisAddIn
                                     ' Fix cell format issues
                                     targetRange.Value = ""
                                     targetRange.NumberFormat = "General"
-                                    Try
-                                        targetRange.Formula = formulaOrValue
-                                        undoStates.Add(state)
-                                    Catch ex As Exception
-                                        If ex.Message.Contains("HRESULT: 0x800A03EC") Then
-                                            Try
-                                                targetRange.FormulaLocal = formulaOrValue
-                                                undoStates.Add(state)
-                                            Catch ex2 As Exception
-                                                If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
-                                                    Try
-                                                        formulaOrValueLocale = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
-                                                        targetRange.FormulaLocal = formulaOrValueLocale
-                                                        undoStates.Add(state)
-                                                    Catch ex3 As Exception
-                                                        If ex3.Message.Contains("HRESULT: 0x800A03EC") Then
-                                                            ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
-                                                        Else
-                                                            ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                                        End If
-                                                    End Try
-                                                Else
-                                                    ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                                End If
-                                            End Try
-                                        Else
-                                            ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                        End If
-                                    End Try
+
+                                    SetFormulaSafe(targetRange, formulaOrValue, excelApp)
+
+                                    'Try
+                                    'targetRange.Formula2 = formulaOrValue
+                                    'undoStates.Add(state)
+                                    'Catch ex As Exception
+                                    'If ex.Message.Contains("HRESULT: 0x800A03EC") Then
+                                    'Try
+                                    'targetRange.FormulaLocal = formulaOrValue
+                                    'undoStates.Add(state)
+                                    'Catch ex2 As Exception
+                                    'If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
+                                    'Try
+                                    'formulaOrValueLocale = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
+                                    'targetRange.FormulaLocal = formulaOrValueLocale
+                                    'undoStates.Add(state)
+                                    'Catch ex3 As Exception
+                                    'If ex3.Message.Contains("HRESULT: 0x800A03EC") Then
+                                    'ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
+                                    'Else
+                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
+                                    'End If
+                                    'End Try
+                                    'Else
+                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
+                                    'End If
+                                    'End Try
+                                    'Else
+                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
+                                    'End If
+                                    'End Try
                                 Else
                                     Dim state As New CellState With {
                                                                     .CellAddress = targetRange.Address,
@@ -2532,8 +2645,40 @@ Public Class ThisAddIn
 
     End Sub
 
+    Public Sub SetFormulaSafe(cell As Excel.Range, formulaOrValue As String, excelApp As Excel.Application)
+        Try
+            ' Try setting using English formula
+            cell.Formula2 = formulaOrValue
+
+            ' Check for #NAME? result
+            If cell.Text.ToString().Trim() = "#NAME?" Then
+                ' Try fallback with FormulaLocal
+                Try
+                    cell.FormulaLocal = formulaOrValue
+
+                    If cell.Text.ToString().Trim() = "#NAME?" Then
+                        ' Final fallback: try conversion if available
+                        Dim converted = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
+                        cell.FormulaLocal = converted
+
+                        If cell.Text.ToString().Trim() = "#NAME?" Then
+                            ShowCustomMessageBox($"Excel rejected the formula '{formulaOrValue}' for cell {cell.Address}. Resulted in #NAME?.")
+                        End If
+                    End If
+                Catch exLocal As COMException
+                    ShowCustomMessageBox($"Failed to set formula using FormulaLocal: {exLocal.Message}")
+                End Try
+            End If
+
+        Catch ex As COMException
+            ShowCustomMessageBox($"COM Error setting formula: {ex.Message}")
+        Catch ex As Exception
+            ShowCustomMessageBox($"General error setting formula: {ex.Message}")
+        End Try
+    End Sub
 
     Public Function ConvertFormulaToLocale(ByVal englishFormula As String, ByVal excelApp As Excel.Application) As String
+
         Dim wb As Workbook = Nothing
         Dim ws As Worksheet = Nothing
         Dim localizedFormula As String = ""
@@ -2575,6 +2720,25 @@ Public Class ThisAddIn
     End Function
 
 
+    Public Function SizeOfWorksheet() As Integer
+        Try
+            Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
+            Dim activeSheet As Worksheet = CType(excelApp.ActiveSheet, Worksheet)
+            Dim usedRange As Excel.Range = activeSheet.UsedRange
+
+            Dim rowCount As Integer = usedRange.Rows.Count
+            Dim colCount As Integer = usedRange.Columns.Count
+            Dim totalCells As Integer = rowCount * colCount
+
+            Return totalCells
+
+        Catch ex As System.Exception
+            MsgBox("Error in SizeOfWorksheet: " & ex.Message, MsgBoxStyle.Critical)
+        End Try
+
+    End Function
+
+
     ' Helper function to release COM objects
     Private Sub ReleaseObject(ByVal obj As Object)
         Try
@@ -2606,6 +2770,8 @@ Public Class ThisAddIn
             pattern = "[Formula: "
         ElseIf instruction.Contains("[Value: ") Then
             pattern = "[Value: "
+        ElseIf instruction.Contains("[Comment: ") Then
+            pattern = "[Comment: "
         Else
             Return String.Empty
         End If
@@ -2645,10 +2811,12 @@ Public Class ThisAddIn
         Dim contentLength As Integer = matchingBracketIndex - contentStart
 
         If contentLength > 0 Then
-            Return instruction.Substring(contentStart, contentLength).Trim()
+            Dim Response As String = instruction.Substring(contentStart, contentLength).Trim()
+            If pattern = "[Comment: " Then
+                Response = $"{AN5}: " & Response
+            End If
+            Return Response
         End If
-
-        Return String.Empty
     End Function
 
     ' Excel Helpers
@@ -2803,6 +2971,7 @@ Public Class ThisAddIn
                 activeSheet.Rows(rowIndex).RowHeight = finalHeight
             Next
 
+
         Catch ex As System.Exception
             MessageBox.Show($"Error in AdjustHeight: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         Finally
@@ -2895,6 +3064,7 @@ Public Class ThisAddIn
 
             Next
 
+
         Catch ex As System.Exception
             MessageBox.Show($"Error in AdjustLegacyNotes: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         Finally
@@ -2902,7 +3072,6 @@ Public Class ThisAddIn
         End Try
 
     End Sub
-
 
     Private Shared LastRegexPattern As String = String.Empty
     Private Shared LastRegexOptions As String = String.Empty
@@ -3018,6 +3187,7 @@ Public Class ThisAddIn
 
             ShowCustomMessageBox($"{totalReplacements} replacement(s) made in the selected cells.")
 
+
         Catch ex As System.Exception
             MessageBox.Show($"Error in RegexSearchReplace: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         Finally
@@ -3121,6 +3291,7 @@ Public Class ThisAddIn
 
             Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
 
+            
         Catch ex As System.Exception
             MessageBox.Show("Error during undo (" & ex.Message & ").")
         End Try
@@ -3188,6 +3359,7 @@ Public Class ThisAddIn
             End If
         Catch ex As Exception
         End Try
+
 
     End Function
 

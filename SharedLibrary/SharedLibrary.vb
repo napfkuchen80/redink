@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.4.2025
+' 21.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -15,6 +15,9 @@
 ' Includes NAudio in unchanged form; Copyright (c) 2020 Mark Heath; licensed under a proprietary open source license (https://www.nuget.org/packages/NAudio/2.2.1/license) at https://github.com/naudio/NAudio
 ' Includes Vosk in unchanged form; Copyright (c) 2022 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/
 ' Includes Whisper.net in unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net
+' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
+' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
+' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Imports System.Reflection.Emit
@@ -44,7 +47,6 @@ Imports Microsoft.Office.Interop
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
-Imports System.Net
 Imports System.Drawing.Imaging
 
 
@@ -159,10 +161,13 @@ Namespace SharedLibrary
             Property SP_Add_KeepHTMLIntact As String
             Property SP_Add_KeepInlineIntact As String
             Property SP_Add_Bubbles As String
+            Property SP_BubblesExcel As String
             Property SP_Add_Revisions As String
             Property SP_MarkupRegex As String
             Property SP_ChatWord As String
             Property SP_Add_ChatWord_Commands As String
+            Property SP_ChatExcel As String
+            Property SP_Add_ChatExcel_Commands As String
             Property INI_ChatCap As Integer
 
             Property INI_ISearch As Boolean
@@ -311,11 +316,13 @@ Namespace SharedLibrary
         Public Property SP_Add_KeepHTMLIntact As String Implements ISharedContext.SP_Add_KeepHTMLIntact
         Public Property SP_Add_KeepInlineIntact As String Implements ISharedContext.SP_Add_KeepInlineIntact
         Public Property SP_Add_Bubbles As String Implements ISharedContext.SP_Add_Bubbles
+        Public Property SP_BubblesExcel As String Implements ISharedContext.SP_BubblesExcel
         Public Property SP_Add_Revisions As String Implements ISharedContext.SP_Add_Revisions
         Public Property SP_MarkupRegex As String Implements ISharedContext.SP_MarkupRegex
         Public Property SP_ChatWord As String Implements ISharedContext.SP_ChatWord
-
         Public Property SP_Add_ChatWord_Commands As String Implements ISharedContext.SP_Add_ChatWord_Commands
+        Public Property SP_ChatExcel As String Implements ISharedContext.SP_ChatExcel
+        Public Property SP_Add_ChatExcel_Commands As String Implements ISharedContext.SP_Add_ChatExcel_Commands
         Public Property INI_ChatCap As Integer Implements ISharedContext.INI_ChatCap
         Public Property INI_ISearch As Boolean Implements ISharedContext.INI_ISearch
         Public Property INI_ISearch_Approve As Boolean Implements ISharedContext.INI_ISearch_Approve
@@ -461,7 +468,10 @@ Namespace SharedLibrary
             "(https://licenses.nuget.org/BSD-2-Clause) at https://github.com/xoofx/markdig" & vbCrLf &
             "8. Vosk in unchanged form; Copyright (c) 2022 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/" & vbCrLf &
             "9. Whisper.net In unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net" & vbCrLf &
-            "10. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
+            "10. Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc" & vbCrLf &
+            "11. Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet" & vbCrLf &
+            "12. Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf" & vbCrLf &
+            "13. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
             "Copyright (c) 2016- Microsoft Corp." & vbCrLf & vbCrLf & "Disclaimer:" & vbCrLf & vbCrLf &
             "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 'As Is' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE." & vbCrLf & vbCrLf &
             "See the Red Ink license file (https://apps.vischer.com/redink/license.txt) for more information."
@@ -498,19 +508,22 @@ Namespace SharedLibrary
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_MailReply As String = "You are a legal professional with excellent legal, language, logical and rhetorical skills that precisely complies with its instructions step by step. Your task is to read the text that is provided to you and marked as 'mailchain', which contains an e-mail chain. The first mail you get is the e-mail to which you shall draft a response for me. When drafting the response for me, comply with the following instructions and information (= key instructions): {OtherPrompt}. \n\nThese are the further rules that every answer should follow: 1. Draft it in the same language as the first mail you get has been written (do not consider headers, the subject line or the footer. 2. The top (and latest) e-mail you are provided with in the mailchain is from the person who wrote to me. This will be the person to whom I want to respond to. You will draft an e-mail to respond to that person, i.e. the author of the top and latest e-mail. Please keep that in mind when drafting a response and make sure that you . 3. Please read the entire mail chain and distinguish exactly who has written what and what the party, to whom I will respond, has written when drafting the response. However, on the substance, focus on the key instructions I provided to you above, if any. 4. In your proposed response use the same style, type of language and way of e-mail drafting as I do. 5. Do not process and never consider or include signatures and mail footers. 6. Provide your output in the Markdown format. 7. When drafting a reply, use full salutations and closing formulas that are adequate in view of the tone of the mailchain. 8. Finally, when drafting the response, it is very important that you comply with all instructions and careful check your response for compliance with all instructions before you provide it. {INI_PreCorrection}"
         Const Default_SP_MailSumup As String = "You are a highly skilled legal professional who strictly follows instructions step by step; analyze the body of the provided ""mailchain"" to determine its predominant language (ignoring sender, recipient, subject, etc.), strictly use this language for the output, generate a concise, structured Markdown-formatted summary (in bold, but not header formatting) including a one-sentence key takeaway followed by a breakdown of key points distinguishing different authors, ensuring the summary is very short and concise while retaining all critical information and getting an understanding of the conversation. {INI_PreCorrection}"
-        Const Default_SP_MailSumup2 As String = "You are a highly skilled and very diligent personal assistant who strictly follows instructions step by step. You want to save my team by handling my e-mails. You will be provided with a number of e-mail-chains that I have received. Analyze the latest e-mail in every e-mail-chain, not more. Determine whether this latest mail is either very important or needs urgent attention. Of the three to five most relevant mails, provide me a one sentence substantive update including mandatory follow-ups, if any. Provide this in a bulleted list. Do not add any other comments. Take into account that the present date and time, which is {DateTimeNow}. Each e-mail will be provided to you between the tags <MAILnnnn> and <MAILnnnn>, whereas 'nnnn' represents the number of the e-mail. Provide your response in the main language of the mails. Be short and concise. Use bold face to indicate important elements of your response. Do not include the date and time of the e-mails, just the Sender, if necessary a word about the topic. {INI_PreCorrection}"
+        Const Default_SP_MailSumup2 As String = "You are a highly skilled and very diligent personal assistant who strictly follows instructions step by step. You want to save my team by handling my e-mails. You will be provided with a number of e-mail-chains that I have received. Analyze the latest e-mail in every e-mail-chain, not more. Determine whether this latest mail is either very important or needs urgent attention. Once you have done so, provide me a list of important or urgent e-mails only (no other mails), sorted by urgency and important, and provide me on each such important or urgent e-mail a short, but concise and easy to read substantive update including mandatory follow-ups, if any. Provide this in a bulleted list. Do not add any other comments. Take into account that the present date and time, which is {DateTimeNow}. Each e-mail will be provided to you between the tags <MAILnnnn> and <MAILnnnn>, whereas 'nnnn' represents the number of the e-mail. Provide your response in the main language of the mails. Be short and concise. Use bold face to indicate important elements of your response. Do not include the date and time of the e-mails, just the Sender, if necessary a word about the topic. {INI_PreCorrection}"
         Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Your task is to swap parties in a text and adapt the text to still read correctly. To do so, rewrite the text that is provided to you and is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}' preserving all other information, but ensure that in particular all pronouns, titles, possessive forms and the use of plural and singular are appropriately adjusted. If {OldParty} or {NewParty} is not a name, treat it based on its meaning, even if it starts with a capital letter. \n {INI_PreCorrection}"
         Const Default_SP_Anonymize As String = "You are very careful editor And legal professional that precisely complies with its instructions step by step. Fully anonymize the text that Is provided to you And Is marked as 'TEXTTOPROCESS'. Do so only by replacing any names, companies, businesses, parties, organizations, proprietary product names, unknown abbreviations, personal addresses, e-mail accounts, phone numbers, IDs, credit card information, account numbers and other identifying information by the expression '[redacted]' and before providing the result, check whether there is no information left that could directly or indirectly identify any person, company, business, party or organization, including information that could link to them by doing an Internet search, and if so, redact it as well. {INI_PreCorrection}"
-        Const Default_SP_RangeOfCells As String = "You are an expert In analyzing And explaining Excel files To non-experts And In drafting Excel formulas For use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
+        Const Default_SP_RangeOfCells As String = "You are an expert in analyzing and explaining Excel files to non-experts And in drafting Excel formulas for use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
         Const Default_SP_WriteNeatly As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be a coherent, concise and easy to understand text based the text and keywords in the provided text, without changing or adding any meaning or information to it, but taking into account the following context, if any: '{Context}' {INI_PreCorrection}"
         Const Default_SP_Add_KeepFormulasIntact As String = "Beware, the text contains an Excel formula. Unless expressly instructed otherwise, make sure that the formula still works as intended."
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text."
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response in short portions so that each portion relates to one particular short portion of the TEXTOPROCESS. When doing so, follow strictly these rules: \n1. Any portion of TEXTTOPROCESS that you comment or quote should never contain multiple lines, never multiple paragraphs and never a title in addition to other text. If you need to comment morethan ne paragraph, just select the first sentence and state that your comment refers to the entire section. Always limit yourself to at maximum one Paragraph. Do not include line breaks, bullets or special characters. \n2. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting verbatim the relevant portion of the TEXTTOPROCESS followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n4. Make sure you quote the portion of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted portion of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks.\n5. Keep the verbatim quoted text as short as possible (ensuring that it is still unique in the TEXTTOPROCESS) and that the comment for such portion is drafted meaningful. The verbatim quote should never be more than a Paragraph, preferrably less. \n6. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n7. Follow these rules strictly, because your output will otherwise not be valid."
+        Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instructions refer to markups, changes, insertions, deletions or revisions in the text, they are found within the tags <ins>...</ins> for insertions and within the tags <del> ... </del> for deletions."
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
         Const Default_SP_ChatWord As String = "You are a helpful AI, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
+        Const Default_SP_ChatExcel As String = "You are a helpful AI, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If the user has not given you access to the worksheet (i.e. no <RANGEOFCELLS> tag), but the user asks you about his worksheet, then do not respond and remind the user to give you access to the worksheet or a selection.\n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, search within the worksheet or insert new formulas, content or comments. If further below you are informed of the commands to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
+        Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_INI_ISearch_SearchTerm_SP As String = "You are an advanced language model tasked with generating precise and direct search terms required to fulfill the given instruction. Analyze the instruction and any additional text provided within <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present, to output only the specific search terms needed to retrieve the required information. If no additional text is provided, base your search terms solely on the instruction. The search terms should be formatted as they would appear in a search engine query, without any additional explanations or context. Instruction: {OtherPrompt}, Current Date: {CurrentDate}. Provide only the search terms, formatted for direct input into a search engine. Avoid any additional text or explanations."
         Const Default_INI_ISearch_Apply_SP As String = "You are a legal professional with excellent legal, language and logical skills and you precisely comply with your instructions step by step. You will execute the following instruction in the language of the command using (1) the knowledge and Information contained in the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, and (2) the text provided within the <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present. {INI_PreCorrection} \n Instruction: '{OtherPrompt}'\n {SearchResult} \n"
         Const Default_INI_ISearch_Apply_SP_Markup As String = "You are a legal professional With excellent legal, Language And logical skills And you precisely comply With your instructions Step by Step. You will execute the following instruction In the language Of the command Using the knowledge And Information contained In the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, And applying it directly To text provided within the <TEXTTOPROCESS> And </TEXTTOPROCESS> tags (amending it, as per the instruction). {INI_PreCorrection} \n Instruction: '{OtherPrompt} \n {SearchResult} \n"
@@ -1534,50 +1547,6 @@ Namespace SharedLibrary
 
 
 
-        Private Shared Function xxxExtractSimpleCitations(ByRef jsonObj As JObject) As String
-
-            Try
-
-                ' Extract citations
-                Dim citations As JToken = jsonObj.SelectToken("citations")
-                Dim citationList As New List(Of String)
-
-                If citations IsNot Nothing Then
-                    If citations.Type = JTokenType.Array Then
-                        ' Check if the citations array contains simple strings or objects
-                        For Each citation As JToken In citations
-                            If citation.Type = JTokenType.String Then
-                                ' Simple URL format
-                                citationList.Add(citation.ToString())
-                            ElseIf citation.Type = JTokenType.Object Then
-                                ' Extract "url" from the object format
-                                Dim url As JToken = citation.SelectToken("url")
-                                If url IsNot Nothing Then
-                                    citationList.Add(url.ToString())
-                                End If
-                            End If
-                        Next
-                    End If
-                End If
-
-                Dim simpleCitationOutput As String = ""
-
-                ' Append citations if found
-                If citationList.Count > 0 Then
-                    simpleCitationOutput = vbCrLf & vbCrLf
-                    For i As Integer = 0 To citationList.Count - 1
-                        simpleCitationOutput &= "[" & (i + 1).ToString() & "] " & citationList(i) & vbCrLf
-                    Next
-                End If
-
-                Return simpleCitationOutput
-
-            Catch ex As Exception
-                MessageBox.Show("Error parsing JSON for simple citations: " & ex.Message)
-                Return String.Empty
-            End Try
-        End Function
-
 
         Public Shared Function FindJsonProperty(token As JToken, searchtext As String) As String
             If token.Type = JTokenType.Object Then
@@ -2027,11 +1996,13 @@ Namespace SharedLibrary
                 context.SP_Add_KeepHTMLIntact = If(configDict.ContainsKey("SP_Add_KeepHTMLIntact"), configDict("SP_Add_KeepHTMLIntact"), Default_SP_Add_KeepHTMLIntact)
                 context.SP_Add_KeepInlineIntact = If(configDict.ContainsKey("SP_Add_KeepInlineIntact"), configDict("SP_Add_KeepInlineIntact"), Default_SP_Add_KeepInlineIntact)
                 context.SP_Add_Bubbles = If(configDict.ContainsKey("SP_Add_Bubbles"), configDict("SP_Add_Bubbles"), Default_SP_Add_Bubbles)
+                context.SP_BubblesExcel = If(configDict.ContainsKey("SP_BubblesExcel"), configDict("SP_BubblesExcel"), Default_SP_BubblesExcel)
                 context.SP_Add_Revisions = If(configDict.ContainsKey("SP_Add_Revisions"), configDict("SP_Add_Revisions"), Default_SP_Add_Revisions)
                 context.SP_MarkupRegex = If(configDict.ContainsKey("SP_MarkupRegex"), configDict("SP_MarkupRegex"), Default_SP_MarkupRegex)
                 context.SP_ChatWord = If(configDict.ContainsKey("SP_ChatWord"), configDict("SP_ChatWord"), Default_SP_ChatWord)
                 context.SP_Add_ChatWord_Commands = If(configDict.ContainsKey("SP_Add_ChatWord_Commands"), configDict("SP_Add_ChatWord_Commands"), Default_SP_Add_ChatWord_Commands)
-
+                context.SP_ChatExcel = If(configDict.ContainsKey("SP_ChatExcel"), configDict("SP_ChatExcel"), Default_SP_ChatExcel)
+                context.SP_Add_ChatExcel_Commands = If(configDict.ContainsKey("SP_Add_ChatExcel_Commands"), configDict("SP_Add_ChatExcel_Commands"), Default_SP_Add_ChatExcel_Commands)
 
                 ' Required For Excel Helper
                 context.INI_OpenSSLPath = If(configDict.ContainsKey("OpenSSLPath"), configDict("OpenSSLPath"), "%APPDATA%\Microsoft\OpenSSL_Runtime\openssl.exe")
@@ -2925,6 +2896,120 @@ Namespace SharedLibrary
             End If
         End Function
 
+        Public Shared Function ShowSelectionForm(
+        prompt As String,
+        title As String,
+        options As IEnumerable(Of String)
+    ) As String
+
+            Dim selectedOption As String = "ESC"
+
+            ' Form erzeugen
+            Dim inputForm As New Form() With {
+        .Text = title,
+        .FormBorderStyle = FormBorderStyle.FixedDialog,
+        .StartPosition = FormStartPosition.CenterParent,
+        .MinimizeBox = False,
+        .MaximizeBox = False,
+        .ShowInTaskbar = False,
+        .KeyPreview = True,
+        .ClientSize = New Size(400, 300)
+    }
+
+            ' Icon setzen
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+            ' Schrift setzen
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            inputForm.Font = standardFont
+
+            ' Prompt‑Label
+            Dim labelPrompt As New System.Windows.Forms.Label() With {
+        .Text = prompt,
+        .AutoSize = False,
+        .Location = New System.Drawing.Point(10, 10),
+        .Size = New Size(inputForm.ClientSize.Width - 20, 40),
+        .TextAlign = ContentAlignment.MiddleLeft
+    }
+            inputForm.Controls.Add(labelPrompt)
+
+            ' ListBox
+            Dim listBoxOptions As New ListBox() With {
+        .Location = New System.Drawing.Point(10, labelPrompt.Bottom + 10),
+        .Size = New Size(inputForm.ClientSize.Width - 20,
+                         inputForm.ClientSize.Height - labelPrompt.Height - 80),
+        .Anchor = AnchorStyles.Top Or AnchorStyles.Bottom Or
+                  AnchorStyles.Left Or AnchorStyles.Right
+    }
+            listBoxOptions.Items.AddRange(options.ToArray())
+            inputForm.Controls.Add(listBoxOptions)
+
+            ' OK‑ und Cancel‑Buttons im Panel, 10px Abstand zum Bottom
+            Dim panelButtons As New Panel() With {
+        .Height = 40,
+        .Location = New System.Drawing.Point(0, inputForm.ClientSize.Height - 40 - 10),
+        .Size = New Size(inputForm.ClientSize.Width, 40),
+        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
+    }
+            inputForm.Controls.Add(panelButtons)
+
+            Dim buttonOK As New Button() With {
+        .Text = "OK",
+        .Enabled = False,
+        .DialogResult = DialogResult.OK
+    }
+            AddHandler buttonOK.Click, Sub()
+                                           selectedOption = listBoxOptions.SelectedItem.ToString()
+                                       End Sub
+
+            Dim buttonCancel As New Button() With {
+        .Text = "Cancel",
+        .DialogResult = DialogResult.Cancel
+    }
+            AddHandler buttonCancel.Click, Sub()
+                                               selectedOption = "ESC"
+                                           End Sub
+
+            ' Links ausrichten: 20px Abstand zueinander
+            Dim leftMargin As Integer = 10
+            buttonOK.Location = New System.Drawing.Point(leftMargin, 5)
+            buttonCancel.Location = New System.Drawing.Point(buttonOK.Right + 20, 5)
+
+            ' Anchor nur oben+links
+            buttonOK.Anchor = AnchorStyles.Top Or AnchorStyles.Left
+            buttonCancel.Anchor = AnchorStyles.Top Or AnchorStyles.Left
+
+            panelButtons.Controls.Add(buttonOK)
+            panelButtons.Controls.Add(buttonCancel)
+
+            ' ListBox SelectionChanged → OK aktivieren
+            AddHandler listBoxOptions.SelectedIndexChanged, Sub()
+                                                                buttonOK.Enabled = (listBoxOptions.SelectedItem IsNot Nothing)
+                                                            End Sub
+
+            ' Ersten Eintrag auswählen
+            If listBoxOptions.Items.Count > 0 Then
+                listBoxOptions.SelectedIndex = 0
+            End If
+
+            ' Enter/Escape
+            inputForm.AcceptButton = buttonOK
+            inputForm.CancelButton = buttonCancel
+            AddHandler inputForm.KeyDown, Sub(sender As Object, e As KeyEventArgs)
+                                              If e.KeyCode = Keys.Escape Then
+                                                  selectedOption = "ESC"
+                                                  inputForm.Close()
+                                                  e.Handled = True
+                                              End If
+                                          End Sub
+
+            ' Dialog anzeigen
+            inputForm.ShowDialog()
+
+            Return selectedOption
+        End Function
+
         Public Shared Function ShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
 
             Dim inputForm As New Form()
@@ -3096,170 +3181,6 @@ Namespace SharedLibrary
             End If
         End Function
 
-
-        Public Shared Function xxxxShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
-
-            Dim inputForm As New Form()
-            inputForm.Opacity = 0
-            Dim promptLabel As New System.Windows.Forms.Label()
-            Dim inputTextBox As New TextBox()
-            Dim okButton As New Button()
-            Dim cancelButton As New Button()
-
-            ' Form attributes
-            inputForm.Text = title
-            inputForm.FormBorderStyle = FormBorderStyle.FixedDialog
-            inputForm.StartPosition = FormStartPosition.CenterScreen
-            inputForm.MaximizeBox = False
-            inputForm.MinimizeBox = False
-            inputForm.ShowInTaskbar = False
-            inputForm.TopMost = True
-
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            inputForm.Font = standardFont
-
-            ' Prompt label
-            promptLabel.Text = prompt
-            promptLabel.Font = standardFont
-            promptLabel.AutoSize = True
-            promptLabel.MaximumSize = New Size(600, 0) ' Increased maximum width for text wrapping
-            promptLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the prompt
-            inputForm.Controls.Add(promptLabel)
-
-            ' Input TextBox
-            Dim textBoxHeight As Integer = If(SimpleInput, 25, 150)
-            inputTextBox.Multiline = Not SimpleInput
-            inputTextBox.WordWrap = True
-            inputTextBox.ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical)
-            inputTextBox.Location = New System.Drawing.Point(20, promptLabel.Bottom + 20) ' Margin below the prompt
-            inputTextBox.Width = 595
-            inputTextBox.Height = textBoxHeight
-            inputTextBox.Text = DefaultValue ' Set default value if provided
-            inputForm.Controls.Add(inputTextBox)
-
-
-            ' Add KeyDown handler for Enter key if SimpleInput is True
-            If SimpleInput Then
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-            Else
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Escape Then
-                                                         inputForm.DialogResult = DialogResult.Cancel
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-            End If
-
-
-
-            ' Buttons
-            okButton.Text = "OK"
-            cancelButton.Text = "Cancel"
-
-            ' Measure and adjust button sizes based on font
-            Dim okButtonSize As Size = TextRenderer.MeasureText(okButton.Text, standardFont)
-            Dim cancelButtonSize As Size = TextRenderer.MeasureText(cancelButton.Text, standardFont)
-            Dim buttonWidth As Integer = Math.Max(okButtonSize.Width, cancelButtonSize.Width) + 20
-            Dim buttonHeight As Integer = Math.Max(okButtonSize.Height, cancelButtonSize.Height) + 10
-            okButton.Size = New Size(buttonWidth, buttonHeight)
-            cancelButton.Size = New Size(buttonWidth, buttonHeight)
-
-            ' Button positions
-            okButton.Location = New System.Drawing.Point(20, inputTextBox.Bottom + 20) ' Margin below the input box
-            cancelButton.Location = New System.Drawing.Point(okButton.Right + 10, inputTextBox.Bottom + 20) ' Margin between buttons
-            inputForm.Controls.Add(okButton)
-            inputForm.Controls.Add(cancelButton)
-
-            ' Button click handlers
-            AddHandler okButton.Click, Sub(sender, e)
-                                           inputForm.DialogResult = DialogResult.OK
-                                           inputForm.Close()
-                                       End Sub
-            AddHandler cancelButton.Click, Sub(sender, e)
-                                               inputForm.DialogResult = DialogResult.Cancel
-                                               inputForm.Close()
-                                           End Sub
-
-            ' Adjust form size dynamically
-            Dim formWidth As Integer = Math.Max(500, Math.Max(promptLabel.Width + 40, inputTextBox.Width + 40)) ' Adjusted width for the form
-            Dim formHeight As Integer = cancelButton.Bottom + 30
-            inputForm.ClientSize = New Size(formWidth, formHeight)
-
-            ' Show dialog
-
-            inputForm.TopMost = True
-            inputForm.BringToFront()
-            inputForm.Focus()
-
-            Dim Result As DialogResult
-
-            If title.Contains("Browser") Then
-                Dim outlookApp As Object = CreateObject("Outlook.Application")
-
-                If outlookApp IsNot Nothing Then
-                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
-                        "ActiveExplorer",
-                        Reflection.BindingFlags.GetProperty,
-                        Nothing,
-                        outlookApp,
-                        Nothing
-                    )
-                    If explorer IsNot Nothing Then
-                        ' WindowState = 1 => Normal window (OlWindowState.olNormalWindow)
-                        explorer.GetType().InvokeMember(
-                            "WindowState",
-                            Reflection.BindingFlags.SetProperty,
-                            Nothing,
-                            explorer,
-                            New Object() {1}
-                        )
-                        explorer.GetType().InvokeMember(
-                            "Activate",
-                            Reflection.BindingFlags.InvokeMethod,
-                            Nothing,
-                            explorer,
-                            Nothing
-                        )
-                    End If
-                End If
-                inputForm.Opacity = 1
-                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing) ' or however you get it
-                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
-            Else
-                inputForm.Opacity = 1
-                Result = inputForm.ShowDialog()
-            End If
-
-            If Result = DialogResult.OK Then
-                Return inputTextBox.Text
-            Else
-                If Not SimpleInput Then
-                    Return "ESC"
-                Else
-                    Return ""
-                End If
-            End If
-        End Function
 
 
         Public Shared Function ShowCustomYesNoBox(ByVal bodyText As String, ByVal button1Text As String, ByVal button2Text As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = "") As Integer
@@ -4066,7 +3987,7 @@ Namespace SharedLibrary
 
 
 
-        Public Shared Function ShowCustomWindow(introLine As String, ByVal bodyText As String, finalRemark As String, header As String, Optional NoRTF As Boolean = False, Optional Getfocus As Boolean = False) As String
+        Public Shared Function ShowCustomWindow(introLine As String, ByVal bodyText As String, finalRemark As String, header As String, Optional NoRTF As Boolean = False, Optional Getfocus As Boolean = False, Optional InsertMarkdown As Boolean = False) As String
 
             Dim OriginalText As String = bodyText
             Dim styledForm As New System.Windows.Forms.Form()
@@ -4075,6 +3996,7 @@ Namespace SharedLibrary
             Dim finalRemarkLabel As New System.Windows.Forms.Label()
             Dim editedButton As New System.Windows.Forms.Button()
             Dim originalButton As New System.Windows.Forms.Button()
+            Dim markButton As New System.Windows.Forms.Button()
             Dim cancelButton As New System.Windows.Forms.Button()
             Dim toolStrip As New System.Windows.Forms.ToolStrip()
 
@@ -4137,6 +4059,14 @@ Namespace SharedLibrary
             Dim originalButtonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(originalButton.Text, standardFont)
             Dim originalButtonWidth As Integer = originalButtonSize.Width + 20
             originalButton.Size = New System.Drawing.Size(originalButtonWidth, buttonHeight)
+
+            If InsertMarkdown Then
+                ' Markdown Button
+                markButton.Text = "Insert original text with formatting"
+                Dim markButtonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(markButton.Text, standardFont)
+                Dim markButtonWidth As Integer = markButtonSize.Width + 20
+                markButton.Size = New System.Drawing.Size(markButtonWidth, buttonHeight)
+            End If
 
             ' Cancel Button
             cancelButton.Text = "Cancel"
@@ -4233,17 +4163,30 @@ Namespace SharedLibrary
             If Not String.IsNullOrEmpty(finalRemark) Then
                 finalRemarkLabel.Location = New System.Drawing.Point(10, bodyTextBox.Bottom + 10)
                 styledForm.Controls.Add(finalRemarkLabel)
-                editedButton.Location = New System.Drawing.Point((maxWidth - buttonWidth - originalButtonWidth - cancelButtonWidth - 40) / 2, finalRemarkLabel.Bottom + 20)
+                editedButton.Location = New System.Drawing.Point(bodyTextBox.Left, finalRemarkLabel.Bottom + 20)
                 originalButton.Location = New System.Drawing.Point(editedButton.Right + 10, finalRemarkLabel.Bottom + 20)
-                cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, finalRemarkLabel.Bottom + 20)
+                If InsertMarkdown Then
+                    markButton.Location = New System.Drawing.Point(originalButton.Right + 10, finalRemarkLabel.Bottom + 20)
+                    cancelButton.Location = New System.Drawing.Point(markButton.Right + 10, finalRemarkLabel.Bottom + 20)
+                Else
+                    cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, finalRemarkLabel.Bottom + 20)
+                End If
             Else
-                editedButton.Location = New System.Drawing.Point((maxWidth - buttonWidth - originalButtonWidth - cancelButtonWidth - 40) / 2, bodyTextBox.Bottom + 20)
+                editedButton.Location = New System.Drawing.Point(bodyTextBox.Left, finalRemarkLabel.Bottom + 20)
                 originalButton.Location = New System.Drawing.Point(editedButton.Right + 10, bodyTextBox.Bottom + 20)
-                cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, bodyTextBox.Bottom + 20)
+                If InsertMarkdown Then
+                    markButton.Location = New System.Drawing.Point(originalButton.Right + 10, bodyTextBox.Bottom + 20)
+                    cancelButton.Location = New System.Drawing.Point(markButton.Right + 10, bodyTextBox.Bottom + 20)
+                Else
+                    cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, bodyTextBox.Bottom + 20)
+                End If
             End If
 
             styledForm.Controls.Add(editedButton)
             styledForm.Controls.Add(originalButton)
+            If InsertMarkdown Then
+                styledForm.Controls.Add(markButton)
+            End If
             styledForm.Controls.Add(cancelButton)
 
             ' Event handlers for buttons
@@ -4268,6 +4211,14 @@ Namespace SharedLibrary
                                                  styledForm.DialogResult = DialogResult.OK
                                                  styledForm.Close()
                                              End Sub
+            If InsertMarkdown Then
+
+                AddHandler markButton.Click, Sub(sender, e)
+                                                 returnValue = "Markdown"
+                                                 styledForm.DialogResult = DialogResult.OK
+                                                 styledForm.Close()
+                                             End Sub
+            End If
 
             AddHandler cancelButton.Click, Sub(sender, e)
                                                returnValue = String.Empty
@@ -5497,10 +5448,13 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", context.SP_Add_Bubbles},
+                    {"SP_BubblesExcel", context.SP_BubblesExcel},
                     {"SP_Add_Revisions", context.SP_Add_Revisions},
                     {"SP_MarkupRegex", context.SP_MarkupRegex},
                     {"SP_ChatWord", context.SP_ChatWord},
-                    {"SP_Add_ChatWord_Commands", context.SP_Add_ChatWord_Commands}
+                    {"SP_Add_ChatWord_Commands", context.SP_Add_ChatWord_Commands},
+                    {"SP_ChatExcel", context.SP_ChatExcel},
+                    {"SP_Add_ChatExcel_Commands", context.SP_Add_ChatExcel_Commands}
                 }
 
                 Dim KeysToSkipWhenDefault As New Dictionary(Of String, String) From {
@@ -5533,10 +5487,13 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", Default_SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", Default_SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", Default_SP_Add_Bubbles},
+                    {"SP_BubblesExcel", Default_SP_BubblesExcel},
                     {"SP_Add_Revisions", Default_SP_Add_Revisions},
                     {"SP_MarkupRegex", Default_SP_MarkupRegex},
                     {"SP_ChatWord", Default_SP_ChatWord},
-                    {"SP_Add_ChatWord_Commands", Default_SP_Add_ChatWord_Commands}
+                    {"SP_Add_ChatWord_Commands", Default_SP_Add_ChatWord_Commands},
+                    {"SP_ChatExcel", Default_SP_ChatExcel},
+                    {"SP_Add_ChatExcel_Commands", Default_SP_Add_ChatExcel_Commands}
                 }
 
 
@@ -5994,10 +5951,13 @@ Namespace SharedLibrary
             variableValues.Add("SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact)
             variableValues.Add("SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact)
             variableValues.Add("SP_Add_Bubbles", context.SP_Add_Bubbles)
+            variableValues.Add("SP_BubblesExcel", context.SP_BubblesExcel)
             variableValues.Add("SP_Add_Revisions", context.SP_Add_Revisions)
             variableValues.Add("SP_MarkupRegex", context.SP_MarkupRegex)
             variableValues.Add("SP_ChatWord", context.SP_ChatWord)
             variableValues.Add("SP_Add_ChatWord_Commands", context.SP_Add_ChatWord_Commands)
+            variableValues.Add("SP_ChatExcel", context.SP_ChatExcel)
+            variableValues.Add("SP_Add_ChatExcel_Commands", context.SP_Add_ChatExcel_Commands)
 
             ' Extract variable names from the dictionary
             Dim variableNames As New List(Of String)(variableValues.Keys)
@@ -6090,10 +6050,13 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_Add_KeepHTMLIntact") Then context.SP_Add_KeepHTMLIntact = updatedValues("SP_Add_KeepHTMLIntact")
                     If updatedValues.ContainsKey("SP_Add_KeepInlineIntact") Then context.SP_Add_KeepInlineIntact = updatedValues("SP_Add_KeepInlineIntact")
                     If updatedValues.ContainsKey("SP_Add_Bubbles") Then context.SP_Add_Bubbles = updatedValues("SP_Add_Bubbles")
+                    If updatedValues.ContainsKey("SP_BubblesExcel") Then context.SP_BubblesExcel = updatedValues("SP_BubblesExcel")
                     If updatedValues.ContainsKey("SP_Add_Revisions") Then context.SP_Add_Revisions = updatedValues("SP_Add_Revisions")
                     If updatedValues.ContainsKey("SP_MarkupRegex") Then context.SP_MarkupRegex = updatedValues("SP_MarkupRegex")
                     If updatedValues.ContainsKey("SP_ChatWord") Then context.SP_ChatWord = updatedValues("SP_ChatWord")
                     If updatedValues.ContainsKey("SP_Add_ChatWord_Commands") Then context.SP_Add_ChatWord_Commands = updatedValues("SP_Add_ChatWord_Commands")
+                    If updatedValues.ContainsKey("SP_ChatExcel") Then context.SP_ChatExcel = updatedValues("SP_ChatExcel")
+                    If updatedValues.ContainsKey("SP_Add_ChatExcel_Commands") Then context.SP_Add_ChatExcel_Commands = updatedValues("SP_Add_ChatExcel_Commands")
                     If updatedValues.ContainsKey("ISearch") Then context.INI_ISearch = CBool(updatedValues("ISearch"))
                     If updatedValues.ContainsKey("ISearch_Approve") Then context.INI_ISearch_Approve = CBool(updatedValues("ISearch_Approve"))
                     If updatedValues.ContainsKey("ISearch_URL") Then context.INI_ISearch_URL = updatedValues("ISearch_URL")

@@ -12,10 +12,6 @@ Public Class Ribbon1
         Dim Result As Boolean = Await Globals.ThisAddIn.Correct()
     End Function
 
-    Public Async Function RI_Correct2_Click(sender As Object, e As RibbonControlEventArgs) As Threading.Tasks.Task Handles RI_Correct2.Click
-        Dim Result As Boolean = Await Globals.ThisAddIn.Correct()
-    End Function
-
     Public Async Function RI_Shorten_Click(sender As Object, e As RibbonControlEventArgs) As Threading.Tasks.Task Handles RI_Shorten.Click
         Dim Result As Boolean = Await Globals.ThisAddIn.Shorten()
     End Function
@@ -82,5 +78,14 @@ Public Class Ribbon1
     Private Sub RI_Undo_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Undo.Click
         Globals.ThisAddIn.UndoAction()
     End Sub
+
+    Public Sub RI_Chat_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Chat2.Click
+        Globals.ThisAddIn.ShowChatForm()
+    End Sub
+
+    Public Sub RI_Chat2_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Chat2.Click
+        Globals.ThisAddIn.ShowChatForm()
+    End Sub
+
 
 End Class

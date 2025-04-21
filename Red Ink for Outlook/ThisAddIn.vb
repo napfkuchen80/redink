@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.4.2025
+' 21.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -15,6 +15,9 @@
 ' Includes NAudio in unchanged form; Copyright (c) 2020 Mark Heath; licensed under a proprietary open source license (https://www.nuget.org/packages/NAudio/2.2.1/license) at https://github.com/naudio/NAudio
 ' Includes Vosk in unchanged form; Copyright (c) 2022 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/
 ' Includes Whisper.net in unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net
+' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
+' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
+' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -94,7 +97,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.150425 Gen2 Beta Test"
+    Public Const Version As String = "V.210425 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -868,6 +871,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_BubblesExcel As String
+        Get
+            Return _context.SP_BubblesExcel
+        End Get
+        Set(value As String)
+            _context.SP_BubblesExcel = value
+        End Set
+    End Property
+
     Public Shared Property SP_Add_Revisions As String
         Get
             Return _context.SP_Add_Revisions
@@ -902,6 +914,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Add_ChatWord_Commands = value
+        End Set
+    End Property
+
+    Public Shared Property SP_ChatExcel As String
+        Get
+            Return _context.SP_ChatExcel
+        End Get
+        Set(value As String)
+            _context.SP_ChatExcel = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Add_ChatExcel_Commands As String
+        Get
+            Return _context.SP_Add_ChatExcel_Commands
+        End Get
+        Set(value As String)
+            _context.SP_Add_ChatExcel_Commands = value
         End Set
     End Property
 
@@ -1550,13 +1580,31 @@ Public Class ThisAddIn
                         ' Order the emails: latest email first (descending order by ReceivedTime)
                         mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
 
+                        Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+
                         Dim selectedText As String = String.Empty
                         Dim count As Integer = 1
                         For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
-                            Dim tag As String = count.ToString("D4") ' Format count with four digits
-                            Dim latestBody As String = GetLatestMailBody(mail.Body)
-                            selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
-                            count += 1
+
+                            Dim lastVerb As Integer = 0
+
+                            Try
+                                lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
+                            Catch comEx As COMException
+                                ' Property nicht gesetzt → noch nicht beantwortet
+                                lastVerb = 0
+                            Catch ex As System.Exception
+                                ' Sicherstellen, dass System.Exception voll qualifiziert ist
+                                lastVerb = 0
+                            End Try
+
+
+                            If lastVerb <> 102 AndAlso lastVerb <> 103 Then
+                                Dim tag As String = count.ToString("D4") ' Format count with four digits
+                                Dim latestBody As String = GetLatestMailBody(mail.Body)
+                                selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
+                                count += 1
+                            End If
                         Next
 
                         ShowSumup2(selectedText)
@@ -1794,7 +1842,7 @@ Public Class ThisAddIn
         Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
         Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
 
-        ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up (multimail)")
+        ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up (of unanswered mails)")
 
     End Sub
 

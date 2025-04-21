@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 5.4.2025
+' 20.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -95,13 +95,14 @@ Public Class frmAIChat
     Private Async Sub frmAIChat_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
         Me.StartPosition = FormStartPosition.Manual
+        Me.KeyPreview = True
 
         ' Restore saved chat text from My.Settings
         Dim previousChat As String = My.Settings.LastChatHistory
         If Not String.IsNullOrEmpty(previousChat) Then
             txtChatHistory.Text = previousChat
             OldChat = previousChat
-            PreceedingNewline = Environment.NewLine & Environment.NewLine
+            PreceedingNewline = Environment.NewLine
         End If
 
         ' Set the form's title and custom icon
@@ -242,12 +243,12 @@ Public Class frmAIChat
 
             ' Update UI on the UI thread
             Await UpdateUIAsync(Sub()
-                                    AppendToChatHistory(PreceedingNewline & "You: " & userPrompt & Environment.NewLine & Environment.NewLine)
+                                    AppendToChatHistory(PreceedingNewline & "You: " & userPrompt.TrimEnd() & Environment.NewLine & Environment.NewLine)
                                     txtUserInput.Clear()
-                                    PreceedingNewline = Environment.NewLine & Environment.NewLine
+                                    PreceedingNewline = Environment.NewLine
                                 End Sub)
 
-            _chatHistory.Add(("user", userPrompt))
+            _chatHistory.Add(("user", userPrompt.TrimEnd()))
 
             ' Add a placeholder for AI response while waiting
             Await UpdateUIAsync(Sub()
@@ -257,8 +258,8 @@ Public Class frmAIChat
 
             ' Call the LLM function asynchronously
             Dim aiResponse As String = Await SharedMethods.LLM(_context, SystemPrompt, fullPrompt.ToString(), "", "", 0, _useSecondApi, True)
-            aiResponse = aiResponse.TrimEnd(Environment.NewLine)
 
+            aiResponse = aiResponse.TrimEnd()
             aiResponse = aiResponse.Replace("**", "").Replace("_", "").Replace("`", "")
 
             Dim CommandsString As String = ""
@@ -273,7 +274,7 @@ Public Class frmAIChat
             ' Remove the "Thinking..." placeholder and update AI response on the UI thread
             Await UpdateUIAsync(Sub()
                                     RemoveLastLineFromChatHistory()
-                                    AppendToChatHistory(Environment.NewLine & $"{AN5}: " & aiResponse.Replace(vbCrLf, Environment.NewLine).Replace(vbLf, Environment.NewLine))
+                                    AppendToChatHistory(Environment.NewLine & $"{AN5}: " & aiResponse.TrimEnd().Replace(vbCrLf, Environment.NewLine).Replace(vbLf, Environment.NewLine) & Environment.NewLine)
                                     If My.Settings.DoCommands And Not String.IsNullOrWhiteSpace(CommandsString) Then
                                         ExecuteAnyCommands(CommandsString, chkIncludeselection.Checked)
                                     End If
@@ -281,7 +282,7 @@ Public Class frmAIChat
                                     If String.IsNullOrEmpty(txtUserInput.Text) Then txtUserInput.Focus()
                                 End Sub)
 
-            _chatHistory.Add(("assistant", aiResponse))
+            _chatHistory.Add(("assistant", aiResponse.TrimEnd()))
 
         Catch ex As System.Exception
             MsgBox("Error in btnSend_Click: " & ex.Message, MsgBoxStyle.Critical)
