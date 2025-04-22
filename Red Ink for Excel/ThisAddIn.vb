@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 21.4.2025
+' 22.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.210425 Gen2 Beta Test"
+    Public Const Version As String = "V.220425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2179,7 +2179,7 @@ Public Class ThisAddIn
         End If
 
         ' Check if all selected cells are blocked
-        If AreAllCellsBlocked(selectedRange) Then
+        If AreAllCellsBlocked(selectedRange) And Not DoRange Then
             ShowCustomMessageBox($"{AN} cannot do anything because the cells are blocked.")
             Return False
         End If
@@ -2404,64 +2404,96 @@ Public Class ThisAddIn
 
     ' Helpers for the Range Functionality
 
+
     Public Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
-        Dim output As String = String.Empty
 
+        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
 
-        Dim rowCount As Integer = CellRange.Rows.Count
-        Dim colCount As Integer = CellRange.Columns.Count
+        splash.Show()
+        splash.Refresh()
 
-        If rowCount = 1 And colCount = 1 Then
-            output = "Current Cell: " & CellRange.Address & vbCrLf
+        If CellRange Is Nothing Then
+            splash.Close()
+            Return String.Empty
         End If
 
-        ' Loop through each cell in the range
-        For Each cell As Excel.Range In CellRange.Cells
-            ' Get the cell address (e.g., "A1", "B4")
-            output &= "Cell " & cell.Address(False, False) & ": " & vbCrLf
+        With Globals.ThisAddIn.Application
+            .ScreenUpdating = False
+            .EnableEvents = False
+            .Calculation = Excel.XlCalculation.xlCalculationManual
+        End With
 
-            ' Get the cell value
-            Dim cellValue As String = If(cell.Value IsNot Nothing, cell.Value.ToString(), "(empty)")
-            output &= "  Value: " & cellValue & vbCrLf
+        Dim vals As Object = CellRange.Value2
+        Dim forms As Object = If(IncludeFormulas, CellRange.Formula, Nothing)
+        Dim sb As New System.Text.StringBuilder()
+        Dim rCount As Integer = vals.GetLength(0)
+        Dim cCount As Integer = vals.GetLength(1)
 
-            ' Check if the cell contains a formula, and include it
-            If IncludeFormulas Then
-                If cell.HasFormula Then
-                    Dim cellFormula As String = cell.Formula
-                    output &= "  Formula: " & cellFormula & vbCrLf
-                Else
-                    output &= "  Formula: none" & vbCrLf
+        For r As Integer = 1 To rCount
+            For c As Integer = 1 To cCount
+                Dim raw = vals(r, c)
+                If raw IsNot Nothing Then
+                    ' grab the cell Range COM object
+                    Dim cell As Excel.Range = CellRange.Cells(r, c)
+                    Dim addr As String = cell.Address(False, False)
+
+                    sb.AppendLine("Cell " & addr & ":")
+                    sb.AppendLine("  Value: " & raw.ToString())
+
+                    If IncludeFormulas Then
+                        Dim f = forms(r, c)
+                        sb.AppendLine("  Formula: " &
+                    If(TypeOf f Is String, f.ToString(), "none"))
+                    End If
+
+                    ' 1) Legacy comment?
+                    If cell.Comment IsNot Nothing Then
+                        sb.AppendLine("  Comment: " & cell.Comment.Text())
+                    End If
+
+                    ' 2) Threaded comments via reflection
+                    Try
+                        Dim tc = cell.GetType() _
+                    .InvokeMember("ThreadedComments",
+                        Reflection.BindingFlags.GetProperty,
+                        Nothing, cell, Nothing)
+                        If tc IsNot Nothing Then
+                            For Each cx In tc
+                                Dim txt = cx.GetType() _
+                            .InvokeMember("Text",
+                                Reflection.BindingFlags.GetProperty,
+                                Nothing, cx, Nothing).ToString()
+                                Dim auth = cx.GetType() _
+                            .InvokeMember("Author",
+                                Reflection.BindingFlags.GetProperty,
+                                Nothing, cx, Nothing).ToString()
+                                sb.AppendLine($"  Comment: {txt} (by {auth})")
+                            Next
+                        End If
+                    Catch ex As System.Exception
+                        ' ignore if ThreadedComments not supported
+                    End Try
+
+                    sb.AppendLine(New String("-"c, 40))
+
+                    ' 3) clean up the COM object
+                    Marshal.ReleaseComObject(cell)
                 End If
-            End If
-
-            ' Include legacy comment (Note)
-            If cell.Comment IsNot Nothing Then
-                output &= "  Comment: " & cell.Comment.Text() & vbCrLf
-            End If
-
-            ' Include threaded comments (if available)
-            Try
-                Dim threadedComments As Object = cell.GetType().InvokeMember("ThreadedComments", Reflection.BindingFlags.GetProperty, Nothing, cell, Nothing)
-
-                If threadedComments IsNot Nothing Then
-                    For Each comment As Object In threadedComments
-                        ' Access the Text and optionally Author
-                        Dim text As String = comment.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, comment, Nothing).ToString()
-                        Dim author As String = comment.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, comment, Nothing).ToString()
-                        output &= $"  Comment: {text} (by {author})" & vbCrLf
-                    Next
-                End If
-            Catch ex As Exception
-                ' If threaded comments are not available, ignore
-            End Try
-
-
-            ' Add a separator line between cells
-            output &= New String("-"c, 40) & vbCrLf
+            Next
         Next
 
-        Return output
+
+        With Globals.ThisAddIn.Application
+                .ScreenUpdating = True
+                .EnableEvents = True
+                .Calculation = Excel.XlCalculation.xlCalculationAutomatic
+            End With
+
+        splash.Close()
+
+        Return sb.ToString()
     End Function
+
 
     Public Function ParseLLMResponse(ByVal Response As String) As List(Of String)
         Dim instructions As New List(Of String)()

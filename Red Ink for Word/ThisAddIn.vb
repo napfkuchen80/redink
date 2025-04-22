@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 21.4.2025
+' 22.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -58,6 +58,8 @@ Imports Whisper.net.LibraryLoader
 Imports Newtonsoft.Json
 Imports Grpc.Core
 Imports Google.Cloud.Speech.V1
+Imports Google.Protobuf
+Imports Grpc.Net
 
 
 Public Class StopForm
@@ -248,7 +250,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.210425 Gen2 Beta Test"
+    Public Const Version As String = "V.220425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2567,6 +2569,7 @@ Public Class ThisAddIn
         Dim selection As Selection = application.Selection
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
+            Return
         End If
         SelectedText = selection.Text.Trim()
         If SelectedText.Contains("H: ") And SelectedText.Contains("G: ") Then
@@ -4422,7 +4425,7 @@ Public Class ThisAddIn
                         .UseTaskLists() _
                         .UseMathematics() _
                         .UseGenericAttributes() _
-                        .Build()
+.Build()
 
         Dim htmlResult As String = Markdown.ToHtml(Result, markdownPipeline).Trim
 
@@ -6644,12 +6647,18 @@ Public Class ThisAddIn
         Private readerCts = New CancellationTokenSource()
         Private _stream As SpeechClient.StreamingRecognizeStream
         Private googleTranscriptStart As Integer = 0
+        Private client As SpeechClient
+        Private GoogleLanguageCode As String = ""
+        Private audioQueue As New System.Collections.Concurrent.BlockingCollection(Of ByteString)()
+        Private _googleStreamCompleted As Boolean = False
 
 
 
         Public Sub New()
             ' Initialize UI Components
             InitializeComponents()
+
+            Me.AutoScaleMode = AutoScaleMode.Font
 
             ' Load available Vosk models
             Dim modelPath As String = Globals.ThisAddIn.INI_SpeechModelPath
@@ -6722,8 +6731,6 @@ Public Class ThisAddIn
                 End If
             End If
 
-
-
             ' Wire up event handlers
             AddHandler StartButton.Click, AddressOf StartButton_Click
             AddHandler StopButton.Click, AddressOf StopButton_Click
@@ -6772,6 +6779,182 @@ Public Class ThisAddIn
 
 
         Private Sub InitializeComponents()
+            ' --- DPI‐aware form setup ---
+            Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            Me.AutoScaleMode = AutoScaleMode.Font
+            Me.Text = $"{AN} Transcriptor (editable text, audio will not be stored)"
+            Me.FormBorderStyle = FormBorderStyle.Sizable
+
+            ' --- Create controls ---
+
+            ' Transcript area
+            Me.RichTextBox1 = New RichTextBox() With {
+        .Font = New System.Drawing.Font("Segoe UI", 10.0F, FontStyle.Regular, GraphicsUnit.Point),
+        .Multiline = True,
+        .ScrollBars = RichTextBoxScrollBars.Vertical,
+        .Dock = DockStyle.Fill
+    }
+
+            ' Selector labels
+            Me.Label1 = New Label() With {.Text = "Model:", .AutoSize = True}
+            Me.Label2 = New Label() With {.Text = "Source:", .AutoSize = True}
+
+            ' Model / source dropdowns (start 50px wider)
+            Me.cultureComboBox = New System.Windows.Forms.ComboBox() With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 200
+    }
+            Me.deviceComboBox = New System.Windows.Forms.ComboBox() With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 200
+    }
+
+            ' Speaker toggle + threshold
+            Me.SpeakerIdent = New System.Windows.Forms.CheckBox() With {.Text = VoskToggle, .AutoSize = True}
+            Me.SpeakerDistance = New System.Windows.Forms.TextBox() With {
+        .Text = If(My.Settings.LastSpeakerDistance <= 0, "1.0", My.Settings.LastSpeakerDistance.ToString()),
+        .Width = 50,
+        .AutoSize = False
+    }
+
+            ' Status + partial text
+            Me.StatusLabel = New Label() With {
+        .Text = "Transcribing:",
+        .AutoSize = True,
+        .Dock = DockStyle.Top
+    }
+            Me.PartialTextLabel = New Label() With {
+        .Text = "...",
+        .AutoSize = False,
+        .Height = 60,
+        .Dock = DockStyle.Top
+    }
+
+            ' Action buttons + bottom combobox
+            Me.StartButton = New System.Windows.Forms.Button() With {.Text = "Start", .AutoSize = True}
+            Me.StopButton = New System.Windows.Forms.Button() With {.Text = "Stop", .AutoSize = True, .Enabled = False}
+            Me.ClearButton = New System.Windows.Forms.Button() With {.Text = "Clear", .AutoSize = True}
+            Me.LoadButton = New System.Windows.Forms.Button() With {.Text = "Load", .AutoSize = True}
+            Me.QuitButton = New System.Windows.Forms.Button() With {.Text = "Quit", .AutoSize = True}
+            Me.ProcessButton = New System.Windows.Forms.Button() With {.Text = "Process:", .AutoSize = True}
+            Me.processCombobox = New System.Windows.Forms.ComboBox() With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 200
+    }
+
+            ' Add a little right‐margin so controls aren’t jammed
+            Dim pad As New Padding(0, 0, 10, 0)
+            For Each ctl In {Label1, cultureComboBox, Label2, deviceComboBox, SpeakerIdent, SpeakerDistance,
+                     StartButton, StopButton, ClearButton, LoadButton, QuitButton, ProcessButton}
+                ctl.Margin = pad
+            Next
+            processCombobox.Margin = pad
+
+            ' --- Build layout ---
+
+            ' Root: 3 rows—top selectors, middle transcript, bottom actions
+            Dim root As New TableLayoutPanel() With {
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .ColumnCount = 1,
+        .RowCount = 3,
+        .Padding = New Padding(10)
+    }
+            root.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
+            root.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' row0: selectors
+            root.RowStyles.Add(New RowStyle(SizeType.Percent, 100)) ' row1: transcript
+            root.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' row2: actions
+
+            ' Row 0: selectors laid out in a TableLayoutPanel so combos stretch
+            Dim topRow As New TableLayoutPanel() With {
+        .Dock = DockStyle.Top,
+        .AutoSize = False,
+        .Height = cultureComboBox.PreferredHeight + 10,
+        .ColumnCount = 6,
+        .RowCount = 1,
+        .Padding = New Padding(0, 0, 0, 10)
+    }
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+            topRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+
+            cultureComboBox.Dock = DockStyle.Fill
+            deviceComboBox.Dock = DockStyle.Fill
+
+            topRow.Controls.Add(Label1, 0, 0)
+            topRow.Controls.Add(cultureComboBox, 1, 0)
+            topRow.Controls.Add(Label2, 2, 0)
+            topRow.Controls.Add(deviceComboBox, 3, 0)
+            topRow.Controls.Add(SpeakerIdent, 4, 0)
+            topRow.Controls.Add(SpeakerDistance, 5, 0)
+
+            root.Controls.Add(topRow, 0, 0)
+
+            ' Row 1: status, partial, then main RichTextBox
+            Dim mid As New TableLayoutPanel() With {
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .ColumnCount = 1,
+        .RowCount = 3
+    }
+            mid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
+            mid.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+            mid.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+            mid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
+
+            mid.Controls.Add(StatusLabel, 0, 0)
+            mid.Controls.Add(PartialTextLabel, 0, 1)
+            mid.Controls.Add(RichTextBox1, 0, 2)
+
+            root.Controls.Add(mid, 0, 1)
+
+            ' Row 2: bottom actions in a stretchy TableLayoutPanel
+            Dim bottomRow As New TableLayoutPanel() With {
+        .Dock = DockStyle.Bottom,
+        .AutoSize = False,
+        .Height = StartButton.PreferredSize.Height + 20,
+        .ColumnCount = 7,
+        .RowCount = 1,
+        .Padding = New Padding(0, 10, 0, 0)
+    }
+            ' first six columns auto‐size, last column (processCombobox) fills
+            For i = 1 To 6
+                bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+            Next
+            bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
+
+            processCombobox.Dock = DockStyle.Fill
+
+            bottomRow.Controls.Add(StartButton, 0, 0)
+            bottomRow.Controls.Add(StopButton, 1, 0)
+            bottomRow.Controls.Add(ClearButton, 2, 0)
+            bottomRow.Controls.Add(LoadButton, 3, 0)
+            bottomRow.Controls.Add(QuitButton, 4, 0)
+            bottomRow.Controls.Add(ProcessButton, 5, 0)
+            bottomRow.Controls.Add(processCombobox, 6, 0)
+
+            root.Controls.Add(bottomRow, 0, 2)
+
+            ' Swap in our root layout
+            Me.Controls.Clear()
+            Me.Controls.Add(root)
+
+            ' Freeze minimum size once first shown
+            AddHandler Me.Shown, Sub() Me.MinimumSize = Me.Size
+
+            ' Set icon
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            Me.Icon = Icon.FromHandle(bmp.GetHicon())
+        End Sub
+
+
+
+        Private Sub xxxxInitializeComponents()
             ' Set standard font for UI
             Me.Font = New System.Drawing.Font("Segoe UI", 9)
 
@@ -6960,9 +7143,12 @@ Public Class ThisAddIn
         End Sub
 
         Private Async Function StopRecording() As System.Threading.Tasks.Task
-            STTCanceled = True
+
             CancelTranscription()
-            audioBuffer.Clear()
+
+            If STTModel = "google" AndAlso _stream IsNot Nothing Then
+                Await SafeCompleteAndDisposeGoogleStreamAsync()
+            End If
 
             If WhisperRecognizer IsNot Nothing Then
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Whisper stopped...")
@@ -6971,51 +7157,52 @@ Public Class ThisAddIn
             End If
 
             If waveIn IsNot Nothing Then
-                If STTModel = "google" Then
-                    RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
-                Else
-                    RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
-                End If
-            End If
-
-            If STTModel = "google" Then
-                Try
-                    Await _stream.WriteCompleteAsync()
-                Catch ex As System.Exception
-                End Try
-
-                readerCts.Cancel()
-                Await googleReaderTask
-                _stream.Dispose()
-            End If
-
-
-            If waveIn IsNot Nothing Then
+                RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
+                RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
                 waveIn.StopRecording()
                 waveIn.Dispose()
+                waveIn = Nothing
             End If
 
         End Function
 
 
         Private Sub StopButton_Click(sender As Object, e As EventArgs)
-            If capturing Then
-                StopRecording().Wait()
-                capturing = False
 
-                Me.StartButton.Enabled = True
-                Me.StopButton.Enabled = False
-                Me.LoadButton.Enabled = True
-                Me.cultureComboBox.Enabled = True
-                Me.deviceComboBox.Enabled = True
-                Me.SpeakerIdent.Enabled = True
-                Me.SpeakerDistance.Enabled = True
-                If STTModel = "vosk" Then
-                    Addline(PartialTextLabel.Text)
-                End If
-                PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
-            End If
+            If Not capturing Then Return
+
+            STTCanceled = True
+
+            ' Verhindere Mehrfachklicks
+            Me.StopButton.Enabled = False
+            PartialTextLabel.Text = "Stopping…"
+
+            System.Threading.Tasks.Task.Run(Async Function()
+                                                Try
+                                                    Await StopRecording()
+                                                Catch ex As System.Exception
+
+                                                End Try
+
+                                                Me.Invoke(Sub()
+                                                              Me.StartButton.Enabled = True
+                                                              Me.LoadButton.Enabled = True
+                                                              Me.cultureComboBox.Enabled = True
+                                                              Me.deviceComboBox.Enabled = True
+                                                              Me.SpeakerIdent.Enabled = True
+                                                              Me.SpeakerDistance.Enabled = True
+
+                                                              If STTModel = "vosk" Then
+                                                                  Addline(PartialTextLabel.Text)
+                                                              End If
+                                                              PartialTextLabel.Text = String.Empty
+                                                          End Sub)
+                                            End Function)
+
+            capturing = False
+
         End Sub
+
 
         Private Sub ClearButton_Click(sender As Object, e As EventArgs)
             RichTextBox1.Invoke(Sub()
@@ -7029,39 +7216,73 @@ Public Class ThisAddIn
 
             If e.CloseReason = CloseReason.UserClosing Then
                 If capturing Then
-                    StopRecording().Wait()
-                    capturing = False
-                    Me.StartButton.Enabled = True
+
+                    STTCanceled = True
+
                     Me.StopButton.Enabled = False
-                    Me.LoadButton.Enabled = True
-                    If STTModel = "vosk" Then
-                        Addline(PartialTextLabel.Text)
-                    End If
-                    PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
+                    Me.QuitButton.Enabled = False
+                    PartialTextLabel.Text = "Stopping…"
+
+                    System.Threading.Tasks.Task.Run(Async Function()
+                                                        Try
+                                                            Await StopRecording()
+                                                        Catch ex As System.Exception
+
+                                                        End Try
+
+                                                        Me.Invoke(Sub()
+                                                                      Me.StartButton.Enabled = False
+                                                                      Me.LoadButton.Enabled = False
+
+                                                                      If STTModel = "vosk" Then
+                                                                          Addline(PartialTextLabel.Text)
+                                                                      End If
+                                                                      PartialTextLabel.Text = String.Empty
+                                                                  End Sub)
+                                                    End Function)
+
+                    capturing = False
+
                 End If
             End If
         End Sub
 
         Private Sub QuitButton_Click(sender As Object, e As EventArgs)
+
             If capturing Then
-                StopRecording().Wait()
-                capturing = False
-                Me.StartButton.Enabled = True
-                Me.LoadButton.Enabled = True
+
+                STTCanceled = True
+
                 Me.StopButton.Enabled = False
-                If STTModel = "vosk" Then
-                    Addline(PartialTextLabel.Text)
-                End If
-                PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
+                Me.QuitButton.Enabled = False
+                PartialTextLabel.Text = "Stopping…"
+
+                System.Threading.Tasks.Task.Run(Async Function()
+                                                    Try
+                                                        Await StopRecording()
+                                                    Catch ex As System.Exception
+
+                                                    End Try
+
+                                                    Me.Invoke(Sub()
+                                                                  Me.StartButton.Enabled = False
+                                                                  Me.LoadButton.Enabled = False
+
+                                                                  If STTModel = "vosk" Then
+                                                                      Addline(PartialTextLabel.Text)
+                                                                  End If
+                                                                  PartialTextLabel.Text = String.Empty
+                                                              End Sub)
+                                                End Function)
+
                 capturing = False
+
             End If
             Me.Close()
         End Sub
 
         Private Async Sub LoadButton_Click(sender As Object, e As EventArgs)
-            If capturing Then
-                Return
-            End If
+            If capturing Then Return
 
             Dim filepath As String = ""
 
@@ -7091,7 +7312,6 @@ Public Class ThisAddIn
             End Using
             DragDropFormLabel = ""
             DragDropFormFilter = ""
-
 
             Dim splash As New SplashScreen($"Loading model...")
             splash.Show()
@@ -7137,50 +7357,16 @@ Public Class ThisAddIn
                         End If
 
                         ' Configure the streaming recognizer
-                        Await StartGoogleSTT(accessToken, language)
 
-                        ' Spawn the response‐reader (identical to your live transcription)
-                        googleReaderTask = System.Threading.Tasks.Task.Run(
-                                Async Function()
-                                    Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(readerCts.Token)
-                                    Try
-                                        While Await enumerator.MoveNextAsync()
-                                            For Each result In enumerator.Current.Results
-                                                If result.IsFinal Then
-                                                    If Me.SpeakerIdent.Checked Then
-                                                        Dim lastSpeaker As Integer = 0
-                                                        Dim segment As New System.Text.StringBuilder()
-                                                        For Each w In result.Alternatives(0).Words
-                                                            If w.SpeakerTag <> lastSpeaker Then
-                                                                If segment.Length > 0 Then
-                                                                    Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                                    ReplaceAndAddLine(prevLine)
-                                                                    segment.Clear()
-                                                                End If
-                                                                lastSpeaker = w.SpeakerTag
-                                                            End If
-                                                            segment.Append(w.Word & " ")
-                                                        Next
-                                                        If segment.Length > 0 Then
-                                                            Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                            ReplaceAndAddLine(finalLine)
-                                                        End If
-                                                    Else
-                                                        ' Normales Hinzufügen ohne Speaker-Logik
-                                                        Addline(result.Alternatives(0).Transcript)
-                                                    End If
-                                                Else
-                                                    PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
-                                                End If
-                                            Next
-                                        End While
-                                    Catch ex As OperationCanceledException
-                                        ' normal cancellation
-                                    Catch ex As System.Exception
-                                        Debug.WriteLine($"Reader error: {ex}")
-                                    End Try
-                                End Function
-                            )
+                        GoogleLanguageCode = language
+
+                        Await StartGoogleSTT(accessToken)
+
+                        ' Spawn the response‐reader
+
+                        googleTranscriptStart = RichTextBox1.TextLength
+
+                        StartGoogleReaderTask()
 
                     Case "vosk"
                         StartVosk()
@@ -7355,7 +7541,7 @@ Public Class ThisAddIn
             End If
         End Sub
 
-        Private Async Function StartGoogleSTT(accessToken As String, LanguageCode As String) As System.Threading.Tasks.Task
+        Private Async Function StartGoogleSTT(accessToken As String) As System.Threading.Tasks.Task
             ' Innerhalb Deiner Initialisierungsroutine (z. B. StartGoogleSTT):
             Dim callCreds = CallCredentials.FromInterceptor(
                 Async Function(context, metadata)
@@ -7372,24 +7558,38 @@ Public Class ThisAddIn
                 .ChannelCredentials = channelCreds
             }
 
-            Dim client As SpeechClient = builder.Build()
+            client = builder.Build()
+
+            Await InitializeGoogleStream()
+
+        End Function
+
+        Private Sub ResetGoogleStreamFlag()
+            _googleStreamCompleted = False
+        End Sub
+
+        Private Async Function InitializeGoogleStream() As System.Threading.Tasks.Task
+
+            ResetGoogleStreamFlag()
 
             Try
                 ' Bidirektionales Streaming öffnen
 
                 If Me.SpeakerIdent.Checked Then
 
+                    Dim maxSpk As Integer = CInt(Math.Ceiling(Double.Parse(Me.SpeakerDistance.Text)))
+
                     _stream = client.StreamingRecognize()
                     Dim streamingConfig As New StreamingRecognitionConfig With {
                         .Config = New RecognitionConfig With {
                             .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
                             .SampleRateHertz = 16000,
-                            .LanguageCode = LanguageCode,
+                            .LanguageCode = GoogleLanguageCode,
                             .EnableAutomaticPunctuation = True,
                             .EnableSpokenPunctuation = True,
                             .DiarizationConfig = New SpeakerDiarizationConfig With {
                                 .EnableSpeakerDiarization = Me.SpeakerIdent.Checked,
-                                .MaxSpeakerCount = Me.SpeakerDistance.Text
+                                .MaxSpeakerCount = maxSpk
                             }
                         },
                         .InterimResults = True
@@ -7402,12 +7602,14 @@ Public Class ThisAddIn
                     .Config = New RecognitionConfig With {
                         .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
                         .SampleRateHertz = 16000,
-                        .LanguageCode = LanguageCode
+                        .LanguageCode = GoogleLanguageCode
                                 },
                                 .InterimResults = True
                             }
                     Await _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig})
                 End If
+
+                'StartAudioQueueWriter()
 
             Catch ex As System.Exception
 
@@ -7417,7 +7619,7 @@ Public Class ThisAddIn
                 .Config = New RecognitionConfig With {
                     .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
                     .SampleRateHertz = 16000,
-                    .LanguageCode = LanguageCode
+                    .LanguageCode = GoogleLanguageCode
                             },
                             .InterimResults = True
                         }
@@ -7486,7 +7688,8 @@ Public Class ThisAddIn
                         End If
 
                         Try
-                            Await StartGoogleSTT(AccessToken, language)
+                            GoogleLanguageCode = language
+                            Await StartGoogleSTT(AccessToken)
                         Catch ex As System.Exception
                             ShowCustomMessageBox("Error starting transcription service: {ex.Message}", $"{GoogleSTT_Desc}")
                             STTCanceled = True
@@ -7500,46 +7703,7 @@ Public Class ThisAddIn
 
                         googleTranscriptStart = RichTextBox1.TextLength
 
-                        googleReaderTask = System.Threading.Tasks.Task.Run(
-                                                      Async Function()
-                                                          Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(readerCts.Token)
-                                                          Try
-                                                              While Await enumerator.MoveNextAsync()
-                                                                  For Each result In enumerator.Current.Results
-                                                                      If result.IsFinal Then
-                                                                          If Me.SpeakerIdent.Checked Then
-                                                                              Dim lastSpeaker As Integer = 0
-                                                                              Dim segment As New System.Text.StringBuilder()
-                                                                              For Each w In result.Alternatives(0).Words
-                                                                                  If w.SpeakerTag <> lastSpeaker Then
-                                                                                      If segment.Length > 0 Then
-                                                                                          Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                                                          ReplaceAndAddLine(prevLine)
-                                                                                          segment.Clear()
-                                                                                      End If
-                                                                                      lastSpeaker = w.SpeakerTag
-                                                                                  End If
-                                                                                  segment.Append(w.Word & " ")
-                                                                              Next
-                                                                              If segment.Length > 0 Then
-                                                                                  Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                                                  ReplaceAndAddLine(finalLine)
-                                                                              End If
-                                                                          Else
-                                                                              ' Normales Hinzufügen ohne Speaker-Logik
-                                                                              Addline(result.Alternatives(0).Transcript)
-                                                                          End If
-                                                                      Else
-                                                                          PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
-                                                                      End If
-                                                                  Next
-                                                              End While
-                                                          Catch ex As OperationCanceledException
-                                                              ' normal cancellation
-                                                          Catch ex As Exception
-                                                              Debug.WriteLine($"Reader error: {ex}")
-                                                          End Try
-                                                      End Function)
+                        StartGoogleReaderTask()
 
                     Case "vosk"
 
@@ -7635,6 +7799,73 @@ Public Class ThisAddIn
 
         End Function
 
+        Private Sub StartGoogleReaderTask()
+
+            ' 1) Alten Reader abbrechen (wenn aktiv)
+            If readerCts IsNot Nothing Then
+                Try
+                    readerCts.Cancel()
+                Catch
+                End Try
+            End If
+
+            ' 2) Neue CancellationTokenSource für den neuen Reader
+            readerCts = New CancellationTokenSource()
+
+            ' 3) Den Google‑Reader neu starten
+            googleReaderTask = System.Threading.Tasks.Task.Run(
+                        Async Function()
+                            Dim token = readerCts.Token
+                            Try
+                                ' Wir holen erst hier den Enumerator, damit er den aktuellen _stream liest
+                                Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(token)
+                                While Await enumerator.MoveNextAsync()
+                                    For Each result In enumerator.Current.Results
+                                        If result.IsFinal Then
+                                            If Me.SpeakerIdent.Checked Then
+                                                Dim lastSpeaker As Integer = 0
+                                                Dim segment As New System.Text.StringBuilder()
+                                                For Each w In result.Alternatives(0).Words
+                                                    If w.SpeakerTag <> lastSpeaker Then
+                                                        If segment.Length > 0 Then
+                                                            Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                            ReplaceAndAddLine(prevLine)
+                                                            segment.Clear()
+                                                        End If
+                                                        lastSpeaker = w.SpeakerTag
+                                                    End If
+                                                    segment.Append(w.Word & " ")
+                                                Next
+                                                If segment.Length > 0 Then
+                                                    Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
+                                                    ReplaceAndAddLine(finalLine)
+                                                End If
+                                            Else
+                                                ' Normales Hinzufügen ohne Speaker-Logik
+                                                Addline(result.Alternatives(0).Transcript)
+                                            End If
+                                        Else
+                                            PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
+                                        End If
+                                    Next
+                                End While
+
+                            Catch ex As OperationCanceledException
+                                ' normaler Abbruch
+
+                            Catch rex As RpcException _
+                                When rex.Status.StatusCode = StatusCode.DeadlineExceeded _
+                                  OrElse rex.Status.StatusCode = StatusCode.Unavailable
+
+                                Debug.WriteLine($"GoogleReaderTask interrupted ({rex.Status.StatusCode}) – closing Reader…")
+                                ' Kein Reconnect hier, das übernimmt OnGoogleDataAvailable via RecoverGoogleStream
+
+                            Catch ex As Exception
+                                Debug.WriteLine($"GoogleReaderTask unexpected error: {ex}")
+                            End Try
+                        End Function)
+        End Sub
+
 
         Private Function ConvertAudioToFloat(buffer As Byte()) As Single()
             ' Each sample = 2 bytes (16-bit), so half as many float samples
@@ -7650,14 +7881,89 @@ Public Class ThisAddIn
         End Function
 
 
-        Private Async Sub OnGoogleDataAvailable(s As Object, e As WaveInEventArgs)
+
+        Private Async Sub OnGoogleDataAvailable(sender As Object, e As NAudio.Wave.WaveInEventArgs)
+            Dim chunk = ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
             Try
-                Dim chunk = Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
-                Await _stream.WriteAsync(New StreamingRecognizeRequest With {.AudioContent = chunk})
-            Catch ex As System.Exception
-                Debug.WriteLine($"Error sending audio to Google STT: {ex.Message}")
+                ' Versuch, den Chunk normal zu senden
+                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
+            .AudioContent = chunk
+        })
+
+            Catch rex As RpcException _
+         When rex.Status.StatusCode = StatusCode.DeadlineExceeded _
+           OrElse rex.Status.StatusCode = StatusCode.Unavailable
+
+                Debug.WriteLine($"Google STT stream interrupted ({rex.Status.StatusCode}). Restarting…")
+
+                ' 1) Alten Stream einfach killen (ohne WriteCompleteAsync)
+                Try
+                    _stream.Dispose()
+                Catch : End Try
+                _stream = Nothing
+
+                ' 2) Fire-and-forget: Wiederaufbau + Reader + Chunk-Retry
+                RecoverGoogleStream(chunk)
+
+            Catch ex As Exception
+                Debug.WriteLine($"Google STT Error when sending a chunk: {ex}")
             End Try
         End Sub
+
+
+        Private Async Sub RecoverGoogleStream(failedChunk As ByteString)
+            Try
+                ' A) Neuen Stream initialisieren
+                Await InitializeGoogleStream()
+
+                ' B) Reader neu starten
+                StartGoogleReaderTask()
+
+                ' C) Neuen Offset holen (muss im UI‑Thread passieren)
+                Dim offset As Integer = 0
+                Me.Invoke(Sub() offset = RichTextBox1.TextLength)
+                googleTranscriptStart = offset
+
+                ' D) Fehlgeschlagenen Chunk nochmal senden
+                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
+            .AudioContent = failedChunk
+        })
+
+            Catch ex As Exception
+                Debug.WriteLine($"Error in RecoverGoogleStream: {ex}")
+            End Try
+        End Sub
+
+
+
+        Private Async Function SafeCompleteAndDisposeGoogleStreamAsync() As System.Threading.Tasks.Task
+            Try
+                If _stream IsNot Nothing AndAlso Not _googleStreamCompleted Then
+                    ' Einmalig WriteCompleteAsync
+                    Await _stream.WriteCompleteAsync()
+                    _googleStreamCompleted = True
+                End If
+
+                ' Reader‐Task sauber abschließen
+                Await googleReaderTask
+
+            Catch ex As InvalidOperationException
+                ' Sollte nur passieren, wenn WriteCompleteAsync doch nochmal kam => ignorieren
+                Debug.WriteLine($"Google STT SafeComplete ignore second WriteCompleteAsync: {ex.Message}")
+
+            Catch ex As Grpc.Core.RpcException
+                Debug.WriteLine($"Google STT SafeComplete gRPC Error: {ex.Status.StatusCode} – {ex.Status.Detail}")
+
+            Catch ex As Exception
+                Debug.WriteLine($"Google STT SafeComplete unexpected error: {ex.Message}")
+            Finally
+                If _stream IsNot Nothing Then
+                    _stream.Dispose()
+                    _stream = Nothing
+                End If
+            End Try
+        End Function
+
 
         Private Async Sub OnAudioDataAvailable(sender As Object, e As WaveInEventArgs)
 
@@ -7794,7 +8100,7 @@ Public Class ThisAddIn
                 Await enumerator.DisposeAsync()
 
                 STTCanceled = True
-                StopRecording().Wait()
+                Await StopRecording()
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
@@ -7862,7 +8168,9 @@ Public Class ThisAddIn
                 Const chunkSize As Integer = 4096
                 Dim offset As Integer = 0
 
-                While offset < pcmData.Length
+                STTCanceled = False
+
+                While offset < pcmData.Length AndAlso Not STTCanceled AndAlso capturing
                     ' Allow user to abort
                     If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
                         Exit While
@@ -7874,26 +8182,30 @@ Public Class ThisAddIn
                     offset += length
                 End While
 
-                ' Signal end of audio and wait for reader to finish
-                Await _stream.WriteCompleteAsync()
-                Await googleReaderTask
-                _stream.Dispose()
+                ' If we exited because of cancellation, the StopButton_Click Task.Run
+                ' will take care of the real StopRecording and UI cleanup.
 
-                ' Cleanup & restore UI
-                STTCanceled = True
-                StopRecording().Wait()
-                capturing = False
-                Me.Invoke(Sub()
-                              StartButton.Enabled = True
-                              StopButton.Enabled = False
-                              LoadButton.Enabled = True
-                              cultureComboBox.Enabled = True
-                              deviceComboBox.Enabled = True
-                              SpeakerIdent.Enabled = True
-                              SpeakerDistance.Enabled = True
-                          End Sub)
+                ' If we ran to completion without cancellation, we can:
+                If Not STTCanceled Then
+                    ' cleanly finish the stream here
+                    Await SafeCompleteAndDisposeGoogleStreamAsync()
 
-                ShowCustomMessageBox("The transcription of your file is complete.")
+                    ' then re‑enable UI on the UI thread
+                    Me.Invoke(Sub()
+                                  StartButton.Enabled = True
+                                  StopButton.Enabled = False
+                                  LoadButton.Enabled = True
+                                  cultureComboBox.Enabled = True
+                                  deviceComboBox.Enabled = True
+                                  SpeakerIdent.Enabled = True
+                                  SpeakerDistance.Enabled = True
+                                  PartialTextLabel.Text = String.Empty
+                                  capturing = False
+                              End Sub)
+
+                    ShowCustomMessageBox("The transcription of your file is complete.")
+                End If
+
             Catch ex As System.Exception
                 Debug.WriteLine($"Error in GoogleTranscribeAudioFile: {ex.Message}")
             End Try
@@ -7972,7 +8284,7 @@ Public Class ThisAddIn
                 ' Reset flags and UI
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
                 STTCanceled = True
-                StopRecording().Wait()
+                Await StopRecording()
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
@@ -8738,7 +9050,6 @@ Public Class ThisAddIn
         End Try
     End Sub
 
-
     Shared Async Sub GenerateAndPlayAudio(textToSpeak As String, filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
 
         Dim Temporary As Boolean = (filepath = "")
@@ -9198,7 +9509,7 @@ Public Class ThisAddIn
         Public Property SelectedLanguage As String = ""
 
         ' --- Constructor ---
-        Public Sub New(context As ISharedContext,
+        Public Sub xxxNew(context As ISharedContext,
                    clientMail As String,
                    scopes As String,
                    apiKey As String,
@@ -9244,7 +9555,363 @@ Public Class ThisAddIn
         End Sub
 
         ' --- CreateControls ---
+
+        Public Sub New(context As ISharedContext,
+               clientMail As String,
+               scopes As String,
+               apiKey As String,
+               oauth2Endpoint As String,
+               oauth2Expiry As Long,
+               topLabelText As String,
+               formTitle As String,
+               twoVoicesRequired As Boolean)
+
+            ' Assign external parameters
+            _context = context
+            INI_OAuth2ClientMail = clientMail
+            INI_OAuth2Scopes = scopes
+            INI_APIKey = apiKey
+            INI_OAuth2Endpoint = oauth2Endpoint
+            INI_OAuth2ATExpiry = oauth2Expiry
+
+            ' Store our extra parameters
+            _topLabelText = topLabelText
+            _formTitle = formTitle
+            _twoVoicesRequired = twoVoicesRequired
+
+            ' --- FORM PROPERTIES ---
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            Me.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+            Me.Text = _formTitle
+            Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
+            Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+            Me.MaximizeBox = False
+
+            ' Prevent the user from shrinking below a usable size
+            Me.MinimumSize = New System.Drawing.Size(810, 470)
+            Me.AutoSize = True
+
+            ' Build the UI
+            CreateControls()
+            LayoutControls()
+            AddHandlers()
+
+            PopulateLanguageComboBoxes()
+            LoadSettingsAndVoices()
+
+            txtSampleText.Text = If(
+        String.IsNullOrEmpty(My.Settings.TTSSampleText),
+        $"Hello, I am talking using {_formTitle}!",
+        My.Settings.TTSSampleText
+    )
+        End Sub
+
         Private Sub CreateControls()
+            ' --- Intro ---
+            lblIntro = New System.Windows.Forms.Label() With {
+        .Font = Me.Font,
+        .Text = _topLabelText,
+        .AutoSize = True,
+        .MaximumSize = New System.Drawing.Size(700, 0)
+    }
+
+            ' --- Voice Set 1 ---
+            lblSet1 = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Your default voice set 1:", .AutoSize = True}
+            cmbLanguage1 = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            cmbVoice1A = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            btnPlay1A = New System.Windows.Forms.Button() With {
+        .Font = New System.Drawing.Font("Segoe UI Symbol", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
+        .Text = "▶",
+        .Size = New System.Drawing.Size(24, cmbVoice1A.PreferredHeight),
+        .AutoSize = False
+    }
+            cmbVoice1B = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            btnPlay1B = New System.Windows.Forms.Button() With {
+        .Font = New System.Drawing.Font("Segoe UI Symbol", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
+        .Text = "▶",
+        .Size = New System.Drawing.Size(24, cmbVoice1B.PreferredHeight),
+        .AutoSize = False
+    }
+
+            ' --- Voice Set 2 ---
+            lblSet2 = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Your default voice set 2:", .AutoSize = True}
+            cmbLanguage2 = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            cmbVoice2A = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            btnPlay2A = New System.Windows.Forms.Button() With {
+        .Font = New System.Drawing.Font("Segoe UI Symbol", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
+        .Text = "▶",
+        .Size = New System.Drawing.Size(24, cmbVoice2A.PreferredHeight),
+        .AutoSize = False
+    }
+            cmbVoice2B = New System.Windows.Forms.ComboBox() With {
+        .Font = Me.Font,
+        .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+        .Width = 300,
+        .MaxDropDownItems = 10
+    }
+            btnPlay2B = New System.Windows.Forms.Button() With {
+        .Font = New System.Drawing.Font("Segoe UI Symbol", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
+        .Text = "▶",
+        .Size = New System.Drawing.Size(24, cmbVoice2B.PreferredHeight),
+        .AutoSize = False
+    }
+
+            ' --- Radio Buttons ---
+            If Not _twoVoicesRequired Then
+                rdoVoice1A = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                rdoVoice1B = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                rdoVoice2A = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                rdoVoice2B = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                Select Case My.Settings.TTSLastRdoOneVoice
+                    Case "Voice1A"
+                        rdoVoice1A.Checked = True
+                    Case "Voice1B"
+                        rdoVoice1B.Checked = True
+                    Case "Voice2A"
+                        rdoVoice2A.Checked = True
+                    Case "Voice2B"
+                        rdoVoice2B.Checked = True
+                    Case Else
+                        rdoVoice1A.Checked = True ' Default if no previous selection
+                End Select
+            Else
+                rdoVoice1A = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                rdoVoice2A = New System.Windows.Forms.RadioButton() With {.Font = Me.Font, .AutoSize = True}
+                Select Case My.Settings.TTSLastRdoTwoVoices
+                    Case "Voice1"
+                        rdoVoice1A.Checked = True
+                    Case "Voice2"
+                        rdoVoice2A.Checked = True
+                    Case Else
+                        rdoVoice1A.Checked = True ' Default if no previous selection
+                End Select
+            End If
+
+            ' --- Sample & Output rows ---
+            lblSampleText = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Sample text:", .AutoSize = True}
+            txtSampleText = New System.Windows.Forms.TextBox() With {.Font = Me.Font, .Width = 467}
+            lblOutputPath = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Output (.mp3):", .AutoSize = True}
+            txtOutputPath = New System.Windows.Forms.TextBox() With {.Font = Me.Font, .Width = 330}
+            chkTemporary = New System.Windows.Forms.CheckBox() With {.Font = Me.Font, .Text = "Temp only", .AutoSize = True}
+
+            ' --- Bottom Buttons ---
+            btnOK = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "OK", .AutoSize = True}
+            btnCancel = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "Cancel", .AutoSize = True}
+            btnDesktop = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "Save on Desktop", .AutoSize = True}
+
+            ' --- Wire up mutual‑exclusion for all radios ---
+            Dim radios As New List(Of System.Windows.Forms.RadioButton)
+            For Each rb In New RadioButton() {rdoVoice1A, rdoVoice1B, rdoVoice2A, rdoVoice2B}
+                If rb IsNot Nothing Then radios.Add(rb)
+            Next
+            For Each rb In radios
+                AddHandler rb.CheckedChanged, Sub(s, e)
+                                                  Dim meRb = DirectCast(s, RadioButton)
+                                                  If meRb.Checked Then
+                                                      For Each other In radios
+                                                          If other IsNot meRb Then other.Checked = False
+                                                      Next
+                                                  End If
+                                              End Sub
+            Next
+        End Sub
+
+        Private Sub LayoutControls()
+            ' Make the form auto‑size exactly to content + 20px bottom padding
+            Me.AutoSize = True
+            Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+
+            ' Root: 2 cols, 8 rows, bottom padding = 20px
+            Dim root As New System.Windows.Forms.TableLayoutPanel() With {
+      .Dock = System.Windows.Forms.DockStyle.Fill,
+      .AutoSize = True,
+      .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+      .ColumnCount = 2,
+      .RowCount = 8,
+      .Padding = New System.Windows.Forms.Padding(10, 10, 10, 0)
+    }
+            root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
+            root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
+            For i = 0 To 7
+                root.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            Next
+
+            ' Row0: Intro
+            root.Controls.Add(lblIntro, 0, 0)
+            root.SetColumnSpan(lblIntro, 2)
+
+            ' Row1: Headings
+            root.Controls.Add(lblSet1, 0, 1)
+            root.Controls.Add(lblSet2, 1, 1)
+
+            ' Row2: Language (+ two‑voice radio)
+            Dim fl2a As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then fl2a.Controls.Add(rdoVoice1A)
+            fl2a.Controls.Add(cmbLanguage1)
+            root.Controls.Add(fl2a, 0, 2)
+
+            Dim fl2b As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then fl2b.Controls.Add(rdoVoice2A)
+            fl2b.Controls.Add(cmbLanguage2)
+            root.Controls.Add(fl2b, 1, 2)
+
+            ' Row3: Voice1A + play + single‑voice radio or indent if two‑voice mode
+            Dim fl3a As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then
+                ' indent by the radio’s width so it lines up with language
+                fl3a.Padding = New System.Windows.Forms.Padding(rdoVoice1A.PreferredSize.Width, 0, 0, 0)
+            Else
+                rdoVoice1A.Margin = New System.Windows.Forms.Padding(0,
+        (cmbVoice1A.PreferredHeight - rdoVoice1A.PreferredSize.Height) \ 2, 0, 0)
+                fl3a.Controls.Add(rdoVoice1A)
+            End If
+            fl3a.Controls.Add(cmbVoice1A)
+            fl3a.Controls.Add(btnPlay1A)
+            root.Controls.Add(fl3a, 0, 3)
+
+            Dim fl3b As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then
+                fl3b.Padding = New System.Windows.Forms.Padding(rdoVoice2A.PreferredSize.Width, 0, 0, 0)
+            Else
+                rdoVoice2A.Margin = New System.Windows.Forms.Padding(0,
+        (cmbVoice2A.PreferredHeight - rdoVoice2A.PreferredSize.Height) \ 2, 0, 0)
+                fl3b.Controls.Add(rdoVoice2A)
+            End If
+            fl3b.Controls.Add(cmbVoice2A)
+            fl3b.Controls.Add(btnPlay2A)
+            root.Controls.Add(fl3b, 1, 3)
+
+            ' Row4: Voice1B + play (same indent logic)
+            Dim fl4a As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then
+                fl4a.Padding = New System.Windows.Forms.Padding(rdoVoice1A.PreferredSize.Width, 0, 0, 0)
+            Else
+                rdoVoice1B.Margin = New System.Windows.Forms.Padding(0,
+        (cmbVoice1B.PreferredHeight - rdoVoice1B.PreferredSize.Height) \ 2, 0, 0)
+                fl4a.Controls.Add(rdoVoice1B)
+            End If
+            fl4a.Controls.Add(cmbVoice1B)
+            fl4a.Controls.Add(btnPlay1B)
+            root.Controls.Add(fl4a, 0, 4)
+
+            Dim fl4b As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True
+    }
+            If _twoVoicesRequired Then
+                fl4b.Padding = New System.Windows.Forms.Padding(rdoVoice2A.PreferredSize.Width, 0, 0, 0)
+            Else
+                rdoVoice2B.Margin = New System.Windows.Forms.Padding(0,
+        (cmbVoice2B.PreferredHeight - rdoVoice2B.PreferredSize.Height) \ 2, 0, 0)
+                fl4b.Controls.Add(rdoVoice2B)
+            End If
+            fl4b.Controls.Add(cmbVoice2B)
+            fl4b.Controls.Add(btnPlay2B)
+            root.Controls.Add(fl4b, 1, 4)
+
+            ' Row5: Sample text (2‑col table for vertical centering)
+            Dim tbl5 As New System.Windows.Forms.TableLayoutPanel() With {
+      .ColumnCount = 2,
+      .RowCount = 1,
+      .AutoSize = True,
+      .Dock = System.Windows.Forms.DockStyle.Top
+    }
+            tbl5.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize))
+            tbl5.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0F))
+            lblSampleText.Dock = System.Windows.Forms.DockStyle.Fill
+            lblSampleText.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            txtSampleText.Dock = System.Windows.Forms.DockStyle.Fill
+            tbl5.Controls.Add(lblSampleText, 0, 0)
+            tbl5.Controls.Add(txtSampleText, 1, 0)
+            root.Controls.Add(tbl5, 0, 5)
+            root.SetColumnSpan(tbl5, 2)
+
+            ' Row6: Output path (3‑col table)
+            Dim tbl6 As New System.Windows.Forms.TableLayoutPanel() With {
+      .ColumnCount = 3,
+      .RowCount = 1,
+      .AutoSize = True,
+      .Dock = System.Windows.Forms.DockStyle.Top
+    }
+            tbl6.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize))
+            tbl6.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0F))
+            tbl6.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize))
+            lblOutputPath.Dock = System.Windows.Forms.DockStyle.Fill
+            lblOutputPath.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            txtOutputPath.Dock = System.Windows.Forms.DockStyle.Fill
+            chkTemporary.Anchor = System.Windows.Forms.AnchorStyles.Left
+            tbl6.Controls.Add(lblOutputPath, 0, 0)
+            tbl6.Controls.Add(txtOutputPath, 1, 0)
+            tbl6.Controls.Add(chkTemporary, 2, 0)
+            root.Controls.Add(tbl6, 0, 6)
+            root.SetColumnSpan(tbl6, 2)
+
+            ' Row7: Bottom buttons with 20px gap above
+            Dim fl7 As New System.Windows.Forms.FlowLayoutPanel() With {
+      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+      .AutoSize = True,
+      .Margin = New System.Windows.Forms.Padding(0, 20, 0, 20)
+    }
+            fl7.Controls.Add(btnOK)
+            fl7.Controls.Add(btnCancel)
+            fl7.Controls.Add(btnDesktop)
+            root.Controls.Add(fl7, 0, 7)
+            root.SetColumnSpan(fl7, 2)
+
+            ' Install into form and freeze min‑size
+            Me.Controls.Clear()
+            Me.Controls.Add(root)
+            Me.AutoSize = False
+
+            'AddHandler Me.Shown, Sub() Me.MinimumSize = Me.Size
+
+        End Sub
+
+
+
+        Private Sub xxxCreateControls()
             ' Top label (autosized)
             lblIntro = New Label() With {
                 .Text = _topLabelText,
@@ -9425,7 +10092,7 @@ Public Class ThisAddIn
         End Sub
 
         ' --- LayoutControls ---
-        Private Sub LayoutControls()
+        Private Sub xxxLayoutControls()
             Dim marginLeft As Integer = 20
             Dim spacingY As Integer = 8
             Dim currentTop As Integer = 20
@@ -9720,6 +10387,7 @@ Public Class ThisAddIn
             SelectedVoices.Clear()
             If Not _twoVoicesRequired Then
                 ' ONE VOICE mode: the four radio buttons are one group.
+
                 If rdoVoice1A.Checked Then
                     If cmbVoice1A.SelectedItem IsNot Nothing AndAlso cmbVoice1A.SelectedItem.ToString() <> "" Then
                         SelectedVoices.Add(cmbVoice1A.SelectedItem.ToString())

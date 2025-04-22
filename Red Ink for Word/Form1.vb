@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 20.4.2025
+' 21.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -60,17 +60,17 @@ Public Class frmAIChat
 
     Dim pnlButtons As New FlowLayoutPanel() With {
         .Dock = DockStyle.Bottom,
-        .FlowDirection = FlowDirection.RightToLeft,
+        .FlowDirection = FlowDirection.LeftToRight,
         .AutoSize = True,
-        .AutoSizeMode = AutoSizeMode.GrowOnly,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
         .Height = 40
     }
 
     Dim pnlCheckboxes As New FlowLayoutPanel() With {
         .Dock = DockStyle.Bottom,
-        .FlowDirection = FlowDirection.RightToLeft,
+        .FlowDirection = FlowDirection.LeftToRight,
         .AutoSize = True,
-        .AutoSizeMode = AutoSizeMode.GrowOnly,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
         .Height = 40
     }
 
@@ -82,11 +82,56 @@ Public Class frmAIChat
     ' We keep the entire conversation in a List of (role, content).
     Private _chatHistory As New List(Of (Role As String, Content As String))
 
+
     Public Sub New(context As ISharedContext)
         ' This call is required by the designer.
         InitializeComponent()
 
-        ' Add any initialization after the InitializeComponent() call.
+        Me.AutoSize = False
+
+        txtChatHistory.Multiline = True
+        txtUserInput.Multiline = True
+
+        ' 1) TableLayoutPanel anlegen
+        Dim mainLayout As New TableLayoutPanel() With {
+        .ColumnCount = 1,
+        .RowCount = 5,
+        .Dock = DockStyle.Fill,
+        .AutoSize = False,
+        .Padding = New Padding(10)   ' wird gleich überschrieben
+    }
+
+        ' 2) Spalten‑Breite auf 100 % setzen
+        mainLayout.ColumnStyles.Clear()
+        mainLayout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100.0F))
+
+        ' 3) Rechts 20 px Innenabstand
+        mainLayout.Padding = New Padding(left:=10, top:=10, right:=20, bottom:=10)
+
+        ' 4) Zeilen definieren
+        mainLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        mainLayout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
+        mainLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        mainLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        mainLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+
+        ' 5) Controls konfigurieren
+        lblInstructions.AutoSize = False
+        lblInstructions.Dock = DockStyle.Fill
+        txtChatHistory.Dock = DockStyle.Fill
+        txtUserInput.Dock = DockStyle.Fill
+
+        ' 6) Controls in die Tabelle packen
+        mainLayout.Controls.Add(lblInstructions, 0, 0)
+        mainLayout.Controls.Add(txtChatHistory, 0, 1)
+        mainLayout.Controls.Add(txtUserInput, 0, 2)
+        mainLayout.Controls.Add(pnlCheckboxes, 0, 3)
+        mainLayout.Controls.Add(pnlButtons, 0, 4)
+
+        ' 7) Form neu befüllen
+        Me.Controls.Clear()
+        Me.Controls.Add(mainLayout)
+
         _context = context
     End Sub
 
@@ -113,7 +158,7 @@ Public Class frmAIChat
         Me.TopMost = True ' Always on top
 
         ' Set the initial and minimum size of the form
-        Me.MinimumSize = New Size(667, 521) ' Minimum size
+        Me.MinimumSize = New Size(830, 521)
 
         If My.Settings.FormLocation <> System.Drawing.Point.Empty AndAlso My.Settings.FormSize <> Size.Empty Then
             Me.Location = My.Settings.FormLocation
@@ -122,8 +167,6 @@ Public Class frmAIChat
             Me.StartPosition = FormStartPosition.CenterScreen
         End If
 
-        ' Dynamically adjust layout on form resize
-        AddHandler Me.Resize, AddressOf AdjustLayout
         AddHandler txtUserInput.KeyDown, AddressOf UserInput_KeyDown
 
         ' Set up instructions label
@@ -161,12 +204,6 @@ Public Class frmAIChat
         AddHandler chkPermitCommands.Click, AddressOf chkPermitCommands_Click
         AddHandler chkStayOnTop.Click, AddressOf chkStayontop_Click
 
-        Me.Controls.Add(pnlCheckboxes)
-        Me.Controls.Add(pnlButtons)
-
-        ' Initialize the layout
-        AdjustLayout()
-
         If String.IsNullOrWhiteSpace(txtChatHistory.Text) Then
             Dim result = Await WelcomeMessage()
         Else
@@ -177,34 +214,6 @@ Public Class frmAIChat
         If String.IsNullOrEmpty(txtUserInput.Text) Then txtUserInput.Focus()
 
     End Sub
-
-
-
-    ' Dynamically adjusts the layout of controls when the form is resized.
-
-    Private Sub AdjustLayout()
-        Dim margin = 10
-
-        ' Resize label to match the form width
-        lblInstructions.Left = margin
-        lblInstructions.Top = margin
-        lblInstructions.Height = TextRenderer.MeasureText(lblInstructions.Text, lblInstructions.Font).Height + 20
-        lblInstructions.Width = Me.ClientSize.Width - 2 * margin
-
-        ' Resize chat history textbox
-        txtChatHistory.Top = lblInstructions.Bottom + margin
-        txtChatHistory.Left = margin
-        txtChatHistory.Width = Me.ClientSize.Width - 2 * margin
-        txtChatHistory.Height = Me.ClientSize.Height - txtChatHistory.Top - txtUserInput.Height - pnlCheckboxes.Height - pnlButtons.Height - (3 * margin)
-
-
-        ' Resize user input textbox
-        txtUserInput.Top = txtChatHistory.Bottom + margin
-        txtUserInput.Left = margin
-        txtUserInput.Width = Me.ClientSize.Width - 2 * margin
-
-    End Sub
-
 
     ' When the user clicks Send, we call the LLM with context.
     ' Then append the AI response to the conversation.

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 21.4.2025
+' 22.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -48,6 +48,7 @@ Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
 Imports System.Drawing.Imaging
+Imports System.Reflection
 
 
 Namespace SharedLibrary
@@ -522,7 +523,7 @@ Namespace SharedLibrary
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
         Const Default_SP_ChatWord As String = "You are a helpful AI, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
-        Const Default_SP_ChatExcel As String = "You are a helpful AI, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If the user has not given you access to the worksheet (i.e. no <RANGEOFCELLS> tag), but the user asks you about his worksheet, then do not respond and remind the user to give you access to the worksheet or a selection.\n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, search within the worksheet or insert new formulas, content or comments. If further below you are informed of the commands to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
+        Const Default_SP_ChatExcel As String = "You are a helpful AI, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If the user has not given you read access to the worksheet (i.e. no <RANGEOFCELLS> tag), but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. If further below you are informed of the commands to make changes to the worksheet or insert comments, you know that he has given you write access and you may provide him assistance in explaining what you can do to change the worksheet, if this appears necessary. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_INI_ISearch_SearchTerm_SP As String = "You are an advanced language model tasked with generating precise and direct search terms required to fulfill the given instruction. Analyze the instruction and any additional text provided within <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present, to output only the specific search terms needed to retrieve the required information. If no additional text is provided, base your search terms solely on the instruction. The search terms should be formatted as they would appear in a search engine query, without any additional explanations or context. Instruction: {OtherPrompt}, Current Date: {CurrentDate}. Provide only the search terms, formatted for direct input into a search engine. Avoid any additional text or explanations."
         Const Default_INI_ISearch_Apply_SP As String = "You are a legal professional with excellent legal, language and logical skills and you precisely comply with your instructions step by step. You will execute the following instruction in the language of the command using (1) the knowledge and Information contained in the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, and (2) the text provided within the <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present. {INI_PreCorrection} \n Instruction: '{OtherPrompt}'\n {SearchResult} \n"
@@ -2896,108 +2897,133 @@ Namespace SharedLibrary
             End If
         End Function
 
+
+
         Public Shared Function ShowSelectionForm(
-        prompt As String,
-        title As String,
-        options As IEnumerable(Of String)
-    ) As String
+    prompt As String,
+    title As String,
+    options As IEnumerable(Of String)
+) As String
 
             Dim selectedOption As String = "ESC"
 
-            ' Form erzeugen
-            Dim inputForm As New Form() With {
+            ' Form konfigurieren und DPI‑Unterstützung
+            Dim inputForm As New System.Windows.Forms.Form() With {
         .Text = title,
-        .FormBorderStyle = FormBorderStyle.FixedDialog,
-        .StartPosition = FormStartPosition.CenterParent,
+        .FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
+        .StartPosition = System.Windows.Forms.FormStartPosition.CenterParent,
         .MinimizeBox = False,
         .MaximizeBox = False,
         .ShowInTaskbar = False,
         .KeyPreview = True,
-        .ClientSize = New Size(400, 300)
+        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font,
+        .ClientSize = New System.Drawing.Size(450, 320),
+        .MinimumSize = New System.Drawing.Size(450, 240)
     }
+            inputForm.Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
 
-            ' Icon setzen
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
+            ' Logo als Icon
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
 
-            ' Schrift setzen
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            inputForm.Font = standardFont
+            ' Haupt-Layout: Prompt, ListBox, Buttons
+            Dim layout As New System.Windows.Forms.TableLayoutPanel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .ColumnCount = 1,
+        .RowCount = 3
+    }
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100))
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            inputForm.Controls.Add(layout)
 
-            ' Prompt‑Label
+            ' Prompt-Label mit automatischem Zeilenumbruch
             Dim labelPrompt As New System.Windows.Forms.Label() With {
         .Text = prompt,
-        .AutoSize = False,
-        .Location = New System.Drawing.Point(10, 10),
-        .Size = New Size(inputForm.ClientSize.Width - 20, 40),
-        .TextAlign = ContentAlignment.MiddleLeft
+        .AutoSize = True,
+        .MaximumSize = New System.Drawing.Size(inputForm.ClientSize.Width - 40, 0),
+        .Margin = New System.Windows.Forms.Padding(20, 20, 20, 10),
+        .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
     }
-            inputForm.Controls.Add(labelPrompt)
+            layout.Controls.Add(labelPrompt, 0, 0)
 
-            ' ListBox
-            Dim listBoxOptions As New ListBox() With {
-        .Location = New System.Drawing.Point(10, labelPrompt.Bottom + 10),
-        .Size = New Size(inputForm.ClientSize.Width - 20,
-                         inputForm.ClientSize.Height - labelPrompt.Height - 80),
-        .Anchor = AnchorStyles.Top Or AnchorStyles.Bottom Or
-                  AnchorStyles.Left Or AnchorStyles.Right
+            ' ListBox mit Padding
+            Dim listPanel As New System.Windows.Forms.Panel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Padding = New System.Windows.Forms.Padding(20)
+    }
+            layout.Controls.Add(listPanel, 0, 1)
+
+            Dim listBoxOptions As New System.Windows.Forms.ListBox() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .SelectionMode = System.Windows.Forms.SelectionMode.One
     }
             listBoxOptions.Items.AddRange(options.ToArray())
-            inputForm.Controls.Add(listBoxOptions)
+            listPanel.Controls.Add(listBoxOptions)
 
-            ' OK‑ und Cancel‑Buttons im Panel, 10px Abstand zum Bottom
-            Dim panelButtons As New Panel() With {
-        .Height = 40,
-        .Location = New System.Drawing.Point(0, inputForm.ClientSize.Height - 40 - 10),
-        .Size = New Size(inputForm.ClientSize.Width, 40),
-        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
+            ' Buttons linksbündig mit Abstand
+            Dim panelButtons As New System.Windows.Forms.FlowLayoutPanel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+        .Padding = New System.Windows.Forms.Padding(20, 10, 20, 20),
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .WrapContents = False
     }
-            inputForm.Controls.Add(panelButtons)
+            layout.Controls.Add(panelButtons, 0, 2)
 
-            Dim buttonOK As New Button() With {
+            ' OK-Button
+            Dim buttonOK As New System.Windows.Forms.Button() With {
         .Text = "OK",
+        .DialogResult = System.Windows.Forms.DialogResult.OK,
         .Enabled = False,
-        .DialogResult = DialogResult.OK
+        .AutoSize = True,
+        .Padding = New System.Windows.Forms.Padding(8, 4, 8, 4),
+        .Margin = New System.Windows.Forms.Padding(0, 0, 20, 0)
     }
             AddHandler buttonOK.Click, Sub()
-                                           selectedOption = listBoxOptions.SelectedItem.ToString()
+                                           selectedOption = CStr(listBoxOptions.SelectedItem)
                                        End Sub
 
-            Dim buttonCancel As New Button() With {
+            ' Cancel-Button (jetzt gleiche Margin‑Top wie OK)
+            Dim buttonCancel As New System.Windows.Forms.Button() With {
         .Text = "Cancel",
-        .DialogResult = DialogResult.Cancel
+        .DialogResult = System.Windows.Forms.DialogResult.Cancel,
+        .AutoSize = True,
+        .Padding = New System.Windows.Forms.Padding(8, 4, 8, 4),
+        .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0)
     }
             AddHandler buttonCancel.Click, Sub()
                                                selectedOption = "ESC"
+                                               inputForm.Close()
                                            End Sub
-
-            ' Links ausrichten: 20px Abstand zueinander
-            Dim leftMargin As Integer = 10
-            buttonOK.Location = New System.Drawing.Point(leftMargin, 5)
-            buttonCancel.Location = New System.Drawing.Point(buttonOK.Right + 20, 5)
-
-            ' Anchor nur oben+links
-            buttonOK.Anchor = AnchorStyles.Top Or AnchorStyles.Left
-            buttonCancel.Anchor = AnchorStyles.Top Or AnchorStyles.Left
 
             panelButtons.Controls.Add(buttonOK)
             panelButtons.Controls.Add(buttonCancel)
 
-            ' ListBox SelectionChanged → OK aktivieren
+            ' Sicherstellen, dass beide Buttons dieselbe Höhe haben
+            Dim btnHeight As Integer = Math.Max(buttonOK.Height, buttonCancel.Height)
+            buttonOK.Height = btnHeight
+            buttonCancel.Height = btnHeight
+
+            ' Ereignisse für ListBox
             AddHandler listBoxOptions.SelectedIndexChanged, Sub()
                                                                 buttonOK.Enabled = (listBoxOptions.SelectedItem IsNot Nothing)
                                                             End Sub
+            AddHandler listBoxOptions.DoubleClick, Sub()
+                                                       If listBoxOptions.SelectedItem IsNot Nothing Then
+                                                           selectedOption = CStr(listBoxOptions.SelectedItem)
+                                                           inputForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                                                           inputForm.Close()
+                                                       End If
+                                                   End Sub
+            If listBoxOptions.Items.Count > 0 Then listBoxOptions.SelectedIndex = 0
 
-            ' Ersten Eintrag auswählen
-            If listBoxOptions.Items.Count > 0 Then
-                listBoxOptions.SelectedIndex = 0
-            End If
-
-            ' Enter/Escape
+            ' Tastenkürzel
             inputForm.AcceptButton = buttonOK
             inputForm.CancelButton = buttonCancel
-            AddHandler inputForm.KeyDown, Sub(sender As Object, e As KeyEventArgs)
-                                              If e.KeyCode = Keys.Escape Then
+            AddHandler inputForm.KeyDown, Sub(sender As Object, e As System.Windows.Forms.KeyEventArgs)
+                                              If e.KeyCode = System.Windows.Forms.Keys.Escape Then
                                                   selectedOption = "ESC"
                                                   inputForm.Close()
                                                   e.Handled = True
@@ -3006,11 +3032,191 @@ Namespace SharedLibrary
 
             ' Dialog anzeigen
             inputForm.ShowDialog()
-
             Return selectedOption
         End Function
 
-        Public Shared Function ShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
+
+        Public Shared Function ShowCustomInputBox(
+                                                    prompt As String,
+                                                    title As String,
+                                                    SimpleInput As Boolean,
+                                                    Optional DefaultValue As String = "",
+                                                    Optional CtrlP As String = ""
+                                                ) As String
+
+            ' Create and configure the form
+            Dim inputForm As New Form() With {
+        .Opacity = 0,
+        .Text = title,
+        .FormBorderStyle = FormBorderStyle.FixedDialog,
+        .StartPosition = FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .ShowInTaskbar = False,
+        .TopMost = True,
+        .AutoScaleMode = AutoScaleMode.Font,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink
+    }
+
+            ' Set the icon
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+            ' Standard font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            inputForm.Font = standardFont
+
+            ' Main flow panel (vertical stack, auto‐sized, padding)
+            Dim mainFlow As New FlowLayoutPanel() With {
+        .FlowDirection = FlowDirection.TopDown,
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Padding = New Padding(20),
+        .MaximumSize = New Size(640, 0)   ' Limit total width
+    }
+
+            ' Prompt label
+            Dim promptLabel As New System.Windows.Forms.Label() With {
+        .Text = prompt,
+        .Font = standardFont,
+        .AutoSize = True,
+        .MaximumSize = New Size(600, 0)   ' Wrap at 600px
+    }
+            mainFlow.Controls.Add(promptLabel)
+
+            ' Input TextBox
+            Dim inputTextBox As New TextBox() With {
+        .Font = standardFont,
+        .Multiline = Not SimpleInput,
+        .WordWrap = True,
+        .ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical),
+        .Width = 600,
+        .Text = DefaultValue
+    }
+            If SimpleInput Then
+                ' Single‐line height
+                inputTextBox.Height = TextRenderer.MeasureText("Wy", standardFont).Height + 6
+            Else
+                ' Multi‐line height
+                inputTextBox.Height = 150
+            End If
+            mainFlow.Controls.Add(inputTextBox)
+
+            ' KeyDown handlers for Enter/Escape
+            If SimpleInput Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            Else
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     ElseIf e.KeyCode = Keys.Escape Then
+                                                         inputForm.DialogResult = DialogResult.Cancel
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            End If
+
+            ' Ctrl+P insertion, if provided
+            If Not String.IsNullOrEmpty(CtrlP) Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.P AndAlso e.Modifiers = Keys.Control Then
+                                                         Dim selPos = inputTextBox.SelectionStart
+                                                         inputTextBox.Text = inputTextBox.Text.Insert(selPos, CtrlP)
+                                                         inputTextBox.SelectionStart = selPos + CtrlP.Length
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            End If
+
+            ' OK and Cancel buttons
+            Dim okButton As New Button() With {
+        .Text = "OK",
+        .AutoSize = True,
+        .Font = standardFont
+    }
+            Dim cancelButton As New Button() With {
+        .Text = "Cancel",
+        .AutoSize = True,
+        .Font = standardFont
+    }
+
+            AddHandler okButton.Click, Sub()
+                                           inputForm.DialogResult = DialogResult.OK
+                                           inputForm.Close()
+                                       End Sub
+            AddHandler cancelButton.Click, Sub()
+                                               inputForm.DialogResult = DialogResult.Cancel
+                                               inputForm.Close()
+                                           End Sub
+
+            ' Bottom flow panel for buttons
+            Dim bottomFlow As New FlowLayoutPanel() With {
+        .FlowDirection = FlowDirection.LeftToRight,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Margin = New Padding(0, 20, 0, 0)
+    }
+            bottomFlow.Controls.Add(okButton)
+            bottomFlow.Controls.Add(cancelButton)
+            mainFlow.Controls.Add(bottomFlow)
+
+            ' Add layout to form
+            inputForm.Controls.Add(mainFlow)
+
+            ' Ensure the form is top‐most and focused
+            inputForm.TopMost = True
+            inputForm.BringToFront()
+            inputForm.Focus()
+
+            ' Show the dialog, optionally owned by Outlook
+            Dim Result As DialogResult
+            If title.Contains("Browser") Then
+                Dim outlookApp As Object = CreateObject("Outlook.Application")
+                If outlookApp IsNot Nothing Then
+                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
+                "ActiveExplorer",
+                BindingFlags.GetProperty, Nothing, outlookApp, Nothing
+            )
+                    If explorer IsNot Nothing Then
+                        explorer.GetType().InvokeMember(
+                    "WindowState",
+                    BindingFlags.SetProperty, Nothing, explorer, New Object() {1})
+                        explorer.GetType().InvokeMember(
+                    "Activate",
+                    BindingFlags.InvokeMethod, Nothing, explorer, Nothing)
+                    End If
+                End If
+                inputForm.Opacity = 1
+                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
+                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
+            Else
+                inputForm.Opacity = 1
+                Result = inputForm.ShowDialog()
+            End If
+
+            ' Return the entered text or appropriate default
+            If Result = DialogResult.OK Then
+                Return inputTextBox.Text
+            Else
+                Return If(Not SimpleInput, "ESC", "")
+            End If
+        End Function
+
+
+
+
+        Public Shared Function xxxShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
 
             Dim inputForm As New Form()
             inputForm.Opacity = 0
@@ -3182,8 +3388,275 @@ Namespace SharedLibrary
         End Function
 
 
+        Public Shared Function ShowCustomYesNoBox(
+                        ByVal bodyText As String,
+                        ByVal button1Text As String,
+                        ByVal button2Text As String,
+                        Optional header As String = AN,
+                        Optional autoCloseSeconds As Integer? = Nothing,
+                        Optional Defaulttext As String = ""
+                    ) As Integer
 
-        Public Shared Function ShowCustomYesNoBox(ByVal bodyText As String, ByVal button1Text As String, ByVal button2Text As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = "") As Integer
+            ' Truncate if too long
+            Dim isTruncated As Boolean = False
+            If bodyText.Length > 10000 Then
+                bodyText = bodyText.Substring(0, 10000)
+                isTruncated = True
+            End If
+
+            ' Create and configure form
+            Dim messageForm As New Form() With {
+            .Opacity = 0,
+            .Text = header,
+            .FormBorderStyle = FormBorderStyle.FixedDialog,
+            .StartPosition = FormStartPosition.CenterScreen,
+            .MaximizeBox = False,
+            .MinimizeBox = False,
+            .ShowInTaskbar = False,
+            .TopMost = True,
+            .AutoScaleMode = AutoScaleMode.Font,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink
+        }
+
+            ' Icon
+            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
+            messageForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            messageForm.Font = standardFont
+
+            ' Layout containers
+            Dim maxLabelWidth = 450
+            Dim maxScreenHeight = Screen.PrimaryScreen.WorkingArea.Height - 100
+
+            Dim mainFlow As New FlowLayoutPanel() With {
+            .FlowDirection = FlowDirection.TopDown,
+            .Dock = DockStyle.Fill,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .Padding = New Padding(20),
+            .MaximumSize = New Size(maxLabelWidth + 40, 0)
+        }
+
+            ' Body label
+            Dim bodyLabel As New System.Windows.Forms.Label() With {
+            .Text = bodyText,
+            .Font = standardFont,
+            .AutoSize = True,
+            .MaximumSize = New Size(maxLabelWidth, maxScreenHeight \ 2)
+        }
+            mainFlow.Controls.Add(bodyLabel)
+
+            ' “Text truncated” label, if needed
+            If isTruncated Then
+                Dim truncatedLabel As New System.Windows.Forms.Label() With {
+                .Text = "(text has been truncated)",
+                .Font = standardFont,
+                .AutoSize = True
+            }
+                mainFlow.Controls.Add(truncatedLabel)
+            End If
+
+            ' Countdown label (for auto-close)
+            Dim countdownLabel As New System.Windows.Forms.Label() With {
+            .Font = standardFont,
+            .AutoSize = True
+        }
+
+            ' Yes/No buttons
+            Dim button1 As New Button() With {
+            .Text = button1Text,
+            .AutoSize = True,
+            .Font = standardFont
+        }
+            Dim button2 As New Button() With {
+            .Text = button2Text,
+            .AutoSize = True,
+            .Font = standardFont
+        }
+
+            ' Result variable
+            Dim result As Integer = 0
+
+            AddHandler button1.Click, Sub()
+                                          result = 1
+                                          messageForm.Close()
+                                      End Sub
+            AddHandler button2.Click, Sub()
+                                          result = 2
+                                          messageForm.Close()
+                                      End Sub
+
+            ' Bottom flow for buttons (+ countdown)
+            Dim bottomFlow As New FlowLayoutPanel() With {
+                        .FlowDirection = FlowDirection.LeftToRight,
+                        .AutoSize = True,
+                        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                        .Margin = New Padding(0, 20, 0, 0)
+                    }
+            bottomFlow.Controls.Add(button1)
+            bottomFlow.Controls.Add(button2)
+            If autoCloseSeconds.HasValue Then
+                bottomFlow.Controls.Add(countdownLabel)
+            End If
+            mainFlow.Controls.Add(bottomFlow)
+
+            messageForm.Controls.Add(mainFlow)
+
+
+            ' Auto-close timer
+            If autoCloseSeconds.HasValue Then
+                Dim remaining = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
+                AddHandler t.Tick, Sub()
+                                       remaining -= 1
+                                       If remaining > 0 Then
+                                           countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                                       Else
+                                           t.Stop()
+                                           result = 3
+                                           messageForm.Close()
+                                       End If
+                                   End Sub
+                t.Start()
+            End If
+
+            ' Show and return
+            messageForm.Opacity = 1
+            messageForm.ShowDialog()
+            Return result
+        End Function
+
+
+        Public Shared Sub ShowCustomMessageBox(
+                                    ByVal bodyText As String,
+                                    Optional header As String = AN,
+                                    Optional autoCloseSeconds As Integer? = Nothing,
+                                    Optional Defaulttext As String = " - execution continues meanwhile",
+                                    Optional SeparateThread As Boolean = False
+                                )
+            ' Truncate if too long
+            If String.IsNullOrWhiteSpace(header) Then header = AN
+            Dim isTruncated As Boolean = False
+            If bodyText.Length > 15000 Then
+                bodyText = bodyText.Substring(0, 15000) & "(...)"
+                isTruncated = True
+            End If
+
+            ' Create and configure form
+            Dim messageForm As New Form() With {
+                            .Opacity = 0,
+                            .Text = header,
+                            .FormBorderStyle = FormBorderStyle.FixedDialog,
+                            .StartPosition = FormStartPosition.CenterScreen,
+                            .MaximizeBox = False,
+                            .MinimizeBox = False,
+                            .ShowInTaskbar = False,
+                            .TopMost = True,
+                            .AutoScaleMode = AutoScaleMode.Font,
+                            .AutoSize = True,
+                            .AutoSizeMode = AutoSizeMode.GrowAndShrink
+                        }
+
+            ' Icon
+            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
+            messageForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            messageForm.Font = standardFont
+
+            ' Layout
+            Dim maxLabelWidth = 450
+            Dim mainFlow As New FlowLayoutPanel() With {
+            .FlowDirection = FlowDirection.TopDown,
+            .Dock = DockStyle.Fill,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .Padding = New Padding(20),
+            .MaximumSize = New Size(maxLabelWidth + 40, 0)
+        }
+
+            ' Body label
+            Dim bodyLabel As New System.Windows.Forms.Label() With {
+            .Text = bodyText,
+            .Font = standardFont,
+            .AutoSize = True,
+            .MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
+        }
+            mainFlow.Controls.Add(bodyLabel)
+
+            ' OK button and countdown
+            Dim okButton As New Button() With {
+            .Text = "OK",
+            .AutoSize = True,
+            .Font = standardFont
+        }
+            Dim countdownLabel As New System.Windows.Forms.Label() With {
+            .Font = standardFont,
+            .AutoSize = True
+        }
+
+            Dim userClicked As Boolean = False
+
+            AddHandler okButton.Click, Sub()
+                                           userClicked = True
+                                           messageForm.Close()
+                                       End Sub
+
+            ' Bottom flow
+            Dim bottomFlow As New FlowLayoutPanel() With {
+            .FlowDirection = FlowDirection.LeftToRight,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .Margin = New Padding(0, 20, 0, 0)
+        }
+            bottomFlow.Controls.Add(okButton)
+            If autoCloseSeconds.HasValue Then
+                bottomFlow.Controls.Add(countdownLabel)
+            End If
+            mainFlow.Controls.Add(bottomFlow)
+
+            messageForm.Controls.Add(mainFlow)
+
+            ' Auto-close
+
+            If autoCloseSeconds.HasValue Then
+                Dim remaining = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
+                AddHandler t.Tick, Sub()
+                                       remaining -= 1
+                                       If remaining > 0 Then
+                                           countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                                       Else
+                                           t.Stop()
+                                           If Not userClicked Then
+                                               messageForm.Close()
+                                           End If
+                                       End If
+                                   End Sub
+                t.Start()
+
+                messageForm.Opacity = 1
+                If SeparateThread Then
+                    messageForm.ShowDialog()
+                Else
+                    messageForm.Show()
+                    System.Windows.Forms.Application.DoEvents()
+                End If
+            Else
+                messageForm.Opacity = 1
+                messageForm.ShowDialog()
+            End If
+        End Sub
+
+
+
+        Public Shared Function xxxShowCustomYesNoBox(ByVal bodyText As String, ByVal button1Text As String, ByVal button2Text As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = "") As Integer
             Dim messageForm As New Form()
             messageForm.Opacity = 0
             Dim bodyLabel As New System.Windows.Forms.Label()
@@ -3337,7 +3810,7 @@ Namespace SharedLibrary
             Return result
         End Function
 
-        Public Shared Sub ShowCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile", Optional SeparateThread As Boolean = False)
+        Public Shared Sub xxxxShowCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile", Optional SeparateThread As Boolean = False)
             Dim messageForm As New Form()
             messageForm.Opacity = 0
             Dim bodyLabel As New System.Windows.Forms.Label()
@@ -3486,6 +3959,7 @@ Namespace SharedLibrary
         End Sub
 
 
+
         Public Class ProgressForm
             Inherits Form
 
@@ -3594,6 +4068,252 @@ Namespace SharedLibrary
 
 
         Public Shared Sub ShowRTFCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile")
+
+            Dim RTFMessageForm As New System.Windows.Forms.Form()
+            Dim bodyLabel As New System.Windows.Forms.RichTextBox()
+            Dim okButton As New System.Windows.Forms.Button()
+            Dim countdownLabel As New System.Windows.Forms.Label()
+            Dim Truncated As Boolean = False
+
+            If String.IsNullOrWhiteSpace(header) Then header = AN
+
+            ' Form attributes
+            RTFMessageForm.Opacity = 0
+            RTFMessageForm.Text = header
+            RTFMessageForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            RTFMessageForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            RTFMessageForm.MaximizeBox = True
+            RTFMessageForm.MinimizeBox = True
+            RTFMessageForm.ShowInTaskbar = False
+            RTFMessageForm.TopMost = True
+            RTFMessageForm.KeyPreview = True
+
+            ' Autoscale for fonts & DPI
+            RTFMessageForm.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+            RTFMessageForm.AutoScaleDimensions = New System.Drawing.SizeF(96.0F, 96.0F)
+
+            RTFMessageForm.MinimumSize = New System.Drawing.Size(650, 335)
+
+            ' Icon
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            RTFMessageForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+            ' Standard font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+
+            ' Body RTF box
+            ' Body RTF box
+            bodyLabel.Font = standardFont
+            bodyLabel.ReadOnly = True
+            bodyLabel.BorderStyle = System.Windows.Forms.BorderStyle.None
+            bodyLabel.BackColor = RTFMessageForm.BackColor
+            bodyLabel.TabStop = False
+            bodyLabel.Rtf = bodyText
+            bodyLabel.Location = New System.Drawing.Point(20, 20)
+            bodyLabel.Width = 600
+            bodyLabel.Height = 200
+            ' Anchor to all sides so it resizes with the form
+            bodyLabel.Anchor = System.Windows.Forms.AnchorStyles.Top _
+                     Or System.Windows.Forms.AnchorStyles.Left _
+                     Or System.Windows.Forms.AnchorStyles.Right _
+                     Or System.Windows.Forms.AnchorStyles.Bottom
+            RTFMessageForm.Controls.Add(bodyLabel)
+
+
+            ' OK button & countdown label setup
+            okButton.Font = standardFont
+            okButton.Text = "OK"
+            okButton.AutoSize = True
+
+            countdownLabel.Font = standardFont
+            countdownLabel.AutoSize = True
+
+            ' Bottom panel to hold button + countdown, docked so it moves with resizing
+            Dim bottomPanel As New System.Windows.Forms.Panel()
+            bottomPanel.Dock = System.Windows.Forms.DockStyle.Bottom
+            bottomPanel.Padding = New System.Windows.Forms.Padding(20)  ' 20px padding on all sides
+            bottomPanel.Height = okButton.PreferredSize.Height + bottomPanel.Padding.Top + bottomPanel.Padding.Bottom
+            RTFMessageForm.Controls.Add(bottomPanel)
+
+            ' Add controls into panel
+            bottomPanel.Controls.Add(okButton)
+            bottomPanel.Controls.Add(countdownLabel)
+            okButton.Location = New System.Drawing.Point(bottomPanel.Padding.Left, bottomPanel.Padding.Top)
+            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, bottomPanel.Padding.Top)
+
+            ' Ensure bodyLabel resizes when form is resized
+            AddHandler RTFMessageForm.Resize, Sub(sender As Object, e As EventArgs)
+                                                  Dim availableWidth As Integer = RTFMessageForm.ClientSize.Width - bodyLabel.Left - 20
+                                                  Dim availableHeight As Integer = RTFMessageForm.ClientSize.Height - bottomPanel.Height - bodyLabel.Top - 20
+                                                  bodyLabel.Size = New System.Drawing.Size(availableWidth, availableHeight)
+                                              End Sub
+
+            ' Handlers
+            Dim userClicked As Boolean = False
+            AddHandler okButton.Click, Sub(sender As Object, e As EventArgs)
+                                           userClicked = True
+                                           RTFMessageForm.Close()
+                                           RTFMessageForm = Nothing
+                                       End Sub
+            AddHandler RTFMessageForm.KeyDown, Sub(sender As Object, e As System.Windows.Forms.KeyEventArgs)
+                                                   If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                                                       userClicked = True
+                                                       RTFMessageForm.Close()
+                                                       RTFMessageForm = Nothing
+                                                       e.SuppressKeyPress = True
+                                                   End If
+                                               End Sub
+            AddHandler RTFMessageForm.Shown, Sub(sender As Object, e As EventArgs)
+                                                 ' Trigger initial resize layout
+                                                 RTFMessageForm.PerformLayout()
+                                                 RTFMessageForm.Activate()
+                                             End Sub
+
+            ' Initial form sizing: ensure 20px padding around button and RTF label sizing
+            Dim formWidth As Integer = Math.Max(RTFMessageForm.MinimumSize.Width, bodyLabel.Width + 40)
+            Dim formHeight As Integer = Math.Max(RTFMessageForm.MinimumSize.Height,
+                                         bodyLabel.Bottom + 20 + bottomPanel.Height)
+            RTFMessageForm.ClientSize = New System.Drawing.Size(formWidth, formHeight)
+
+            ' Auto-close timer
+            If autoCloseSeconds.HasValue AndAlso autoCloseSeconds > 0 Then
+                Dim remainingTime As Integer = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
+
+                Dim timer As New System.Windows.Forms.Timer()
+                timer.Interval = 1000
+                AddHandler timer.Tick, Sub(sender As Object, e As EventArgs)
+                                           remainingTime -= 1
+                                           If remainingTime > 0 Then
+                                               countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
+                                           Else
+                                               timer.Stop()
+                                               If Not userClicked Then
+                                                   RTFMessageForm.Close()
+                                               End If
+                                           End If
+                                       End Sub
+                timer.Start()
+
+                RTFMessageForm.Opacity = 1
+                RTFMessageForm.Show()
+                RTFMessageForm.BringToFront()
+                RTFMessageForm.Activate()
+                System.Windows.Forms.Application.DoEvents()
+            Else
+                RTFMessageForm.Opacity = 1
+                RTFMessageForm.TopMost = True
+                RTFMessageForm.ShowDialog()
+            End If
+
+        End Sub
+
+
+
+
+        Public Shared Sub ShowHTMLCustomMessageBox(
+    ByVal bodyText As String,
+    Optional header As String = AN,
+    Optional Defaulttext As String = " - execution continues meanwhile"
+)
+            Dim t As New Thread(Sub()
+                                    ' Create and configure form
+                                    Dim HTMLMessageForm As New System.Windows.Forms.Form() With {
+                                .Opacity = 0,
+                                .Text = header,
+                                .FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable,
+                                .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
+                                .MaximizeBox = True,
+                                .MinimizeBox = True,
+                                .ShowInTaskbar = True,
+                                .TopMost = False,
+                                .KeyPreview = True,
+                                .MinimumSize = New System.Drawing.Size(800, 500),
+                                .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
+                            }
+
+                                    ' Header fallback
+                                    If String.IsNullOrWhiteSpace(header) Then
+                                        HTMLMessageForm.Text = AN
+                                    End If
+
+                                    ' Set the icon
+                                    Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                                    HTMLMessageForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+                                    ' Standard font
+                                    Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                                    HTMLMessageForm.Font = standardFont
+
+                                    ' WebBrowser mit 10px Margin
+                                    Dim htmlBrowser As New System.Windows.Forms.WebBrowser() With {
+                                .AllowNavigation = False,
+                                .WebBrowserShortcutsEnabled = False,
+                                .ScrollBarsEnabled = True,
+                                .ScriptErrorsSuppressed = True,
+                                .DocumentText = bodyText,
+                                .Dock = System.Windows.Forms.DockStyle.Fill,
+                                .BackColor = HTMLMessageForm.BackColor,
+                                .Margin = New System.Windows.Forms.Padding(20)
+                            }
+                                    AddHandler htmlBrowser.DocumentCompleted, Sub(sender2, e2)
+                                                                                  If htmlBrowser.Document?.Body IsNot Nothing Then
+                                                                                      ' Body-Style mit 10px Margin innen
+                                                                                      htmlBrowser.Document.Body.Style =
+                                                                                  $"background-color: rgb({HTMLMessageForm.BackColor.R}, {HTMLMessageForm.BackColor.G}, {HTMLMessageForm.BackColor.B}); " &
+                                                                                  "font-family: 'Segoe UI'; font-size: 9pt; margin: 20px;"
+                                                                                  End If
+                                                                              End Sub
+
+                                    ' OK button
+                                    Dim okButton As New System.Windows.Forms.Button() With {
+                                .Text = "OK",
+                                .AutoSize = True,
+                                .Font = standardFont,
+                                .Margin = New System.Windows.Forms.Padding(0) ' kein zusätzlicher Abstand hier
+                            }
+                                    AddHandler okButton.Click, Sub()
+                                                                   HTMLMessageForm.Close()
+                                                               End Sub
+
+                                    ' Form‐level Escape
+                                    AddHandler HTMLMessageForm.KeyDown, Sub(sender2, e2)
+                                                                            If e2.KeyCode = System.Windows.Forms.Keys.Escape Then
+                                                                                HTMLMessageForm.Close()
+                                                                                e2.SuppressKeyPress = True
+                                                                            End If
+                                                                        End Sub
+
+                                    ' Activate on shown
+                                    AddHandler HTMLMessageForm.Shown, Sub(sender2, e2)
+                                                                          HTMLMessageForm.Activate()
+                                                                      End Sub
+
+                                    ' Bottom flow panel
+                                    Dim bottomFlow As New System.Windows.Forms.FlowLayoutPanel() With {
+                                .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+                                .Dock = System.Windows.Forms.DockStyle.Bottom,
+                                .AutoSize = True,
+                                .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+                                .Padding = New System.Windows.Forms.Padding(20)
+                            }
+                                    bottomFlow.Controls.Add(okButton)
+
+                                    ' Compose form
+                                    HTMLMessageForm.Controls.Add(htmlBrowser)
+                                    HTMLMessageForm.Controls.Add(bottomFlow)
+
+                                    ' Show dialog
+                                    HTMLMessageForm.Opacity = 1
+                                    HTMLMessageForm.ShowDialog()
+                                End Sub)
+            t.SetApartmentState(System.Threading.ApartmentState.STA)
+            t.Start()
+        End Sub
+
+
+
+        Public Shared Sub xxxxShowRTFCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile")
 
             Dim RTFMessageForm As New Form()
             Dim bodyLabel As New System.Windows.Forms.RichTextBox()
@@ -3726,7 +4446,7 @@ Namespace SharedLibrary
             End If
         End Sub
 
-        Public Shared Sub ShowHTMLCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional Defaulttext As String = " - execution continues meanwhile")
+        Public Shared Sub xxxxShowHTMLCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional Defaulttext As String = " - execution continues meanwhile")
             Dim t As New Threading.Thread(Sub()
                                               Dim HTMLMessageForm As New System.Windows.Forms.Form()
                                               Dim htmlBrowser As New System.Windows.Forms.WebBrowser()
@@ -3824,20 +4544,158 @@ Namespace SharedLibrary
 
 
 
-        Public Class InputParameter
-            Public Property Name As String
-            Public Property Value As Object
-            ' We use this property to keep track of the dynamically created control.
-            Public Property InputControl As Control
 
-            Public Sub New(ByVal name As String, ByVal value As Object)
-                Me.Name = name
-                Me.Value = value
-            End Sub
-        End Class
+        Public Shared Function ShowCustomVariableInputForm(
+    ByVal prompt As String,
+    ByVal header As String,
+    ByRef params() As InputParameter
+) As Boolean
+            ' Fallback header
+            If String.IsNullOrWhiteSpace(header) Then header = AN
+
+            ' Formular initialisieren
+            Dim inputForm As New System.Windows.Forms.Form() With {
+        .Text = header,
+        .FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
+        .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
+        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font,
+        .AutoScaleDimensions = New System.Drawing.SizeF(6.0F, 13.0F),
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+    }
+
+            ' Icon setzen
+            Dim bmpIcon As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = System.Drawing.Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Hauptlayout: zwei Spalten, Label auto, Control fill
+            Dim mainLayout As New System.Windows.Forms.TableLayoutPanel() With {
+        .ColumnCount = 2,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .Padding = New System.Windows.Forms.Padding(12),
+        .GrowStyle = System.Windows.Forms.TableLayoutPanelGrowStyle.AddRows
+    }
+            ' Erste Spalte: AutoSize für Label, zweite: Prozent für Eingabe
+            mainLayout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize))
+            mainLayout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0F))
+
+            ' Prompt-Label oben
+            Dim promptLabel As New System.Windows.Forms.Label() With {
+        .Text = prompt,
+        .AutoSize = True,
+        .MaximumSize = New System.Drawing.Size(400, 0),
+        .Margin = New System.Windows.Forms.Padding(0, 0, 0, 12)
+    }
+            mainLayout.Controls.Add(promptLabel, 0, 0)
+            mainLayout.SetColumnSpan(promptLabel, 2)
+
+            ' Eine Zeile pro Parameter
+            For i As Integer = 0 To params.Length - 1
+                Dim param = params(i)
+                ' Label
+                Dim lbl As New System.Windows.Forms.Label() With {
+            .Text = param.Name & ":",
+            .AutoSize = True,
+            .Anchor = System.Windows.Forms.AnchorStyles.Left,
+            .Margin = New System.Windows.Forms.Padding(0, 0, 8, 8)
+        }
+                mainLayout.Controls.Add(lbl, 0, i + 1)
+
+                ' Eingabe-Control
+                Dim ctrl As System.Windows.Forms.Control
+                If TypeOf param.Value Is Boolean Then
+                    Dim chk As New System.Windows.Forms.CheckBox() With {
+                .Checked = Convert.ToBoolean(param.Value),
+                .AutoSize = True,
+                .Anchor = System.Windows.Forms.AnchorStyles.Left,
+                .Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            }
+                    ctrl = chk
+                Else
+                    Dim txt As New System.Windows.Forms.TextBox() With {
+                .Text = param.Value.ToString(),
+                .Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right,
+                .Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            }
+                    ' Starte mit Mindestbreite je nach Typ
+                    If TypeOf param.Value Is String Then
+                        txt.MinimumSize = New System.Drawing.Size(400, 0)
+                    Else
+                        txt.MinimumSize = New System.Drawing.Size(50, 0)
+                    End If
+                    ctrl = txt
+                End If
+                param.InputControl = ctrl
+                mainLayout.Controls.Add(ctrl, 1, i + 1)
+            Next
+
+            ' Buttons-Panel
+            Dim buttonFlow As New System.Windows.Forms.FlowLayoutPanel() With {
+        .FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
+        .Dock = System.Windows.Forms.DockStyle.Bottom,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .Padding = New System.Windows.Forms.Padding(12, 8, 12, 12)
+    }
+            Dim btnOK As New System.Windows.Forms.Button() With {
+        .Text = "OK",
+        .AutoSize = True,
+        .DialogResult = System.Windows.Forms.DialogResult.OK
+    }
+            Dim btnCancel As New System.Windows.Forms.Button() With {
+        .Text = "Cancel",
+        .AutoSize = True,
+        .DialogResult = System.Windows.Forms.DialogResult.Cancel
+    }
+            buttonFlow.Controls.Add(btnCancel)
+            buttonFlow.Controls.Add(btnOK)
+
+            inputForm.Controls.Add(mainLayout)
+            inputForm.Controls.Add(buttonFlow)
+
+            ' Dialog anzeigen
+            Dim result = inputForm.ShowDialog()
+            If result = System.Windows.Forms.DialogResult.OK Then
+                ' Werte zurücklesen
+                For Each param In params
+                    Try
+                        If TypeOf param.Value Is Boolean Then
+                            param.Value = CType(param.InputControl, System.Windows.Forms.CheckBox).Checked
+                        ElseIf TypeOf param.Value Is Integer Then
+                            Dim val As Integer
+                            If Integer.TryParse(CType(param.InputControl, System.Windows.Forms.TextBox).Text, val) Then
+                                param.Value = val
+                            Else
+                                Throw New System.Exception($"Invalid value for {param.Name}.")
+                            End If
+                        ElseIf TypeOf param.Value Is Double Then
+                            Dim val As Double
+                            If Double.TryParse(CType(param.InputControl, System.Windows.Forms.TextBox).Text, val) Then
+                                param.Value = val
+                            Else
+                                Throw New System.Exception($"Invalid value for {param.Name}.")
+                            End If
+                        Else
+                            param.Value = CType(param.InputControl, System.Windows.Forms.TextBox).Text
+                        End If
+                    Catch ex As System.Exception
+                        ShowCustomMessageBox($"{ex.Message} Using original ('{param.Value}').")
+                    End Try
+                Next
+            End If
+
+            inputForm.Dispose()
+            Return (result = System.Windows.Forms.DialogResult.OK)
+        End Function
 
 
-        Public Shared Function ShowCustomVariableInputForm(ByVal prompt As String, ByVal header As String, ByRef params() As InputParameter) As Boolean
+
+        Public Shared Function xxxxShowCustomVariableInputForm(ByVal prompt As String, ByVal header As String, ByRef params() As InputParameter) As Boolean
             ' Create a new form and set its basic properties.
             If String.IsNullOrWhiteSpace(header) Then header = AN
             Dim inputForm As New Form()
@@ -3982,7 +4840,7 @@ Namespace SharedLibrary
                 Returnvalue = False
             End If
             inputForm.Dispose()
-            Return returnvalue
+            Return Returnvalue
         End Function
 
 
@@ -4245,6 +5103,21 @@ Namespace SharedLibrary
             End If
             Return returnValue
         End Function
+
+
+        Public Class InputParameter
+            Public Property Name As String
+            Public Property Value As Object
+            ' We use this property to keep track of the dynamically created control.
+            Public Property InputControl As Control
+
+            Public Sub New(ByVal name As String, ByVal value As Object)
+                Me.Name = name
+                Me.Value = value
+            End Sub
+        End Class
+
+        ' xxxxx start here with window optimization
 
         Public Shared Function MissingSettingsWindow(Settings As Dictionary(Of String, String), context As ISharedContext) As Boolean
 
@@ -6096,6 +6969,8 @@ Namespace SharedLibrary
         End Sub
 
 
+
+
         Public Shared Sub ShowAboutWindow(owner As System.Windows.Forms.Form, context As ISharedContext)
             ' Example of using the same font and appearance as ShowWindowsSettings
             Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
@@ -6216,6 +7091,320 @@ Namespace SharedLibrary
 
 
         Public Shared Function ShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean, Context As ISharedContext) As (String, Boolean, Boolean, Boolean)
+
+            filePath = ExpandEnvironmentVariables(filePath)
+
+            Dim LoadResult = LoadPrompts(filePath, Context)
+            Dim NoBubbles As Boolean = False
+            Dim NoMarkup As Boolean = False
+
+            If enableMarkup = Nothing Then
+                NoMarkup = True
+                enableMarkup = False
+            End If
+
+            If enableBubbles = Nothing Then
+                NoBubbles = True
+                enableBubbles = False
+            End If
+
+            If LoadResult <> 0 Then Return ("", False, False, False)
+
+            ' Create the form
+            Dim settingsForm As New Form With {
+                    .Text = "Select Prompt",
+                    .AutoScaleMode = AutoScaleMode.Dpi,
+                    .AutoScaleDimensions = New SizeF(96.0F, 96.0F),
+                    .AutoSize = True,
+                    .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    .StartPosition = FormStartPosition.CenterScreen,
+                    .Padding = New Padding(10)
+                }
+
+            ' Optional minimum size
+            settingsForm.MinimumSize = New Size(900, 650)
+
+            ' Set icon
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            settingsForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+            ' Set a predefined font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            settingsForm.Font = standardFont
+
+            ' Create a table layout panel for structured arrangement
+            Dim layout As New TableLayoutPanel With {
+                        .Dock = DockStyle.Fill,
+                        .ColumnCount = 2,
+                        .RowCount = 3,
+                        .Padding = New Padding(10)
+                    }
+
+            ' Configure column and row styles
+            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
+            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
+            layout.RowStyles.Add(New RowStyle(SizeType.Percent, 70))
+            layout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+            layout.RowStyles.Add(New RowStyle(SizeType.Absolute, 50))
+
+            settingsForm.Controls.Add(layout)
+
+            ' Create listbox for prompt titles
+            Dim titleListBox As New ListBox With {
+                        .Dock = DockStyle.Fill,
+                        .Margin = New Padding(10)
+                    }
+            titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
+            layout.Controls.Add(titleListBox, 0, 0)
+
+            ' Create textbox for prompt content
+            Dim promptTextBox As New TextBox With {
+                            .Dock = DockStyle.Fill,
+                            .Multiline = True,
+                            .ReadOnly = True,
+                            .ScrollBars = ScrollBars.Vertical,
+                            .Margin = New Padding(10)
+                        }
+            layout.Controls.Add(promptTextBox, 1, 0)
+
+            ' Ensure equal sizes for selector and preview
+            AddHandler settingsForm.Resize, Sub()
+                                                Dim equalHeight = layout.GetRowHeights()(0)
+                                                titleListBox.Height = equalHeight
+                                                promptTextBox.Height = equalHeight
+                                            End Sub
+
+            ' Preselect the first prompt
+            If Context.PromptTitles.Count > 0 Then
+                titleListBox.SelectedIndex = 0
+                promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
+            End If
+
+            ' Handle title selection
+            AddHandler titleListBox.SelectedIndexChanged, Sub()
+                                                              Dim selectedIndex = titleListBox.SelectedIndex
+                                                              If selectedIndex >= 0 Then
+                                                                  Dim selectedPrompt = Context.PromptLibrary(selectedIndex).Replace("\n", vbCrLf)
+                                                                  promptTextBox.Text = selectedPrompt
+                                                              End If
+                                                          End Sub
+
+            ' Handle Enter key to confirm selection
+            AddHandler titleListBox.KeyDown, Sub(sender, e)
+                                                 If e.KeyCode = Keys.Enter Then
+                                                     settingsForm.DialogResult = DialogResult.OK
+                                                     settingsForm.Close()
+                                                 End If
+                                             End Sub
+
+            ' Create a panel for checkboxes
+            Dim checkboxPanel As New FlowLayoutPanel With {
+                        .FlowDirection = FlowDirection.TopDown,
+                        .WrapContents = False,
+                        .Dock = DockStyle.Top,  'Fill
+                        .Margin = New Padding(10),
+                        .AutoSize = True,
+                        .AutoSizeMode = AutoSizeMode.GrowAndShrink
+                    }
+            layout.Controls.Add(checkboxPanel, 0, 1)
+
+            ' Checkboxes
+            Dim markupCheckbox As New System.Windows.Forms.CheckBox With {
+                        .Text = "The output shall be provided as a markup",
+                        .AutoSize = True,
+                        .Enabled = enableMarkup,
+                        .Visible = Not NoMarkup
+                    }
+
+            Dim clipboardCheckbox As New System.Windows.Forms.CheckBox With {
+                        .Text = "The output shall be put in the clipboard",
+                        .AutoSize = True
+                    }
+
+            Dim bubblesCheckbox As New System.Windows.Forms.CheckBox With {
+                        .Text = "The output shall be in the form of bubbles",
+                        .AutoSize = True,
+                        .Enabled = enableBubbles,
+                        .Visible = Not NoBubbles
+                    }
+
+            checkboxPanel.Controls.Add(markupCheckbox)
+            checkboxPanel.Controls.Add(clipboardCheckbox)
+            checkboxPanel.Controls.Add(bubblesCheckbox)
+
+            ' Ensure mutual exclusivity of checkboxes
+            AddHandler markupCheckbox.CheckedChanged, Sub()
+                                                          If markupCheckbox.Checked Then
+                                                              bubblesCheckbox.Checked = False
+                                                              clipboardCheckbox.Checked = False
+                                                          End If
+                                                      End Sub
+
+            AddHandler bubblesCheckbox.CheckedChanged, Sub()
+                                                           If bubblesCheckbox.Checked Then
+                                                               markupCheckbox.Checked = False
+                                                               clipboardCheckbox.Checked = False
+                                                           End If
+                                                       End Sub
+
+            AddHandler clipboardCheckbox.CheckedChanged, Sub()
+                                                             If clipboardCheckbox.Checked Then
+                                                                 markupCheckbox.Checked = False
+                                                                 bubblesCheckbox.Checked = False
+                                                             End If
+                                                         End Sub
+
+            ' File path label
+            Dim filePathLabel As New System.Windows.Forms.Label With {
+                            .Text = $"Source: {filePath}",
+                            .AutoSize = True,
+                            .MaximumSize = New Size(layout.Width, 0),
+                            .Margin = New Padding(10)
+                        }
+            layout.Controls.Add(filePathLabel, 1, 1)
+
+            ' Add OK, Cancel, and Edit buttons
+            Dim buttonPanel As New FlowLayoutPanel With {
+                            .FlowDirection = FlowDirection.LeftToRight,
+                            .Dock = DockStyle.Bottom,
+                            .Padding = New Padding(10)
+                        }
+            layout.Controls.Add(buttonPanel, 0, 2)
+            layout.SetColumnSpan(buttonPanel, 2)
+
+            Dim okButton As New Button With {
+                        .Text = "OK",
+                        .AutoSize = True,
+                        .DialogResult = DialogResult.OK
+                    }
+
+            Dim cancelButton As New Button With {
+                        .Text = "Cancel",
+                        .AutoSize = True,
+                        .DialogResult = DialogResult.Cancel
+                    }
+
+            Dim editButton As New Button With {
+                        .Text = "Edit",
+                        .AutoSize = True,
+                        .Anchor = AnchorStyles.Right
+                    }
+            buttonPanel.Controls.Add(okButton)
+            buttonPanel.Controls.Add(cancelButton)
+            buttonPanel.Controls.Add(editButton)
+
+            ' Align edit button to the right
+            Dim spacer As New Panel With {
+                        .Dock = DockStyle.Fill
+                    }
+            buttonPanel.Controls.SetChildIndex(editButton, buttonPanel.Controls.Count - 1)
+
+            ' Handle Edit button click
+            AddHandler editButton.Click, Sub()
+                                             Dim editorForm As New Form With {
+                                                 .Text = "Edit Prompt Library",
+                                                 .Width = 800,
+                                                 .Height = 600,
+                                                 .StartPosition = FormStartPosition.CenterParent,
+                                                 .Padding = New Padding(10)
+                                             }
+
+                                             ' Set icon for editor
+                                             editorForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+                                             Dim descriptionLabel As New System.Windows.Forms.Label With {
+                                                 .Text = $"You can now edit your prompts (stored at {filePath}). Make sure that on each line, the description and the prompt is separated by a '|'; you can use ';' for indicating comments.",
+                                                 .Dock = DockStyle.Top,
+                                                 .Font = standardFont,
+                                                 .AutoSize = True,
+                                                 .MaximumSize = New Size(editorForm.Width - 20, 0),
+                                                 .Margin = New Padding(10, 20, 20, 20)
+                                             }
+
+                                             Dim editorTextBox As New TextBox With {
+                                                 .Multiline = True,
+                                                 .Dock = DockStyle.Fill,
+                                                 .ScrollBars = ScrollBars.Both,
+                                                 .Font = standardFont,
+                                                 .Margin = New Padding(20),
+                                                 .Height = 400
+                                             }
+
+                                             ' Load file content into editor
+                                             editorTextBox.Text = System.IO.File.ReadAllText(filePath)
+                                             editorTextBox.SelectionStart = 0
+                                             editorTextBox.SelectionLength = 0
+
+                                             Dim editorButtonPanel As New FlowLayoutPanel With {
+                                                 .FlowDirection = FlowDirection.LeftToRight,
+                                                 .Dock = DockStyle.Bottom,
+                                                 .Padding = New Padding(10),
+                                                 .AutoSize = True
+                                             }
+
+                                             Dim saveButton As New Button With {
+                                                 .Text = "Save",
+                                                 .Font = standardFont,
+                                                 .AutoSize = True
+                                             }
+
+                                             Dim cancelEditButton As New Button With {
+                                                 .Text = "Cancel",
+                                                 .Font = standardFont,
+                                                 .AutoSize = True
+                                             }
+
+                                             AddHandler cancelEditButton.Click, Sub()
+                                                                                    editorForm.Close()
+                                                                                End Sub
+
+                                             AddHandler saveButton.Click, Sub()
+                                                                              System.IO.File.WriteAllText(filePath, editorTextBox.Text)
+                                                                              editorForm.Close()
+
+                                                                              ' Reload prompts after saving
+                                                                              LoadPrompts(filePath, Context)
+                                                                              titleListBox.Items.Clear()
+                                                                              titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
+                                                                              If Context.PromptTitles.Count > 0 Then
+                                                                                  titleListBox.SelectedIndex = 0
+                                                                                  promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
+                                                                              End If
+                                                                              titleListBox.Focus()
+                                                                          End Sub
+
+                                             editorButtonPanel.Controls.Add(saveButton)
+                                             editorButtonPanel.Controls.Add(cancelEditButton)
+
+                                             editorForm.Controls.Add(editorTextBox)
+                                             editorForm.Controls.Add(descriptionLabel)
+                                             editorForm.Controls.Add(editorButtonPanel)
+                                             editorForm.ShowDialog()
+                                             titleListBox.Focus()
+                                         End Sub
+
+            ' Show the form
+            Dim result As DialogResult = settingsForm.ShowDialog()
+
+            If result = DialogResult.OK Then
+                Dim selectedIndex = titleListBox.SelectedIndex
+                If selectedIndex >= 0 Then
+                    Return (
+                        Context.PromptLibrary(selectedIndex),
+                        markupCheckbox.Checked,
+                        bubblesCheckbox.Checked,
+                        clipboardCheckbox.Checked
+                    )
+                End If
+            End If
+
+            ' Return defaults if cancelled or no selection
+            Return ("", False, False, False)
+        End Function
+
+
+
+        Public Shared Function xxxxShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean, Context As ISharedContext) As (String, Boolean, Boolean, Boolean)
 
             filePath = ExpandEnvironmentVariables(filePath)
 
