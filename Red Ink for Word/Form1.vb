@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 21.4.2025
+' 23.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -116,8 +116,8 @@ Public Class frmAIChat
         mainLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
 
         ' 5) Controls konfigurieren
-        lblInstructions.AutoSize = False
-        lblInstructions.Dock = DockStyle.Fill
+        lblInstructions.AutoSize = True
+        lblInstructions.Dock = DockStyle.Top
         txtChatHistory.Dock = DockStyle.Fill
         txtUserInput.Dock = DockStyle.Fill
 
@@ -171,8 +171,8 @@ Public Class frmAIChat
 
         ' Set up instructions label
         lblInstructions.Text = $"Enter your question and click 'Send' or Ctrl-Enter. You can allow the chatbot to perform actions on your document (search, replace, delete, insert)."
-        lblInstructions.AutoSize = False
-        lblInstructions.Height = 40
+        lblInstructions.AutoSize = True
+        lblInstructions.Height = 50
         lblInstructions.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
         lblInstructions.TextAlign = ContentAlignment.MiddleLeft
 

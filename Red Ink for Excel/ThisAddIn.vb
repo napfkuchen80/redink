@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.4.2025
+' 24.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.220425 Gen2 Beta Test"
+    Public Const Version As String = "V.240425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2408,6 +2408,112 @@ Public Class ThisAddIn
     Public Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
 
         Dim splash As New SplashScreen("Gathering the content from your worksheet...")
+        splash.Show()
+        splash.Refresh()
+
+        If CellRange Is Nothing Then
+            splash.Close()
+            Return String.Empty
+        End If
+
+        With Globals.ThisAddIn.Application
+            .ScreenUpdating = False
+            .EnableEvents = False
+            .Calculation = Excel.XlCalculation.xlCalculationManual
+        End With
+
+        ' Rohdaten und Formeln
+        Dim rawVals As Object = CellRange.Value2
+        Dim rawForms As Object = If(IncludeFormulas, CellRange.Formula, Nothing)
+
+        ' Ziel-Arrays (immer nullbasiert)
+        Dim vals(,) As Object
+        Dim forms(,) As Object
+
+        If TypeOf rawVals Is Object(,) Then
+            vals = CType(rawVals, Object(,))
+            If IncludeFormulas Then forms = CType(rawForms, Object(,))
+        Else
+            ' Single-Cell -> 1×1 nullbasiertes Array
+            ReDim vals(0, 0)
+            vals(0, 0) = rawVals
+            If IncludeFormulas Then
+                ReDim forms(0, 0)
+                forms(0, 0) = rawForms
+            End If
+        End If
+
+        ' tatsächliche Bounds ermitteln
+        Dim rowLB = vals.GetLowerBound(0)
+        Dim rowUB = vals.GetUpperBound(0)
+        Dim colLB = vals.GetLowerBound(1)
+        Dim colUB = vals.GetUpperBound(1)
+
+        Dim sb As New StringBuilder()
+
+        For r As Integer = rowLB To rowUB
+            For c As Integer = colLB To colUB
+                Dim raw = vals(r, c)
+                If raw IsNot Nothing Then
+                    ' auf Range.Cells umrechnen (1-basiert)
+                    Dim relativeRow = r - rowLB + 1
+                    Dim relativeCol = c - colLB + 1
+                    Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
+                    Dim addr As String = cell.Address(False, False)
+
+                    sb.AppendLine($"Cell {addr}:")
+                    sb.AppendLine($"  Value: {raw}")
+
+                    If IncludeFormulas Then
+                        Dim f = forms(r, c)
+                        sb.AppendLine($"  Formula: {If(TypeOf f Is String, f.ToString(), "none")}")
+                    End If
+
+                    ' 1) Legacy-Kommentar
+                    If cell.Comment IsNot Nothing Then
+                        sb.AppendLine($"  Comment: {cell.Comment.Text()}")
+                    End If
+
+                    ' 2) ThreadedComments via Reflection
+                    Try
+                        Dim tc = cell.GetType().InvokeMember("ThreadedComments",
+                                                         Reflection.BindingFlags.GetProperty,
+                                                         Nothing, cell, Nothing)
+                        If tc IsNot Nothing Then
+                            For Each cx In tc
+                                Dim txt = cx.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
+                                Dim auth = cx.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
+                                sb.AppendLine($"  Comment: {txt} (by {auth})")
+                            Next
+                        End If
+                    Catch ex As System.Exception
+                        ' ignorieren, wenn nicht unterstützt
+                    End Try
+
+                    sb.AppendLine(New String("-"c, 40))
+
+                    Marshal.ReleaseComObject(cell)
+                End If
+            Next
+        Next
+
+        With Globals.ThisAddIn.Application
+            .ScreenUpdating = True
+            .EnableEvents = True
+            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
+        End With
+
+        splash.Close()
+        Return sb.ToString()
+    End Function
+
+
+
+
+
+    Public Function xxxConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
+
+        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
 
         splash.Show()
         splash.Refresh()
@@ -2484,10 +2590,10 @@ Public Class ThisAddIn
 
 
         With Globals.ThisAddIn.Application
-                .ScreenUpdating = True
-                .EnableEvents = True
-                .Calculation = Excel.XlCalculation.xlCalculationAutomatic
-            End With
+            .ScreenUpdating = True
+            .EnableEvents = True
+            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
+        End With
 
         splash.Close()
 
@@ -2677,7 +2783,70 @@ Public Class ThisAddIn
 
     End Sub
 
+
     Public Sub SetFormulaSafe(cell As Excel.Range, formulaOrValue As String, excelApp As Excel.Application)
+        ' 0. Hol Dir den Listentrenner (in DE ist das ";")
+        Dim localSep As String = excelApp.International(XlApplicationInternational.xlListSeparator)
+
+        ' 1. Unser "englischer" Ausgangs-String
+        Dim englishFormula As String = formulaOrValue
+
+        Try
+            ' 2. Erstversuch: dynamic-array-Formel in Englisch
+            Try
+                cell.Formula2 = englishFormula
+            Catch ex1 As System.Runtime.InteropServices.COMException When ex1.ErrorCode = &H800A03EC
+                ' 0x800A03EC = Locale-Error
+                ' → versuche gleich mit Formula2Local
+                Try
+                    cell.Formula2Local = englishFormula
+                Catch ex2 As System.Runtime.InteropServices.COMException
+                    ' ignorieren, kommt unten nochmal dran
+                End Try
+            End Try
+
+            ' 3. Wenn #NAME? drinsteht, nochmal mit FormulaLocal und lokalem Trenner
+            If cell.HasFormula AndAlso Trim(cell.Text.ToString()) = "#NAME?" Then
+                Try
+                    cell.FormulaLocal = englishFormula.Replace(",", localSep)
+                Catch ex3 As System.Runtime.InteropServices.COMException
+                    ' ignorieren
+                End Try
+
+                ' 4. Wenn immer noch #NAME? → Namen übersetzen lassen
+                If Trim(cell.Text.ToString()) = "#NAME?" Then
+                    Dim converted As String = Trim(ConvertFormulaToLocale(englishFormula, excelApp))
+                    If Not String.IsNullOrEmpty(converted) Then
+                        converted = converted.Replace(",", localSep)
+                        Try
+                            cell.FormulaLocal = converted
+                        Catch ex4 As System.Runtime.InteropServices.COMException
+                            ShowCustomMessageBox($"Failed to set converted formula: {ex4.Message}")
+                        End Try
+                    End If
+
+                    ' 5. Letzter Check
+                    If Trim(cell.Text.ToString()) = "#NAME?" Then
+                        ShowCustomMessageBox(
+                        $"Excel rejected the formula '{englishFormula}' for cell {cell.Address}. Resulted in #NAME?."
+                    )
+                    End If
+                End If
+            End If
+
+            ' 6. Genereller COM-Fehler
+        Catch comEx As System.Runtime.InteropServices.COMException
+            ShowCustomMessageBox($"COM Error setting formula: {comEx.Message}")
+
+            ' 7. Alle anderen Fehler
+        Catch ex As System.Exception
+            ShowCustomMessageBox($"General error setting formula: {ex.Message}")
+        End Try
+    End Sub
+
+
+
+    Public Sub xxSetFormulaSafe(cell As Excel.Range, formulaOrValue As String, excelApp As Excel.Application)
         Try
             ' Try setting using English formula
             cell.Formula2 = formulaOrValue

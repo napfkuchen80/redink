@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.4.2025
+' 24.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -60,6 +60,8 @@ Imports Grpc.Core
 Imports Google.Cloud.Speech.V1
 Imports Google.Protobuf
 Imports Grpc.Net
+Imports Google.Api.Gax
+Imports Google.Api.Gax.Grpc
 
 
 Public Class StopForm
@@ -250,7 +252,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.220425 Gen2 Beta Test"
+    Public Const Version As String = "V.240425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2242,7 +2244,7 @@ Public Class ThisAddIn
                 Environment.SetEnvironmentVariable("PATH", currentPath & ";" & SpeechPath)
             End If
             RuntimeOptions.LibraryPath = SpeechPath
-            RuntimeOptions.RuntimeLibraryOrder = New List(Of RuntimeLibrary) From {RuntimeLibrary.Cuda, RuntimeLibrary.Cpu}
+            'RuntimeOptions.RuntimeLibraryOrder = New List(Of RuntimeLibrary) From {RuntimeLibrary.Cuda, RuntimeLibrary.Cpu}
 
         End If
 
@@ -4424,7 +4426,7 @@ Public Class ThisAddIn
                         .UseEmojiAndSmiley() _
                         .UseTaskLists() _
                         .UseMathematics() _
-                        .UseGenericAttributes() _
+.UseGenericAttributes() _
 .Build()
 
         Dim htmlResult As String = Markdown.ToHtml(Result, markdownPipeline).Trim
@@ -6651,6 +6653,8 @@ Public Class ThisAddIn
         Private GoogleLanguageCode As String = ""
         Private audioQueue As New System.Collections.Concurrent.BlockingCollection(Of ByteString)()
         Private _googleStreamCompleted As Boolean = False
+        Private Const STREAMING_LIMIT_MS As Integer = 290000  ' 4 Minuten 50 Sekunden
+        Private streamingStartTime As DateTime
 
 
 
@@ -6658,7 +6662,8 @@ Public Class ThisAddIn
             ' Initialize UI Components
             InitializeComponents()
 
-            Me.AutoScaleMode = AutoScaleMode.Font
+            Me.AutoScaleMode = AutoScaleMode.Dpi
+            ''Me.AutoScaleMode = AutoScaleMode.Font
 
             ' Load available Vosk models
             Dim modelPath As String = Globals.ThisAddIn.INI_SpeechModelPath
@@ -6825,8 +6830,8 @@ Public Class ThisAddIn
     }
             Me.PartialTextLabel = New Label() With {
         .Text = "...",
-        .AutoSize = False,
-        .Height = 60,
+        .AutoSize = True,
+        .MinimumSize = New System.Drawing.Size(0, 70),
         .Dock = DockStyle.Top
     }
 
@@ -7144,6 +7149,14 @@ Public Class ThisAddIn
 
         Private Async Function StopRecording() As System.Threading.Tasks.Task
 
+            If waveIn IsNot Nothing Then
+                RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
+                RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
+                waveIn.StopRecording()
+                waveIn.Dispose()
+                waveIn = Nothing
+            End If
+
             CancelTranscription()
 
             If STTModel = "google" AndAlso _stream IsNot Nothing Then
@@ -7156,13 +7169,6 @@ Public Class ThisAddIn
                 WhisperRecognizer = Nothing
             End If
 
-            If waveIn IsNot Nothing Then
-                RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
-                RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
-                waveIn.StopRecording()
-                waveIn.Dispose()
-                waveIn = Nothing
-            End If
 
         End Function
 
@@ -7175,7 +7181,9 @@ Public Class ThisAddIn
 
             ' Verhindere Mehrfachklicks
             Me.StopButton.Enabled = False
-            PartialTextLabel.Text = "Stopping…"
+            If STTModel <> "vosk" Then
+                PartialTextLabel.Text = "Stopping…"
+            End If
 
             System.Threading.Tasks.Task.Run(Async Function()
                                                 Try
@@ -7221,7 +7229,9 @@ Public Class ThisAddIn
 
                     Me.StopButton.Enabled = False
                     Me.QuitButton.Enabled = False
-                    PartialTextLabel.Text = "Stopping…"
+                    If STTModel <> "vosk" Then
+                        PartialTextLabel.Text = "Stopping…"
+                    End If
 
                     System.Threading.Tasks.Task.Run(Async Function()
                                                         Try
@@ -7255,7 +7265,9 @@ Public Class ThisAddIn
 
                 Me.StopButton.Enabled = False
                 Me.QuitButton.Enabled = False
-                PartialTextLabel.Text = "Stopping…"
+                If STTModel <> "vosk" Then
+                    PartialTextLabel.Text = "Stopping…"
+                End If
 
                 System.Threading.Tasks.Task.Run(Async Function()
                                                     Try
@@ -7556,8 +7568,7 @@ Public Class ThisAddIn
             Dim builder As New SpeechClientBuilder() With {
                 .Endpoint = "eu-speech.googleapis.com",
                 .ChannelCredentials = channelCreds
-            }
-
+}
             client = builder.Build()
 
             Await InitializeGoogleStream()
@@ -7570,6 +7581,7 @@ Public Class ThisAddIn
 
         Private Async Function InitializeGoogleStream() As System.Threading.Tasks.Task
 
+            streamingStartTime = DateTime.UtcNow
             ResetGoogleStreamFlag()
 
             Try
@@ -7881,38 +7893,53 @@ Public Class ThisAddIn
         End Function
 
 
+        Private Async Sub OnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
 
-        Private Async Sub OnGoogleDataAvailable(sender As Object, e As NAudio.Wave.WaveInEventArgs)
-            Dim chunk = ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+            If _googleStreamCompleted Then
+                Return
+            End If
+
+            Dim now = System.DateTime.UtcNow
+            Dim elapsed = (now - streamingStartTime).TotalMilliseconds
+            Dim chunk As ByteString = ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+
+            ' 1) Zeitbasiertes Reconnect knapp vor 5-Minuten-Limit
+            If elapsed > STREAMING_LIMIT_MS Then
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = System.DateTime.UtcNow
+                Return
+            End If
+
+            ' 2) Try/Catch ohne Await im Catch
+            Dim shouldRecover As Boolean = False
+
             Try
-                ' Versuch, den Chunk normal zu senden
                 Await _stream.WriteAsync(New StreamingRecognizeRequest With {
-            .AudioContent = chunk
-        })
+                    .AudioContent = chunk
+                       })
+            Catch ex As RpcException _
+                     When ex.Status.StatusCode = StatusCode.DeadlineExceeded _
+                       OrElse ex.Status.StatusCode = StatusCode.Unavailable
 
-            Catch rex As RpcException _
-         When rex.Status.StatusCode = StatusCode.DeadlineExceeded _
-           OrElse rex.Status.StatusCode = StatusCode.Unavailable
-
-                Debug.WriteLine($"Google STT stream interrupted ({rex.Status.StatusCode}). Restarting…")
-
-                ' 1) Alten Stream einfach killen (ohne WriteCompleteAsync)
-                Try
-                    _stream.Dispose()
-                Catch : End Try
-                _stream = Nothing
-
-                ' 2) Fire-and-forget: Wiederaufbau + Reader + Chunk-Retry
-                RecoverGoogleStream(chunk)
-
-            Catch ex As Exception
-                Debug.WriteLine($"Google STT Error when sending a chunk: {ex}")
+                System.Diagnostics.Debug.WriteLine(
+                              $"Google STT stream interrupted ({ex.Status.StatusCode}). Restarting…")
+                shouldRecover = True
             End Try
+
+            ' 3) Outside Catch: Fire-and-await Recovery
+            If shouldRecover Then
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = System.DateTime.UtcNow
+            End If
+
         End Sub
 
 
-        Private Async Sub RecoverGoogleStream(failedChunk As ByteString)
+        Private Async Function RecoverGoogleStream(failedChunk As ByteString) As System.Threading.Tasks.Task
             Try
+
+                streamingStartTime = DateTime.UtcNow
+
                 ' A) Neuen Stream initialisieren
                 Await InitializeGoogleStream()
 
@@ -7932,7 +7959,7 @@ Public Class ThisAddIn
             Catch ex As Exception
                 Debug.WriteLine($"Error in RecoverGoogleStream: {ex}")
             End Try
-        End Sub
+        End Function
 
 
 
@@ -9592,10 +9619,16 @@ Public Class ThisAddIn
             ' Prevent the user from shrinking below a usable size
             Me.MinimumSize = New System.Drawing.Size(810, 470)
             Me.AutoSize = True
+            Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            AddHandler Me.Shown, Sub()
+                                     Me.MinimumSize = Me.Size
+                                 End Sub
 
             ' Build the UI
+            Me.SuspendLayout()
             CreateControls()
             LayoutControls()
+            Me.ResumeLayout()
             AddHandlers()
 
             PopulateLanguageComboBoxes()
