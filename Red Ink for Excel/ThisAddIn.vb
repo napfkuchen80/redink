@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.4.2025
+' 27.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.240425 Gen2 Beta Test"
+    Public Const Version As String = "V.270425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -285,6 +285,16 @@ Public Class ThisAddIn
             _context.INI_APICall = value
         End Set
     End Property
+
+    Public Shared Property INI_APICall_Object As String
+        Get
+            Return _context.INI_APICall_Object
+        End Get
+        Set(value As String)
+            _context.INI_APICall_Object = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_Response As String
         Get
@@ -519,6 +529,16 @@ Public Class ThisAddIn
             _context.INI_APICall_2 = value
         End Set
     End Property
+
+    Public Shared Property INI_APICall_Object_2 As String
+        Get
+            Return _context.INI_APICall_Object_2
+        End Get
+        Set(value As String)
+            _context.INI_APICall_Object_2 = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_Response_2 As String
         Get
@@ -3624,6 +3644,7 @@ Public Class ThisAddIn
             config.Add("INI_APICall§§" & INI_APICall_2)
             config.Add("INI_Response§§" & INI_Response_2)
             config.Add("DecodedAPI§§" & DecodedAPI_2)
+            'config.Add("INI_APICall_Object§§" & INI_APICALL_Object_2)
         Else
             config.Add("INI_OAuth2§§" & INI_OAuth2.ToString)
             config.Add("INI_OAuth2ClientMail§§" & INI_OAuth2ClientMail)
@@ -3641,6 +3662,7 @@ Public Class ThisAddIn
             config.Add("INI_APICall§§" & INI_APICall)
             config.Add("INI_Response§§" & INI_Response)
             config.Add("DecodedAPI§§" & DecodedAPI)
+            'config.Add("INI_APICall_Object§§" & INI_APICALL_Object)
         End If
 
         ' Join the list into a single string with a delimiter

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.4.2025
+' 27.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -62,6 +62,7 @@ Imports Google.Protobuf
 Imports Grpc.Net
 Imports Google.Api.Gax
 Imports Google.Api.Gax.Grpc
+Imports System.Security.Cryptography
 
 
 Public Class StopForm
@@ -252,7 +253,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.240425 Gen2 Beta Test"
+    Public Const Version As String = "V.270425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -277,6 +278,7 @@ Public Class ThisAddIn
     Private Const KFTrigger2 As String = "(kf)"
     Private Const KPFTrigger As String = "(keepparaformat)"
     Private Const KPFTrigger2 As String = "(kpf)"
+    Private Const ObjectTrigger As String = "(file)"
     Private Const InPlacePrefix As String = "Replace:"
     Private Const MarkupPrefix As String = "Markup:"
     Private Const MarkupPrefixDiff As String = "MarkupDiff:"
@@ -454,6 +456,16 @@ Public Class ThisAddIn
             _context.INI_APICall = value
         End Set
     End Property
+
+    Public Shared Property INI_APICall_Object As String
+        Get
+            Return _context.INI_APICall_Object
+        End Get
+        Set(value As String)
+            _context.INI_APICall_Object = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_Response As String
         Get
@@ -688,6 +700,16 @@ Public Class ThisAddIn
             _context.INI_APICall_2 = value
         End Set
     End Property
+
+    Public Shared Property INI_APICall_Object_2 As String
+        Get
+            Return _context.INI_APICall_Object_2
+        End Get
+        Set(value As String)
+            _context.INI_APICall_Object_2 = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_Response_2 As String
         Get
@@ -1620,8 +1642,8 @@ Public Class ThisAddIn
     Public Shared Async Function PostCorrection(inputText As String, Optional ByVal UseSecondAPI As Boolean = False) As Task(Of String)
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional ByVal FileObject As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt, FileObject)
     End Function
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
         SharedMethods.ShowSettingsWindow(Settings, SettingsTips, _context)
@@ -2660,6 +2682,7 @@ Public Class ThisAddIn
             Dim KeepFormatCap = INI_KeepFormatCap
             Dim DoKeepFormat As Boolean = INI_KeepFormat2
             Dim DoKeepParaFormat As Boolean = INI_KeepParaFormatInline
+            Dim DoFileObject As Boolean = False
 
             Dim MarkupInstruct As String = $"start With '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"with '{InPlacePrefix}' for replacing the selection"
@@ -2672,7 +2695,9 @@ Public Class ThisAddIn
             Dim LibInstruct As String = $"; add '{LibTrigger}' for library search"
             Dim NetInstruct As String = $"; add '{NetTrigger}' for internet search"
             Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
+            Dim ObjectInstruct As String = $"; add '{ObjectTrigger}' for adding a file object"
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
+            Dim FileObject As String = ""
 
             Dim AddOnInstruct As String = TPMarkupInstruct
             AddOnInstruct += NoFormatInstruct.Replace("; add", ", ")
@@ -2681,6 +2706,17 @@ Public Class ThisAddIn
             End If
             If INI_ISearch Then
                 AddOnInstruct += NetInstruct.Replace("; add", ", ")
+            End If
+            If UseSecondAPI Then
+                If Not String.IsNullOrWhiteSpace(INI_APICall_Object_2) Then
+                    AddOnInstruct += ObjectInstruct.Replace("; add", ",")
+                    DoFileObject = True
+                End If
+            Else
+                If Not String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                    AddOnInstruct += ObjectInstruct.Replace("; add", ",")
+                    DoFileObject = True
+                End If
             End If
 
             Dim lastCommaIndex As Integer = AddOnInstruct.LastIndexOf(","c)
@@ -2942,6 +2978,11 @@ Public Class ThisAddIn
                 OtherPrompt = OtherPrompt.Replace(KPFTrigger2, "").Trim()
                 DoKeepParaFormat = True
             End If
+            If DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                OtherPrompt = OtherPrompt.Replace(ObjectTrigger, "").Trim()
+            Else
+                DoFileObject = False
+            End If
 
             ' Regular expression to find text in the format "(markup:..." and extract until ")"
             Dim pattern As String = $"\{TPMarkupTriggerL}}}(.*?)\{TPMarkupTriggerR}"
@@ -2995,10 +3036,25 @@ Public Class ThisAddIn
 
 
             If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                DragDropFormLabel = ""
+                DragDropFormFilter = ""
                 doc = GetFileContent()
                 OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
                 ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
             End If
+
+            If DoFileObject Then
+                DragDropFormLabel = "All file types that are supported by your LLM."
+                DragDropFormFilter = "Supported Files|*.*"
+                FileObject = GetFileName()
+                DragDropFormLabel = ""
+                DragDropFormFilter = ""
+                If String.IsNullOrWhiteSpace(FileObject) Then
+                    ShowCustomMessageBox("No file object has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
+                    Exit Sub
+                End If
+            End If
+
 
             If NoText And DoBubbles Then
                 Dim FullDocument As Integer = ShowCustomYesNoBox("You have not selected text. Ask the LLM to comment on the full document?", "Yes", "No, abort")
@@ -3049,7 +3105,7 @@ Public Class ThisAddIn
                 End If
             End If
 
-            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName)
+            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject)
 
             If UseSecondAPI And originalConfigLoaded Then
                 RestoreDefaults(_context, originalConfig)
@@ -3235,6 +3291,7 @@ Public Class ThisAddIn
     ' - DoTPMarkup: Boolean flag to indicate that markups in the output should marked.
     ' - TPMarkupname: String containing the user of whom the tags will be marked, if any.
     ' - CreatePodcast: Boolean flag to indicate that the output should be used to create a podcast.
+    ' - FileObject: String containing the file path to the object to be added to the LLM request if supported by the API.
 
     ' Global array to store paragraph formatting information
     Structure ParagraphFormatStructure
@@ -3259,7 +3316,7 @@ Public Class ThisAddIn
     Dim paragraphFormat() As ParagraphFormatStructure
     Dim paraCount As Integer
 
-    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False) As Task(Of String)
+    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "") As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
@@ -3276,7 +3333,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Or selection.Tables.Count = 0 Or PutInClipboard Or PutInBubbles Then
 
-            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast)
+            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject)
 
         Else
 
@@ -3347,7 +3404,7 @@ Public Class ThisAddIn
                                                                                 KeepFormat, ParaFormatInline, InPlace,
                                                                                 DoMarkup, MarkupMethod, PutInClipboard,
                                                                                 PutInBubbles, SelectionMandatory, UseSecondAPI,
-                                                                                FormattingCap, DoTPMarkup, TPMarkupname)
+                                                                                FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                                     ' Optionally delay between processing cells.
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
@@ -3399,7 +3456,7 @@ Public Class ThisAddIn
                                 ' Also verify it's not empty
                                 If textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Else
@@ -3410,7 +3467,7 @@ Public Class ThisAddIn
 
                                 If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
 
@@ -3444,7 +3501,7 @@ Public Class ThisAddIn
                                 cellRange.End -= 1  ' Exclude cell marker
                                 If cellRange.Start < cellRange.End Then
                                     cellRange.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Next
@@ -3464,7 +3521,7 @@ Public Class ThisAddIn
 
                             finalChunk.Select()
                             Dim text = selection.Text
-                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                         Else
                             Do
                                 finalChunk.Start += 1
@@ -3474,7 +3531,7 @@ Public Class ThisAddIn
 
                             If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
                                 finalChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname)
+                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
                             End If
                         End If
                     End If
@@ -3484,7 +3541,7 @@ Public Class ThisAddIn
 
             ElseIf userdialog = 1 Then
 
-                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast)
+                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject)
 
             End If
 
@@ -3499,7 +3556,7 @@ Public Class ThisAddIn
         Return ""
 
     End Function
-    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False) As Task(Of String)
+    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "") As Task(Of String)
 
         Try
             Dim SelectedText As String = ""
@@ -3636,7 +3693,7 @@ Public Class ThisAddIn
 
             End If
 
-            Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt)
+            Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
             OtherPrompt = ""
 
@@ -4429,7 +4486,7 @@ Public Class ThisAddIn
 .UseGenericAttributes() _
 .Build()
 
-        Dim htmlResult As String = Markdown.ToHtml(Result, markdownPipeline).Trim
+        Dim htmlResult As String = Markdown.ToHtml(Result, markdownpipeline).Trim
 
         ' Load the HTML into HtmlDocument
         Dim htmlDoc As New HtmlAgilityPack.HtmlDocument()
@@ -6164,6 +6221,34 @@ Public Class ThisAddIn
             End If
         Catch ex As System.Exception
             If Not Silent Then ShowCustomMessageBox($"An error occurred reading the file '{filePath}': {ex.Message}")
+            Return ""
+        End Try
+    End Function
+
+    Public Function GetFileName() As String
+        Dim filePath As String = ""
+        Try
+            If String.IsNullOrWhiteSpace(filePath) Then
+                Using form As New DragDropForm()
+                    If form.ShowDialog() = DialogResult.OK Then
+                        filePath = form.SelectedFilePath
+                    Else
+                        ' User cancelled or closed form
+                        Return String.Empty
+                    End If
+                End Using
+            End If
+
+            filePath = RemoveCR(filePath.Trim())
+            filePath = Path.GetFullPath(filePath)
+            If Not File.Exists(filePath) Then
+                ShowCustomMessageBox($"The file '{filePath}' was not found.")
+                Return ""
+            End If
+            Return filePath
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox($"An error occurred reading the file '{filePath}': {ex.Message}")
             Return ""
         End Try
     End Function
@@ -9535,53 +9620,6 @@ Public Class ThisAddIn
         Public Property SelectedOutputPath As String = ""
         Public Property SelectedLanguage As String = ""
 
-        ' --- Constructor ---
-        Public Sub xxxNew(context As ISharedContext,
-                   clientMail As String,
-                   scopes As String,
-                   apiKey As String,
-                   oauth2Endpoint As String,
-                   oauth2Expiry As Long,
-                   topLabelText As String,
-                   formTitle As String,
-                   twoVoicesRequired As Boolean)
-            ' Assign external parameters
-            _context = context
-            INI_OAuth2ClientMail = clientMail
-            INI_OAuth2Scopes = scopes
-            INI_APIKey = apiKey
-            INI_OAuth2Endpoint = oauth2Endpoint
-            INI_OAuth2ATExpiry = oauth2Expiry
-
-            ' Store our extra parameters
-            _topLabelText = topLabelText
-            _formTitle = formTitle
-            _twoVoicesRequired = twoVoicesRequired
-
-            ' Form settings
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            Me.Icon = Icon.FromHandle(bmp.GetHicon())
-            Me.Text = _formTitle
-            Me.Font = New Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular)
-            Me.StartPosition = FormStartPosition.CenterScreen
-            Me.Size = New Size(750, 550)
-            Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.MaximizeBox = False
-
-            ' Create controls (all existing ones plus new ones for radio buttons and output path)
-            CreateControls()
-            LayoutControls()
-            AddHandlers()
-
-            PopulateLanguageComboBoxes()
-            LoadSettingsAndVoices()
-
-            txtSampleText.Text = If(String.IsNullOrEmpty(My.Settings.TTSSampleText),
-                                  $"Hello, I am talking using {_formTitle}!",
-                                  My.Settings.TTSSampleText)
-        End Sub
-
-        ' --- CreateControls ---
 
         Public Sub New(context As ISharedContext,
                clientMail As String,
@@ -9611,24 +9649,20 @@ Public Class ThisAddIn
             Me.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
             Me.Text = _formTitle
             Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
+            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
             Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
             Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
-            Me.MaximizeBox = False
-
-            ' Prevent the user from shrinking below a usable size
             Me.MinimumSize = New System.Drawing.Size(810, 470)
-            Me.AutoSize = True
+            Me.AutoSize = False
             Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-            AddHandler Me.Shown, Sub()
-                                     Me.MinimumSize = Me.Size
-                                 End Sub
+            Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            Me.MaximizeBox = True
 
-            ' Build the UI
             Me.SuspendLayout()
             CreateControls()
             LayoutControls()
             Me.ResumeLayout()
+
             AddHandlers()
 
             PopulateLanguageComboBoxes()
@@ -9777,19 +9811,16 @@ Public Class ThisAddIn
         End Sub
 
         Private Sub LayoutControls()
-            ' Make the form auto‑size exactly to content + 20px bottom padding
-            Me.AutoSize = True
-            Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
 
             ' Root: 2 cols, 8 rows, bottom padding = 20px
             Dim root As New System.Windows.Forms.TableLayoutPanel() With {
-      .Dock = System.Windows.Forms.DockStyle.Fill,
-      .AutoSize = True,
-      .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
-      .ColumnCount = 2,
-      .RowCount = 8,
-      .Padding = New System.Windows.Forms.Padding(10, 10, 10, 0)
-    }
+                      .Dock = System.Windows.Forms.DockStyle.Fill,
+                      .AutoSize = True,
+                      .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+                      .ColumnCount = 2,
+                      .RowCount = 8,
+                      .Padding = New System.Windows.Forms.Padding(10, 10, 10, 20)
+                    }
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
             For i = 0 To 7
@@ -9925,7 +9956,7 @@ Public Class ThisAddIn
             Dim fl7 As New System.Windows.Forms.FlowLayoutPanel() With {
       .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
       .AutoSize = True,
-      .Margin = New System.Windows.Forms.Padding(0, 20, 0, 20)
+      .Margin = New System.Windows.Forms.Padding(0, 20, 0, 0)
     }
             fl7.Controls.Add(btnOK)
             fl7.Controls.Add(btnCancel)
@@ -9933,314 +9964,12 @@ Public Class ThisAddIn
             root.Controls.Add(fl7, 0, 7)
             root.SetColumnSpan(fl7, 2)
 
-            ' Install into form and freeze min‑size
             Me.Controls.Clear()
             Me.Controls.Add(root)
-            Me.AutoSize = False
 
-            'AddHandler Me.Shown, Sub() Me.MinimumSize = Me.Size
 
         End Sub
 
-
-
-        Private Sub xxxCreateControls()
-            ' Top label (autosized)
-            lblIntro = New Label() With {
-                .Text = _topLabelText,
-                .AutoSize = True,
-                .MaximumSize = New Size(700, 0)
-            }
-
-            ' Column 1
-            lblSet1 = New Label() With {
-            .Text = "Your default voice set 1:",
-            .AutoSize = True
-        }
-            cmbLanguage1 = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            cmbVoice1A = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            btnPlay1A = New Forms.Button() With {
-            .Width = 50
-        }
-            cmbVoice1B = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            btnPlay1B = New Forms.Button() With {
-            .Width = 50
-        }
-
-            ' Column 2
-            lblSet2 = New Label() With {
-            .Text = "Your default voice set 2:",
-            .AutoSize = True
-        }
-            cmbLanguage2 = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            cmbVoice2A = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            btnPlay2A = New Forms.Button() With {
-            .Width = 50
-        }
-            cmbVoice2B = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .Width = 200
-        }
-            btnPlay2B = New Forms.Button() With {
-            .Width = 50
-        }
-
-            ' Sample text
-            lblSampleText = New Label() With {
-            .Text = "Sample text:",
-            .AutoSize = True
-        }
-            txtSampleText = New Forms.TextBox() With {
-            .Text = "",
-            .Width = 467
-        }
-
-            ' Bottom buttons
-            btnOK = New Forms.Button() With {
-            .Text = "OK",
-            .AutoSize = True
-        }
-            btnCancel = New Forms.Button() With {
-            .Text = "Cancel",
-            .AutoSize = True
-        }
-            btnDesktop = New Forms.Button() With {
-            .Text = "Save on Desktop",
-            .AutoSize = True
-            }
-
-            ' Add the basic controls to the form
-            Me.Controls.Add(lblIntro)
-            Me.Controls.Add(lblSet1)
-            Me.Controls.Add(cmbLanguage1)
-            Me.Controls.Add(cmbVoice1A)
-            Me.Controls.Add(btnPlay1A)
-            Me.Controls.Add(cmbVoice1B)
-            Me.Controls.Add(btnPlay1B)
-
-            Me.Controls.Add(lblSet2)
-            Me.Controls.Add(cmbLanguage2)
-            Me.Controls.Add(cmbVoice2A)
-            Me.Controls.Add(btnPlay2A)
-            Me.Controls.Add(cmbVoice2B)
-            Me.Controls.Add(btnPlay2B)
-
-            Me.Controls.Add(lblSampleText)
-            Me.Controls.Add(txtSampleText)
-            Me.Controls.Add(btnOK)
-            Me.Controls.Add(btnCancel)
-            Me.Controls.Add(btnDesktop)
-
-            ' --- Create radio buttons for voice selection ---
-            If Not _twoVoicesRequired Then
-                ' ONE VOICE mode: all four radio buttons belong to one group.
-                rdoVoice1A = New RadioButton() With {.AutoSize = True}
-                rdoVoice1B = New RadioButton() With {.AutoSize = True}
-                rdoVoice2A = New RadioButton() With {.AutoSize = True}
-                rdoVoice2B = New RadioButton() With {.AutoSize = True}
-                ' Add them directly to the form.
-                Me.Controls.Add(rdoVoice1A)
-                Me.Controls.Add(rdoVoice1B)
-                Me.Controls.Add(rdoVoice2A)
-                Me.Controls.Add(rdoVoice2B)
-                ' Default selection
-                Select Case My.Settings.TTSLastRdoOneVoice
-                    Case "Voice1A"
-                        rdoVoice1A.Checked = True
-                    Case "Voice1B"
-                        rdoVoice1B.Checked = True
-                    Case "Voice2A"
-                        rdoVoice2A.Checked = True
-                    Case "Voice2B"
-                        rdoVoice2B.Checked = True
-                    Case Else
-                        rdoVoice1A.Checked = True ' Default if no previous selection
-                End Select
-
-            Else
-                ' TWO VOICES mode: only one radio button per voice set.
-                ' Create a single radio button for Voice Set 1
-                rdoVoice1A = New RadioButton() With {.AutoSize = True}
-                Me.Controls.Add(rdoVoice1A)
-                rdoVoice1A.Checked = True
-
-                ' Create a single radio button for Voice Set 2
-                rdoVoice2A = New RadioButton() With {.AutoSize = True}
-                Me.Controls.Add(rdoVoice2A)
-                Select Case My.Settings.TTSLastRdoTwoVoices
-                    Case "Voice1"
-                        rdoVoice1A.Checked = True
-                    Case "Voice2"
-                        rdoVoice2A.Checked = True
-                    Case Else
-                        rdoVoice1A.Checked = True ' Default if no previous selection
-                End Select
-            End If
-
-            ' --- Change play buttons to display Webdings character 52 ---
-            Dim webdingsFont As New Drawing.Font("Webdings", 9.0F)
-            btnPlay1A.Font = webdingsFont
-            btnPlay1B.Font = webdingsFont
-            btnPlay2A.Font = webdingsFont
-            btnPlay2B.Font = webdingsFont
-            btnPlay1A.Text = ChrW(52)
-            btnPlay1B.Text = ChrW(52)
-            btnPlay2A.Text = ChrW(52)
-            btnPlay2B.Text = ChrW(52)
-
-            ' --- Create output path controls ---
-            lblOutputPath = New Label() With {
-            .Text = "Output (.mp3):",
-            .AutoSize = True
-        }
-            txtOutputPath = New Forms.TextBox() With {
-            .Text = My.Settings.TTSOutputPath,
-            .Width = 330
-        }
-            chkTemporary = New Forms.CheckBox() With {
-            .Text = "Temp only",
-            .AutoSize = True
-        }
-            ' When checked, the output path text box is disabled.
-            AddHandler chkTemporary.CheckedChanged, AddressOf chkTemporary_CheckedChanged
-
-            Me.Controls.Add(lblOutputPath)
-            Me.Controls.Add(txtOutputPath)
-            Me.Controls.Add(chkTemporary)
-        End Sub
-
-        ' --- LayoutControls ---
-        Private Sub xxxLayoutControls()
-            Dim marginLeft As Integer = 20
-            Dim spacingY As Integer = 8
-            Dim currentTop As Integer = 20
-
-            ' Top label (autosized)
-            lblIntro.Left = marginLeft
-            lblIntro.Top = currentTop
-            currentTop = lblIntro.Bottom + spacingY + 4
-
-            ' Layout for Voice Set 1 voice choices (two rows)
-            Dim radioWidth As Integer = 25 ' space reserved for radio buttons
-            Dim controlSpacingX As Integer = 5
-
-            ' Voice Set 1 label and language combo
-            lblSet1.Left = marginLeft
-            lblSet1.Top = currentTop
-            currentTop = lblSet1.Bottom + 5
-
-            cmbLanguage1.Left = marginLeft + radioWidth
-            cmbLanguage1.Top = currentTop
-            If _twoVoicesRequired Then
-                rdoVoice1A.Left = marginLeft
-                rdoVoice1A.Top = currentTop + 6
-            End If
-
-            ' First row for set 1
-            currentTop = cmbLanguage1.Bottom + spacingY
-            cmbVoice1A.Left = marginLeft + radioWidth
-            cmbVoice1A.Top = currentTop
-            btnPlay1A.Left = cmbVoice1A.Right + controlSpacingX
-            btnPlay1A.Top = cmbVoice1A.Top
-            If Not _twoVoicesRequired Then
-                rdoVoice1A.Left = marginLeft
-                rdoVoice1A.Top = currentTop + 6
-            End If
-
-            ' Second row for set 1
-            currentTop = cmbVoice1A.Bottom + spacingY
-            cmbVoice1B.Left = marginLeft + radioWidth
-            cmbVoice1B.Top = currentTop
-            btnPlay1B.Left = cmbVoice1B.Right + controlSpacingX
-            btnPlay1B.Top = cmbVoice1B.Top
-            If Not _twoVoicesRequired Then
-                rdoVoice1B.Left = marginLeft
-                rdoVoice1B.Top = currentTop + 6
-            End If
-
-            ' Now, Voice Set 2: position it to the right of set 1.
-            Dim set2Left As Integer = btnPlay1A.Right + 30
-
-            currentTop = lblSet1.Top ' align with set 1 label
-            lblSet2.Left = set2Left
-            lblSet2.Top = currentTop
-            currentTop = lblSet2.Bottom + 5
-
-            cmbLanguage2.Left = set2Left + radioWidth
-            cmbLanguage2.Top = currentTop
-            If _twoVoicesRequired Then
-                rdoVoice2A.Left = set2Left
-                rdoVoice2A.Top = currentTop + 6
-            End If
-
-            ' First row for set 2
-            currentTop = cmbLanguage2.Bottom + spacingY
-            If Not _twoVoicesRequired Then
-                rdoVoice2A.Left = set2Left
-                rdoVoice2A.Top = currentTop + 6
-            End If
-            cmbVoice2A.Left = set2Left + radioWidth
-            cmbVoice2A.Top = currentTop
-            btnPlay2A.Left = cmbVoice2A.Right + controlSpacingX
-            btnPlay2A.Top = cmbVoice2A.Top
-
-            ' Second row for set 2
-            currentTop = cmbVoice2A.Bottom + spacingY
-            If Not _twoVoicesRequired Then
-                rdoVoice2B.Left = set2Left
-                rdoVoice2B.Top = currentTop + 6
-            End If
-            cmbVoice2B.Left = set2Left + radioWidth
-            cmbVoice2B.Top = currentTop
-            btnPlay2B.Left = cmbVoice2B.Right + controlSpacingX
-            btnPlay2B.Top = cmbVoice2B.Top
-
-            ' Next, the Sample Text row
-            Dim sampleLeft As Integer = marginLeft
-            currentTop = Math.Max(cmbVoice1B.Bottom, cmbVoice2B.Bottom) + 20
-            lblSampleText.Left = sampleLeft
-            lblSampleText.Top = currentTop
-            txtSampleText.Left = lblSampleText.Right + 35
-            txtSampleText.Top = lblSampleText.Top - 3
-
-            ' Now, add the Output Path row (below sample text)
-            currentTop = txtSampleText.Bottom + 20
-            lblOutputPath.Left = marginLeft
-            lblOutputPath.Top = currentTop
-            txtOutputPath.Left = lblSampleText.Right + 35
-            txtOutputPath.Top = currentTop - 3
-            chkTemporary.Left = txtOutputPath.Right + 10
-            chkTemporary.Top = currentTop
-
-            ' Finally, the bottom OK / Cancel buttons
-            currentTop = txtOutputPath.Bottom + 30
-            btnOK.Left = marginLeft
-            btnOK.Top = currentTop
-            btnCancel.Left = btnOK.Right + 10
-            btnCancel.Top = btnOK.Top
-            btnDesktop.Left = btnCancel.Right + 10
-            btnDesktop.Top = btnOK.Top
-
-            ' Adjust overall form height if needed.
-            Me.Height = btnCancel.Bottom + 90
-        End Sub
-
-        ' --- AddHandlers ---
         Private Sub AddHandlers()
             AddHandler cmbLanguage1.SelectedIndexChanged, AddressOf cmbLanguage1_SelectedIndexChanged
             AddHandler cmbLanguage2.SelectedIndexChanged, AddressOf cmbLanguage2_SelectedIndexChanged

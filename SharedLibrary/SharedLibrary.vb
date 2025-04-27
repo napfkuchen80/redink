@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.4.2025
+' 27.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -49,6 +49,7 @@ Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
 Imports System.Drawing.Imaging
 Imports System.Reflection
+Imports Org.BouncyCastle.Tls
 
 
 Namespace SharedLibrary
@@ -70,6 +71,7 @@ Namespace SharedLibrary
             Property INI_HeaderA As String
             Property INI_HeaderB As String
             Property INI_APICall As String
+            Property INI_APICall_Object As String
             Property INI_Response As String
             Property INI_DoubleS As Boolean
             Property INI_PreCorrection As String
@@ -97,6 +99,7 @@ Namespace SharedLibrary
             Property INI_HeaderA_2 As String
             Property INI_HeaderB_2 As String
             Property INI_APICall_2 As String
+            Property INI_APICall_Object_2 As String
             Property INI_Response_2 As String
             Property INI_APIEncrypted_2 As Boolean
             Property INI_APIKeyPrefix_2 As String
@@ -229,6 +232,7 @@ Namespace SharedLibrary
         Public Property INI_HeaderA As String Implements ISharedContext.INI_HeaderA
         Public Property INI_HeaderB As String Implements ISharedContext.INI_HeaderB
         Public Property INI_APICall As String Implements ISharedContext.INI_APICall
+        Public Property INI_APICall_Object As String Implements ISharedContext.INI_APICall_Object
         Public Property INI_Response As String Implements ISharedContext.INI_Response
         Public Property INI_DoubleS As Boolean Implements ISharedContext.INI_DoubleS
         Public Property INI_PreCorrection As String Implements ISharedContext.INI_PreCorrection
@@ -255,6 +259,7 @@ Namespace SharedLibrary
         Public Property INI_HeaderA_2 As String Implements ISharedContext.INI_HeaderA_2
         Public Property INI_HeaderB_2 As String Implements ISharedContext.INI_HeaderB_2
         Public Property INI_APICall_2 As String Implements ISharedContext.INI_APICall_2
+        Public Property INI_APICall_Object_2 As String Implements ISharedContext.INI_APICall_Object_2
         Public Property INI_Response_2 As String Implements ISharedContext.INI_Response_2
         Public Property INI_APIEncrypted_2 As Boolean Implements ISharedContext.INI_APIEncrypted_2
         Public Property INI_APIKeyPrefix_2 As String Implements ISharedContext.INI_APIKeyPrefix_2
@@ -383,6 +388,74 @@ Namespace SharedLibrary
         End Function
     End Module
 
+    Public Module MimeHelper
+
+        ' P/Invoke to urlmon.dll for MIME sniffing
+        <DllImport("urlmon.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
+        Private Function FindMimeFromData(
+        ByVal pBC As IntPtr,
+        <MarshalAs(UnmanagedType.LPWStr)> ByVal pwzUrl As String,
+        <MarshalAs(UnmanagedType.LPArray, ArraySubType:=UnmanagedType.I1, SizeParamIndex:=3)> ByVal pBuffer As Byte(),
+        ByVal cbSize As UInteger,
+        <MarshalAs(UnmanagedType.LPWStr)> ByVal pwzMimeProposed As String,
+        ByVal dwMimeFlags As UInteger,
+        ByRef ppwzMimeOut As IntPtr,
+        ByVal dwReserved As UInteger
+    ) As Integer
+        End Function
+
+        Public Function GetFileMimeTypeAndBase64(
+        ByVal filePath As String
+    ) As (MimeType As String, EncodedData As String)
+            Try
+                ' 1) sniff the MIME type
+                Dim mime As String = GetMimeType(filePath)
+
+                ' 2) read and Base64-encode
+                Dim bytes As Byte() = File.ReadAllBytes(filePath)
+                Dim b64 As String = Convert.ToBase64String(bytes)
+
+                Return (mime, b64)
+            Catch ex As System.Exception
+                Throw New System.Exception("Error determining MIME type or encoding data: " & ex.Message, ex)
+            End Try
+        End Function
+
+        ' Uses FindMimeFromData to inspect the first 256 bytes of the file and return a MIME type.
+        Private Function GetMimeType(ByVal filePath As String) As String
+            Dim buffer(255) As Byte
+            Using fs As New FileStream(filePath, FileMode.Open, FileAccess.Read)
+                Dim read As Integer = fs.Read(buffer, 0, buffer.Length)
+                If read = 0 Then
+                    Throw New System.Exception("Unable to read from file: " & filePath)
+                End If
+            End Using
+
+            Dim mimePtr As IntPtr = IntPtr.Zero
+            Dim hr As Integer = FindMimeFromData(
+            IntPtr.Zero,
+            filePath,
+            buffer,
+            CUInt(buffer.Length),
+            Nothing,
+            0,
+            mimePtr,
+            0
+        )
+
+            If hr <> 0 Then
+                Throw New System.Exception($"FindMimeFromData failed with HRESULT 0x{hr:X8}")
+            End If
+
+            Dim mime As String = Marshal.PtrToStringUni(mimePtr)
+            Marshal.FreeCoTaskMem(mimePtr)
+
+            Return mime
+        End Function
+
+    End Module
+
+
     Public Module ProgressBarModule
         ' Global variables to control the progress form.
         Public GlobalProgressValue As Integer = 0
@@ -417,6 +490,8 @@ Namespace SharedLibrary
             End Get
         End Property
     End Class
+
+
 
     Public Class SharedMethods
 
@@ -541,6 +616,9 @@ Namespace SharedLibrary
 
         Public Shared SP_CleanTextPrompt As String = "You are a careful copy-editor and will review the text provided to you between the <TEXTTOPROCESS> tags. Your will identify any text that cannot be easily read by a text-to-speech-system and do either of these two things: (a) If it is in brackets and merely a reference that is not relevant for a listener (such as references to other parts of the text or sources) you will remove it. (b) Otherwise, you will adapt it so that it is easily readable by a text-to-speech-system without in any way changing its content. You will not otherwise change the text and in your response provide nothing else than the text. "
         Public Shared LicensedTill As Date = CDate("1.1.2000")
+
+
+
 
         Public Shared Function GetDefaultINIPath(ByVal key As String) As String
             For Each entry In DefaultINIPaths
@@ -1047,7 +1125,7 @@ Namespace SharedLibrary
             Return OutputText
         End Function
 
-        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
+        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional FileObject As String = "") As Task(Of String)
 
             Dim splash As New SplashScreen("Waiting for the LLM to respond...")
 
@@ -1121,6 +1199,25 @@ Namespace SharedLibrary
                 requestBody = requestBody.Replace("{promptuser}", CleanString(promptUser))
                 requestBody = requestBody.Replace("{userinstruction}", CleanString(AddUserPrompt))
                 requestBody = requestBody.Replace("{temperature}", TemperatureValue)
+
+                If Not String.IsNullOrWhiteSpace(If(UseSecondAPI, context.INI_APICall_Object_2, context.INI_APICall_Object)) AndAlso Not String.IsNullOrWhiteSpace(FileObject) Then
+                    If UseSecondAPI Then
+                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object_2)
+                    Else
+                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object)
+                    End If
+                    Try
+                        Dim mresult As (MimeType As String, EncodedData As String) = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
+                        Dim mimeType As String = mresult.MimeType.Trim()
+                        Dim encodedData As String = mresult.EncodedData.Trim()
+                        requestBody = requestBody.Replace("{mimetype}", mimeType)
+                        requestBody = requestBody.Replace("{encodeddata}", encodedData)
+                    Catch ex As Exception
+                        ShowCustomMessageBox($"Error encoding file '{FileObject}': {ex.Message}")
+                        Return ""
+                    End Try
+                End If
+                requestBody = requestBody.Replace("{objectcall}", "")
 
                 Dim Returnvalue As String = ""
 
@@ -1966,6 +2063,7 @@ Namespace SharedLibrary
                 context.INI_HeaderB = If(configDict.ContainsKey("HeaderB"), configDict("HeaderB"), "")
                 context.INI_Response = If(configDict.ContainsKey("Response"), configDict("Response"), "")
                 context.INI_APICall = If(configDict.ContainsKey("APICall"), configDict("APICall"), "")
+                context.INI_APICall_Object = If(configDict.ContainsKey("APICall_Object"), configDict("APICall_Object"), "")
                 context.INI_Timeout = If(configDict.ContainsKey("Timeout"), CLng(configDict("Timeout")), 0)
                 context.INI_MaxOutputToken = If(configDict.ContainsKey("MaxOutputToken"), CInt(configDict("MaxOutputToken")), 0)
                 context.INI_Temperature = If(configDict.ContainsKey("Temperature"), configDict("Temperature"), "")
@@ -2093,6 +2191,7 @@ Namespace SharedLibrary
                     context.INI_HeaderB_2 = If(configDict.ContainsKey("HeaderB_2"), configDict("HeaderB_2"), "")
                     context.INI_Response_2 = If(configDict.ContainsKey("Response_2"), configDict("Response_2"), "")
                     context.INI_APICall_2 = If(configDict.ContainsKey("APICall_2"), configDict("APICall_2"), "")
+                    context.INI_APICall_Object_2 = If(configDict.ContainsKey("APICall_Object_2"), configDict("APICall_Object_2"), "")
                     context.INI_Timeout_2 = If(configDict.ContainsKey("Timeout_2"), CLng(configDict("Timeout_2")), 0)
                     context.INI_MaxOutputToken_2 = If(configDict.ContainsKey("MaxOutputToken_2"), CInt(configDict("MaxOutputToken_2")), 0)
                     context.INI_Temperature_2 = If(configDict.ContainsKey("Temperature_2"), configDict("Temperature_2"), "")
@@ -2355,6 +2454,7 @@ Namespace SharedLibrary
                 mc.HeaderB = If(configDict.ContainsKey("HeaderB"), configDict("HeaderB"), "")
                 mc.Response = If(configDict.ContainsKey("Response"), configDict("Response"), "")
                 mc.APICall = If(configDict.ContainsKey("APICall"), configDict("APICall"), "")
+                mc.APICall_Object = If(configDict.ContainsKey("APICall_Object"), configDict("APICall_Object"), "")
                 mc.Timeout = If(configDict.ContainsKey("Timeout"), CLng(configDict("Timeout")), 0)
                 mc.MaxOutputToken = If(configDict.ContainsKey("MaxOutputToken_2"), CInt(configDict("MaxOutputToken")), 0)
                 mc.Temperature = If(configDict.ContainsKey("Temperature"), configDict("Temperature"), "")
@@ -2399,6 +2499,7 @@ Namespace SharedLibrary
                 mc.HeaderB = If(String.IsNullOrEmpty(context.INI_HeaderB_2), "", context.INI_HeaderB_2)
                 mc.Response = If(String.IsNullOrEmpty(context.INI_Response_2), "", context.INI_Response_2)
                 mc.APICall = If(String.IsNullOrEmpty(context.INI_APICall_2), "", context.INI_APICall_2)
+                mc.APICall_Object = If(String.IsNullOrEmpty(context.INI_APICall_Object_2), "", context.INI_APICall_Object_2)
                 mc.Timeout = context.INI_Timeout_2
                 mc.MaxOutputToken = context.INI_MaxOutputToken_2
                 mc.Temperature = If(String.IsNullOrEmpty(context.INI_Temperature_2), "", context.INI_Temperature_2)
@@ -2429,6 +2530,7 @@ Namespace SharedLibrary
                 context.INI_HeaderB_2 = If(Not String.IsNullOrEmpty(config.HeaderB), config.HeaderB, "")
                 context.INI_Response_2 = If(Not String.IsNullOrEmpty(config.Response), config.Response, "")
                 context.INI_APICall_2 = If(Not String.IsNullOrEmpty(config.APICall), config.APICall, "")
+                context.INI_APICall_Object_2 = If(Not String.IsNullOrEmpty(config.APICall_Object), config.APICall_Object, "")
                 context.INI_Timeout_2 = If(config.Timeout <> 0, config.Timeout, 0)
                 context.INI_MaxOutputToken_2 = If(config.MaxOutputToken <> 0, config.MaxOutputToken, 0)
                 context.INI_Temperature_2 = If(Not String.IsNullOrEmpty(config.Temperature), config.Temperature, "")
@@ -2504,6 +2606,8 @@ Namespace SharedLibrary
             End Try
             Return models
         End Function
+
+
 
         Public Shared originalConfig As ModelConfig
         Public Shared originalConfigLoaded As Boolean = False
@@ -3428,7 +3532,7 @@ Namespace SharedLibrary
             messageForm.Font = standardFont
 
             ' Layout containers
-            Dim maxLabelWidth = 450
+            Dim maxLabelWidth = 480
             Dim maxScreenHeight = Screen.PrimaryScreen.WorkingArea.Height - 100
 
             Dim mainFlow As New FlowLayoutPanel() With {
@@ -4873,7 +4977,8 @@ Namespace SharedLibrary
 
             ' Form attributes
             styledForm.Text = header
-            styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+            'styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+            styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
             styledForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
             styledForm.MaximizeBox = False
             styledForm.MinimizeBox = False
@@ -5086,7 +5191,7 @@ Namespace SharedLibrary
 
             ' Adjust form size dynamically
             Dim formWidth As Integer = Math.Max(minWidth, Math.Min(maxWidth, bodyTextBox.Width + 20))
-            Dim formHeight As Integer = Math.Max(minHeight, Math.Min(maxHeight, staticElementsHeight + bodyTextBox.Height + 100))
+            Dim formHeight As Integer = Math.Max(minHeight, Math.Min(maxHeight, staticElementsHeight + bodyTextBox.Height + 120))
             styledForm.ClientSize = New System.Drawing.Size(formWidth, formHeight)
 
             ' Show dialog and return appropriate value
@@ -5782,6 +5887,8 @@ Namespace SharedLibrary
                     Return context.INI_HeaderB
                 Case "APICall"
                     Return context.INI_APICall
+                Case "APICall_Object"
+                    Return context.INI_APICall_Object
                 Case "Response"
                     Return context.INI_Response
                 Case "APIKey_2"
@@ -5800,6 +5907,8 @@ Namespace SharedLibrary
                     Return context.INI_HeaderB_2
                 Case "APICall_2"
                     Return context.INI_APICall_2
+                Case "APICall_Object_2"
+                    Return context.INI_APICall_Object_2
                 Case "Response_2"
                     Return context.INI_Response_2
                 Case "OAuth2ClientMail"
@@ -5938,6 +6047,8 @@ Namespace SharedLibrary
                     context.INI_HeaderB = value
                 Case "APICall"
                     context.INI_APICall = value
+                Case "APICall_Object"
+                    context.INI_APICall_Object = value
                 Case "Response"
                     context.INI_Response = value
                 Case "APIKey_2"
@@ -5958,6 +6069,8 @@ Namespace SharedLibrary
                     context.INI_HeaderB_2 = value
                 Case "APICall_2"
                     context.INI_APICall_2 = value
+                Case "APICall_Object_2"
+                    context.INI_APICall_Object_2 = value
                 Case "Response_2"
                     context.INI_Response_2 = value
                 Case "OAuth2ClientMail"
@@ -6134,6 +6247,10 @@ Namespace SharedLibrary
             context.INI_APICall = context.INI_APICall_2
             context.INI_APICall_2 = temp
 
+            temp = context.INI_APICall_Object
+            context.INI_APICall_Object = context.INI_APICall_Object_2
+            context.INI_APICall_Object_2 = temp
+
             temp = context.INI_OAuth2ClientMail
             context.INI_OAuth2ClientMail = context.INI_OAuth2ClientMail_2
             context.INI_OAuth2ClientMail_2 = temp
@@ -6217,6 +6334,7 @@ Namespace SharedLibrary
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
                     {"APICall", context.INI_APICall},
+                    {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
                     {"MaxOutputToken", context.INI_MaxOutputToken.ToString()},
                     {"Temperature", context.INI_Temperature},
@@ -6249,6 +6367,7 @@ Namespace SharedLibrary
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
                     {"APICall_2", context.INI_APICall_2},
+                    {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
                     {"MaxOutputToken_2", context.INI_MaxOutputToken_2.ToString()},
                     {"Temperature_2", context.INI_Temperature_2},
@@ -6465,6 +6584,7 @@ Namespace SharedLibrary
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
                     {"APICall", context.INI_APICall},
+                    {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
                     {"MaxOutputToken", context.INI_MaxOutputToken.ToString()},
                     {"Temperature", context.INI_Temperature},
@@ -6478,6 +6598,7 @@ Namespace SharedLibrary
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
                     {"APICall_2", context.INI_APICall_2},
+                    {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
                     {"MaxOutputToken_2", context.INI_MaxOutputToken_2.ToString()},
                     {"Temperature_2", context.INI_Temperature_2},
@@ -6723,6 +6844,7 @@ Namespace SharedLibrary
             variableValues.Add("HeaderA", context.INI_HeaderA)
             variableValues.Add("HeaderB", context.INI_HeaderB)
             variableValues.Add("APICall", context.INI_APICall)
+            variableValues.Add("APICall_Object", context.INI_APICall_Object)
             variableValues.Add("Response", context.INI_Response)
             variableValues.Add("DoubleS", context.INI_DoubleS)
             variableValues.Add("PreCorrection", context.INI_PreCorrection)
@@ -6748,6 +6870,7 @@ Namespace SharedLibrary
             variableValues.Add("HeaderA_2", context.INI_HeaderA_2)
             variableValues.Add("HeaderB_2", context.INI_HeaderB_2)
             variableValues.Add("APICall_2", context.INI_APICall_2)
+            variableValues.Add("APICall_Object_2", context.INI_APICall_Object_2)
             variableValues.Add("Response_2", context.INI_Response_2)
             variableValues.Add("APIEncrypted_2", context.INI_APIEncrypted_2)
             variableValues.Add("APIKeyPrefix_2", context.INI_APIKeyPrefix_2)
@@ -6852,6 +6975,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("HeaderA") Then context.INI_HeaderA = updatedValues("HeaderA")
                     If updatedValues.ContainsKey("HeaderB") Then context.INI_HeaderB = updatedValues("HeaderB")
                     If updatedValues.ContainsKey("APICall") Then context.INI_APICall = updatedValues("APICall")
+                    If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
                     If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
                     If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
                     If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
@@ -6877,6 +7001,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("HeaderA_2") Then context.INI_HeaderA_2 = updatedValues("HeaderA_2")
                     If updatedValues.ContainsKey("HeaderB_2") Then context.INI_HeaderB_2 = updatedValues("HeaderB_2")
                     If updatedValues.ContainsKey("APICall_2") Then context.INI_APICall_2 = updatedValues("APICall_2")
+                    If updatedValues.ContainsKey("APICall_Object_2") Then context.INI_APICall_Object_2 = updatedValues("APICall_Object_2")
                     If updatedValues.ContainsKey("Response_2") Then context.INI_Response_2 = updatedValues("Response_2")
                     If updatedValues.ContainsKey("APIEncrypted_2") Then context.INI_APIEncrypted_2 = CBool(updatedValues("APIEncrypted_2"))
                     If updatedValues.ContainsKey("APIKeyPrefix_2") Then context.INI_APIKeyPrefix_2 = updatedValues("APIKeyPrefix_2")
@@ -6986,7 +7111,7 @@ Namespace SharedLibrary
     }
             Dim graphics As System.Drawing.Graphics = testRichTextBox.CreateGraphics()
             Dim textSize As System.Drawing.SizeF = graphics.MeasureString(testRichTextBox.Text, standardFont, formWidth - 40)
-            Dim formHeight As Integer = CInt(textSize.Height + 240 + 20) ' Add padding for margins, logo, buttons, and 1–2 extra lines
+            Dim formHeight As Integer = CInt(textSize.Height + 260 + 20) ' Add padding for margins, logo, buttons, and 1–2 extra lines
             graphics.Dispose()
             testRichTextBox.Dispose()
 
@@ -9310,6 +9435,7 @@ Namespace SharedLibrary
         Public Property HeaderA As String
         Public Property HeaderB As String
         Public Property APICall As String
+        Public Property APICall_Object As String
         Public Property Response As String
         Public Property APIEncrypted As Boolean
         Public Property APIKeyPrefix As String
@@ -9344,84 +9470,115 @@ Namespace SharedLibrary
         ' True if the default configuration is to be used.
         Public Property UseDefault As Boolean = True
 
-        Public Sub New(ByVal iniFilePath As String, context As ISharedContext)
-            ' Center the form on the screen
-            Me.StartPosition = FormStartPosition.CenterScreen
 
-            ' Increase width and height so everything fits comfortably
-            Me.Width = 580
-            Me.Height = 400
-            ' Prevent the form from being shrunk below its initial size (it can still be enlarged)
-            Me.MinimumSize = New Size(Me.Width, Me.Height)
+        Public Sub New(ByVal iniFilePath As String, ByVal context As ISharedContext)
+            ' --- DPI- und Font-Skalierung aktivieren ---
+            Me.AutoScaleDimensions = New System.Drawing.SizeF(96.0F, 96.0F)
+            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+            Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
 
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            Me.Icon = Icon.FromHandle(bmp.GetHicon())
+            Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            Me.Icon = Icon.FromHandle((New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)).GetHicon())
             Me.Text = "Freestyle"
 
-            ' Create and add the label above the list
+            ' Haupt-TableLayoutPanel mit 4 Zeilen
+            Dim tlpMain As New System.Windows.Forms.TableLayoutPanel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .ColumnCount = 1,
+        .RowCount = 4
+    }
+            tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))    ' Zeile 1: Label
+            tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Zeile 2: ListBox
+            tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))    ' Zeile 3: Checkbox
+            tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))    ' Zeile 4: Buttons
+
+            ' Zeile 1: Label (shrinks & grows, 20px Padding)
             lblTitle = New System.Windows.Forms.Label() With {
-            .Text = "Select the model you want to use:",
-            .AutoSize = True,
-            .Top = 10,
-            .Left = 10,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
-        }
-            Me.Controls.Add(lblTitle)
+        .Text = "Select the model you want to use:",
+        .AutoSize = True,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(20, 20, 20, 0)
+    }
+            tlpMain.Controls.Add(lblTitle, 0, 0)
 
-            ' Create the list box positioned below the label
-            lstModels = New ListBox() With {
-            .Top = lblTitle.Bottom + 10,
-            .Left = 10,
-            .Width = Me.ClientSize.Width - 20,
-            .Height = 220,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
-        }
-            Me.Controls.Add(lstModels)
+            ' Zeile 2: ListBox (shrinks & grows, 20px Padding)
+            lstModels = New System.Windows.Forms.ListBox() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(20)
+    }
+            tlpMain.Controls.Add(lstModels, 0, 1)
 
-            ' Create the checkbox with a bit less gap below the list
+            ' Zeile 3: Checkbox (grows but not shrink, 20px Padding)
             chkReset = New System.Windows.Forms.CheckBox() With {
-            .Text = "Reset to default model after use",
-            .Checked = True,
-            .Top = lstModels.Bottom + 5,
-            .Left = 11,
-            .AutoSize = True,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
-        }
-            Me.Controls.Add(chkReset)
+        .Text = "Reset to default model after use",
+        .Checked = True,
+        .AutoSize = True,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(20, 0, 20, 0)
+    }
+            tlpMain.Controls.Add(chkReset, 0, 2)
 
-            ' Create the buttons positioned below the checkbox
-            btnOK = New Button() With {
-            .Text = "OK",
-            .Left = 10,
-            .Top = chkReset.Bottom + 10,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
-        }
+            ' Zeile 4: Buttons (links-nach-rechts, grows but not shrink, 20px Padding)
+            Dim flpButtons As New System.Windows.Forms.FlowLayoutPanel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+        .AutoSize = True,
+        .Margin = New System.Windows.Forms.Padding(20)
+    }
+            btnOK = New System.Windows.Forms.Button() With {
+        .Text = "OK",
+        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+    }
             AddHandler btnOK.Click, AddressOf btnOK_Click
+            flpButtons.Controls.Add(btnOK)
 
-            btnCancel = New Button() With {
-            .Text = "Cancel",
-            .Left = btnOK.Right + 10,
-            .Top = chkReset.Bottom + 10,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Left
-        }
+            btnCancel = New System.Windows.Forms.Button() With {
+        .Text = "Cancel",
+        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+    }
             AddHandler btnCancel.Click, AddressOf btnCancel_Click
+            flpButtons.Controls.Add(btnCancel)
 
-            Me.Controls.Add(btnOK)
-            Me.Controls.Add(btnCancel)
+            tlpMain.Controls.Add(flpButtons, 0, 3)
 
-            ' Set Enter key to trigger OK and Esc key to trigger Cancel.
+            Me.Controls.Add(tlpMain)
             Me.AcceptButton = btnOK
             Me.CancelButton = btnCancel
 
+            ' Modelle laden
             alternativeModels = LoadAlternativeModels(iniFilePath, context)
-            ' First item is always "Default Model"
             lstModels.Items.Add("Default = " & context.INI_Model_2)
             For Each model In alternativeModels
                 Dim displayText As String = If(String.IsNullOrEmpty(model.ModelDescription), model.Model, model.ModelDescription)
                 lstModels.Items.Add(displayText)
             Next
             lstModels.SelectedIndex = 0
+            AddHandler lstModels.DoubleClick, AddressOf lstModels_DoubleClick
+
+            Me.ClientSize = New System.Drawing.Size(580, 450)
+            Me.MinimumSize = Me.Size
         End Sub
+
+        Private Sub lstModels_DoubleClick(sender As Object, e As System.EventArgs)
+            If lstModels.SelectedIndex >= 0 Then
+                btnOK.PerformClick()
+            End If
+        End Sub
+
+
+        Protected Overrides Sub OnHandleCreated(e As System.EventArgs)
+            MyBase.OnHandleCreated(e)
+            Dim dpiScale As Single = Me.DeviceDpi / 96.0F
+            If dpiScale <> 1.0F Then
+                Me.Scale(New System.Drawing.SizeF(dpiScale, dpiScale))
+            End If
+        End Sub
+
+
 
         Private Sub btnOK_Click(sender As Object, e As EventArgs)
             Try
