@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.4.2025
+' 28.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.270425 Gen2 Beta Test"
+    Public Const Version As String = "V.280425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2426,6 +2426,112 @@ Public Class ThisAddIn
 
 
     Public Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
+        ' Anzeige eines Splash-Screens
+        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
+        splash.Show()
+        splash.Refresh()
+
+        If CellRange Is Nothing Then
+            splash.Close()
+            Return String.Empty
+        End If
+
+        ' Excel-UI abschalten
+        With Globals.ThisAddIn.Application
+            .ScreenUpdating = False
+            .EnableEvents = False
+            .Calculation = Excel.XlCalculation.xlCalculationManual
+        End With
+
+        ' Werte auslesen
+        Dim rawVals As Object = CellRange.Value2
+
+        ' Nur ein nullbasiertes Array für Value2
+        Dim vals(,) As Object
+        If TypeOf rawVals Is Object(,) Then
+            vals = CType(rawVals, Object(,))
+        Else
+            ReDim vals(0, 0)
+            vals(0, 0) = rawVals
+        End If
+
+        ' Grenzen ermitteln
+        Dim rowLB = vals.GetLowerBound(0)
+        Dim rowUB = vals.GetUpperBound(0)
+        Dim colLB = vals.GetLowerBound(1)
+        Dim colUB = vals.GetUpperBound(1)
+
+        Dim sb As New System.Text.StringBuilder()
+
+        For r As Integer = rowLB To rowUB
+            For c As Integer = colLB To colUB
+                Dim raw = vals(r, c)
+                If raw IsNot Nothing Then
+                    ' 1-basierte Koordinaten innerhalb des Range
+                    Dim relativeRow = r - rowLB + 1
+                    Dim relativeCol = c - colLB + 1
+                    Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
+                    Dim addr As String = cell.Address(False, False)
+
+                    sb.AppendLine($"Cell {addr}:")
+                    sb.AppendLine($"  Value: {raw}")
+
+                    ' Formeln nur bei Bedarf pro Zelle holen
+                    If IncludeFormulas AndAlso cell.HasFormula Then
+                        Dim f As String = String.Empty
+                        Try
+                            ' Formula2 bis 32 767 Zeichen
+                            f = cell.Formula2.ToString()
+                        Catch ex As System.Runtime.InteropServices.COMException _
+                          When ex.ErrorCode = &H800A03EC
+                            ' Fallback auf Limit-Version
+                            f = cell.Formula.ToString()
+                        End Try
+                        sb.AppendLine($"  Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
+                    End If
+
+                    ' 1) Klassischer Kommentar
+                    If cell.Comment IsNot Nothing Then
+                        sb.AppendLine($"  Comment: {cell.Comment.Text()}")
+                    End If
+
+                    ' 2) Neue ThreadedComments per Reflection
+                    Try
+                        Dim tc = cell.GetType().InvokeMember("ThreadedComments",
+                                                         Reflection.BindingFlags.GetProperty,
+                                                         Nothing, cell, Nothing)
+                        If tc IsNot Nothing Then
+                            For Each cx In tc
+                                Dim txt = cx.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
+                                Dim auth = cx.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
+                                sb.AppendLine($"  Comment: {txt} (by {auth})")
+                            Next
+                        End If
+                    Catch ex As System.Exception
+                        ' ignorieren, wenn nicht verfügbar
+                    End Try
+
+                    sb.AppendLine(New String("-"c, 40))
+
+                    ' COM-Objekt freigeben
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(cell)
+                End If
+            Next
+        Next
+
+        ' Excel-UI wieder aktivieren
+        With Globals.ThisAddIn.Application
+            .ScreenUpdating = True
+            .EnableEvents = True
+            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
+        End With
+
+        splash.Close()
+        Return sb.ToString()
+    End Function
+
+
+    Public Function oldConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
 
         Dim splash As New SplashScreen("Gathering the content from your worksheet...")
         splash.Show()
@@ -3641,7 +3747,7 @@ Public Class ThisAddIn
             config.Add("INI_Endpoint§§" & INI_Endpoint_2)
             config.Add("INI_HeaderA§§" & INI_HeaderA_2)
             config.Add("INI_HeaderB§§" & INI_HeaderB_2)
-            config.Add("INI_APICall§§" & INI_APICall_2)
+            config.Add("INI_APICall§§" & INI_APICall_2.Replace("{objectcall}", ""))
             config.Add("INI_Response§§" & INI_Response_2)
             config.Add("DecodedAPI§§" & DecodedAPI_2)
             'config.Add("INI_APICall_Object§§" & INI_APICALL_Object_2)
@@ -3659,7 +3765,7 @@ Public Class ThisAddIn
             config.Add("INI_Endpoint§§" & INI_Endpoint)
             config.Add("INI_HeaderA§§" & INI_HeaderA)
             config.Add("INI_HeaderB§§" & INI_HeaderB)
-            config.Add("INI_APICall§§" & INI_APICall)
+            config.Add("INI_APICall§§" & INI_APICall.Replace("{objectcall}", ""))
             config.Add("INI_Response§§" & INI_Response)
             config.Add("DecodedAPI§§" & DecodedAPI)
             'config.Add("INI_APICall_Object§§" & INI_APICALL_Object)

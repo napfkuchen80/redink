@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.4.2025
+' 28.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -63,6 +63,8 @@ Imports Grpc.Net
 Imports Google.Api.Gax
 Imports Google.Api.Gax.Grpc
 Imports System.Security.Cryptography
+Imports NAudio.MediaFoundation
+
 
 
 Public Class StopForm
@@ -253,7 +255,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.270425 Gen2 Beta Test"
+    Public Const Version As String = "V.280425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -6741,6 +6743,19 @@ Public Class ThisAddIn
         Private Const STREAMING_LIMIT_MS As Integer = 290000  ' 4 Minuten 50 Sekunden
         Private streamingStartTime As DateTime
 
+        Private loopback As WasapiLoopbackCapture
+        Private loopbackBuffer As BufferedWaveProvider
+        Private loopbackCapture As WasapiLoopbackCapture
+        Private loopbackRawProvider As BufferedWaveProvider
+        Private loopbackResampler As MediaFoundationResampler
+        Private _multiSourceSelected As Boolean = False
+
+        Private ReadOnly Property MultiSourceEnabled As Boolean
+            Get
+                Return _multiSourceSelected
+            End Get
+        End Property
+
 
 
         Public Sub New()
@@ -6801,6 +6816,8 @@ Public Class ThisAddIn
 
             AddHandler Me.deviceComboBox.MouseMove, AddressOf deviceComboBox_MouseMove
 
+            AddHandler Me.deviceComboBox.SelectedIndexChanged, AddressOf Me.deviceComboBox_SelectedIndexChanged
+
             LoadAndPopulateProcessComboBox(Globals.ThisAddIn.INI_PromptLibPath_Transcript, processCombobox)
 
             Dim index As Integer = Me.cultureComboBox.SelectedIndex
@@ -6839,6 +6856,13 @@ Public Class ThisAddIn
         End Sub
 
         Private ToolTip As New Forms.ToolTip()
+
+        Private Sub deviceComboBox_SelectedIndexChanged(sender As Object, e As EventArgs)
+            ' runs on UI thread—safe to read SelectedItem here
+            Dim s As String = TryCast(Me.deviceComboBox.SelectedItem, String)
+            _multiSourceSelected = Not String.IsNullOrEmpty(s) _
+                            AndAlso s.EndsWith("(plus audio output)")
+        End Sub
 
         Private Sub cultureComboBox_MouseMove(sender As Object, e As MouseEventArgs)
             Dim index As Integer = Me.cultureComboBox.SelectedIndex
@@ -7234,6 +7258,20 @@ Public Class ThisAddIn
 
         Private Async Function StopRecording() As System.Threading.Tasks.Task
 
+            If loopbackCapture IsNot Nothing Then
+                RemoveHandler loopbackCapture.DataAvailable, AddressOf OnLoopbackDataAvailable
+                loopbackCapture.StopRecording()
+                loopbackCapture.Dispose()
+                loopbackCapture = Nothing
+            End If
+
+            If loopbackResampler IsNot Nothing Then
+                loopbackResampler.Dispose()
+                loopbackResampler = Nothing
+                loopbackRawProvider = Nothing
+            End If
+
+
             If waveIn IsNot Nothing Then
                 RemoveHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
                 RemoveHandler waveIn.DataAvailable, AddressOf OnAudioDataAvailable
@@ -7570,8 +7608,12 @@ Public Class ThisAddIn
             deviceComboBox.Items.Clear()
             Dim i As Integer = 0
             For i = 0 To WaveInEvent.DeviceCount - 1
-                Dim capabilities As WaveInCapabilities = WaveInEvent.GetCapabilities(i)
-                deviceComboBox.Items.Add($"{i}: {capabilities.ProductName}")
+                Dim capabilities = WaveInEvent.GetCapabilities(i)
+                Dim micName As String = $"{i}: {capabilities.ProductName}"
+                '  a) plain mic
+                deviceComboBox.Items.Add(micName)
+                '  b) mic + system audio
+                deviceComboBox.Items.Add($"{micName} (plus audio output)")
             Next
 
             ' Select default device (if available)
@@ -7581,7 +7623,8 @@ Public Class ThisAddIn
             ElseIf deviceComboBox.Items.Count > 0 Then
                 deviceComboBox.SelectedIndex = 0
             End If
-
+            Dim sel = TryCast(deviceComboBox.SelectedItem, String)
+            _multiSourceSelected = (sel IsNot Nothing AndAlso sel.EndsWith("(plus audio output)"))
         End Sub
 
         Private Sub StartVosk()
@@ -7885,6 +7928,39 @@ Public Class ThisAddIn
                     .WaveFormat = New WaveFormat(16000, 1)
                 }
 
+            If MultiSourceEnabled Then
+                ' 1) start loopback capture in its native format
+                loopbackCapture = New WasapiLoopbackCapture()
+                loopbackRawProvider = New BufferedWaveProvider(loopbackCapture.WaveFormat) With {
+        .DiscardOnBufferOverflow = True
+    }
+                AddHandler loopbackCapture.DataAvailable, Sub(s, ev)
+                                                              loopbackRawProvider.AddSamples(ev.Buffer, 0, ev.BytesRecorded)
+                                                          End Sub
+
+                ' 2) resample from native -> mic format (16 kHz mono 16-bit)
+                loopbackResampler = New MediaFoundationResampler(loopbackRawProvider, waveIn.WaveFormat)
+                loopbackResampler.ResamplerQuality = 60
+
+                ' 3) kick off loopback
+                Try
+                    loopbackCapture.StartRecording()
+                Catch ex As Exception
+                    ' Could be “device in use exclusively”
+                    ShowCustomMessageBox("Cannot capture system audio: Device is in exclusive use. Continuing with mic only.")
+                    loopbackCapture.Dispose()
+                    loopbackCapture = Nothing
+                    loopbackResampler?.Dispose()
+                    loopbackResampler = Nothing
+                    loopbackRawProvider = Nothing
+                End Try
+
+            End If
+
+            Debug.Print("_multisourcselected =" & _multiSourceSelected)
+            Debug.Print("MultiSourceEnabled =" & MultiSourceEnabled)
+
+
             If STTModel = "google" Then
                 AddHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
             Else
@@ -7977,8 +8053,76 @@ Public Class ThisAddIn
             Return floatArray
         End Function
 
+        Private Sub OnLoopbackDataAvailable(sender As Object, e As WaveInEventArgs)
+            ' Buffer the system audio for later mixing
+            loopbackBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded)
+        End Sub
+
 
         Private Async Sub OnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
+            If _googleStreamCompleted Then Return
+
+            Dim now = DateTime.UtcNow
+            Dim elapsed = (now - streamingStartTime).TotalMilliseconds
+
+            ' ——————— 1) MIX IN LOOPBACK (if enabled) ———————
+            If MultiSourceEnabled AndAlso loopbackCapture IsNot Nothing AndAlso loopbackResampler IsNot Nothing Then
+                ' prepare buffer
+                Dim mixBuf(e.BytesRecorded - 1) As Byte
+                ' read resampled system audio (same format/length as mic)
+                Dim bytesRead = loopbackResampler.Read(mixBuf, 0, e.BytesRecorded)
+                If bytesRead > 0 Then
+                    For i As Integer = 0 To bytesRead - 1 Step 2
+                        ' convert to Int16
+                        Dim micSample As Integer = BitConverter.ToInt16(e.Buffer, i)
+                        Dim outSample As Integer = BitConverter.ToInt16(mixBuf, i)
+                        Dim summedSample As Integer = micSample + outSample
+
+                        ' clamp
+                        If summedSample > Short.MaxValue Then summedSample = Short.MaxValue
+                        If summedSample < Short.MinValue Then summedSample = Short.MinValue
+
+                        ' write back
+                        Dim ba() As Byte = BitConverter.GetBytes(CShort(summedSample))
+                        e.Buffer(i) = ba(0)
+                        e.Buffer(i + 1) = ba(1)
+                    Next
+                End If
+            End If
+
+            ' ——————— 2) BUILD THE GOOGLE CHUNK ———————
+            Dim chunk As Google.Protobuf.ByteString =
+        Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+
+            ' ——————— 3) RECONNECT LOGIC ———————
+            If elapsed > STREAMING_LIMIT_MS Then
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = DateTime.UtcNow
+                Return
+            End If
+
+            ' ——————— 4) NORMAL WRITE ———————
+            Dim shouldRecover As Boolean = False
+            Try
+                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
+            .AudioContent = chunk
+        })
+            Catch ex As RpcException _
+         When ex.Status.StatusCode = StatusCode.DeadlineExceeded _
+           OrElse ex.Status.StatusCode = StatusCode.Unavailable
+                shouldRecover = True
+            End Try
+
+            If shouldRecover Then
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = DateTime.UtcNow
+            End If
+        End Sub
+
+
+
+
+        Private Async Sub OldOnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
 
             If _googleStreamCompleted Then
                 Return
@@ -7986,6 +8130,7 @@ Public Class ThisAddIn
 
             Dim now = System.DateTime.UtcNow
             Dim elapsed = (now - streamingStartTime).TotalMilliseconds
+
             Dim chunk As ByteString = ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
 
             ' 1) Zeitbasiertes Reconnect knapp vor 5-Minuten-Limit
@@ -8018,7 +8163,6 @@ Public Class ThisAddIn
             End If
 
         End Sub
-
 
         Private Async Function RecoverGoogleStream(failedChunk As ByteString) As System.Threading.Tasks.Task
             Try
@@ -8078,6 +8222,27 @@ Public Class ThisAddIn
 
 
         Private Async Sub OnAudioDataAvailable(sender As Object, e As WaveInEventArgs)
+
+            If MultiSourceEnabled AndAlso loopbackCapture IsNot Nothing AndAlso loopbackResampler IsNot Nothing Then
+                Dim mixBuf(e.BytesRecorded - 1) As Byte
+                ' read the same # of bytes from our resampler (16kHz mono 16-bit)
+                Dim bytesRead = loopbackResampler.Read(mixBuf, 0, e.BytesRecorded)
+                If bytesRead > 0 Then
+                    For i As Integer = 0 To bytesRead - 1 Step 2
+                        Dim micSample As Integer = BitConverter.ToInt16(e.Buffer, i)
+                        Dim outSample As Integer = BitConverter.ToInt16(mixBuf, i)
+                        Dim summedSample As Integer = micSample + outSample
+
+                        ' clamp to Int16
+                        If summedSample > Short.MaxValue Then summedSample = Short.MaxValue
+                        If summedSample < Short.MinValue Then summedSample = Short.MinValue
+
+                        Dim ba() As Byte = BitConverter.GetBytes(CShort(summedSample))
+                        e.Buffer(i) = ba(0)
+                        e.Buffer(i + 1) = ba(1)
+                    Next
+                End If
+            End If
 
             Dim buffer As Byte() = e.Buffer
             Dim bytesRecorded As Integer = e.BytesRecorded
@@ -9649,12 +9814,12 @@ Public Class ThisAddIn
             Me.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
             Me.Text = _formTitle
             Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+            Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
             Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
             Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
-            Me.MinimumSize = New System.Drawing.Size(810, 470)
             Me.AutoSize = False
             Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            Me.MinimumSize = New System.Drawing.Size(810, 450)
             Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
             Me.MaximizeBox = True
 
@@ -9823,7 +9988,7 @@ Public Class ThisAddIn
                     }
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
-            For i = 0 To 7
+            For i = 0 To 6
                 root.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
             Next
 
@@ -9952,19 +10117,18 @@ Public Class ThisAddIn
             root.Controls.Add(tbl6, 0, 6)
             root.SetColumnSpan(tbl6, 2)
 
-            ' Row7: Bottom buttons with 20px gap above
-            Dim fl7 As New System.Windows.Forms.FlowLayoutPanel() With {
-      .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-      .AutoSize = True,
-      .Margin = New System.Windows.Forms.Padding(0, 20, 0, 0)
-    }
-            fl7.Controls.Add(btnOK)
-            fl7.Controls.Add(btnCancel)
-            fl7.Controls.Add(btnDesktop)
-            root.Controls.Add(fl7, 0, 7)
-            root.SetColumnSpan(fl7, 2)
+            Dim pnlButtons As New System.Windows.Forms.FlowLayoutPanel() With {
+                  .Dock = System.Windows.Forms.DockStyle.Bottom,
+                  .AutoSize = True,
+                  .Padding = New Padding(10),
+                  .FlowDirection = FlowDirection.LeftToRight
+                }
+            pnlButtons.Controls.Add(btnOK)
+            pnlButtons.Controls.Add(btnCancel)
+            pnlButtons.Controls.Add(btnDesktop)
 
             Me.Controls.Clear()
+            Me.Controls.Add(pnlButtons)
             Me.Controls.Add(root)
 
 
