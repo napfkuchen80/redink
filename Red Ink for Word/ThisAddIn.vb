@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 28.4.2025
+' 29.4.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -255,7 +255,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.280425 Gen2 Beta Test"
+    Public Const Version As String = "V.290425 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -6920,7 +6920,7 @@ Public Class ThisAddIn
     }
             Me.deviceComboBox = New System.Windows.Forms.ComboBox() With {
         .DropDownStyle = ComboBoxStyle.DropDownList,
-        .Width = 200
+        .Width = 400
     }
 
             ' Speaker toggle + threshold
@@ -7921,10 +7921,17 @@ Public Class ThisAddIn
 
         Private Function StartRecording() As Boolean
 
-            Dim selectedDeviceIndex As Integer = deviceComboBox.SelectedIndex
+            Dim ss As String = TryCast(Me.deviceComboBox.SelectedItem, String)
+            Dim deviceIndex As Integer
+
+            Dim pos As Integer = If(ss?.IndexOf(":"c), -1)
+            If pos < 0 OrElse Not Integer.TryParse(ss.Substring(0, pos), deviceIndex) Then
+                ShowCustomMessageBox($"Invalid device selection: '{ss}'")
+                Return False
+            End If
 
             waveIn = New WaveInEvent() With {
-                    .DeviceNumber = selectedDeviceIndex,
+                    .DeviceNumber = deviceIndex,
                     .WaveFormat = New WaveFormat(16000, 1)
                 }
 
