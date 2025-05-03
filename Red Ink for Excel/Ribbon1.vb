@@ -79,7 +79,7 @@ Public Class Ribbon1
         Globals.ThisAddIn.UndoAction()
     End Sub
 
-    Public Sub RI_Chat_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Chat2.Click
+    Public Sub RI_Chat_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Chat.Click
         Globals.ThisAddIn.ShowChatForm()
     End Sub
 

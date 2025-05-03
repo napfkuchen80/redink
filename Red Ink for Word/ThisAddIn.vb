@@ -3041,6 +3041,10 @@ Public Class ThisAddIn
                 DragDropFormLabel = ""
                 DragDropFormFilter = ""
                 doc = GetFileContent()
+                If String.IsNullOrWhiteSpace(doc) Then
+                    ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
+                    Exit Sub
+                End If
                 OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
                 ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
             End If

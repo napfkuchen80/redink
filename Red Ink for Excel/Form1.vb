@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 23.4.2025
+' 3.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -256,7 +256,7 @@ Public Class frmAIChat
                 Dim used As Excel.Range = appx.ActiveSheet.UsedRange
                 Dim intersectedRange As Excel.Range = appx.Intersect(selected, used)
                 If Not intersectedRange Is Nothing Then
-                    selectiontext = Globals.ThisAddIn.ConvertRangeToString(intersectedRange, True)
+                    selectiontext = Globals.ThisAddIn.ConvertRangeToString(intersectedRange, True, True)
                 End If
             End If
 

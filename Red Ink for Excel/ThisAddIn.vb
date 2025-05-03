@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 28.4.2025
+' 3.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.280425 Gen2 Beta Test"
+    Public Const Version As String = "V.030525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -184,9 +184,14 @@ Public Class ThisAddIn
     Private Const CellByCellPrefix2 As String = "CBC:"
     Private Const PurePrefix As String = "Pure:"
     Private Const BubblesPrefix As String = "Bubbles:"
+    Private Const ExtTrigger As String = "{doc}"
+    Private Const ColorTrigger As String = "(color)"
     Private Const RIMenu = AN
     Private Const MinHelperVersion = 1           ' Minimum version of the helper file that is required
     Public Const LargeWorksheetSize As Integer = 2500
+
+    Public Shared DragDropFormLabel As String = ""
+    Public Shared DragDropFormFilter As String = ""
 
     ' Definition of the SharedProperties for context for exchanging values with the SharedLibrary
 
@@ -2053,6 +2058,7 @@ Public Class ThisAddIn
         Dim DoClipboard As Boolean = False
         Dim DoFormulas As Boolean = True
         Dim DoBubbles As Boolean = False
+        Dim DoColor As Boolean = False
 
         Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
         Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -2065,6 +2071,8 @@ Public Class ThisAddIn
         Dim CBCInstruct As String = $"with '{CellByCellPrefix}' or '{CellByCellPrefix2} if the instruction should be executed cell-by-cell"
         Dim TextInstruct As String = $"use '{TextPrefix}' or '{TextPrefix2}' if the instruction should apply cell-by-cell, but only to text cells"
         Dim BubblesInstruct As String = $"use '{BubblesPrefix}' for inserting comments only"
+        Dim ExtInstruct As String = $"; insert '{ExtTrigger}' for text of a file (txt, docx, pdf)"
+        Dim AddonInstruct As String = $"; add'{ColorTrigger}' to check for colorcodes"
 
         Dim PromptLibInstruct As String = ""
         If INI_PromptLib Then
@@ -2076,9 +2084,9 @@ Public Class ThisAddIn
         'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & ExtInstruct & AddonInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
         Else
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){PureInstruct}{ExtInstruct}{AddonInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
             DoRange = True
         End If
 
@@ -2129,18 +2137,35 @@ Public Class ThisAddIn
             selectedRange.Select()
         End If
 
+        If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ColorTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            DoColor = True
+            OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ColorTrigger), "", RegexOptions.IgnoreCase)
+        End If
+
+        If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            DragDropFormLabel = ""
+            DragDropFormFilter = ""
+            Dim doc As String = GetFileContent()
+            If String.IsNullOrWhiteSpace(doc) Then
+                ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
+                Return False
+            End If
+            OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
+            ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
+        End If
+
         If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
             OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
-            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
+            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
         Else
             If Not NoSelectedCells Then
                 If DoRange Then
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
                 Else
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor)
                 End If
             Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True)
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
             End If
         End If
 
@@ -2159,8 +2184,10 @@ Public Class ThisAddIn
     ' - SelectionMandatory: A boolean value indicating whether a selection is mandatory
     ' - UseSecondAPI: A boolean value indicating whether the second API should be used
     ' - Optional: ShortenPercentValue: A percentage value by which the text should be shortened (for calculating the word count for each cell individually)
+    ' - Optional: Freestyle: A boolean value indicating whether to use freestyle mode
+    ' - Optional: DoColor: A boolean value indicating whether to check for color codes
 
-    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False) As Task(Of Boolean)
+    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False) As Task(Of Boolean)
 
         Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
 
@@ -2375,7 +2402,7 @@ Public Class ThisAddIn
                 End If
 
                 If Not NoSelectedCells Then
-                    SelectedText = ConvertRangeToString(selectedRange, DoFormulas)
+                    SelectedText = ConvertRangeToString(selectedRange, DoFormulas, DoColor)
                 End If
 
                 Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False, OtherPrompt)
@@ -2425,7 +2452,175 @@ Public Class ThisAddIn
     ' Helpers for the Range Functionality
 
 
-    Public Function ConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
+
+    Public Function ConvertRangeToString(
+    ByVal CellRange As Excel.Range,
+    ByVal IncludeFormulas As Boolean,
+    Optional ByVal DoColor As Boolean = False
+) As String
+
+        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
+        splash.Show()
+        splash.Refresh()
+
+        If CellRange Is Nothing Then
+            splash.Close()
+            Return String.Empty
+        End If
+
+        ' Excel-UI abschalten
+        Dim app As Excel.Application = Globals.ThisAddIn.Application
+        With app
+            .ScreenUpdating = False
+            .EnableEvents = False
+            .Calculation = Excel.XlCalculation.xlCalculationManual
+        End With
+
+        Dim sb As New System.Text.StringBuilder()
+
+        ' Standardfarben des "Normal"-Styles ermitteln
+        Dim normalStyle As Excel.Style = app.ActiveWorkbook.Styles("Normal")
+        Dim defaultFontColor As Long = normalStyle.Font.Color
+        Dim defaultInteriorColor As Long = normalStyle.Interior.Color
+
+        Try
+            ' Werte auslesen
+            Dim rawVals As Object = CellRange.Value2
+            Dim vals(,) As Object
+
+            If TypeOf rawVals Is Object(,) Then
+                vals = CType(rawVals, Object(,))
+            Else
+                ReDim vals(0, 0)
+                vals(0, 0) = rawVals
+            End If
+
+            Dim rowLB As Integer = vals.GetLowerBound(0)
+            Dim rowUB As Integer = vals.GetUpperBound(0)
+            Dim colLB As Integer = vals.GetLowerBound(1)
+            Dim colUB As Integer = vals.GetUpperBound(1)
+
+            For r As Integer = rowLB To rowUB
+                For c As Integer = colLB To colUB
+                    Dim raw = vals(r, c)
+                    If raw IsNot Nothing Then
+                        Dim relativeRow As Integer = r - rowLB + 1
+                        Dim relativeCol As Integer = c - colLB + 1
+                        Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
+                        Dim addr As String = cell.Address(False, False)
+
+                        Try
+                            sb.AppendLine($"Cell {addr}:")
+                            sb.AppendLine($"  Value: {raw}")
+
+                            ' Formeln optional auslesen
+                            If IncludeFormulas AndAlso cell.HasFormula Then
+                                Dim f As String = String.Empty
+                                Try
+                                    f = cell.Formula2.ToString()
+                                Catch comEx As System.Runtime.InteropServices.COMException _
+                                When comEx.ErrorCode = &H800A03EC
+                                    f = cell.Formula.ToString()
+                                End Try
+                                sb.AppendLine($"  Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
+                            End If
+
+                            ' Kommentare (klassisch)
+                            If cell.Comment IsNot Nothing Then
+                                sb.AppendLine($"  Comment: {cell.Comment.Text()}")
+                            End If
+
+                            ' ThreadedComments per Reflection
+                            Try
+                                Dim tc = cell.GetType().InvokeMember(
+                                "ThreadedComments",
+                                Reflection.BindingFlags.GetProperty,
+                                Nothing, cell, Nothing)
+                                If tc IsNot Nothing Then
+                                    For Each cx In tc
+                                        Dim txt = cx.GetType().InvokeMember(
+                                        "Text",
+                                        Reflection.BindingFlags.GetProperty,
+                                        Nothing, cx, Nothing).ToString()
+                                        Dim auth = cx.GetType().InvokeMember(
+                                        "Author",
+                                        Reflection.BindingFlags.GetProperty,
+                                        Nothing, cx, Nothing).ToString()
+                                        sb.AppendLine($"  Comment: {txt} (by {auth})")
+                                    Next
+                                End If
+                            Catch ex As System.Exception
+                                ' ignorieren, wenn nicht verfügbar
+                            End Try
+
+                            ' 1) Drop-Down-Auswahl (DataValidation)
+                            Try
+                                If cell.Validation.Type = Excel.XlDVType.xlValidateList Then
+                                    Dim formula1 As String = cell.Validation.Formula1
+                                    If Not String.IsNullOrEmpty(formula1) Then
+                                        Dim options As New List(Of String)
+                                        If formula1.StartsWith("=") Then
+                                            Dim refRange As Excel.Range = app.Range(formula1)
+                                            Dim tmp = refRange.Value2
+                                            If TypeOf tmp Is Object(,) Then
+                                                Dim arr = CType(tmp, Object(,))
+                                                For i As Integer = 1 To arr.GetLength(0)
+                                                    options.Add(arr(i, 1).ToString())
+                                                Next
+                                            ElseIf tmp IsNot Nothing Then
+                                                options.Add(tmp.ToString())
+                                            End If
+                                            Marshal.ReleaseComObject(refRange)
+                                        Else
+                                            options.AddRange(formula1.Split(","c).Select(Function(s) s.Trim()))
+                                        End If
+                                        sb.AppendLine($"  Dropdown options (separated by §): {String.Join("§", options)}")
+                                    End If
+                                End If
+                            Catch ex As System.Exception
+                                sb.AppendLine($"  Error reading dropdown: {ex.Message}")
+                            End Try
+
+                            ' 2) Farben (nur bei Abweichung)
+                            If DoColor Then
+                                If cell.Font.Color <> defaultFontColor Then
+                                    sb.AppendLine($"  FontColor: {cell.Font.Color}")
+                                End If
+                                If cell.Interior.Color <> defaultInteriorColor Then
+                                    sb.AppendLine($"  BackgroundColor: {cell.Interior.Color}")
+                                End If
+                            End If
+
+                            sb.AppendLine(New String("-"c, 40))
+
+                        Catch ex As System.Runtime.InteropServices.COMException _
+                        When ex.ErrorCode = &H800A03EC
+                            sb.AppendLine($"  COM-Error in Cell {addr}: {ex.Message}")
+                        Catch ex As System.Exception
+                            sb.AppendLine($"  Error in Cell {addr}: {ex.Message}")
+                        Finally
+                            Marshal.ReleaseComObject(cell)
+                        End Try
+                    End If
+                Next
+            Next
+
+        Finally
+            ' Excel-UI wieder aktivieren
+            With app
+                .ScreenUpdating = True
+                .EnableEvents = True
+                .Calculation = Excel.XlCalculation.xlCalculationAutomatic
+            End With
+            splash.Close()
+        End Try
+
+        Return sb.ToString()
+    End Function
+
+
+
+    Public Function xxxConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean, Optional ByVal DoColor As Boolean = False) As String
         ' Anzeige eines Splash-Screens
         Dim splash As New SplashScreen("Gathering the content from your worksheet...")
         splash.Show()
@@ -2531,201 +2726,60 @@ Public Class ThisAddIn
     End Function
 
 
-    Public Function oldConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
 
-        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
-        splash.Show()
-        splash.Refresh()
+    Public Function GetFileContent(Optional ByVal optionalFilePath As String = Nothing, Optional Silent As Boolean = False) As String
+        Dim filePath As String = ""
+        Try
 
-        If CellRange Is Nothing Then
-            splash.Close()
-            Return String.Empty
-        End If
-
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = False
-            .EnableEvents = False
-            .Calculation = Excel.XlCalculation.xlCalculationManual
-        End With
-
-        ' Rohdaten und Formeln
-        Dim rawVals As Object = CellRange.Value2
-        Dim rawForms As Object = If(IncludeFormulas, CellRange.Formula, Nothing)
-
-        ' Ziel-Arrays (immer nullbasiert)
-        Dim vals(,) As Object
-        Dim forms(,) As Object
-
-        If TypeOf rawVals Is Object(,) Then
-            vals = CType(rawVals, Object(,))
-            If IncludeFormulas Then forms = CType(rawForms, Object(,))
-        Else
-            ' Single-Cell -> 1×1 nullbasiertes Array
-            ReDim vals(0, 0)
-            vals(0, 0) = rawVals
-            If IncludeFormulas Then
-                ReDim forms(0, 0)
-                forms(0, 0) = rawForms
+            If optionalFilePath IsNot Nothing Then
+                filePath = ExpandEnvironmentVariables(optionalFilePath)
             End If
-        End If
 
-        ' tatsächliche Bounds ermitteln
-        Dim rowLB = vals.GetLowerBound(0)
-        Dim rowUB = vals.GetUpperBound(0)
-        Dim colLB = vals.GetLowerBound(1)
-        Dim colUB = vals.GetUpperBound(1)
-
-        Dim sb As New StringBuilder()
-
-        For r As Integer = rowLB To rowUB
-            For c As Integer = colLB To colUB
-                Dim raw = vals(r, c)
-                If raw IsNot Nothing Then
-                    ' auf Range.Cells umrechnen (1-basiert)
-                    Dim relativeRow = r - rowLB + 1
-                    Dim relativeCol = c - colLB + 1
-                    Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
-                    Dim addr As String = cell.Address(False, False)
-
-                    sb.AppendLine($"Cell {addr}:")
-                    sb.AppendLine($"  Value: {raw}")
-
-                    If IncludeFormulas Then
-                        Dim f = forms(r, c)
-                        sb.AppendLine($"  Formula: {If(TypeOf f Is String, f.ToString(), "none")}")
+            If String.IsNullOrWhiteSpace(filePath) Then
+                Using form As New DragDropForm()
+                    If form.ShowDialog() = DialogResult.OK Then
+                        filePath = form.SelectedFilePath
+                    Else
+                        ' User cancelled or closed form
+                        Return String.Empty
                     End If
+                End Using
+            End If
 
-                    ' 1) Legacy-Kommentar
-                    If cell.Comment IsNot Nothing Then
-                        sb.AppendLine($"  Comment: {cell.Comment.Text()}")
-                    End If
+            filePath = RemoveCR(filePath.Trim())
+            filePath = Path.GetFullPath(filePath)
+            If Not File.Exists(filePath) Then
+                If Not Silent Then ShowCustomMessageBox($"The file '{filePath}' was not found.")
+                Return ""
+            End If
 
-                    ' 2) ThreadedComments via Reflection
-                    Try
-                        Dim tc = cell.GetType().InvokeMember("ThreadedComments",
-                                                         Reflection.BindingFlags.GetProperty,
-                                                         Nothing, cell, Nothing)
-                        If tc IsNot Nothing Then
-                            For Each cx In tc
-                                Dim txt = cx.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
-                                Dim auth = cx.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
-                                sb.AppendLine($"  Comment: {txt} (by {auth})")
-                            Next
-                        End If
-                    Catch ex As System.Exception
-                        ' ignorieren, wenn nicht unterstützt
-                    End Try
-
-                    sb.AppendLine(New String("-"c, 40))
-
-                    Marshal.ReleaseComObject(cell)
+            If Not String.IsNullOrWhiteSpace(filePath) AndAlso IO.File.Exists(filePath) Then
+                Dim ext As String = IO.Path.GetExtension(filePath).ToLowerInvariant()
+                Dim FromFile As String
+                Select Case ext
+                    Case ".txt", ".ini", ".csv", ".log", ".json", ".xml", ".html", ".htm"
+                        FromFile = ReadTextFile(filePath)
+                    Case ".rtf"
+                        FromFile = ReadRtfAsText(filePath)
+                    Case ".doc", ".docx"
+                        FromFile = ReadWordDocument(filePath)
+                    Case ".pdf"
+                        FromFile = ReadPdfAsText(filePath)
+                    Case Else
+                        FromFile = "Error: File type not supported."
+                End Select
+                If FromFile.StartsWith("Error") And Len(FromFile) < 100 And Not Silent Then
+                    ShowCustomMessageBox(FromFile)
+                    Return ""
+                Else
+                    Return FromFile
                 End If
-            Next
-        Next
-
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = True
-            .EnableEvents = True
-            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
-        End With
-
-        splash.Close()
-        Return sb.ToString()
+            End If
+        Catch ex As System.Exception
+            If Not Silent Then ShowCustomMessageBox($"An error occurred reading the file '{filePath}': {ex.Message}")
+            Return ""
+        End Try
     End Function
-
-
-
-
-
-    Public Function xxxConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean) As String
-
-        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
-
-        splash.Show()
-        splash.Refresh()
-
-        If CellRange Is Nothing Then
-            splash.Close()
-            Return String.Empty
-        End If
-
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = False
-            .EnableEvents = False
-            .Calculation = Excel.XlCalculation.xlCalculationManual
-        End With
-
-        Dim vals As Object = CellRange.Value2
-        Dim forms As Object = If(IncludeFormulas, CellRange.Formula, Nothing)
-        Dim sb As New System.Text.StringBuilder()
-        Dim rCount As Integer = vals.GetLength(0)
-        Dim cCount As Integer = vals.GetLength(1)
-
-        For r As Integer = 1 To rCount
-            For c As Integer = 1 To cCount
-                Dim raw = vals(r, c)
-                If raw IsNot Nothing Then
-                    ' grab the cell Range COM object
-                    Dim cell As Excel.Range = CellRange.Cells(r, c)
-                    Dim addr As String = cell.Address(False, False)
-
-                    sb.AppendLine("Cell " & addr & ":")
-                    sb.AppendLine("  Value: " & raw.ToString())
-
-                    If IncludeFormulas Then
-                        Dim f = forms(r, c)
-                        sb.AppendLine("  Formula: " &
-                    If(TypeOf f Is String, f.ToString(), "none"))
-                    End If
-
-                    ' 1) Legacy comment?
-                    If cell.Comment IsNot Nothing Then
-                        sb.AppendLine("  Comment: " & cell.Comment.Text())
-                    End If
-
-                    ' 2) Threaded comments via reflection
-                    Try
-                        Dim tc = cell.GetType() _
-                    .InvokeMember("ThreadedComments",
-                        Reflection.BindingFlags.GetProperty,
-                        Nothing, cell, Nothing)
-                        If tc IsNot Nothing Then
-                            For Each cx In tc
-                                Dim txt = cx.GetType() _
-                            .InvokeMember("Text",
-                                Reflection.BindingFlags.GetProperty,
-                                Nothing, cx, Nothing).ToString()
-                                Dim auth = cx.GetType() _
-                            .InvokeMember("Author",
-                                Reflection.BindingFlags.GetProperty,
-                                Nothing, cx, Nothing).ToString()
-                                sb.AppendLine($"  Comment: {txt} (by {auth})")
-                            Next
-                        End If
-                    Catch ex As System.Exception
-                        ' ignore if ThreadedComments not supported
-                    End Try
-
-                    sb.AppendLine(New String("-"c, 40))
-
-                    ' 3) clean up the COM object
-                    Marshal.ReleaseComObject(cell)
-                End If
-            Next
-        Next
-
-
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = True
-            .EnableEvents = True
-            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
-        End With
-
-        splash.Close()
-
-        Return sb.ToString()
-    End Function
-
 
     Public Function ParseLLMResponse(ByVal Response As String) As List(Of String)
         Dim instructions As New List(Of String)()
