@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 3.5.2025
+' 4.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -30,6 +30,8 @@ Imports System.Runtime.InteropServices
 Imports Microsoft.Office.Interop.Excel
 Imports System.Globalization
 Imports Microsoft.Office.Core
+Imports Microsoft.VisualBasic.ApplicationServices
+Imports System.Reflection
 
 
 Public Class frmAIChat
@@ -270,9 +272,7 @@ Public Class frmAIChat
 
             If Not String.IsNullOrEmpty(docText) Then
                 fullPrompt.AppendLine("The user's content is from the worksheet '" & combinedName & "' and is as follows: <RANGEOFCELLS>" & docText & "</RANGEOFCELLS>")
-            End If
-
-            If Not String.IsNullOrEmpty(selectiontext) Then
+            ElseIf Not String.IsNullOrEmpty(selectiontext) Then
                 fullPrompt.AppendLine("The user's selected content is from the worksheet '" & combinedName & "' and is as follows: <RANGEOFCELLS>" & selectiontext & "</RANGEOFCELLS>")
             ElseIf chkIncludeselection.Checked Then
                 fullPrompt.AppendLine("The user has granted you access to a selection of the worksheet '" & combinedName & "' but it is empty.")
@@ -416,6 +416,27 @@ Public Class frmAIChat
     End Sub
 
     Private Function IsSelectionEmpty(selection As Excel.Range) As Boolean
+        Dim ws As Excel.Worksheet = selection.Worksheet
+        Dim app As Excel.Application = ws.Application
+
+        ' build the range of all cells that "mean something"
+        Dim infoRange As Excel.Range = ws.UsedRange
+
+        ' see if any of those intersect the user’s selection
+        Dim intersected As Excel.Range = Nothing
+        Try
+            intersected = app.Intersect(selection, infoRange)
+        Catch ex As System.Exception
+            ' should never really happen, but just in case
+            Return True
+        End Try
+
+        ' if nothing in common, it's empty
+        Return (intersected Is Nothing) OrElse (intersected.Cells.Count = 0)
+    End Function
+
+
+    Private Function xxxIsSelectionEmpty(selection As Excel.Range) As Boolean
         If selection.Cells.Count = 1 Then
             Dim value = selection.Value2
             Return value Is Nothing OrElse String.IsNullOrWhiteSpace(value.ToString())

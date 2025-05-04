@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 3.5.2025
+' 4.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -171,7 +171,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.030525 Gen2 Beta Test"
+    Public Const Version As String = "V.040525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2503,11 +2503,54 @@ Public Class ThisAddIn
             For r As Integer = rowLB To rowUB
                 For c As Integer = colLB To colUB
                     Dim raw = vals(r, c)
+
+                    Dim relativeRow As Integer = r - rowLB + 1
+                    Dim relativeCol As Integer = c - colLB + 1
+                    Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
+                    Dim addr As String = cell.Address(False, False)
+
+                    ' Prüfen, ob wir diese Zelle *trotz* leerem Wert verarbeiten müssen
+                    Dim shouldProcess As Boolean = False
+
+                    ' 1) Ist ein Wert drin?
                     If raw IsNot Nothing Then
-                        Dim relativeRow As Integer = r - rowLB + 1
-                        Dim relativeCol As Integer = c - colLB + 1
-                        Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
-                        Dim addr As String = cell.Address(False, False)
+                        shouldProcess = True
+                    End If
+
+                    ' 2) Klassischer Kommentar?
+                    If Not shouldProcess AndAlso cell.Comment IsNot Nothing Then
+                        shouldProcess = True
+                    End If
+
+                    ' 3) Threaded Comment?
+                    If Not shouldProcess Then
+                        Try
+                            Dim tc = CType(cell, Object).CommentThreaded
+                            If tc IsNot Nothing Then shouldProcess = True
+                        Catch ex As COMException When ex.ErrorCode = &H800A03EC
+                            ' kein Support / kein ThreadedComment
+                        End Try
+                    End If
+
+                    ' 4) DataValidation-List?
+                    If Not shouldProcess Then
+                        Try
+                            If cell.Validation.Type = Excel.XlDVType.xlValidateList Then
+                                shouldProcess = True
+                            End If
+                        Catch
+                            ' keine Validierung
+                        End Try
+                    End If
+
+                    ' 5) Farbe nur bei DoColor?
+                    If Not shouldProcess AndAlso DoColor Then
+                        If cell.Font.Color <> defaultFontColor OrElse cell.Interior.Color <> defaultInteriorColor Then
+                            shouldProcess = True
+                        End If
+                    End If
+
+                    If shouldProcess Then
 
                         Try
                             sb.AppendLine($"Cell {addr}:")
@@ -2530,56 +2573,110 @@ Public Class ThisAddIn
                                 sb.AppendLine($"  Comment: {cell.Comment.Text()}")
                             End If
 
-                            ' ThreadedComments per Reflection
+                            ' ThreadedComments per the Excel object model
+                            Dim cellObj As Object = cell   ' late-bind the Range
                             Try
-                                Dim tc = cell.GetType().InvokeMember(
-                                "ThreadedComments",
-                                Reflection.BindingFlags.GetProperty,
-                                Nothing, cell, Nothing)
-                                If tc IsNot Nothing Then
-                                    For Each cx In tc
-                                        Dim txt = cx.GetType().InvokeMember(
-                                        "Text",
-                                        Reflection.BindingFlags.GetProperty,
-                                        Nothing, cx, Nothing).ToString()
-                                        Dim auth = cx.GetType().InvokeMember(
-                                        "Author",
-                                        Reflection.BindingFlags.GetProperty,
-                                        Nothing, cx, Nothing).ToString()
-                                        sb.AppendLine($"  Comment: {txt} (by {auth})")
+                                ' try to get the single threaded comment
+                                Dim topObj As Object = cellObj.CommentThreaded
+                                If topObj IsNot Nothing Then
+                                    ' .Text
+                                    Dim txt = topObj.Text
+                                    ' .Author.Name
+                                    Dim authName = topObj.Author.Name
+                                    sb.AppendLine($"  Threaded: {txt} (by {authName})")
+
+                                    ' now each reply
+                                    For Each rep In topObj.Replies  ' an IEnumerable
+                                        sb.AppendLine($"    Reply: {rep.Text} (by {rep.Author.Name})")
                                     Next
                                 End If
-                            Catch ex As System.Exception
-                                ' ignorieren, wenn nicht verfügbar
+                            Catch ex As System.Runtime.InteropServices.COMException When ex.ErrorCode = &H800A03EC
+                                ' no threaded-comments support—ignore
                             End Try
 
-                            ' 1) Drop-Down-Auswahl (DataValidation)
+                            ' 1) Drop-Down-Auswahl (DataValidation mit Named-Range-Support)
                             Try
-                                If cell.Validation.Type = Excel.XlDVType.xlValidateList Then
-                                    Dim formula1 As String = cell.Validation.Formula1
-                                    If Not String.IsNullOrEmpty(formula1) Then
-                                        Dim options As New List(Of String)
-                                        If formula1.StartsWith("=") Then
-                                            Dim refRange As Excel.Range = app.Range(formula1)
+                                ' 1a) Prüfen, ob die Zelle überhaupt eine Listen-Validation hat
+                                Dim hasList As Boolean
+                                Try
+                                    hasList = (cell.Validation.Type = Excel.XlDVType.xlValidateList)
+                                Catch comEx As COMException When comEx.ErrorCode = &H800A03EC
+                                    hasList = False
+                                End Try
+
+                                If hasList Then
+                                    Dim formula1 As String = cell.Validation.Formula1  ' z.B. "=MyList" oder "=Sheet2!$A$1:$A$5"
+                                    If Not String.IsNullOrWhiteSpace(formula1) Then
+                                        Dim options As New List(Of String)()
+                                        Dim wb As Microsoft.Office.Interop.Excel.Workbook = cell.Worksheet.Parent
+                                        Dim refRange As Excel.Range = Nothing
+
+                                        ' 1b) Versuch: Workbook-scoped Named Range
+                                        If formula1.StartsWith("="c) Then
+                                            Dim nameKey As String = formula1.Substring(1)  ' ohne "="
+                                            Try
+                                                Dim nm As Excel.Name = wb.Names(nameKey)
+                                                refRange = nm.RefersToRange
+                                            Catch ex As Exception
+                                                ' kein Named Range gefunden → weiter unten
+                                            End Try
+                                        End If
+
+                                        ' 1c) Fallback: Worksheet-lokaler Bereich oder sheet-qualifizierte Adresse
+                                        If refRange Is Nothing AndAlso formula1.StartsWith("="c) Then
+                                            Dim addrx As String = formula1.Substring(1)
+                                            Try
+                                                refRange = cell.Worksheet.Range(addrx)
+                                            Catch ex1 As COMException
+                                                ' vielleicht sheet-qualifiziert: "Sheet2!$B$1:$B$10"
+                                                Dim parts = addrx.Split("!"c)
+                                                Dim sheetName = parts(0)
+                                                Dim rangeAddr = parts(1)
+                                                Dim otherSheet As Microsoft.Office.Interop.Excel.Worksheet = wb.Sheets(sheetName)
+                                                refRange = otherSheet.Range(rangeAddr)
+                                            End Try
+                                        End If
+
+                                        ' 1d) Werte aus dem ermittelten Bereich auslesen (nested loop)
+                                        If refRange IsNot Nothing Then
                                             Dim tmp = refRange.Value2
                                             If TypeOf tmp Is Object(,) Then
                                                 Dim arr = CType(tmp, Object(,))
-                                                For i As Integer = 1 To arr.GetLength(0)
-                                                    options.Add(arr(i, 1).ToString())
+                                                Dim rCount = arr.GetLength(0)
+                                                Dim cCount = arr.GetLength(1)
+                                                For rx As Integer = 1 To rCount
+                                                    For cx As Integer = 1 To cCount
+                                                        Dim v = arr(rx, cx)
+                                                        options.Add(If(v Is Nothing, String.Empty, v.ToString()))
+                                                    Next
                                                 Next
                                             ElseIf tmp IsNot Nothing Then
                                                 options.Add(tmp.ToString())
                                             End If
                                             Marshal.ReleaseComObject(refRange)
                                         Else
-                                            options.AddRange(formula1.Split(","c).Select(Function(s) s.Trim()))
+                                            ' 1e) Kein Range-Objekt gefunden? Dann nochmal die Fallback-Komma-Liste
+                                            If formula1.StartsWith("="c) Then
+                                                ' remove leading "=" before splitting
+                                                options.AddRange(formula1.Substring(1) _
+                                                .Split(","c) _
+                                                .Select(Function(s) s.Trim()))
+                                            Else
+                                                ' pure comma-list, komplett splitten
+                                                options.AddRange(formula1 _
+                                                .Split(","c) _
+                                                .Select(Function(s) s.Trim()))
+                                            End If
                                         End If
+
                                         sb.AppendLine($"  Dropdown options (separated by §): {String.Join("§", options)}")
                                     End If
                                 End If
-                            Catch ex As System.Exception
+
+                            Catch ex As Exception
                                 sb.AppendLine($"  Error reading dropdown: {ex.Message}")
                             End Try
+
 
                             ' 2) Farben (nur bei Abweichung)
                             If DoColor Then
@@ -2602,6 +2699,7 @@ Public Class ThisAddIn
                             Marshal.ReleaseComObject(cell)
                         End Try
                     End If
+                    Marshal.ReleaseComObject(cell)
                 Next
             Next
 
