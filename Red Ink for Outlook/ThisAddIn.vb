@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.4.2025
+' 16.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -18,6 +18,7 @@
 ' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
 ' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
 ' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
+' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -97,7 +98,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.270425 Gen2 Beta Test"
+    Public Const Version As String = "V.160525 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -253,6 +254,15 @@ Public Class ThisAddIn
         End Get
         Set(value As Boolean)
             _context.INI_DoubleS = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Clean As Boolean
+        Get
+            Return _context.INI_Clean
+        End Get
+        Set(value As Boolean)
+            _context.INI_Clean = value
         End Set
     End Property
 
@@ -1333,6 +1343,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_AlternateModelPath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_SpecialServicePath As String
+        Get
+            Return _context.INI_SpecialServicePath
+        End Get
+        Set(value As String)
+            _context.INI_SpecialServicePath = value
         End Set
     End Property
 

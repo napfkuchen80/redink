@@ -57,7 +57,6 @@ Partial Class Ribbon1
         Dim RibbonDialogLauncherImpl1 As Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher = Me.Factory.CreateRibbonDialogLauncher
         Me.Tab1 = Me.Factory.CreateRibbonTab
         Me.Group1 = Me.Factory.CreateRibbonGroup
-        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.Menu1 = Me.Factory.CreateRibbonMenu
         Me.RI_Primlang = Me.Factory.CreateRibbonButton
         Me.RI_SecLang = Me.Factory.CreateRibbonButton
@@ -75,6 +74,7 @@ Partial Class Ribbon1
         Me.RI_Summarize = Me.Factory.CreateRibbonButton
         Me.RI_Explain = Me.Factory.CreateRibbonButton
         Me.RI_SuggestTitles = Me.Factory.CreateRibbonButton
+        Me.RI_SpecialModel = Me.Factory.CreateRibbonButton
         Me.RI_CreatePodcast = Me.Factory.CreateRibbonButton
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
@@ -89,6 +89,7 @@ Partial Class Ribbon1
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_Transcriptor = Me.Factory.CreateRibbonButton
         Me.Settings = Me.Factory.CreateRibbonButton
+        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
@@ -113,18 +114,6 @@ Partial Class Ribbon1
         Me.Group1.Label = "Red Ink"
         Me.Group1.Name = "Group1"
         Me.Group1.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
-        '
-        'Group2
-        '
-        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
-        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
-        Me.Group2.Items.Add(Me.RI_PrimLang2)
-        Me.Group2.Items.Add(Me.RI_Correct2)
-        Me.Group2.Items.Add(Me.RI_Chat)
-        Me.Group2.KeyTip = "RIQ"
-        Me.Group2.Label = "Red Ink"
-        Me.Group2.Name = "Group2"
-        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'Menu1
         '
@@ -259,6 +248,7 @@ Partial Class Ribbon1
         Me.Menu3.Items.Add(Me.RI_Summarize)
         Me.Menu3.Items.Add(Me.RI_Explain)
         Me.Menu3.Items.Add(Me.RI_SuggestTitles)
+        Me.Menu3.Items.Add(Me.RI_SpecialModel)
         Me.Menu3.Items.Add(Me.RI_CreatePodcast)
         Me.Menu3.Items.Add(Me.RI_CreateAudio)
         Me.Menu3.Label = "Analyze"
@@ -290,6 +280,14 @@ Partial Class Ribbon1
         Me.RI_SuggestTitles.OfficeImageId = "FillUp"
         Me.RI_SuggestTitles.ScreenTip = "Suggest various titles for the selected text"
         Me.RI_SuggestTitles.ShowImage = True
+        '
+        'RI_SpecialModel
+        '
+        Me.RI_SpecialModel.Label = "Special Service"
+        Me.RI_SpecialModel.Name = "RI_SpecialModel"
+        Me.RI_SpecialModel.OfficeImageId = "AutoFormatNow"
+        Me.RI_SpecialModel.ScreenTip = "Query one of your special services with your selected text"
+        Me.RI_SpecialModel.ShowImage = True
         '
         'RI_CreatePodcast
         '
@@ -410,6 +408,18 @@ Partial Class Ribbon1
         Me.Settings.ScreenTip = "Allows you to temporarily change the settings"
         Me.Settings.ShowImage = True
         '
+        'Group2
+        '
+        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
+        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
+        Me.Group2.Items.Add(Me.RI_PrimLang2)
+        Me.Group2.Items.Add(Me.RI_Correct2)
+        Me.Group2.Items.Add(Me.RI_Chat)
+        Me.Group2.KeyTip = "RIQ"
+        Me.Group2.Label = "Red Ink"
+        Me.Group2.Name = "Group2"
+        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
+        '
         'RI_PrimLang2
         '
         Me.RI_PrimLang2.KeyTip = "E"
@@ -490,6 +500,7 @@ Partial Class Ribbon1
         AddHandler RI_Friendly.Click, AddressOf RI_Friendly_Click
         AddHandler RI_NoFillers.Click, AddressOf RI_NoFillers_Click
         AddHandler RI_Convincing.Click, AddressOf RI_Convincing_Click
+        AddHandler RI_SpecialModel.Click, AddressOf RI_SpecialModel_Click
 
         AddHandler Group2.DialogLauncherClick, AddressOf Easteregg_Click
 
@@ -543,10 +554,16 @@ Partial Class Ribbon1
             Me.RI_CreatePodcast.Label = "Create Podcast"
         End If
 
-        If Trim(ThisAddIn.INI_SpeechModelPath) = "" Then
+        If Trim(ThisAddIn.INI_SpeechModelPath) = "" And Not IsGoogle Then
             Me.RI_Transcriptor.Visible = False
         Else
             Me.RI_Transcriptor.Visible = True
+        End If
+
+        If Trim(ThisAddIn.INI_SpecialServicePath) = "" Then
+            Me.RI_SpecialModel.Visible = False
+        Else
+            Me.RI_SpecialModel.Visible = True
         End If
 
         Me.Menu1.ScreenTip = If(String.IsNullOrEmpty(ThisAddIn.INI_UsageRestrictions), "",
@@ -593,6 +610,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_NoFillers As RibbonButton
     Friend WithEvents RI_Friendly As RibbonButton
     Friend WithEvents RI_Convincing As RibbonButton
+    Friend WithEvents RI_SpecialModel As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

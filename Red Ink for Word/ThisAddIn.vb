@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 29.4.2025
+' 16.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -18,6 +18,7 @@
 ' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
 ' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
 ' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
+' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -64,6 +65,7 @@ Imports Google.Api.Gax
 Imports Google.Api.Gax.Grpc
 Imports System.Security.Cryptography
 Imports NAudio.MediaFoundation
+Imports NAudio
 
 
 
@@ -198,6 +200,8 @@ Public Class ThisAddIn
     Private WithEvents wordApp As Word.Application
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+
+        SharedMethods.Initialize(Me.CustomTaskPanes)
         wordApp = Application
         Try
             If wordApp IsNot Nothing Then
@@ -255,7 +259,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.290425 Gen2 Beta Test"
+    Public Const Version As String = "V.160525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -269,6 +273,7 @@ Public Class ThisAddIn
     Private Const SummaryPercent As Integer = 20
     Private Const NetTrigger As String = "(net)"
     Private Const LibTrigger As String = "(lib)"
+    Private Const AllTrigger As String = "(all)"
     Private Const TPMarkupTrigger As String = "(rev)"
     Private Const TPMarkupTriggerL As String = "(rev:"
     Private Const TPMarkupTriggerR As String = ")"
@@ -291,6 +296,7 @@ Public Class ThisAddIn
     Private Const PurePrefix As String = "Pure:"
     Private Const ClipboardPrefix As String = "Clipboard:"
     Private Const ClipboardPrefix2 As String = "Clip:"
+    Private Const PanePrefix As String = "Pane:"
     Private Const BubblesPrefix As String = "Bubbles:"
     Private Const BubbleCutText As String = " (" & ChrW(&H2702) & ")"
     Private Const SearchAllTrigger As String = "(full)"
@@ -486,6 +492,16 @@ Public Class ThisAddIn
             _context.INI_DoubleS = value
         End Set
     End Property
+
+    Public Shared Property INI_Clean As Boolean
+        Get
+            Return _context.INI_Clean
+        End Get
+        Set(value As Boolean)
+            _context.INI_Clean = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_PreCorrection As String
         Get
@@ -1591,6 +1607,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_SpecialServicePath As String
+        Get
+            Return _context.INI_SpecialServicePath
+        End Get
+        Set(value As String)
+            _context.INI_SpecialServicePath = value
+        End Set
+    End Property
+
 
     Public Shared Property PromptLibrary() As List(Of String)
         Get
@@ -1625,6 +1650,42 @@ Public Class ThisAddIn
         End Get
         Set(value As Boolean)
             _context.InitialConfigFailed = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter1 As String
+        Get
+            Return _context.INI_Model_Parameter1
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter1 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter2 As String
+        Get
+            Return _context.INI_Model_Parameter2
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter2 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter3 As String
+        Get
+            Return _context.INI_Model_Parameter3
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter3 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter4 As String
+        Get
+            Return _context.INI_Model_Parameter4
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter4 = value
         End Set
     End Property
 
@@ -2256,7 +2317,7 @@ Public Class ThisAddIn
     Private chatForm As frmAIChat
 
     Public Sub Transcriptor()
-
+        If INILoadFail() Then Exit Sub
         If Not String.IsNullOrEmpty(INI_SpeechModelPath) Then
             Dim SpeechPath As String = ExpandEnvironmentVariables(INI_SpeechModelPath)
             If Not String.IsNullOrEmpty(SpeechPath) AndAlso Not SpeechPath.EndsWith("\") Then
@@ -2277,6 +2338,7 @@ Public Class ThisAddIn
     End Sub
 
     Public Sub ShowChatForm()
+        If INILoadFail() Then Exit Sub
         If chatForm Is Nothing OrElse chatForm.IsDisposed Then
             chatForm = New frmAIChat(_context)
 
@@ -2326,7 +2388,7 @@ Public Class ThisAddIn
             Exit Sub
         End If
 
-        Dim result2 As String = Await LLM("You are an image generator. You will complete the following command.", "Create the following image " & OtherPrompt, "", "", 0, True)
+        Dim result2 As String = Await LLM("You are an image generator. You will complete the following command.", "Create the following image: " & OtherPrompt, "", "", 0, True)
 
         ShowCustomMessageBox(result2)
 
@@ -2391,7 +2453,7 @@ Public Class ThisAddIn
                 Case 2
                     MarkupNow = "Diff markup method"
                 Case 3
-                    MarkupNow = "Diff markup method (With the output In a separate window)"
+                    MarkupNow = "Diff markup method (with the output in a separate window)"
             End Select
 
             Dim result2 As Integer = ShowCustomYesNoBox($"You have chosen the {MarkupNow}. If you are anonymizing a larger text, the 'Regex' markup method may be a better choice. How do you want to continue?", "Continue as is", "Use Regex")
@@ -2420,6 +2482,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
+            Return
         End If
 
         Dim Textlength As Integer = GetSelectedTextLength()
@@ -2500,6 +2563,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
+            Return
         End If
 
         Dim Textlength As Integer = GetSelectedTextLength()
@@ -2532,6 +2596,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
+            Return
         End If
 
         HostName = My.Settings.Hostname
@@ -2665,8 +2730,132 @@ Public Class ThisAddIn
         FreeStyle(True)
 
     End Sub
-    Public Async Sub FreeStyle(UseSecondAPI)
 
+    Public Async Sub SpecialModel()
+        If INILoadFail() Then Exit Sub
+        Dim DoPane As Boolean = True
+
+        If String.IsNullOrWhiteSpace(INI_SpecialServicePath) Then
+            ShowCustomMessageBox("No special service path is configured.")
+            Return
+        End If
+
+        If INILoadFail() Then Exit Sub
+        Dim application As Word.Application = Globals.ThisAddIn.Application
+        Dim selection As Selection = application.Selection
+
+        If selection.Type = WdSelectionType.wdSelectionIP Then
+            ShowCustomMessageBox("Please select the text to be processed.")
+            Return
+        End If
+
+        OptionChecked = False
+
+        If Not ShowModelSelection(_context, INI_SpecialServicePath, "Special Service", "Select the special service you want to query:", "Output in a pane (not directly in the document)", 2) Then
+            originalConfigLoaded = False
+            Exit Sub
+        End If
+
+        Debug.WriteLine("Selected model: " & INI_Model_2)
+
+        Dim iniValues() As String = {INI_Model_Parameter1, INI_Model_Parameter2, INI_Model_Parameter3, INI_Model_Parameter4}
+        Dim list As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)
+
+        For Each raw As String In iniValues
+            If String.IsNullOrWhiteSpace(raw) Then Continue For
+            Dim segments = raw.Split(";"c)
+            Dim desc = segments(0).Trim()
+            Dim t As String = segments(1).Trim().ToLowerInvariant()
+            Dim defaultStr = segments(2).Trim()
+            Dim opts As List(Of String) = Nothing
+            If segments.Length > 3 Then
+                opts = segments(3).Split(","c).Select(Function(o) o.Trim()).ToList()
+            End If
+
+            Dim val As Object
+            Select Case t
+                Case "boolean"
+                    Dim b As Boolean
+                    Boolean.TryParse(defaultStr, b)
+                    val = b
+                Case "integer"
+                    Dim i As Integer
+                    Integer.TryParse(defaultStr, i)
+                    val = i
+                Case "long"
+                    Dim l As Long
+                    Integer.TryParse(defaultStr, l)
+                    val = l
+                Case "double"
+                    Dim d As Double
+                    Double.TryParse(defaultStr, d)
+                    val = d
+                Case Else
+                    val = defaultStr
+            End Select
+
+            If opts IsNot Nothing AndAlso opts.Count > 0 Then
+                list.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val, opts))  ' Use overload with options
+            Else
+                list.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val))
+            End If
+        Next
+
+        OtherPrompt = ""
+
+        If list.Count > 0 Then
+            Dim parameters() As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = list.ToArray()
+            If ShowCustomVariableInputForm("Please configure your parameters:", "Use '" & INI_Model_2 & "'", parameters) Then
+                Dim i As Integer = 0
+                For Each p In parameters
+                    i = i + 1
+                    If p.Name.ToLowerInvariant().Contains("prompt") Then
+                        OtherPrompt = p.Value.ToString().Trim()
+                    End If
+                    If p.Value.ToString().ToLower().Trim().Contains("(all)") Or p.Value.ToString().ToLower().Trim().Contains("(alle)") Or p.Value.ToString().ToLower().Trim().Contains("---") Then p.Value = ""
+                    INI_APICall_2 = INI_APICall_2.Replace("{parameter" & i & "}", p.Value.ToString().Trim())
+                    INI_APICall_Object_2 = INI_APICall_Object_2.Replace("{parameter" & i & "}", p.Value.ToString().Trim())
+                Next
+            Else
+                Return
+            End If
+        End If
+
+        SelectedText = selection.Text.Trim()
+
+        Dim llmresult As String = Await LLM(OtherPrompt, SelectedText, "", "", 0, True)
+
+        If Not String.IsNullOrWhiteSpace(llmresult) Then
+            If OptionChecked Then
+                If DoPane Then
+                    ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
+                Else
+                    Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True)
+
+                    If FinalText <> "" Then
+                        If FinalText = "Markdown" Then
+                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                            InsertTextWithMarkdown(selection, llmresult, False)
+                        Else
+                            SLib.PutInClipboard(FinalText)
+                        End If
+                    End If
+                End If
+            Else
+                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                InsertTextWithMarkdown(selection, llmresult, False)
+            End If
+        End If
+
+        RestoreDefaults(_context, originalConfig)
+        originalConfigLoaded = False
+
+    End Sub
+
+    Public Async Sub FreeStyle(UseSecondAPI)
+        If INILoadFail() Then Exit Sub
         Try
             OtherPrompt = ""
             SysPrompt = ""
@@ -2685,15 +2874,17 @@ Public Class ThisAddIn
             Dim DoKeepFormat As Boolean = INI_KeepFormat2
             Dim DoKeepParaFormat As Boolean = INI_KeepParaFormatInline
             Dim DoFileObject As Boolean = False
+            Dim DoPane As Boolean = False
 
             Dim MarkupInstruct As String = $"start With '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"with '{InPlacePrefix}' for replacing the selection"
             Dim BubblesInstruct As String = $"with '{BubblesPrefix}' for having your text commented"
-            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}' for separate output"
+            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}' or '{PanePrefix}' for separate output"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf)"
             Dim TPMarkupInstruct As String = $"; add '{TPMarkupTriggerInstruct}' if revisions [of user] should be pointed out to the LLM"
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
+            Dim AllInstruct As String = $"; add '{AllTrigger} to select all"
             Dim LibInstruct As String = $"; add '{LibTrigger}' for library search"
             Dim NetInstruct As String = $"; add '{NetTrigger}' for internet search"
             Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -2701,8 +2892,17 @@ Public Class ThisAddIn
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
             Dim FileObject As String = ""
 
-            Dim AddOnInstruct As String = TPMarkupInstruct
-            AddOnInstruct += NoFormatInstruct.Replace("; add", ", ")
+            Dim application As Word.Application = Globals.ThisAddIn.Application
+            Dim selection As Selection = application.Selection
+
+            If selection.Type = WdSelectionType.wdSelectionIP Then NoText = True
+
+            Dim AddOnInstruct As String = AllInstruct
+
+            If Not NoText Then
+                AddOnInstruct += NoFormatInstruct.Replace("; add", ", ")
+                AddOnInstruct += TPMarkupInstruct.Replace("; add", ", ")
+            End If
             If INI_Lib Then
                 AddOnInstruct += LibInstruct.Replace("; add", ",")
             End If
@@ -2726,23 +2926,12 @@ Public Class ThisAddIn
                 AddOnInstruct = AddOnInstruct.Substring(0, lastCommaIndex) & ", and" & AddOnInstruct.Substring(lastCommaIndex + 1)
             End If
 
-            Dim application As Word.Application = Globals.ThisAddIn.Application
-            Dim selection As Selection = application.Selection
-
-            If selection.Type = WdSelectionType.wdSelectionIP Then NoText = True
-
-            'SLib.StoreClipboard()
-            'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
             If Not NoText Then
                 OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
             Else
                 OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
             End If
-
-            ' SLib.RestoreClipboard()
-
-            ' Command line commands
 
             SelectedText = ""
 
@@ -2944,6 +3133,13 @@ Public Class ThisAddIn
             My.Settings.LastPrompt = OtherPrompt
             My.Settings.Save()
 
+            If OtherPrompt.IndexOf(AllTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                OtherPrompt = OtherPrompt.Replace(AllTrigger, "").Trim()
+                Dim document As Word.Document = application.ActiveDocument
+                document.Content.Select()
+                NoText = False
+            End If
+
             If OtherPrompt.IndexOf(LibTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
                 OtherPrompt = OtherPrompt.Replace(LibTrigger, "").Trim()
                 DoLib = True
@@ -3028,6 +3224,10 @@ Public Class ThisAddIn
                 OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiff.Length).Trim()
                 DoMarkup = True
                 MarkupMethod = 2
+            ElseIf OtherPrompt.StartsWith(PanePrefix, StringComparison.OrdinalIgnoreCase) Then
+                OtherPrompt = OtherPrompt.Substring(PanePrefix.Length).Trim()
+                DoPane = True
+                DoClipboard = True
             End If
 
 
@@ -3111,7 +3311,7 @@ Public Class ThisAddIn
                 End If
             End If
 
-            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject)
+            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane)
 
             If UseSecondAPI And originalConfigLoaded Then
                 RestoreDefaults(_context, originalConfig)
@@ -3298,6 +3498,7 @@ Public Class ThisAddIn
     ' - TPMarkupname: String containing the user of whom the tags will be marked, if any.
     ' - CreatePodcast: Boolean flag to indicate that the output should be used to create a podcast.
     ' - FileObject: String containing the file path to the object to be added to the LLM request if supported by the API.
+    ' - DoPane: Boolean flag to indicate that the output should be shown in a pane.
 
     ' Global array to store paragraph formatting information
     Structure ParagraphFormatStructure
@@ -3322,7 +3523,7 @@ Public Class ThisAddIn
     Dim paragraphFormat() As ParagraphFormatStructure
     Dim paraCount As Integer
 
-    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "") As Task(Of String)
+    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False) As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
@@ -3339,7 +3540,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Or selection.Tables.Count = 0 Or PutInClipboard Or PutInBubbles Then
 
-            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject)
+            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane)
 
         Else
 
@@ -3410,7 +3611,7 @@ Public Class ThisAddIn
                                                                                 KeepFormat, ParaFormatInline, InPlace,
                                                                                 DoMarkup, MarkupMethod, PutInClipboard,
                                                                                 PutInBubbles, SelectionMandatory, UseSecondAPI,
-                                                                                FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                                                                                FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                                     ' Optionally delay between processing cells.
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
@@ -3462,7 +3663,7 @@ Public Class ThisAddIn
                                 ' Also verify it's not empty
                                 If textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Else
@@ -3473,7 +3674,7 @@ Public Class ThisAddIn
 
                                 If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
 
@@ -3507,7 +3708,7 @@ Public Class ThisAddIn
                                 cellRange.End -= 1  ' Exclude cell marker
                                 If cellRange.Start < cellRange.End Then
                                     cellRange.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Next
@@ -3527,7 +3728,7 @@ Public Class ThisAddIn
 
                             finalChunk.Select()
                             Dim text = selection.Text
-                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                         Else
                             Do
                                 finalChunk.Start += 1
@@ -3537,7 +3738,7 @@ Public Class ThisAddIn
 
                             If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
                                 finalChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject)
+                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane)
                             End If
                         End If
                     End If
@@ -3547,7 +3748,7 @@ Public Class ThisAddIn
 
             ElseIf userdialog = 1 Then
 
-                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject)
+                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane)
 
             End If
 
@@ -3562,7 +3763,7 @@ Public Class ThisAddIn
         Return ""
 
     End Function
-    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "") As Task(Of String)
+    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False) As Task(Of String)
 
         Try
             Dim SelectedText As String = ""
@@ -3756,6 +3957,10 @@ Public Class ThisAddIn
                         End If
                     End If
 
+                ElseIf DoPane Then
+
+                    ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane.", AN, False, True)
+
                 ElseIf PutInClipboard Then
 
                     Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True)
@@ -3763,6 +3968,7 @@ Public Class ThisAddIn
                     If FinalText <> "" Then
                         If FinalText = "Markdown" Then
                             Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
                             InsertTextWithMarkdown(selection, LLMResult, trailingCR)
                         Else
                             SLib.PutInClipboard(FinalText)
@@ -4466,7 +4672,6 @@ Public Class ThisAddIn
     End Sub
 
 
-
     Public Shared Sub InsertTextWithMarkdown(selection As Microsoft.Office.Interop.Word.Selection, Result As String, Optional TrailingCR As Boolean = False)
         If selection Is Nothing Then
             MessageBox.Show("Error in InsertTextWithMarkdown: The selection object is null", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -4478,19 +4683,13 @@ Public Class ThisAddIn
         ' Extract the range from the selection
         Dim range As Microsoft.Office.Interop.Word.Range = selection.Range
 
-        ' Convert Markdown to HTML using Markdig
-        'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
-        'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
-        '.UseAdvancedExtensions() _
-        '.Build()
-
         Dim markdownpipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
                         .UseAdvancedExtensions() _
                         .UseEmojiAndSmiley() _
                         .UseTaskLists() _
                         .UseMathematics() _
-.UseGenericAttributes() _
-.Build()
+                        .UseGenericAttributes() _
+                        .Build()
 
         Dim htmlResult As String = Markdown.ToHtml(Result, markdownpipeline).Trim
 
@@ -4505,8 +4704,12 @@ Public Class ThisAddIn
             Next
         End If
 
+        Debug.WriteLine(htmlDoc.DocumentNode.OuterHtml) ' Output the full HTML code
+
         ' Parse and insert HTML content into the Word range
         ParseHtmlNode(htmlDoc.DocumentNode, range)
+
+        selection.Document.Fields.Update()
 
         If TrailingCR Then
             range.Text = vbCrLf
@@ -4521,7 +4724,295 @@ Public Class ThisAddIn
 
     End Sub
 
-    Private Shared Sub ParseHtmlNode(node As HtmlNode, range As Microsoft.Office.Interop.Word.Range)
+
+
+    Private Shared Sub ParseHtmlNode(node As HtmlNode, range As Range)
+        For Each childNode As HtmlNode In node.ChildNodes
+
+            ' ——— Pre-Check auf erstes verschachteltes <a> ———
+            Dim nestedLinkNode As HtmlNode = Nothing
+            If Not childNode.Name.Equals("a", StringComparison.OrdinalIgnoreCase) Then
+                nestedLinkNode = childNode.SelectSingleNode(".//a")
+            End If
+            Dim nestedHref As String = If(nestedLinkNode IsNot Nothing,
+                                     nestedLinkNode.GetAttributeValue("href", String.Empty),
+                                     String.Empty)
+            ' ——————————————————————————————————————————————
+
+            range.Style = WdBuiltinStyle.wdStyleNormal
+
+            Select Case childNode.Name.ToLower()
+
+                Case "#text"
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.Font.Reset()
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+
+                Case "strong", "b"
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.Font.Bold = True
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+
+                Case "em", "i"
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.Font.Italic = True
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+
+                Case "u"
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.Font.Underline = WdUnderline.wdUnderlineSingle
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+
+                Case "br"
+                    range.Font.Reset()
+                    range.Text = vbCr
+                    range.Collapse(WdCollapseDirection.wdCollapseEnd)
+
+                Case "h1", "h2", "h3"
+                    Dim style As WdBuiltinStyle =
+                    If(childNode.Name.Equals("h1", StringComparison.OrdinalIgnoreCase),
+                       WdBuiltinStyle.wdStyleHeading1,
+                    If(childNode.Name.Equals("h2", StringComparison.OrdinalIgnoreCase),
+                       WdBuiltinStyle.wdStyleHeading2,
+                       WdBuiltinStyle.wdStyleHeading3))
+                    ' Text + Style + Link
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.Style = style
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    ' Haupt-Range vor Zeilenumbruch setzen
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+                    ' Zeilenumbruch
+                    range.Font.Reset()
+                    range.Text = vbCr
+                    range.Collapse(WdCollapseDirection.wdCollapseEnd)
+
+                Case "a"
+                    ' Reiner <a>-Tag
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim linkRngDup As Range = range.Duplicate
+                    linkRngDup.Text = txt
+                    Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                    range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=childNode.GetAttributeValue("href", String.Empty))
+                    linkRngDup.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(linkRngDup.End, linkRngDup.End)
+
+                Case "blockquote"
+                    Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim startPos As Integer = range.Start
+                    Dim tRng As Range = range.Duplicate
+                    tRng.Text = txt
+                    tRng.ParagraphFormat.LeftIndent += 18
+                    tRng.Font.Italic = True
+                    If nestedHref <> String.Empty Then
+                        Dim linkRng As Range = range.Document.Range(startPos, startPos + txt.Length)
+                        range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=nestedHref)
+                    End If
+                    tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.SetRange(tRng.End + 1, tRng.End + 1)
+                    range.Text = vbCr
+                    range.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    range.Font.Reset()
+
+                Case "ul"
+                    ' Unordered list
+                    Dim listStart As Integer = range.Start
+                    For Each li As HtmlNode In childNode.SelectNodes("li")
+                        ParseHtmlNode(li, range)
+                        range.Text = vbCr
+                        range.Collapse(False)
+                    Next
+                    Dim ulRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(listStart, range.End)
+                    ulRange.ListFormat.ApplyBulletDefault()
+                    ulRange.ListFormat.ListIndent()
+                    range.SetRange(ulRange.End, ulRange.End)
+
+                Case "ol"
+                    ' Ordered list
+                    Dim numStart As Integer = range.Start
+                    For Each li As HtmlNode In childNode.SelectNodes("li")
+                        ParseHtmlNode(li, range)
+                        range.Text = vbCr
+                        range.Collapse(False)
+                    Next
+                    Dim olRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(numStart, range.End)
+                    olRange.ListFormat.ApplyNumberDefault()
+                    olRange.ListFormat.ListIndent()
+                    range.SetRange(olRange.End, olRange.End)
+
+                Case "dl"
+                    ' Definition list
+                    For Each dt As HtmlNode In childNode.SelectNodes("dt")
+                        ' Term
+                        Dim term As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        term.Text = HtmlEntity.DeEntitize(dt.InnerText) & vbTab
+                        term.Font.Bold = True
+                        term.Collapse(False)
+                        range.SetRange(term.End, term.End)
+                        ' Definition
+                        Dim dd As HtmlNode = dt.NextSibling
+                        If dd IsNot Nothing AndAlso dd.Name.ToLower() = "dd" Then
+                            Dim defn As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                            defn.Text = HtmlEntity.DeEntitize(dd.InnerText) & vbCr
+                            defn.ParagraphFormat.LeftIndent += 18
+                            defn.Collapse(False)
+                            range.SetRange(defn.End, defn.End)
+                        End If
+                    Next
+
+                Case "sup"
+                    ' Superscript
+                    Dim supRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    supRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    supRng.Font.Superscript = True
+                    supRng.Collapse(False)
+                    range.SetRange(supRng.End, supRng.End)
+
+                Case "hr"
+                    ' Horizontal rule
+                    Dim hrRange As Range = range.Duplicate
+                    hrRange.Text = vbCr & "――――――――――――――――――――――――――――――――――――――--" & vbCr
+                    hrRange.Collapse(False)
+                    range.SetRange(hrRange.End, hrRange.End)
+
+                Case "input"
+                    ' Task list checkbox
+                    If childNode.GetAttributeValue("type", String.Empty).ToLower() = "checkbox" Then
+                        Dim cc As Microsoft.Office.Interop.Word.ContentControl =
+                        range.Document.ContentControls.Add(Microsoft.Office.Interop.Word.WdContentControlType.wdContentControlCheckBox, range)
+                        cc.Checked = (childNode.GetAttributeValue("checked", String.Empty).ToLower() = "checked")
+                        range.SetRange(cc.Range.End, cc.Range.End)
+                    End If
+
+                Case "img"
+                    ' Image
+                    Dim src As String = childNode.GetAttributeValue("src", String.Empty)
+                    If Not String.IsNullOrEmpty(src) Then
+                        Dim pic As Microsoft.Office.Interop.Word.InlineShape =
+                        range.InlineShapes.AddPicture(src, LinkToFile:=False, SaveWithDocument:=True)
+                        range.SetRange(pic.Range.End, pic.Range.End)
+                    End If
+
+                Case "pre"
+                    ' Code block
+                    Dim codeBlock As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    codeBlock.Text = HtmlEntity.DeEntitize(childNode.InnerText) & vbCr
+                    codeBlock.Font.Name = "Courier New"
+                    codeBlock.Font.Size = 10
+                    codeBlock.ParagraphFormat.LeftIndent += 14.18
+                    codeBlock.Collapse(False)
+                    range.SetRange(codeBlock.End, codeBlock.End)
+
+                Case "code"
+                    ' Inline code
+                    Dim codeRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                    codeRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                    codeRng.Font.Name = "Courier New"
+                    codeRng.Font.Size = 10
+                    codeRng.Shading.BackgroundPatternColor =
+                    Microsoft.Office.Interop.Word.WdColor.wdColorGray25
+                    codeRng.Collapse(False)
+                    range.SetRange(codeRng.End, codeRng.End)
+
+
+                Case "span"
+                    ' Emoji badge or Math span
+                    Dim cls = childNode.GetAttributeValue("class", String.Empty)
+                    If cls.Contains("emoji") Then
+                        Dim emTxt = HtmlEntity.DeEntitize(childNode.InnerText)
+                        Dim emRange As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        emRange.Text = emTxt
+                        emRange.Font.Name = "Segoe UI Emoji"
+                        emRange.Font.Color = Microsoft.Office.Interop.Word.WdColor.wdColorWhite
+                        emRange.Shading.BackgroundPatternColor =
+                        System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.FromArgb(0, 112, 192))
+                        emRange.Collapse(False)
+                        range.SetRange(emRange.End, emRange.End)
+                    ElseIf cls.Contains("math") Then
+                        Dim mRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
+                        mRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
+                        mRng.OMaths.Add(mRng)
+                        mRng.Collapse(False)
+                        range.SetRange(mRng.End, mRng.End)
+                    Else
+                        ParseHtmlNode(childNode, range)
+                    End If
+
+
+                Case "table"
+                    ' Table
+                    Dim rowList = childNode.SelectNodes(".//tr")
+                    If rowList Is Nothing OrElse rowList.Count = 0 Then Exit Select
+                    Dim firstCells = rowList(0).SelectNodes("th|td")
+                    If firstCells Is Nothing OrElse firstCells.Count = 0 Then Exit Select
+                    Dim tbl As Microsoft.Office.Interop.Word.Table =
+                        range.Document.Tables.Add(range, rowList.Count, firstCells.Count)
+                    Dim r As Integer = 1
+                    For Each tr As HtmlNode In rowList
+                        Dim cells = tr.SelectNodes("th|td")
+                        If cells IsNot Nothing AndAlso cells.Count > 0 Then
+                            Dim c As Integer = 1
+                            For Each cell As HtmlNode In cells
+                                Dim text = HtmlEntity.DeEntitize(cell.InnerText)
+                                tbl.Cell(r, c).Range.Text = text
+                                If cell.Name.Equals("th", StringComparison.OrdinalIgnoreCase) Then
+                                    tbl.Cell(r, c).Range.Font.Bold = True
+                                End If
+                                c += 1
+                            Next
+                        End If
+                        r += 1
+                    Next
+                    range.SetRange(tbl.Range.End, tbl.Range.End)
+
+                Case Else
+                    ParseHtmlNode(childNode, range)
+            End Select
+
+        Next
+    End Sub
+
+
+    Private Shared Sub oldParseHtmlNode(node As HtmlNode, range As Microsoft.Office.Interop.Word.Range)
         For Each childNode As HtmlNode In node.ChildNodes
             Select Case childNode.Name.ToLower()
                 Case "#text"
@@ -5516,6 +6007,37 @@ Public Class ThisAddIn
     End Sub
 
 
+
+    Private Async Sub ShowPaneAsync(
+                              introLine As String,
+                              bodyText As String,
+                              finalRemark As String,
+                              header As String,
+                              Optional noRTF As Boolean = False,
+                              Optional insertMarkdown As Boolean = False
+                            )
+        Try
+
+            Dim OriginalText As String = bodyText
+
+            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
+
+            If result <> "" Then
+                If result = "Markdown" Then
+                    Dim currentSelection As Word.Selection = Globals.ThisAddIn.Application.Selection
+                    currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    InsertTextWithMarkdown(currentSelection, OriginalText, False)
+                End If
+            End If
+
+        Catch ex As Exception
+            MessageBox.Show("Error in ShowPaneAsync: " & ex.Message)
+        End Try
+    End Sub
+
+
+
     Private Shared LastRegexPattern As String = String.Empty
     Private Shared LastRegexOptions As String = String.Empty
     Private Shared LastRegexReplace As String = String.Empty
@@ -6011,6 +6533,7 @@ Public Class ThisAddIn
 
     Public Sub ShowSettings()
 
+        If INILoadFail() Then Exit Sub
         Dim Settings As New Dictionary(Of String, String) From {
                 {"Temperature", "Temperature of {model}"},
                 {"Timeout", "Timeout of {model}"},

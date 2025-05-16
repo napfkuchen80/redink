@@ -128,5 +128,8 @@ Public Class Ribbon1
     Private Sub RI_Convincing_Click(sender As Object, e As RibbonControlEventArgs)
         Globals.ThisAddIn.Convincing()
     End Sub
+    Private Sub RI_SpecialModel_Click(sender As Object, e As RibbonControlEventArgs)
+        Globals.ThisAddIn.SpecialModel()
+    End Sub
 
 End Class

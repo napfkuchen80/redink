@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.4.2025
+' 16.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -18,6 +18,7 @@
 ' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
 ' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
 ' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
+' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Imports System.Reflection.Emit
@@ -49,12 +50,16 @@ Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports Markdig.Extensions
 Imports System.Drawing.Imaging
 Imports System.Reflection
-Imports Org.BouncyCastle.Tls
-
+Imports Microsoft.Office.Tools
+Imports System.Globalization
+Imports Markdig
+Imports SharedLibrary.MarkdownToRtf
+Imports Org.BouncyCastle.Utilities
 
 Namespace SharedLibrary
 
     Public Class SharedContext
+
         Implements ISharedContext
 
         Public Interface ISharedContext
@@ -74,6 +79,7 @@ Namespace SharedLibrary
             Property INI_APICall_Object As String
             Property INI_Response As String
             Property INI_DoubleS As Boolean
+            Property INI_Clean As Boolean
             Property INI_PreCorrection As String
             Property INI_PostCorrection As String
             Property INI_APIEncrypted As Boolean
@@ -203,12 +209,15 @@ Namespace SharedLibrary
             Property INI_PromptLib As Boolean
             Property INI_PromptLibPath As String
             Property INI_AlternateModelPath As String
+            Property INI_SpecialServicePath As String
             Property INI_PromptLibPath_Transcript As String
             Property PromptLibrary() As List(Of String)
             Property PromptTitles() As List(Of String)
             Property MenusAdded As Boolean
-
-
+            Property INI_Model_Parameter1 As String
+            Property INI_Model_Parameter2 As String
+            Property INI_Model_Parameter3 As String
+            Property INI_Model_Parameter4 As String
 
 #End Region
 
@@ -235,6 +244,7 @@ Namespace SharedLibrary
         Public Property INI_APICall_Object As String Implements ISharedContext.INI_APICall_Object
         Public Property INI_Response As String Implements ISharedContext.INI_Response
         Public Property INI_DoubleS As Boolean Implements ISharedContext.INI_DoubleS
+        Public Property INI_Clean As Boolean Implements ISharedContext.INI_Clean
         Public Property INI_PreCorrection As String Implements ISharedContext.INI_PreCorrection
         Public Property INI_PostCorrection As String Implements ISharedContext.INI_PostCorrection
         Public Property INI_APIEncrypted As Boolean Implements ISharedContext.INI_APIEncrypted
@@ -359,18 +369,43 @@ Namespace SharedLibrary
         Public Property INI_PromptLib As Boolean Implements ISharedContext.INI_PromptLib
         Public Property INI_PromptLibPath As String Implements ISharedContext.INI_PromptLibPath
         Public Property INI_AlternateModelPath As String Implements ISharedContext.INI_AlternateModelPath
+        Public Property INI_SpecialServicePath As String Implements ISharedContext.INI_SpecialServicePath
         Public Property INI_PromptLibPath_Transcript As String Implements ISharedContext.INI_PromptLibPath_Transcript
         Public Property PromptLibrary() As List(Of String) Implements ISharedContext.PromptLibrary
         Public Property PromptTitles() As List(Of String) Implements ISharedContext.PromptTitles
         Public Property MenusAdded As Boolean Implements ISharedContext.MenusAdded
-
-
+        Public Property INI_Model_Parameter1 As String Implements ISharedContext.INI_Model_Parameter1
+        Public Property INI_Model_Parameter2 As String Implements ISharedContext.INI_Model_Parameter2
+        Public Property INI_Model_Parameter3 As String Implements ISharedContext.INI_Model_Parameter3
+        Public Property INI_Model_Parameter4 As String Implements ISharedContext.INI_Model_Parameter4
 
 #End Region
 
     End Class
 
     Public Class InputParameter
+        Public Property Name As String
+        Public Property Value As Object
+        Public Property Options As List(Of String) = Nothing  ' New: list of options, if any
+        Public Property InputControl As Control
+
+        ' Constructor for simple parameters
+        Public Sub New(ByVal name As String, ByVal value As Object)
+            Me.Name = name
+            Me.Value = value
+        End Sub
+
+        ' Overload for parameters with options
+        Public Sub New(ByVal name As String, ByVal value As Object, ByVal options As IEnumerable(Of String))
+            Me.Name = name
+            Me.Value = value
+            If options IsNot Nothing Then
+                Me.Options = New List(Of String)(options)
+            End If
+        End Sub
+    End Class
+
+    Public Class xxInputParameter
         Public Property Name As String
         Public Property Value As Object
         ' We use this property to keep track of the dynamically created control.
@@ -413,7 +448,7 @@ Namespace SharedLibrary
 
                 ' 2) read and Base64-encode
                 Dim bytes As Byte() = File.ReadAllBytes(filePath)
-                Dim b64 As String = Convert.ToBase64String(bytes)
+                Dim b64 As String = System.Convert.ToBase64String(bytes)
 
                 Return (mime, b64)
             Catch ex As System.Exception
@@ -547,7 +582,8 @@ Namespace SharedLibrary
             "10. Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc" & vbCrLf &
             "11. Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet" & vbCrLf &
             "12. Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf" & vbCrLf &
-            "13. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
+            "13. MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf" & vbCrLf &
+            "14. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
             "Copyright (c) 2016- Microsoft Corp." & vbCrLf & vbCrLf & "Disclaimer:" & vbCrLf & vbCrLf &
             "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 'As Is' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE." & vbCrLf & vbCrLf &
             "See the Red Ink license file (https://apps.vischer.com/redink/license.txt) for more information."
@@ -1037,14 +1073,14 @@ Namespace SharedLibrary
 
             ' Base64Url encoding
             Private Shared Function Base64UrlEncode(input As String) As String
-                Return Convert.ToBase64String(Encoding.UTF8.GetBytes(input)).
+                Return System.Convert.ToBase64String(Encoding.UTF8.GetBytes(input)).
                 Replace("+", "-").
                 Replace("/", "_").
                 Replace("=", "")
             End Function
 
             Private Shared Function Base64UrlEncode(inputBytes As Byte()) As String
-                Return Convert.ToBase64String(inputBytes).
+                Return System.Convert.ToBase64String(inputBytes).
                 Replace("+", "-").
                 Replace("/", "_").
                 Replace("=", "")
@@ -1235,9 +1271,8 @@ Namespace SharedLibrary
                         End If
 
                         If context.INI_APIDebug Then
-                            Debug.WriteLine($"SENT TO API:{Environment.NewLine}{requestBody}")
+                            Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
                         End If
-
 
                         ' Send the request
                         Try
@@ -1318,6 +1353,10 @@ Namespace SharedLibrary
                                 If DoubleS Then
                                     text = text.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
                                 End If
+                                If context.INI_Clean Then
+                                    text = text.Replace("  ", " ").Replace("  ", " ")
+                                    text = RemoveHiddenMarkers(text)
+                                End If
                                 Returnvalue = text
                             End If
                         Catch ex As System.Net.Http.HttpRequestException
@@ -1341,6 +1380,32 @@ Namespace SharedLibrary
             End Try
         End Function
 
+
+        Public Shared Function RemoveHiddenMarkers(text As String) As String
+            If text Is Nothing Then
+                Throw New System.Exception("Cannot remove hidden markers from a null string.")
+            End If
+
+            Dim sb As New StringBuilder(text.Length)
+            For Each ch As Char In text
+                Dim uc As UnicodeCategory = Char.GetUnicodeCategory(ch)
+
+                ' Erlaube gewöhnliches Space plus CR (U+000D) und LF (U+000A):
+                If ch = " "c OrElse
+                   ch = ChrW(13) OrElse      ' Carriage Return
+                   ch = ChrW(10) OrElse      ' Line Feed
+                   (uc <> UnicodeCategory.Control AndAlso
+                    uc <> UnicodeCategory.Format AndAlso
+                    uc <> UnicodeCategory.LineSeparator AndAlso
+                    uc <> UnicodeCategory.ParagraphSeparator AndAlso
+                    uc <> UnicodeCategory.SpaceSeparator) Then
+
+                    sb.Append(ch)
+                End If
+            Next
+
+            Return sb.ToString()
+        End Function
 
         Public Shared Function ExtractCitations(ByRef jsonObj As JObject) As String
             Try
@@ -1773,7 +1838,7 @@ Namespace SharedLibrary
             ' Convert Unicode escape sequences (e.g., \u000B)
             Dim unicodePattern As String = "\\u([0-9A-Fa-f]{4})"
             inputText = Regex.Replace(inputText, unicodePattern, Function(m)
-                                                                     Dim unicodeValue As Integer = Convert.ToInt32(m.Groups(1).Value, 16)
+                                                                     Dim unicodeValue As Integer = System.Convert.ToInt32(m.Groups(1).Value, 16)
                                                                      Return ChrW(unicodeValue)
                                                                  End Function)
 
@@ -2123,6 +2188,7 @@ Namespace SharedLibrary
 
                 ' Boolean parameters
                 context.INI_DoubleS = ParseBoolean(configDict, "DoubleS")
+                context.INI_Clean = ParseBoolean(configDict, "Clean")
                 context.INI_KeepFormat1 = ParseBoolean(configDict, "KeepFormat1")
                 context.INI_ReplaceText1 = ParseBoolean(configDict, "ReplaceText1", True)
                 context.INI_KeepFormat2 = ParseBoolean(configDict, "KeepFormat2")
@@ -2146,6 +2212,7 @@ Namespace SharedLibrary
 
                 context.INI_PromptLibPath = If(configDict.ContainsKey("PromptLib"), configDict("PromptLib"), "")
                 context.INI_AlternateModelPath = If(configDict.ContainsKey("AlternateModelPath"), configDict("AlternateModelPath"), "")
+                context.INI_SpecialServicePath = If(configDict.ContainsKey("SpecialServicePath"), configDict("SpecialServicePath"), "")
                 context.INI_PromptLibPath_Transcript = If(configDict.ContainsKey("PromptLib_Transcript"), configDict("PromptLib_Transcript"), "")
 
                 ' Process Internet search if enabled
@@ -2345,7 +2412,7 @@ Namespace SharedLibrary
                 Dim signatureBytes = signer.GenerateSignature()
 
                 ' Base64 encode the signature
-                Dim base64Signature = Convert.ToBase64String(signatureBytes)
+                Dim base64Signature = System.Convert.ToBase64String(signatureBytes)
 
                 Return base64Signature
             Catch ex As Exception
@@ -2466,6 +2533,10 @@ Namespace SharedLibrary
                 mc.OAuth2Scopes = If(configDict.ContainsKey("OAuth2Scopes"), configDict("OAuth2Scopes"), "")
                 mc.OAuth2Endpoint = If(configDict.ContainsKey("OAuth2Endpoint"), configDict("OAuth2Endpoint"), "")
                 mc.OAuth2ATExpiry = If(configDict.ContainsKey("OAuth2ATExpiry"), CLng(configDict("OAuth2ATExpiry")), 3600)
+                mc.Parameter1 = If(configDict.ContainsKey("Parameter1"), configDict("Parameter1"), "")
+                mc.Parameter2 = If(configDict.ContainsKey("Parameter2"), configDict("Parameter2"), "")
+                mc.Parameter3 = If(configDict.ContainsKey("Parameter3"), configDict("Parameter3"), "")
+                mc.Parameter4 = If(configDict.ContainsKey("Parameter4"), configDict("Parameter4"), "")
                 mc.ModelDescription = Description
 
                 mc.APIKeyBack = mc.APIKey
@@ -2544,6 +2615,10 @@ Namespace SharedLibrary
                 context.INI_OAuth2ATExpiry_2 = If(config.OAuth2ATExpiry <> 0, config.OAuth2ATExpiry, 3600)
                 context.DecodedAPI_2 = config.DecodedAPI
                 context.TokenExpiry_2 = config.TokenExpiry
+                context.INI_Model_Parameter1 = If(Not String.IsNullOrEmpty(config.Parameter1), config.Parameter1, "")
+                context.INI_Model_Parameter2 = If(Not String.IsNullOrEmpty(config.Parameter2), config.Parameter2, "")
+                context.INI_Model_Parameter3 = If(Not String.IsNullOrEmpty(config.Parameter3), config.Parameter3, "")
+                context.INI_Model_Parameter4 = If(Not String.IsNullOrEmpty(config.Parameter4), config.Parameter4, "")
 
             Catch ex As System.Exception
                 MessageBox.Show("Error in ApplyModelConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -2608,12 +2683,12 @@ Namespace SharedLibrary
         End Function
 
 
-
         Public Shared originalConfig As ModelConfig
+        Public Shared OptionChecked As Boolean = False
         Public Shared originalConfigLoaded As Boolean = False
 
         ' Displays the model selection form and applies the chosen configuration.
-        Public Shared Function ShowModelSelection(ByVal context As ISharedContext, iniFilePath As String) As Boolean
+        Public Shared Function ShowModelSelection(ByVal context As ISharedContext, iniFilePath As String, Optional Title As String = "Freestyle", Optional Listtype As String = "Select the model you want to use:", Optional OptionText As String = "Reset to default model after use", Optional UseCase As Integer = 1) As Boolean
             Try
                 ' Back up the current (default) configuration.
 
@@ -2621,9 +2696,9 @@ Namespace SharedLibrary
                 originalConfig = GetCurrentConfig(context)
                 originalConfigLoaded = True
 
-                Dim selector As New ModelSelectorForm(iniFilePath, context)
+                Dim selector As New ModelSelectorForm(iniFilePath, context, Title, Listtype, OptionText, UseCase)
                 If selector.ShowDialog() = DialogResult.OK Then
-                    If selector.UseDefault Then
+                    If selector.UseDefault And UseCase = 1 Then
                         RestoreDefaults(context, originalConfig)
                     ElseIf selector.SelectedModel IsNot Nothing Then
                         ApplyModelConfig(context, selector.SelectedModel)
@@ -2637,7 +2712,6 @@ Namespace SharedLibrary
                 Return False
             End Try
         End Function
-
 
 
         Public Shared Function RenameFileToBak(filePath As String) As Boolean
@@ -2893,7 +2967,7 @@ Namespace SharedLibrary
                 End While
 
                 ' Decode the Base64 string
-                Return Convert.FromBase64String(base64String)
+                Return System.Convert.FromBase64String(base64String)
             Catch ex As System.Exception
                 ' Return Nothing on failure
                 Return Nothing
@@ -2943,7 +3017,7 @@ Namespace SharedLibrary
             Next
 
             ' Convert encrypted bytes to Base64
-            Return Convert.ToBase64String(encryptedBytes)
+            Return System.Convert.ToBase64String(encryptedBytes)
         End Function
 
         Public Shared Function GetDomain() As String
@@ -4648,12 +4722,170 @@ Namespace SharedLibrary
 
 
 
-
         Public Shared Function ShowCustomVariableInputForm(
-    ByVal prompt As String,
-    ByVal header As String,
-    ByRef params() As InputParameter
-) As Boolean
+                                            ByVal prompt As String,
+                                            ByVal header As String,
+                                            ByRef params() As InputParameter
+                                        ) As Boolean
+            If String.IsNullOrWhiteSpace(header) Then header = String.Empty
+
+            Dim inputForm As New Form() With {
+        .Text = header,
+        .FormBorderStyle = FormBorderStyle.FixedDialog,
+        .StartPosition = FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .Font = New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point),
+        .AutoScaleMode = AutoScaleMode.Font,
+        .AutoScaleDimensions = New SizeF(6.0F, 13.0F),
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink
+    }
+
+            ' Set icon
+            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Layout
+            Dim mainLayout As New TableLayoutPanel() With {
+        .ColumnCount = 2,
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Padding = New Padding(12),
+        .GrowStyle = TableLayoutPanelGrowStyle.AddRows
+    }
+            mainLayout.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
+            mainLayout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100.0F))
+
+            ' Prompt label
+            Dim promptLabel As New System.Windows.Forms.Label() With {
+        .Text = prompt,
+        .AutoSize = True,
+        .MaximumSize = New Size(600, 0),
+        .Margin = New Padding(0, 0, 0, 12)
+    }
+            mainLayout.Controls.Add(promptLabel, 0, 0)
+            mainLayout.SetColumnSpan(promptLabel, 2)
+
+            ' One row per parameter
+            For i As Integer = 0 To params.Length - 1
+                Dim param = params(i)
+                Dim lbl As New System.Windows.Forms.Label() With {
+            .Text = param.Name & ":",
+            .AutoSize = True,
+            .Anchor = AnchorStyles.Left,
+            .Margin = New Padding(0, 0, 8, 8)
+        }
+                mainLayout.Controls.Add(lbl, 0, i + 1)
+
+                ' Decide control type
+                Dim ctrl As Control
+                If param.Options IsNot Nothing AndAlso param.Options.Count > 0 AndAlso TypeOf param.Value Is String Then
+
+                    Dim cb As New System.Windows.Forms.ComboBox() With {
+                                            .DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList,
+                                            .MaxDropDownItems = 5,
+                                            .IntegralHeight = False,
+                                            .Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right,
+                                            .Margin = New System.Windows.Forms.Padding(0, 0, 0, 12),
+                                            .MinimumSize = New System.Drawing.Size(400, 0)
+                                        }
+                    cb.Items.AddRange(param.Options.ToArray())
+                    cb.SelectedItem = param.Value.ToString()
+                    param.InputControl = cb
+
+                    ' Set default selection
+                    Dim defaultVal = param.Value.ToString()
+                    If param.Options.Contains(defaultVal) Then cb.SelectedItem = defaultVal
+                    ctrl = cb
+                ElseIf TypeOf param.Value Is Boolean Then
+                    Dim chk As New System.Windows.Forms.CheckBox() With {
+                .Checked = System.Convert.ToBoolean(param.Value),
+                .AutoSize = True,
+                .Anchor = AnchorStyles.Left,
+                .Margin = New Padding(0, 0, 0, 8)
+            }
+                    ctrl = chk
+                Else
+                    Dim txt As New TextBox() With {
+                .Text = param.Value.ToString(),
+                .Anchor = AnchorStyles.Left Or AnchorStyles.Right,
+                .Margin = New Padding(0, 0, 0, 8)
+            }
+                    If TypeOf param.Value Is String Then
+                        txt.MinimumSize = New Size(400, 0)
+                    Else
+                        txt.MinimumSize = New Size(50, 0)
+                    End If
+                    ctrl = txt
+                End If
+                param.InputControl = ctrl
+                mainLayout.Controls.Add(ctrl, 1, i + 1)
+            Next
+
+            ' Buttons
+            Dim buttonFlow As New FlowLayoutPanel() With {
+        .FlowDirection = FlowDirection.RightToLeft,
+        .Dock = DockStyle.Bottom,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Padding = New Padding(12, 8, 12, 12)
+    }
+            Dim btnOK As New Button() With {.Text = "OK", .AutoSize = True, .DialogResult = DialogResult.OK}
+            Dim btnCancel As New Button() With {.Text = "Cancel", .AutoSize = True, .DialogResult = DialogResult.Cancel}
+            buttonFlow.Controls.Add(btnCancel)
+            buttonFlow.Controls.Add(btnOK)
+
+            inputForm.Controls.Add(mainLayout)
+            inputForm.Controls.Add(buttonFlow)
+
+            ' Show dialog
+            Dim result = inputForm.ShowDialog()
+            If result = DialogResult.OK Then
+                ' Read back values
+                For Each param In params
+                    Try
+                        If TypeOf param.InputControl Is System.Windows.Forms.ComboBox Then
+                            Dim cb = DirectCast(param.InputControl, System.Windows.Forms.ComboBox)
+                            param.Value = If(cb.SelectedItem IsNot Nothing,
+                             cb.SelectedItem.ToString(),
+                             cb.Text)
+                        ElseIf TypeOf param.Value Is Boolean Then
+                            param.Value = CType(param.InputControl, System.Windows.Forms.CheckBox).Checked
+                        ElseIf TypeOf param.Value Is Integer Then
+                            Dim val As Integer
+                            If Integer.TryParse(CType(param.InputControl, TextBox).Text, val) Then
+                                param.Value = val
+                            Else
+                                Throw New System.Exception($"Invalid value for {param.Name}.")
+                            End If
+                        ElseIf TypeOf param.Value Is Double Then
+                            Dim val As Double
+                            If Double.TryParse(CType(param.InputControl, TextBox).Text, val) Then
+                                param.Value = val
+                            Else
+                                Throw New System.Exception($"Invalid value for {param.Name}.")
+                            End If
+                        Else
+                            param.Value = CType(param.InputControl, TextBox).Text
+                        End If
+                    Catch ex As System.Exception
+                        ShowCustomMessageBox($"{ex.Message} Using original ('{param.Value}').")
+                    End Try
+                Next
+            End If
+
+            inputForm.Dispose()
+            Return (result = DialogResult.OK)
+        End Function
+
+
+        Public Shared Function xxShowCustomVariableInputForm(
+                                                            ByVal prompt As String,
+                                                            ByVal header As String,
+                                                            ByRef params() As InputParameter
+                                                        ) As Boolean
             ' Fallback header
             If String.IsNullOrWhiteSpace(header) Then header = AN
 
@@ -4714,7 +4946,7 @@ Namespace SharedLibrary
                 Dim ctrl As System.Windows.Forms.Control
                 If TypeOf param.Value Is Boolean Then
                     Dim chk As New System.Windows.Forms.CheckBox() With {
-                .Checked = Convert.ToBoolean(param.Value),
+                .Checked = System.Convert.ToBoolean(param.Value),
                 .AutoSize = True,
                 .Anchor = System.Windows.Forms.AnchorStyles.Left,
                 .Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
@@ -4846,7 +5078,7 @@ Namespace SharedLibrary
                 If TypeOf param.Value Is Boolean Then
                     ' For Boolean values use a CheckBox.
                     Dim chk As New System.Windows.Forms.CheckBox()
-                    chk.Checked = Convert.ToBoolean(param.Value)
+                    chk.Checked = System.Convert.ToBoolean(param.Value)
                     chk.AutoSize = True
                     ' Place the checkbox at a fixed X position.
                     chk.Location = New Drawing.Point(widthneeded + 50, currentY)
@@ -4947,9 +5179,629 @@ Namespace SharedLibrary
             Return Returnvalue
         End Function
 
+        <DllImport("user32.dll", CharSet:=CharSet.Auto)>
+        Private Shared Function SendMessage(
+                    ByVal hWnd As IntPtr,
+                    ByVal msg As Integer,
+                    ByVal wParam As IntPtr,
+                    ByVal lParam As IntPtr
+                ) As IntPtr
+        End Function
+
+        Private Const EM_AUTOURLDETECT As Integer = &H45A
 
 
-        Public Shared Function ShowCustomWindow(introLine As String, ByVal bodyText As String, finalRemark As String, header As String, Optional NoRTF As Boolean = False, Optional Getfocus As Boolean = False, Optional InsertMarkdown As Boolean = False) As String
+        Public Shared Function ShowCustomWindow(
+                            introLine As String,
+                            ByVal bodyText As String,
+                            finalRemark As String,
+                            header As String,
+                            Optional NoRTF As Boolean = False,
+                            Optional Getfocus As Boolean = False,
+                            Optional InsertMarkdown As Boolean = False
+                        ) As String
+
+
+            ' Ursprünglichen Text merken
+            Dim OriginalText As String = bodyText
+
+            ' --- Abstände & Konstanten ---
+            Const leftMargin As Integer = 10
+            Const rightPadding As Integer = 10    ' jetzt 10 px
+            Const spacing As Integer = 10         ' zwischen Label/TextBox
+            Const gapButtons As Integer = 10
+            Const remarkToButtonSpacing As Integer = 20  ' immer 20 px zwischen (finalRemark) und Buttons
+            Const bottomPadding As Integer = 20   ' immer 20 px unter den Buttons
+
+            ' --- Controls anlegen ---
+            Dim styledForm As New System.Windows.Forms.Form()
+            Dim introLabel As New System.Windows.Forms.Label()
+            Dim bodyTextBox As New System.Windows.Forms.RichTextBox()
+            Dim finalRemarkLabel As New System.Windows.Forms.Label()
+            Dim btnEdited As New System.Windows.Forms.Button()
+            Dim btnOriginal As New System.Windows.Forms.Button()
+            Dim btnMark As New System.Windows.Forms.Button()
+            Dim btnCancel As New System.Windows.Forms.Button()
+            Dim toolStrip As New System.Windows.Forms.ToolStrip()
+
+            ' --- Screen / Max-Größe berechnen ---
+            Dim scrW = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Width
+            Dim scrH = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height
+            Dim maxW = scrW \ 2
+            Dim maxH = Math.Min(scrH \ 2, (maxW * 9) \ 16)
+            maxW = Math.Min(maxW, (maxH * 16) \ 9)
+
+            ' --- Fallback–Minima für Breite/Höhe ---
+            Const minFormWStatic As Integer = 400
+            Const minFormHStatic As Integer = 300
+
+            ' --- Formular-Eigenschaften ---
+            styledForm.Text = header
+            styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            styledForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            styledForm.MaximizeBox = True
+            styledForm.MinimizeBox = False
+            styledForm.ShowInTaskbar = False
+            styledForm.TopMost = True
+            styledForm.CancelButton = btnCancel
+            ' Nur statisches Fallback-Minimum
+            styledForm.MinimumSize = New System.Drawing.Size(minFormWStatic, minFormHStatic)
+
+            ' Icon
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            styledForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+            ' Einheitliche Schrift
+            Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            styledForm.Font = stdFont
+
+            ' --- Intro-Label ---
+            introLabel.Text = introLine
+            introLabel.Font = stdFont
+            introLabel.AutoSize = False
+            introLabel.Location = New System.Drawing.Point(leftMargin, spacing)
+            introLabel.Width = maxW - leftMargin - rightPadding
+            introLabel.Height = introLabel.PreferredHeight
+            introLabel.Anchor = System.Windows.Forms.AnchorStyles.Top Or System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+            styledForm.Controls.Add(introLabel)
+
+            ' --- Buttons anlegen & messen ---
+            btnEdited.Text = "OK, use edited text"
+            Dim szE = System.Windows.Forms.TextRenderer.MeasureText(btnEdited.Text, stdFont)
+            btnEdited.Size = New System.Drawing.Size(szE.Width + 20, szE.Height + 10)
+
+            btnOriginal.Text = "OK, use original text"
+            Dim szO = System.Windows.Forms.TextRenderer.MeasureText(btnOriginal.Text, stdFont)
+            btnOriginal.Size = New System.Drawing.Size(szO.Width + 20, szE.Height + 10)
+
+            If InsertMarkdown Then
+                btnMark.Text = "Insert original text with formatting"
+                Dim szM = System.Windows.Forms.TextRenderer.MeasureText(btnMark.Text, stdFont)
+                btnMark.Size = New System.Drawing.Size(szM.Width + 20, szE.Height + 10)
+                styledForm.Controls.Add(btnMark)
+            End If
+
+            btnCancel.Text = "Cancel"
+            Dim szC = System.Windows.Forms.TextRenderer.MeasureText(btnCancel.Text, stdFont)
+            btnCancel.Size = New System.Drawing.Size(szC.Width + 20, szE.Height + 10)
+
+            ' Füge die Buttons jetzt schon ans Formular (Position später)
+            styledForm.Controls.Add(btnEdited)
+            styledForm.Controls.Add(btnOriginal)
+            styledForm.Controls.Add(btnCancel)
+
+            ' --- BodyTextBox ---
+            bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            bodyTextBox.Multiline = True
+            bodyTextBox.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical
+            bodyTextBox.WordWrap = True
+            bodyTextBox.Location = New System.Drawing.Point(leftMargin, introLabel.Bottom + spacing)
+            bodyTextBox.Width = maxW - leftMargin - rightPadding
+            bodyTextBox.Height = maxH - introLabel.Bottom - spacing
+            bodyTextBox.MinimumSize = New System.Drawing.Size(bodyTextBox.Width, bodyTextBox.Height)
+            bodyTextBox.Anchor = System.Windows.Forms.AnchorStyles.Top Or System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+            styledForm.Controls.Add(bodyTextBox)
+
+            ' --- Optionales End-Label ---
+            Dim hasRemark = Not String.IsNullOrEmpty(finalRemark)
+            If hasRemark Then
+                finalRemarkLabel.Text = finalRemark
+                finalRemarkLabel.Font = stdFont
+                finalRemarkLabel.AutoSize = False
+                finalRemarkLabel.Width = bodyTextBox.MinimumSize.Width
+                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(finalRemarkLabel.Width, 0)).Height
+                finalRemarkLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+                styledForm.Controls.Add(finalRemarkLabel)
+            End If
+
+            ' --- ToolStrip aufbauen ---
+            toolStrip.Dock = System.Windows.Forms.DockStyle.None
+            For Each sym In New String() {"B", "I", "U", "•"}
+                Dim tsb As New System.Windows.Forms.ToolStripButton(sym) With {
+            .Font = New System.Drawing.Font(stdFont, If(sym = "B", System.Drawing.FontStyle.Bold, If(sym = "I", System.Drawing.FontStyle.Italic, If(sym = "U", System.Drawing.FontStyle.Underline, System.Drawing.FontStyle.Regular)))),
+            .Name = "tsb" & sym
+        }
+                AddHandler tsb.Click, Sub(s, e)
+                                          If bodyTextBox.SelectionLength > 0 Then
+                                              Select Case DirectCast(s, System.Windows.Forms.ToolStripButton).Name
+                                                  Case "tsbB"
+                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Bold)
+                                                  Case "tsbI"
+                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Italic)
+                                                  Case "tsbU"
+                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Underline)
+                                                  Case "tsb•"
+                                                      bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
+                                                      bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
+                                                      bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
+                                              End Select
+                                          End If
+                                      End Sub
+                toolStrip.Items.Add(tsb)
+            Next
+            styledForm.Controls.Add(toolStrip)
+
+            ' --- Dynamische Mindestgröße berechnen inkl. finalRemark & Buttons ---
+            Dim bodyTop = bodyTextBox.Top
+            Dim bodyMinH = bodyTextBox.MinimumSize.Height
+            Dim remHeight = If(hasRemark,
+                      finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(bodyTextBox.MinimumSize.Width, 0)).Height,
+                      0)
+            Dim btnH = btnEdited.Height
+
+            Dim dynamicMinH = bodyTop _
+                      + bodyMinH _
+                      + If(hasRemark,
+                            spacing + remHeight + remarkToButtonSpacing,
+                            remarkToButtonSpacing) _
+                      + btnH _
+                      + bottomPadding
+
+            ' Mindestbreite: reicht für BodyTextBox + padding, Intro-Label und alle Buttons
+            Dim w1 = leftMargin + bodyTextBox.MinimumSize.Width + rightPadding
+            Dim introMinW = leftMargin + introLabel.PreferredWidth + rightPadding
+            Dim totalBtnW = btnEdited.Width + gapButtons + btnOriginal.Width _
+                    + If(InsertMarkdown, gapButtons + btnMark.Width, 0) _
+                    + gapButtons + btnCancel.Width
+            Dim w3 = leftMargin + totalBtnW + rightPadding
+            Dim dynamicMinW = Math.Max(Math.Max(w1, introMinW), w3)
+
+            ' Setze die wirklich gültige MinimumSize
+            styledForm.MinimumSize = New System.Drawing.Size(
+        Math.Max(minFormWStatic, dynamicMinW),
+        Math.Max(minFormHStatic, dynamicMinH)
+    )
+
+            ' --- Resize-Handler: Positionen & Größen anpassen ---
+            AddHandler styledForm.Resize, Sub(s, e)
+                                              Dim fW = styledForm.ClientSize.Width
+                                              Dim fH = styledForm.ClientSize.Height
+
+                                              ' Intro-Label
+                                              introLabel.Width = fW - leftMargin - rightPadding
+
+                                              ' BodyTextBox Breite/Höhe
+                                              Dim newW = fW - leftMargin - rightPadding
+                                              bodyTextBox.Width = Math.Max(bodyTextBox.MinimumSize.Width, newW)
+                                              Dim usedBelow = If(hasRemark,
+                           spacing + finalRemarkLabel.Height + remarkToButtonSpacing,
+                           remarkToButtonSpacing) _
+                        + btnH + bottomPadding
+                                              Dim availH = fH - bodyTop - usedBelow
+                                              bodyTextBox.Height = Math.Max(bodyTextBox.MinimumSize.Height, availH)
+
+                                              ' finalRemarkLabel darunter
+                                              If hasRemark Then
+                                                  finalRemarkLabel.Width = bodyTextBox.Width
+                                                  finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(finalRemarkLabel.Width, 0)).Height
+                                                  finalRemarkLabel.Location = New System.Drawing.Point(leftMargin, bodyTextBox.Bottom + spacing)
+                                              End If
+
+                                              ' Buttons immer 20px über dem unteren Fensterrand
+                                              Dim btnY = fH - btnH - bottomPadding
+                                              btnEdited.Location = New System.Drawing.Point(leftMargin, btnY)
+                                              btnOriginal.Location = New System.Drawing.Point(btnEdited.Right + gapButtons, btnY)
+                                              If InsertMarkdown Then
+                                                  btnMark.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
+                                                  btnCancel.Location = New System.Drawing.Point(btnMark.Right + gapButtons, btnY)
+                                              Else
+                                                  btnCancel.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
+                                              End If
+
+                                              ' ToolStrip oberhalb der TextBox am rechten Rand
+                                              toolStrip.Location = New System.Drawing.Point(
+            leftMargin + bodyTextBox.Width - toolStrip.Width,
+            bodyTextBox.Top - toolStrip.Height - spacing
+        )
+                                              toolStrip.BringToFront()
+                                          End Sub
+
+            ' --- Initialgröße setzen (>= dynamicMin & >= max) und Layout triggern ---
+            Dim initW = Math.Max(maxW, styledForm.MinimumSize.Width)
+            Dim initH = Math.Max(maxH, styledForm.MinimumSize.Height)
+            styledForm.ClientSize = New System.Drawing.Size(initW, initH)
+            styledForm.PerformLayout()
+
+            styledForm.MinimumSize = styledForm.Size
+
+            ' --- RTF-Initialformatierung (unverändert) ---
+            'bodyTextBox.Text = bodyText
+            'bodyTextBox.AppendText(" ")
+            'bodyTextBox.Select(bodyTextBox.TextLength - 1, 1)
+            'bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, System.Drawing.FontStyle.Bold)
+            'bodyTextBox.DeselectAll()
+
+            'Dim rtf As String = bodyTextBox.Rtf
+            'Dim pattern As String = "(\*\*.*?\*\*|\{\{.*?\}\})"
+            'Dim matches = System.Text.RegularExpressions.Regex.Matches(rtf, pattern)
+            'Dim newRtf = rtf
+            'For Each m As System.Text.RegularExpressions.Match In matches.Cast(Of System.Text.RegularExpressions.Match).Reverse()
+            '    Dim txt = m.Value.Substring(2, m.Value.Length - 4)
+            '    newRtf = newRtf.Remove(m.Index, m.Length).Insert(m.Index, "\b\f1 " & txt & "\b0\f0 ")
+            'Next
+            'bodyTextBox.Rtf = newRtf
+            'bodyTextBox.Select(0, 0)
+
+            Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
+            bodyTextBox.Rtf = rtf
+
+            SendMessage(bodyTextBox.Handle, EM_AUTOURLDETECT, CType(1, IntPtr), IntPtr.Zero)
+            bodyTextBox.DetectUrls = True
+            bodyTextBox.Refresh()
+            bodyTextBox.Select(0, 0)
+
+            ' --- Button-Handler (unverändert) ---
+            Dim returnValue As String = String.Empty
+
+            AddHandler btnEdited.Click, Sub()
+                                            returnValue = If(NoRTF, bodyTextBox.Text, bodyTextBox.Rtf)
+                                            styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                                            styledForm.Close()
+                                        End Sub
+
+            AddHandler btnOriginal.Click, Sub()
+                                              returnValue = If(NoRTF, OriginalText, rtf)
+                                              styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                                              styledForm.Close()
+                                          End Sub
+
+            If InsertMarkdown Then
+                AddHandler btnMark.Click, Sub()
+                                              returnValue = "Markdown"
+                                              styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                                              styledForm.Close()
+                                          End Sub
+            End If
+
+            AddHandler btnCancel.Click, Sub()
+                                            returnValue = String.Empty
+                                            styledForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
+                                            styledForm.Close()
+                                        End Sub
+
+            ' --- Dialog anzeigen ---
+            styledForm.BringToFront()
+            styledForm.Focus()
+            If Getfocus Then
+                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
+                styledForm.ShowDialog(New WindowWrapper(outlookHwnd))
+            Else
+                styledForm.ShowDialog()
+            End If
+
+            Return returnValue
+
+        End Function
+
+        Public Shared Property TaskPanes As CustomTaskPaneCollection
+
+        Public Shared Sub Initialize(panes As CustomTaskPaneCollection)
+            TaskPanes = panes
+        End Sub
+
+        Public Class PaneManager
+
+            ' Jetzt referenzieren wir ganz eindeutig den VSTO-Typ:
+            Private Shared CurrentCustomTaskPane As Microsoft.Office.Tools.CustomTaskPane
+
+
+            Public Shared Async Function ShowMyPane(
+                                introLine As String,
+                                bodyText As String,
+                                finalRemark As String,
+                                header As String,
+                                Optional noRTF As Boolean = False,
+                                Optional insertMarkdown As Boolean = False
+                            ) As Task(Of String)
+
+                If TaskPanes Is Nothing Then
+                    Return String.Empty
+                End If
+
+                ' Asynchron warten, ohne den UI-Thread zu blockieren:
+                Dim result = Await PaneManager.ShowCustomPane(
+        TaskPanes,
+        introLine,
+        bodyText,
+        finalRemark,
+        header,
+        noRTF,
+        insertMarkdown
+    )
+
+                Return result
+            End Function
+
+            Public Shared Function ShowCustomPane(
+                XtaskPanes As Microsoft.Office.Tools.CustomTaskPaneCollection,
+                introLine As String,
+                bodyText As String,
+                finalRemark As String,
+                header As String,
+                Optional noRTF As Boolean = False,
+                Optional insertMarkdown As Boolean = False
+            ) As System.Threading.Tasks.Task(Of String)
+
+                ' Wenn‘s schon eins gibt, zuerst entfernen
+                If CurrentCustomTaskPane IsNot Nothing Then
+                    CurrentCustomTaskPane.Visible = False
+                    XtaskPanes.Remove(CurrentCustomTaskPane)
+                    CurrentCustomTaskPane = Nothing
+                End If
+
+                ' neues Control + Pane anlegen
+                Dim ctrl As New CustomPaneControl()
+                Dim pane = XtaskPanes.Add(ctrl, header)
+
+                ' Eindeutig die Core-Enums benutzen:
+                pane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight
+                pane.DockPositionRestrict = Microsoft.Office.Core.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNone
+
+                pane.Visible = True
+                ctrl.ParentPane = pane
+                CurrentCustomTaskPane = pane
+
+                Return ctrl.ShowPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
+            End Function
+
+        End Class
+
+
+        Public Class CustomPaneControl
+            Inherits UserControl
+
+            <DllImport("user32.dll", CharSet:=CharSet.Auto)>
+            Private Shared Function SendMessage(
+                    ByVal hWnd As IntPtr,
+                    ByVal msg As Integer,
+                    ByVal wParam As IntPtr,
+                    ByVal lParam As IntPtr
+                ) As IntPtr
+            End Function
+
+            Private Const EM_AUTOURLDETECT As Integer = &H45A
+
+            ''' <summary>Wird vom PaneManager gesetzt.</summary>
+            Public Property ParentPane As Microsoft.Office.Tools.CustomTaskPane
+
+            Private tcs As System.Threading.Tasks.TaskCompletionSource(Of String)
+            Private originalText As String
+            Private NoRTF As Boolean
+            Private InsertMarkdown As Boolean
+
+            ' --- Controls ---
+            Private introLabel As System.Windows.Forms.Label
+            Private toolStrip As ToolStrip
+            Private bodyTextBox As RichTextBox
+            Private finalRemarkLabel As System.Windows.Forms.Label
+            Private btnTable As TableLayoutPanel
+            Private btnAll As Button
+            Private btnSelected As Button
+            Private btnMark As Button
+            Private btnCancel As Button
+            Private toolTip As ToolTip
+
+            Public Sub New()
+                InitializeComponent()
+                Me.Dock = DockStyle.Fill
+            End Sub
+
+            Private Sub InitializeComponent()
+                ' --- Konstanten ---
+                Const padding As Integer = 10
+
+                ' Schrift
+                Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+                Me.Font = stdFont
+
+                ' ToolTip
+                toolTip = New ToolTip() With {.ShowAlways = True}
+
+                ' Äußeres TableLayoutPanel
+                Dim tbl As New TableLayoutPanel() With {
+            .Dock = DockStyle.Fill,
+            .ColumnCount = 1,
+            .RowCount = 5,
+            .Padding = New Padding(padding)
+        }
+                tbl.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
+                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' Intro
+                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' ToolStrip
+                tbl.RowStyles.Add(New RowStyle(SizeType.Percent, 100)) ' BodyTextBox
+                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' FinalRemark
+                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' Buttons
+                Me.Controls.Add(tbl)
+
+                ' 1) Intro-Label
+                introLabel = New System.Windows.Forms.Label() With {
+            .AutoSize = True,
+            .Dock = DockStyle.Fill,
+            .Font = stdFont,
+            .TextAlign = ContentAlignment.MiddleLeft
+        }
+                tbl.Controls.Add(introLabel, 0, 0)
+
+                ' 2) ToolStrip
+                toolStrip = New ToolStrip() With {
+            .GripStyle = ToolStripGripStyle.Hidden,
+            .Dock = DockStyle.Fill,
+            .Padding = New Padding(0)
+        }
+                For Each sym In New String() {"B", "I", "U", "•"}
+                    Dim tsb As New ToolStripButton(sym) With {
+                .Font = New System.Drawing.Font(stdFont,
+                    If(sym = "B", FontStyle.Bold,
+                    If(sym = "I", FontStyle.Italic,
+                    If(sym = "U", FontStyle.Underline,
+                    FontStyle.Regular)))),
+                .Name = "tsb" & sym,
+                .DisplayStyle = ToolStripItemDisplayStyle.Text
+            }
+                    AddHandler tsb.Click, AddressOf ToolStripButton_Click
+                    toolStrip.Items.Add(tsb)
+                Next
+                tbl.Controls.Add(toolStrip, 0, 1)
+
+                ' 3) BodyTextBox
+                bodyTextBox = New System.Windows.Forms.RichTextBox() With {
+                            .Dock = DockStyle.Fill,
+                            .DetectUrls = True,
+                            .Font = New System.Drawing.Font("Segoe UI", 10.0F, FontStyle.Regular, GraphicsUnit.Point),
+                            .WordWrap = True,
+                            .ScrollBars = RichTextBoxScrollBars.Vertical,
+                            .BorderStyle = BorderStyle.FixedSingle
+                        }
+                AddHandler bodyTextBox.LinkClicked, AddressOf BodyTextBox_LinkClicked
+                tbl.Controls.Add(bodyTextBox, 0, 2)
+
+                ' 4) FinalRemark-Label
+                finalRemarkLabel = New System.Windows.Forms.Label() With {
+            .AutoSize = True,
+            .Dock = DockStyle.Fill,
+            .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style),
+            .TextAlign = ContentAlignment.MiddleLeft
+        }
+                tbl.Controls.Add(finalRemarkLabel, 0, 3)
+
+                ' 5) Buttons-TableLayoutPanel
+                btnTable = New TableLayoutPanel() With {
+            .Dock = DockStyle.Fill,
+            .ColumnCount = 4,
+            .RowCount = 1,
+            .Margin = New Padding(0)
+        }
+                For i As Integer = 1 To 4
+                    btnTable.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25))
+                Next
+                ' Buttons
+                btnAll = New Button() With {.Text = "Copy all", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
+                btnSelected = New Button() With {.Text = "Copy selection", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
+                btnMark = New Button() With {.Text = "Insert && close", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Visible = False, .Padding = New Padding(3)}
+                btnCancel = New Button() With {.Text = "Close", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
+
+                ' Helfer-Funktion
+                Dim addBtn = Sub(btn As Button, col As Integer, tip As String)
+                                 btn.Dock = DockStyle.Fill
+                                 btn.AutoSize = False
+                                 btn.AutoEllipsis = True
+                                 AddHandler btn.Click, AddressOf Button_Click
+                                 toolTip.SetToolTip(btn, tip)
+                                 btnTable.Controls.Add(btn, col, 0)
+                             End Sub
+
+                addBtn(btnAll, 0, "") ' "Copy all to the clipboard"
+                addBtn(btnSelected, 1, "") ' "Copy selection to the clipboard"
+                addBtn(btnMark, 2, "Insert the original text with its formatting and close") ' Insert the original text with its formatting and close
+                addBtn(btnCancel, 3, "") ' "Close the pane without copying the text to the clipboard"
+
+                tbl.Controls.Add(btnTable, 0, 4)
+            End Sub
+
+            ''' <summary>Zeigt den Pane und gibt asynchron das Ergebnis zurück.</summary>
+            Public Function ShowPane(introLine As String,
+                             bodyText As String,
+                             finalRemark As String,
+                             header As String,
+                             Optional noRTF As Boolean = False,
+                             Optional insertMarkdown As Boolean = False) As System.Threading.Tasks.Task(Of String)
+
+                Me.originalText = bodyText
+                Me.NoRTF = noRTF
+                Me.InsertMarkdown = insertMarkdown
+
+                introLabel.Text = introLine
+                finalRemarkLabel.Text = finalRemark
+                btnMark.Visible = insertMarkdown
+
+                ' RTF-Init
+                bodyTextBox.Rtf = MarkdownToRtfConverter.Convert(bodyText)
+
+                SendMessage(bodyTextBox.Handle, EM_AUTOURLDETECT, CType(1, IntPtr), IntPtr.Zero)
+                bodyTextBox.DetectUrls = True
+                bodyTextBox.Refresh()
+
+                tcs = New System.Threading.Tasks.TaskCompletionSource(Of String)()
+                Return tcs.Task
+            End Function
+
+            Private Sub BodyTextBox_LinkClicked(
+                            sender As Object,
+                            e As LinkClickedEventArgs
+                        )
+                Try
+                    ' .UseShellExecute = True is required on .NET Core / .NET 5+
+                    Process.Start(New ProcessStartInfo(e.LinkText) With {.UseShellExecute = True})
+                Catch ex As System.Exception
+                    MessageBox.Show("Could not open link: " & ex.Message)
+                End Try
+            End Sub
+
+            Private Sub Button_Click(sender As Object, e As EventArgs)
+                Dim btn = DirectCast(sender, Button)
+                Dim result As String = String.Empty
+                If btn Is btnAll Then
+                    If NoRTF Then PutInClipboard(bodyTextBox.Text) Else PutInClipboard(bodyTextBox.Rtf)
+                    Return
+                End If
+                If btn Is btnSelected Then
+                    If NoRTF Then PutInClipboard(bodyTextBox.SelectedText) Else PutInClipboard(bodyTextBox.SelectedRtf)
+                    Return
+                End If
+                If btn Is btnMark Then result = "Markdown"
+                tcs.TrySetResult(result)
+                HidePane()
+            End Sub
+
+            Private Sub ToolStripButton_Click(sender As Object, e As EventArgs)
+                Dim tsb = DirectCast(sender, ToolStripButton)
+                If bodyTextBox.SelectionLength > 0 Then
+                    Select Case tsb.Name
+                        Case "tsbB"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Bold)
+                        Case "tsbI"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Italic)
+                        Case "tsbU"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Underline)
+                        Case "tsb•"
+                            bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
+                            bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
+                            bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
+                    End Select
+                End If
+            End Sub
+
+            Private Sub HidePane()
+                Try
+                    If ParentPane IsNot Nothing Then ParentPane.Visible = False
+                Catch
+                End Try
+            End Sub
+        End Class
+
+
+
+
+        Public Shared Function xxShowCustomWindow(introLine As String, ByVal bodyText As String, finalRemark As String, header As String, Optional NoRTF As Boolean = False, Optional Getfocus As Boolean = False, Optional InsertMarkdown As Boolean = False) As String
 
             Dim OriginalText As String = bodyText
             Dim styledForm As New System.Windows.Forms.Form()
@@ -5213,6 +6065,28 @@ Namespace SharedLibrary
         Public Class InputParameter
             Public Property Name As String
             Public Property Value As Object
+            Public Property Options As List(Of String) = Nothing  ' New: list of options, if any
+            Public Property InputControl As Control
+
+            ' Constructor for simple parameters
+            Public Sub New(ByVal name As String, ByVal value As Object)
+                Me.Name = name
+                Me.Value = value
+            End Sub
+
+            ' Overload for parameters with options
+            Public Sub New(ByVal name As String, ByVal value As Object, ByVal options As IEnumerable(Of String))
+                Me.Name = name
+                Me.Value = value
+                If options IsNot Nothing Then
+                    Me.Options = New List(Of String)(options)
+                End If
+            End Sub
+        End Class
+
+        Public Class xxInputParameter
+            Public Property Name As String
+            Public Property Value As Object
             ' We use this property to keep track of the dynamically created control.
             Public Property InputControl As Control
 
@@ -5221,8 +6095,6 @@ Namespace SharedLibrary
                 Me.Value = value
             End Sub
         End Class
-
-        ' xxxxx start here with window optimization
 
         Public Shared Function MissingSettingsWindow(Settings As Dictionary(Of String, String), context As ISharedContext) As Boolean
 
@@ -5815,7 +6687,7 @@ Namespace SharedLibrary
                 Dim wordApp As Microsoft.Office.Interop.Word.Application = CType(Marshal.GetActiveObject("Word.Application"), Microsoft.Office.Interop.Word.Application)
 
                 ' Iterate through all loaded AddIns in Word.
-                For Each addIn As AddIn In wordApp.AddIns
+                For Each addIn As Microsoft.Office.Interop.Word.AddIn In wordApp.AddIns
                     ' Compare names in a case-insensitive manner (if desired).
                     Debug.WriteLine("Addin: " & addIn.Name)
                     If addIn.Name.Equals(addInName, StringComparison.OrdinalIgnoreCase) Then
@@ -5860,7 +6732,7 @@ Namespace SharedLibrary
         Public Shared Function IsBooleanSetting(settingKey As String) As Boolean
             ' Determine if a setting is a Boolean based on its key
             Dim booleanSettings As New List(Of String) From {
-        "DoubleS", "KeepFormat1", "ReplaceText1",
+        "DoubleS", "Clean", "KeepFormat1", "ReplaceText1",
         "KeepFormat2", "KeepParaFormatInline", "ReplaceText2", "DoMarkupOutlook", "DoMarkupWord",
         "APIDebug", "ISearch_Approve", "ISearch", "Lib"
             }
@@ -5931,6 +6803,8 @@ Namespace SharedLibrary
                     Return context.Codebasis
                 Case "DoubleS"
                     Return context.INI_DoubleS.ToString()
+                Case "Clean"
+                    Return context.INI_Clean.ToString()
                 Case "KeepFormat1"
                     Return context.INI_KeepFormat1.ToString()
                 Case "ReplaceText1"
@@ -5973,6 +6847,8 @@ Namespace SharedLibrary
                     Return context.INI_PromptLibPath
                 Case "AlternateModelPath"
                     Return context.INI_AlternateModelPath
+                Case "SpecialServicePath"
+                    Return context.INI_SpecialServicePath
                 Case "PromptLibPath_Transcript"
                     Return context.INI_PromptLibPath_Transcript
                 Case "SpeechModelPath"
@@ -6093,6 +6969,8 @@ Namespace SharedLibrary
                     context.Codebasis = value
                 Case "DoubleS"
                     context.INI_DoubleS = Boolean.Parse(value)
+                Case "Clean"
+                    context.INI_Clean = Boolean.Parse(value)
                 Case "KeepFormat1"
                     context.INI_KeepFormat1 = Boolean.Parse(value)
                 Case "ReplaceText1"
@@ -6137,6 +7015,8 @@ Namespace SharedLibrary
                     context.INI_PromptLibPath_Transcript = value
                 Case "AlternateModelPath"
                     context.INI_AlternateModelPath = value
+                Case "SpecialServicePath"
+                    context.INI_SpecialServicePath = value
                 Case "SpeechModelPath"
                     context.INI_SpeechModelPath = value
                 Case "APIDebug"
@@ -6346,6 +7226,7 @@ Namespace SharedLibrary
                     {"Language1", context.INI_Language1},
                     {"Language2", context.INI_Language2},
                     {"DoubleS", context.INI_DoubleS.ToString()},
+                    {"Clean", context.INI_Clean.ToString()},
                     {"KeepFormat1", context.INI_KeepFormat1.ToString()},
                     {"ReplaceText1", context.INI_ReplaceText1.ToString()},
                     {"KeepFormat2", context.INI_KeepFormat2.ToString()},
@@ -6413,6 +7294,7 @@ Namespace SharedLibrary
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
                     {"AlternateModelPath", context.INI_AlternateModelPath},
+                    {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript},
                     {"SP_Translate", context.SP_Translate},
                     {"SP_Correct", context.SP_Correct},
@@ -6619,6 +7501,7 @@ Namespace SharedLibrary
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
                     {"AlternateModelPath", context.INI_AlternateModelPath},
+                    {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript}
                 }
 
@@ -6847,6 +7730,7 @@ Namespace SharedLibrary
             variableValues.Add("APICall_Object", context.INI_APICall_Object)
             variableValues.Add("Response", context.INI_Response)
             variableValues.Add("DoubleS", context.INI_DoubleS)
+            variableValues.Add("Clean", context.INI_Clean)
             variableValues.Add("PreCorrection", context.INI_PreCorrection)
             variableValues.Add("PostCorrection", context.INI_PostCorrection)
             variableValues.Add("APIEncrypted", context.INI_APIEncrypted)
@@ -6920,6 +7804,7 @@ Namespace SharedLibrary
             variableValues.Add("ShortcutsWordExcel", context.INI_ShortcutsWordExcel)
             variableValues.Add("PromptLib", context.INI_PromptLibPath)
             variableValues.Add("AlternateModelPath", context.INI_AlternateModelPath)
+            variableValues.Add("SpecialServicePath", context.INI_SpecialServicePath)
             variableValues.Add("PromptLib_Transcript", context.INI_PromptLibPath_Transcript)
             variableValues.Add("SP_Translate", context.SP_Translate)
             variableValues.Add("SP_Correct", context.SP_Correct)
@@ -6978,6 +7863,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
                     If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
                     If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
+                    If updatedValues.ContainsKey("Clean") Then context.INI_Clean = CBool(updatedValues("Clean"))
                     If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
                     If updatedValues.ContainsKey("PostCorrection") Then context.INI_PostCorrection = updatedValues("PostCorrection")
                     If updatedValues.ContainsKey("APIEncrypted") Then context.INI_APIEncrypted = CBool(updatedValues("APIEncrypted"))
@@ -7085,6 +7971,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("TTSEndpoint") Then context.INI_TTSEndpoint = updatedValues("TTSEndpoint")
                     If updatedValues.ContainsKey("PromptLib") Then context.INI_PromptLibPath = updatedValues("PromptLib")
                     If updatedValues.ContainsKey("AlternateModelPath") Then context.INI_AlternateModelPath = updatedValues("AlternateModelPath")
+                    If updatedValues.ContainsKey("SpecialServicePath") Then context.INI_SpecialServicePath = updatedValues("SpecialServicePath")
                     If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
 
                     ' Call UpdateAppConfig after all updates
@@ -9287,7 +10174,7 @@ Namespace SharedLibrary
         Private Shared Function TryGetImageData(token As JToken, ByRef imageBytes As Byte(), ByRef mimeType As String) As Boolean
             Dim base64Str As String = token.ToString()
             Try
-                Dim bytes As Byte() = Convert.FromBase64String(base64Str)
+                Dim bytes As Byte() = System.Convert.FromBase64String(base64Str)
                 ' Validate that the byte array represents a valid image.
                 Using ms As New MemoryStream(bytes)
                     Using img As Image = Image.FromStream(ms)
@@ -9422,8 +10309,6 @@ Namespace SharedLibrary
     End Class
 
 
-
-
     Public Class ModelConfig
         Public Property APIKey As String
         Public Property APIKeyBack As String
@@ -9447,6 +10332,10 @@ Namespace SharedLibrary
         Public Property ModelDescription As String
         Public Property DecodedAPI As String
         Public Property TokenExpiry As DateTime
+        Public Property Parameter1 As String
+        Public Property Parameter2 As String
+        Public Property Parameter3 As String
+        Public Property Parameter4 As String
 
         Public Function Clone() As ModelConfig
             Return DirectCast(Me.MemberwiseClone(), ModelConfig)
@@ -9464,14 +10353,17 @@ Namespace SharedLibrary
         Private btnCancel As Button
 
         Private alternativeModels As List(Of ModelConfig)
+        Private hasDefaultEntry As Boolean
 
         ' The selected alternative model (if any).
         Public Property SelectedModel As ModelConfig = Nothing
         ' True if the default configuration is to be used.
         Public Property UseDefault As Boolean = True
 
+        Public Sub New(ByVal iniFilePath As String, ByVal context As ISharedContext, ByVal Title As String, ByVal ListType As String, ByVal OptionText As String, Optional UseCase As Integer = 1)
 
-        Public Sub New(ByVal iniFilePath As String, ByVal context As ISharedContext)
+            OptionChecked = True
+
             ' --- DPI- und Font-Skalierung aktivieren ---
             Me.AutoScaleDimensions = New System.Drawing.SizeF(96.0F, 96.0F)
             Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
@@ -9479,14 +10371,14 @@ Namespace SharedLibrary
 
             Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
             Me.Icon = Icon.FromHandle((New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)).GetHicon())
-            Me.Text = "Freestyle"
+            Me.Text = Title
 
             ' Haupt-TableLayoutPanel mit 4 Zeilen
             Dim tlpMain As New System.Windows.Forms.TableLayoutPanel() With {
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .ColumnCount = 1,
-        .RowCount = 4
-    }
+                                            .Dock = System.Windows.Forms.DockStyle.Fill,
+                                            .ColumnCount = 1,
+                                            .RowCount = 4
+                                        }
             tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))    ' Zeile 1: Label
             tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Zeile 2: ListBox
             tlpMain.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))    ' Zeile 3: Checkbox
@@ -9494,52 +10386,52 @@ Namespace SharedLibrary
 
             ' Zeile 1: Label (shrinks & grows, 20px Padding)
             lblTitle = New System.Windows.Forms.Label() With {
-        .Text = "Select the model you want to use:",
-        .AutoSize = True,
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .Margin = New System.Windows.Forms.Padding(20, 20, 20, 0)
-    }
+                                            .Text = ListType,
+                                            .AutoSize = True,
+                                            .Dock = System.Windows.Forms.DockStyle.Fill,
+                                            .Margin = New System.Windows.Forms.Padding(20, 20, 20, 0)
+                                        }
             tlpMain.Controls.Add(lblTitle, 0, 0)
 
             ' Zeile 2: ListBox (shrinks & grows, 20px Padding)
             lstModels = New System.Windows.Forms.ListBox() With {
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .Margin = New System.Windows.Forms.Padding(20)
-    }
+                                        .Dock = System.Windows.Forms.DockStyle.Fill,
+                                        .Margin = New System.Windows.Forms.Padding(20)
+                                    }
             tlpMain.Controls.Add(lstModels, 0, 1)
 
             ' Zeile 3: Checkbox (grows but not shrink, 20px Padding)
             chkReset = New System.Windows.Forms.CheckBox() With {
-        .Text = "Reset to default model after use",
-        .Checked = True,
-        .AutoSize = True,
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .Margin = New System.Windows.Forms.Padding(20, 0, 20, 0)
-    }
+                                        .Text = OptionText,
+                                        .Checked = OptionChecked,
+                                        .AutoSize = True,
+                                        .Dock = System.Windows.Forms.DockStyle.Fill,
+                                        .Margin = New System.Windows.Forms.Padding(20, 0, 20, 0)
+                                    }
             tlpMain.Controls.Add(chkReset, 0, 2)
 
             ' Zeile 4: Buttons (links-nach-rechts, grows but not shrink, 20px Padding)
             Dim flpButtons As New System.Windows.Forms.FlowLayoutPanel() With {
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-        .AutoSize = True,
-        .Margin = New System.Windows.Forms.Padding(20)
-    }
+                                        .Dock = System.Windows.Forms.DockStyle.Fill,
+                                        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+                                        .AutoSize = True,
+                                        .Margin = New System.Windows.Forms.Padding(20)
+                                    }
             btnOK = New System.Windows.Forms.Button() With {
-        .Text = "OK",
-        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
-        .AutoSize = True,
-        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-    }
+                                        .Text = "OK",
+                                        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
+                                        .AutoSize = True,
+                                        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+                                    }
             AddHandler btnOK.Click, AddressOf btnOK_Click
             flpButtons.Controls.Add(btnOK)
 
             btnCancel = New System.Windows.Forms.Button() With {
-        .Text = "Cancel",
-        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
-        .AutoSize = True,
-        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-    }
+                                        .Text = "Cancel",
+                                        .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5),
+                                        .AutoSize = True,
+                                        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+                                    }
             AddHandler btnCancel.Click, AddressOf btnCancel_Click
             flpButtons.Controls.Add(btnCancel)
 
@@ -9551,7 +10443,12 @@ Namespace SharedLibrary
 
             ' Modelle laden
             alternativeModels = LoadAlternativeModels(iniFilePath, context)
-            lstModels.Items.Add("Default = " & context.INI_Model_2)
+            If UseCase = 1 Then
+                lstModels.Items.Add("Default = " & context.INI_Model_2)
+                hasDefaultEntry = True
+            Else
+                hasDefaultEntry = False
+            End If
             For Each model In alternativeModels
                 Dim displayText As String = If(String.IsNullOrEmpty(model.ModelDescription), model.Model, model.ModelDescription)
                 lstModels.Items.Add(displayText)
@@ -9582,13 +10479,15 @@ Namespace SharedLibrary
 
         Private Sub btnOK_Click(sender As Object, e As EventArgs)
             Try
-                If lstModels.SelectedIndex = 0 Then
+                If hasDefaultEntry AndAlso lstModels.SelectedIndex = 0 Then
                     UseDefault = True
                 Else
                     UseDefault = False
-                    Dim index As Integer = lstModels.SelectedIndex - 1
-                    If index >= 0 AndAlso index < alternativeModels.Count Then
-                        SelectedModel = alternativeModels(index)
+                    ' adjust the index offset by 1 if there was a default entry
+                    Dim offset As Integer = If(hasDefaultEntry, 1, 0)
+                    Dim idx As Integer = lstModels.SelectedIndex - offset
+                    If idx >= 0 AndAlso idx < alternativeModels.Count Then
+                        SelectedModel = alternativeModels(idx)
                     End If
                 End If
 
@@ -9596,6 +10495,8 @@ Namespace SharedLibrary
                 If Not chkReset.Checked AndAlso Not UseDefault Then
                     originalConfigLoaded = False
                 End If
+
+                OptionChecked = chkReset.Checked
 
                 Me.DialogResult = DialogResult.OK
                 Me.Close()
@@ -9612,5 +10513,298 @@ Namespace SharedLibrary
     End Class
 
 
+
+
 End Namespace
+
+
+
+Namespace MarkdownToRtf
+    ''' <summary>
+    ''' Main entry point: converts Markdown text to RTF.
+    ''' </summary>
+    Public Module MarkdownToRtfConverter
+
+        ''' <summary>
+        ''' Converts Markdown markup to an RTF-formatted string.
+        ''' </summary>
+        ''' <param name="markdownText">Eine Zeichenfolge mit Markdown-Markup.</param>
+        ''' <returns>RTF-formatierte Zeichenfolge.</returns>
+        Public Function Convert(markdownText As String) As String
+            ' 1) Markdown parsen
+            Dim pipeline = New Markdig.MarkdownPipelineBuilder().Build()
+            Dim document = Markdig.Markdown.Parse(markdownText, pipeline)
+
+            ' 2) RTF aufbauen
+            Dim rtfBuilder As New System.Text.StringBuilder()
+            rtfBuilder.AppendLine("{\rtf1\ansi\deff0")
+
+            ' 3) Blöcke verarbeiten
+            For Each block In document
+                If TypeOf block Is Markdig.Syntax.HeadingBlock Then
+                    ConvertHeadingBlock(rtfBuilder, CType(block, Markdig.Syntax.HeadingBlock))
+                ElseIf TypeOf block Is Markdig.Syntax.ParagraphBlock Then
+                    ConvertParagraphBlock(rtfBuilder, CType(block, Markdig.Syntax.ParagraphBlock))
+                ElseIf TypeOf block Is Markdig.Syntax.ListBlock Then
+                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock))
+                End If
+            Next
+
+            ' RTF-Dokument schließen
+            rtfBuilder.AppendLine("}")
+            Return rtfBuilder.ToString()
+        End Function
+
+        Private Sub ConvertHeadingBlock(rtf As System.Text.StringBuilder, headingBlock As Markdig.Syntax.HeadingBlock)
+            Dim headingSizes() As Integer = {30, 28, 26, 24, 22, 20}
+            Dim level As Integer = headingBlock.Level
+            Dim size As Integer = headingSizes(System.Math.Min(level, headingSizes.Length) - 1)
+
+            rtf.Append($"\pard\sa180\fs{size} \b ")
+            ConvertInline(rtf, headingBlock.Inline)
+            rtf.AppendLine(" \b0\par")
+        End Sub
+
+        Private Sub ConvertParagraphBlock(rtf As System.Text.StringBuilder, paragraphBlock As Markdig.Syntax.ParagraphBlock)
+            rtf.Append("\pard\sa180\fs20 ")
+            ConvertInline(rtf, paragraphBlock.Inline)
+            rtf.AppendLine("\par")
+        End Sub
+
+        Private Sub ConvertListBlock(rtf As System.Text.StringBuilder, listBlock As Markdig.Syntax.ListBlock)
+            Dim isOrdered As Boolean = listBlock.IsOrdered
+            For Each item In listBlock
+                If TypeOf item Is Markdig.Syntax.ListItemBlock Then
+                    Dim li = CType(item, Markdig.Syntax.ListItemBlock)
+                    Dim prefix As String = If(isOrdered, $"{li.Order}. ", "\bullet ")
+
+                    rtf.Append("\pard\sa100\fs20 ")
+                    rtf.Append(prefix)
+                    For Each sb In li
+                        If TypeOf sb Is Markdig.Syntax.ParagraphBlock Then
+                            ConvertInline(rtf, CType(sb, Markdig.Syntax.ParagraphBlock).Inline)
+                        End If
+                    Next
+                    rtf.AppendLine("\par")
+                End If
+            Next
+        End Sub
+
+        ''' <summary>
+        ''' Rekursiv Inlines verarbeiten, inkl. Hyperlinks.
+        ''' </summary>
+        Private Sub ConvertInline(rtf As System.Text.StringBuilder, container As Markdig.Syntax.Inlines.ContainerInline)
+            For Each inline In container
+                Select Case inline.GetType().Name
+                    Case NameOf(Markdig.Syntax.Inlines.EmphasisInline)
+                        HandleEmphasis(rtf, CType(inline, Markdig.Syntax.Inlines.EmphasisInline))
+
+                    Case NameOf(Markdig.Syntax.Inlines.LineBreakInline)
+                        rtf.Append("\line ")
+
+                    Case NameOf(Markdig.Syntax.Inlines.CodeInline)
+                        rtf.Append("\f1 ")
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.CodeInline).Content))
+                        rtf.Append("\f0 ")
+
+                    Case NameOf(Markdig.Syntax.Inlines.HtmlInline)
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag))
+
+                    Case NameOf(Markdig.Syntax.Inlines.LinkInline)
+                        Dim link = CType(inline, Markdig.Syntax.Inlines.LinkInline)
+                        ' Sonderfall: kein sichtbarer Text => URL anzeigen
+                        If link.FirstChild Is Nothing Then
+                            rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt " & EscapeRtf(link.Url) & "}}")
+                        Else
+                            ' Link mit Text: Text als unsichtbare Feldergebnis anzeigen
+                            rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt ")
+                            ConvertInline(rtf, link)
+                            rtf.Append("}}")
+                        End If
+
+                    Case NameOf(Markdig.Syntax.Inlines.LiteralInline)
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.LiteralInline).Content.ToString()))
+                End Select
+            Next
+        End Sub
+
+        ''' <summary>
+        ''' Umgang mit Fett, Kursiv, Unterstrichen.
+        ''' </summary>
+        Private Sub HandleEmphasis(rtf As System.Text.StringBuilder, e As Markdig.Syntax.Inlines.EmphasisInline)
+            Dim italic = (e.DelimiterChar = "*"c AndAlso e.DelimiterCount = 1) OrElse (e.DelimiterChar = "_"c AndAlso e.DelimiterCount = 1)
+            Dim bold = (e.DelimiterChar = "*"c AndAlso e.DelimiterCount = 2)
+            Dim underline = (e.DelimiterChar = "_"c AndAlso e.DelimiterCount = 2)
+
+            If bold Then rtf.Append("\b ")
+            If italic Then rtf.Append("\i ")
+            If underline Then rtf.Append("\ul ")
+
+            ConvertInline(rtf, e)
+
+            If underline Then rtf.Append(" \ulnone")
+            If italic Then rtf.Append(" \i0")
+            If bold Then rtf.Append(" \b0")
+        End Sub
+
+        ''' <summary>
+        ''' Maskierung spezieller Zeichen.
+        ''' </summary>
+        Private Function EscapeRtf(text As String) As String
+            If String.IsNullOrEmpty(text) Then Return String.Empty
+            Dim sb As New System.Text.StringBuilder()
+            For Each c As Char In text
+                Select Case c
+                    Case "\"c : sb.Append("\\")
+                    Case "{"c : sb.Append("\{")
+                    Case "}"c : sb.Append("\}")
+                    Case Else : sb.Append(c)
+                End Select
+            Next
+            Return sb.ToString()
+        End Function
+
+    End Module
+End Namespace
+
+
+Namespace xMarkdownToRtf
+    ''' <summary>
+    ''' Main entry point: converts Markdown text to RTF.
+    ''' </summary>
+    Public Module MarkdownToRtfConverter
+
+        ''' <summary>
+        ''' Converts Markdown markup to an RTF-formatted string.
+        ''' </summary>
+        ''' <param name="markdownText">A string containing Markdown markup.</param>
+        ''' <returns>An RTF-formatted string.</returns>
+        Public Function Convert(markdownText As String) As String
+            ' 1) Parse Markdown into a syntax tree
+            Dim pipeline = New Markdig.MarkdownPipelineBuilder().Build()
+            Dim document = Markdig.Markdown.Parse(markdownText, pipeline)
+
+            ' 2) Start building the RTF string
+            Dim rtfBuilder As New System.Text.StringBuilder()
+
+            ' Basic RTF header
+            rtfBuilder.AppendLine("{\rtf1\ansi\deff0")
+
+            ' 3) Walk the document blocks
+            For Each block In document
+                If TypeOf block Is Markdig.Syntax.HeadingBlock Then
+                    ConvertHeadingBlock(rtfBuilder, CType(block, Markdig.Syntax.HeadingBlock))
+                ElseIf TypeOf block Is Markdig.Syntax.ParagraphBlock Then
+                    ConvertParagraphBlock(rtfBuilder, CType(block, Markdig.Syntax.ParagraphBlock))
+                ElseIf TypeOf block Is Markdig.Syntax.ListBlock Then
+                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock))
+                End If
+            Next
+
+            ' Close the RTF document
+            rtfBuilder.AppendLine("}")
+
+            Return rtfBuilder.ToString()
+        End Function
+
+        Private Sub ConvertHeadingBlock(rtf As System.Text.StringBuilder, headingBlock As Markdig.Syntax.HeadingBlock)
+            Dim headingSizes() As Integer = {30, 28, 26, 24, 22, 20}
+            Dim headingLevel As Integer = headingBlock.Level
+            Dim fontSize As Integer = headingSizes(System.Math.Min(headingLevel, headingSizes.Length) - 1)
+
+            rtf.Append($"\pard\sa180\fs{fontSize} \b ")
+            ConvertInline(rtf, headingBlock.Inline)
+            rtf.AppendLine(" \b0\par")
+        End Sub
+
+        Private Sub ConvertParagraphBlock(rtf As System.Text.StringBuilder, paragraphBlock As Markdig.Syntax.ParagraphBlock)
+            rtf.Append("\pard\sa180\fs20 ")
+            ConvertInline(rtf, paragraphBlock.Inline)
+            rtf.AppendLine("\par")
+        End Sub
+
+        Private Sub ConvertListBlock(rtf As System.Text.StringBuilder, listBlock As Markdig.Syntax.ListBlock)
+            Dim isOrdered As Boolean = listBlock.IsOrdered
+
+            For Each item In listBlock
+                If TypeOf item Is Markdig.Syntax.ListItemBlock Then
+                    Dim li = CType(item, Markdig.Syntax.ListItemBlock)
+                    Dim prefix As String = If(isOrdered, $"{li.Order}. ", "\bullet ")
+
+                    rtf.Append("\pard\sa100\fs20 ")
+                    rtf.Append(prefix)
+
+                    For Each sb In li
+                        If TypeOf sb Is Markdig.Syntax.ParagraphBlock Then
+                            ConvertInline(rtf, CType(sb, Markdig.Syntax.ParagraphBlock).Inline)
+                        End If
+                    Next
+
+                    rtf.AppendLine("\par")
+                End If
+            Next
+        End Sub
+
+        ''' <summary>
+        ''' Recursively handles inlines including hyperlinks.
+        ''' </summary>
+        Private Sub ConvertInline(rtf As System.Text.StringBuilder, container As Markdig.Syntax.Inlines.ContainerInline)
+            For Each inline In container
+                Select Case inline.GetType().Name
+                    Case NameOf(Markdig.Syntax.Inlines.EmphasisInline)
+                        HandleEmphasis(rtf, CType(inline, Markdig.Syntax.Inlines.EmphasisInline))
+                    Case NameOf(Markdig.Syntax.Inlines.LineBreakInline)
+                        rtf.Append("\line ")
+                    Case NameOf(Markdig.Syntax.Inlines.CodeInline)
+                        rtf.Append("\f1 ")
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.CodeInline).Content))
+                        rtf.Append("\f0 ")
+                    Case NameOf(Markdig.Syntax.Inlines.HtmlInline)
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag))
+                    Case NameOf(Markdig.Syntax.Inlines.LinkInline)
+                        Dim link = CType(inline, Markdig.Syntax.Inlines.LinkInline)
+                        ' RTF HYPERLINK field: hidden URL, visible link text
+                        rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt ")
+                        ConvertInline(rtf, link)
+                        rtf.Append("}}")
+                    Case NameOf(Markdig.Syntax.Inlines.LiteralInline)
+                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.LiteralInline).Content.ToString()))
+                End Select
+            Next
+        End Sub
+
+        Private Sub HandleEmphasis(rtf As System.Text.StringBuilder, e As Markdig.Syntax.Inlines.EmphasisInline)
+            Dim isItalic = (e.DelimiterChar = "*"c AndAlso e.DelimiterCount = 1) OrElse (e.DelimiterChar = "_"c AndAlso e.DelimiterCount = 1)
+            Dim isBold = (e.DelimiterChar = "*"c AndAlso e.DelimiterCount = 2)
+            Dim isUnderline = (e.DelimiterChar = "_"c AndAlso e.DelimiterCount = 2)
+
+            If isBold Then rtf.Append(" \b")
+            If isItalic Then rtf.Append(" \i")
+            If isUnderline Then rtf.Append(" \ul")
+
+            ConvertInline(rtf, e)
+
+            If isUnderline Then rtf.Append(" \ulnone")
+            If isItalic Then rtf.Append(" \i0")
+            If isBold Then rtf.Append(" \b0")
+        End Sub
+
+        Private Function EscapeRtf(text As String) As String
+            If String.IsNullOrEmpty(text) Then Return String.Empty
+            Dim sb As New System.Text.StringBuilder()
+            For Each c As Char In text
+                Select Case c
+                    Case "\"c : sb.Append("\\")
+                    Case "{"c : sb.Append("\{")
+                    Case "}"c : sb.Append("\}")
+                    Case Else : sb.Append(c)
+                End Select
+            Next
+            Return sb.ToString()
+        End Function
+
+    End Module
+End Namespace
+
+
 
