@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.5.2025
+' 20.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -208,6 +208,9 @@ Public Class ThisAddIn
                 AddHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
                 AddHandler wordApp.DocumentOpen, AddressOf WordApp_DocumentOpen
                 AddHandler wordApp.NewDocument, AddressOf WordApp_NewDocument
+                AddHandler wordApp.ProtectedViewWindowOpen, AddressOf WordApp_ProtectedViewWindowOpen
+                AddHandler wordApp.ProtectedViewWindowBeforeEdit, AddressOf WordApp_ProtectedViewWindowBeforeEdit
+                AddHandler wordApp.ProtectedViewWindowActivate, AddressOf WordApp_ProtectedViewWindowActivate
             Else
                 mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
                 StartupInitialized = True
@@ -223,6 +226,9 @@ Public Class ThisAddIn
             RemoveHandler wordApp.WindowActivate, AddressOf WordApp_WindowActivate
             RemoveHandler wordApp.DocumentOpen, AddressOf WordApp_DocumentOpen
             RemoveHandler wordApp.NewDocument, AddressOf WordApp_NewDocument
+            RemoveHandler wordApp.ProtectedViewWindowOpen, AddressOf WordApp_ProtectedViewWindowOpen
+            RemoveHandler wordApp.ProtectedViewWindowBeforeEdit, AddressOf WordApp_ProtectedViewWindowBeforeEdit
+            RemoveHandler wordApp.ProtectedViewWindowActivate, AddressOf WordApp_ProtectedViewWindowActivate
         Catch ex As System.Exception
             ' Handle exceptions gracefully.
         End Try
@@ -243,6 +249,29 @@ Public Class ThisAddIn
         DelayedStartupTasks()
     End Sub
 
+
+    ' Fires when a file opens in Protected View.
+    Private Sub WordApp_ProtectedViewWindowOpen(
+            pvWin As ProtectedViewWindow)
+        RemoveStartupHandlers()
+        DelayedStartupTasks()
+    End Sub
+
+    ' Fires just before the user clicks “Edit” in Protected View.
+    Private Sub WordApp_ProtectedViewWindowBeforeEdit(
+            pvWin As ProtectedViewWindow,
+            ByRef Cancel As Boolean)
+        RemoveStartupHandlers()
+        DelayedStartupTasks()
+    End Sub
+
+    ' Fires when the Protected View window is activated.
+    Private Sub WordApp_ProtectedViewWindowActivate(
+            pvWin As ProtectedViewWindow)
+        RemoveStartupHandlers()
+        DelayedStartupTasks()
+    End Sub
+
     Private Sub DelayedStartupTasks()
         Try
             InitializeAddInFeatures()
@@ -259,7 +288,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.160525 Gen2 Beta Test"
+    Public Const Version As String = "V.190525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2884,7 +2913,7 @@ Public Class ThisAddIn
             Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf)"
             Dim TPMarkupInstruct As String = $"; add '{TPMarkupTriggerInstruct}' if revisions [of user] should be pointed out to the LLM"
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
-            Dim AllInstruct As String = $"; add '{AllTrigger} to select all"
+            Dim AllInstruct As String = $"; add '{AllTrigger}' to select all"
             Dim LibInstruct As String = $"; add '{LibTrigger}' for library search"
             Dim NetInstruct As String = $"; add '{NetTrigger}' for internet search"
             Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -4672,6 +4701,8 @@ Public Class ThisAddIn
     End Sub
 
 
+    Public Shared OneBack As Boolean = False
+
     Public Shared Sub InsertTextWithMarkdown(selection As Microsoft.Office.Interop.Word.Selection, Result As String, Optional TrailingCR As Boolean = False)
         If selection Is Nothing Then
             MessageBox.Show("Error in InsertTextWithMarkdown: The selection object is null", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -4682,6 +4713,8 @@ Public Class ThisAddIn
 
         ' Extract the range from the selection
         Dim range As Microsoft.Office.Interop.Word.Range = selection.Range
+
+        Debug.WriteLine("Range = '" & range.Text & "'")
 
         Dim markdownpipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
                         .UseAdvancedExtensions() _
@@ -4704,16 +4737,19 @@ Public Class ThisAddIn
             Next
         End If
 
-        Debug.WriteLine(htmlDoc.DocumentNode.OuterHtml) ' Output the full HTML code
+        OneBack = False
 
         ' Parse and insert HTML content into the Word range
         ParseHtmlNode(htmlDoc.DocumentNode, range)
 
         selection.Document.Fields.Update()
 
+        If OneBack Then range.MoveEnd(WdUnits.wdCharacter, -1)  ' Due to behaviour of ParseHTMLNode
+
         If TrailingCR Then
-            range.Text = vbCrLf
-            range.Collapse(False)
+            range.Collapse(WdCollapseDirection.wdCollapseEnd)
+            range.InsertParagraphAfter()
+            range.Collapse(WdCollapseDirection.wdCollapseEnd)
         End If
 
         Dim insertionEnd As Integer = range.End
@@ -4755,6 +4791,7 @@ Public Class ThisAddIn
                     End If
                     tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.SetRange(tRng.End + 1, tRng.End + 1)
+                    OneBack = True
 
                 Case "strong", "b"
                     Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
@@ -4768,6 +4805,7 @@ Public Class ThisAddIn
                     End If
                     tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.SetRange(tRng.End + 1, tRng.End + 1)
+                    OneBack = True
 
                 Case "em", "i"
                     Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
@@ -4781,6 +4819,7 @@ Public Class ThisAddIn
                     End If
                     tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.SetRange(tRng.End + 1, tRng.End + 1)
+                    OneBack = True
 
                 Case "u"
                     Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
@@ -4794,11 +4833,13 @@ Public Class ThisAddIn
                     End If
                     tRng.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.SetRange(tRng.End + 1, tRng.End + 1)
+                    OneBack = True
 
                 Case "br"
                     range.Font.Reset()
                     range.Text = vbCr
                     range.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    OneBack = False
 
                 Case "h1", "h2", "h3"
                     Dim style As WdBuiltinStyle =
@@ -4824,6 +4865,7 @@ Public Class ThisAddIn
                     range.Font.Reset()
                     range.Text = vbCr
                     range.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    OneBack = True
 
                 Case "a"
                     ' Reiner <a>-Tag
@@ -4835,6 +4877,7 @@ Public Class ThisAddIn
                     range.Document.Hyperlinks.Add(Anchor:=linkRng, Address:=childNode.GetAttributeValue("href", String.Empty))
                     linkRngDup.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.SetRange(linkRngDup.End, linkRngDup.End)
+                    OneBack = False
 
                 Case "blockquote"
                     Dim txt As String = HtmlEntity.DeEntitize(childNode.InnerText)
@@ -4852,6 +4895,7 @@ Public Class ThisAddIn
                     range.Text = vbCr
                     range.Collapse(WdCollapseDirection.wdCollapseEnd)
                     range.Font.Reset()
+                    OneBack = True
 
                 Case "ul"
                     ' Unordered list
@@ -4865,6 +4909,7 @@ Public Class ThisAddIn
                     ulRange.ListFormat.ApplyBulletDefault()
                     ulRange.ListFormat.ListIndent()
                     range.SetRange(ulRange.End, ulRange.End)
+                    OneBack = False
 
                 Case "ol"
                     ' Ordered list
@@ -4878,6 +4923,7 @@ Public Class ThisAddIn
                     olRange.ListFormat.ApplyNumberDefault()
                     olRange.ListFormat.ListIndent()
                     range.SetRange(olRange.End, olRange.End)
+                    OneBack = False
 
                 Case "dl"
                     ' Definition list
@@ -4898,6 +4944,7 @@ Public Class ThisAddIn
                             range.SetRange(defn.End, defn.End)
                         End If
                     Next
+                    OneBack = False
 
                 Case "sup"
                     ' Superscript
@@ -4906,6 +4953,7 @@ Public Class ThisAddIn
                     supRng.Font.Superscript = True
                     supRng.Collapse(False)
                     range.SetRange(supRng.End, supRng.End)
+                    OneBack = False
 
                 Case "hr"
                     ' Horizontal rule
@@ -4913,6 +4961,7 @@ Public Class ThisAddIn
                     hrRange.Text = vbCr & "――――――――――――――――――――――――――――――――――――――--" & vbCr
                     hrRange.Collapse(False)
                     range.SetRange(hrRange.End, hrRange.End)
+                    OneBack = False
 
                 Case "input"
                     ' Task list checkbox
@@ -4921,6 +4970,7 @@ Public Class ThisAddIn
                         range.Document.ContentControls.Add(Microsoft.Office.Interop.Word.WdContentControlType.wdContentControlCheckBox, range)
                         cc.Checked = (childNode.GetAttributeValue("checked", String.Empty).ToLower() = "checked")
                         range.SetRange(cc.Range.End, cc.Range.End)
+                        OneBack = False
                     End If
 
                 Case "img"
@@ -4930,6 +4980,7 @@ Public Class ThisAddIn
                         Dim pic As Microsoft.Office.Interop.Word.InlineShape =
                         range.InlineShapes.AddPicture(src, LinkToFile:=False, SaveWithDocument:=True)
                         range.SetRange(pic.Range.End, pic.Range.End)
+                        OneBack = False
                     End If
 
                 Case "pre"
@@ -4941,6 +4992,7 @@ Public Class ThisAddIn
                     codeBlock.ParagraphFormat.LeftIndent += 14.18
                     codeBlock.Collapse(False)
                     range.SetRange(codeBlock.End, codeBlock.End)
+                    OneBack = False
 
                 Case "code"
                     ' Inline code
@@ -4952,7 +5004,7 @@ Public Class ThisAddIn
                     Microsoft.Office.Interop.Word.WdColor.wdColorGray25
                     codeRng.Collapse(False)
                     range.SetRange(codeRng.End, codeRng.End)
-
+                    OneBack = False
 
                 Case "span"
                     ' Emoji badge or Math span
@@ -4967,12 +5019,14 @@ Public Class ThisAddIn
                         System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.FromArgb(0, 112, 192))
                         emRange.Collapse(False)
                         range.SetRange(emRange.End, emRange.End)
+                        OneBack = False
                     ElseIf cls.Contains("math") Then
                         Dim mRng As Microsoft.Office.Interop.Word.Range = range.Duplicate
                         mRng.Text = HtmlEntity.DeEntitize(childNode.InnerText)
                         mRng.OMaths.Add(mRng)
                         mRng.Collapse(False)
                         range.SetRange(mRng.End, mRng.End)
+                        OneBack = False
                     Else
                         ParseHtmlNode(childNode, range)
                     End If
@@ -5003,7 +5057,7 @@ Public Class ThisAddIn
                         r += 1
                     Next
                     range.SetRange(tbl.Range.End, tbl.Range.End)
-
+                    OneBack = False
                 Case Else
                     ParseHtmlNode(childNode, range)
             End Select
@@ -7121,6 +7175,14 @@ Public Class ThisAddIn
             Debug.Print("Content-Length: " & request.ContentLength64)
             Debug.Print("Content-Type: " & request.ContentType)
             Debug.Print("Has Entity Body: " & request.HasEntityBody.ToString())
+            ' --- full requested URI ---
+            Debug.Print("Full URL: " & request.Url.AbsoluteUri)
+            ' --- referring page (if the browser sent a Referer header) ---
+            If request.UrlReferrer IsNot Nothing Then
+                Debug.Print("Referrer: " & request.UrlReferrer.AbsoluteUri)
+            Else
+                Debug.Print("Referrer: (none)")
+            End If
 
             ' Handle preflight (OPTIONS) request
             If request.HttpMethod = "OPTIONS" Then
@@ -7196,13 +7258,15 @@ Public Class ThisAddIn
             If command IsNot Nothing AndAlso command.Equals("redink_sendtoword", StringComparison.OrdinalIgnoreCase) Then
                 ' Extract the "text" segment
                 Dim textToInsert As String = jsonObject("Text")?.ToString()
+                Dim SourceURL As String = jsonObject("URL")?.ToString()
                 If textToInsert IsNot Nothing Then
                     ' Get the active Word document and the selection
                     Dim app As Word.Application = Globals.ThisAddIn.Application
                     Dim selection As Word.Selection = app.Selection
 
                     ' Insert the text at the current cursor position
-                    selection.TypeText(textToInsert)
+                    selection.TypeText(textToInsert & " (" & SourceURL & ")")
+
                 End If
             End If
         Catch ex As Exception

@@ -1285,7 +1285,7 @@ Namespace SharedLibrary
                                 ' On retries, wait the specified delay before sending a new request.
                                 If attempt > 0 Then
                                     If Not Hidesplash Then
-                                        splash.UpdateMessage("The LLM resources are exhausted; slowing down ...")
+                                        splash.UpdateMessage("Slowing down ...")
                                     End If
                                     Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1))
                                 End If
