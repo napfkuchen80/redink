@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.5.2025
+' 25.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -21,40 +21,47 @@
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
-Imports System.Reflection.Emit
-Imports SharedLibrary.SharedLibrary.SharedContext
-Imports Microsoft.Office.Interop.Word
-Imports System.Windows.Forms
+Imports System
+Imports System.Deployment.Application
 Imports System.Drawing
-Imports System.Management
+Imports System.Drawing.Imaging
+Imports System.Globalization
 Imports System.IO
-Imports Microsoft.Win32
-Imports HtmlAgilityPack
-Imports Newtonsoft.Json
-Imports System.Text.RegularExpressions
+Imports System.Management
+Imports System.Net
+Imports System.Net.Http
+Imports System.Reflection
+Imports System.Reflection.Emit
+Imports System.Runtime.InteropServices
 Imports System.Text
+Imports System.Text.RegularExpressions
+Imports System.Threading
+Imports System.Windows.Forms
+Imports BlingFire
+Imports HtmlAgilityPack
+Imports Markdig
+Imports Markdig.Extensions
+Imports Microsoft.ML.OnnxRuntime
+Imports Microsoft.ML.OnnxRuntime.Tensors
+Imports Microsoft.ML.Tokenizers
+Imports Microsoft.Office.Interop
+Imports Microsoft.Office.Interop.Word
+Imports Microsoft.Office.Tools
+Imports Microsoft.Win32
+Imports Newtonsoft.Json
+Imports Newtonsoft.Json.Linq
+Imports Org.BouncyCastle.Crypto
 Imports Org.BouncyCastle.Crypto.Parameters
 Imports Org.BouncyCastle.OpenSsl
 Imports Org.BouncyCastle.Security
-Imports System.Net.Http
+Imports Org.BouncyCastle.Utilities
 Imports Org.BouncyCastle.Utilities.IO.Pem
+Imports SharedLibrary.MarkdownToRtf
+Imports SharedLibrary.SharedLibrary.SharedContext
+Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports UglyToad.PdfPig
 Imports UglyToad.PdfPig.Content
-Imports System.Runtime.InteropServices
-Imports System.Threading
-Imports Org.BouncyCastle.Crypto
-Imports System.Deployment.Application
-Imports Microsoft.Office.Interop
-Imports Newtonsoft.Json.Linq
-Imports SharedLibrary.SharedLibrary.SharedMethods
-Imports Markdig.Extensions
-Imports System.Drawing.Imaging
-Imports System.Reflection
-Imports Microsoft.Office.Tools
-Imports System.Globalization
-Imports Markdig
-Imports SharedLibrary.MarkdownToRtf
-Imports Org.BouncyCastle.Utilities
+
 
 Namespace SharedLibrary
 
@@ -987,7 +994,7 @@ Namespace SharedLibrary
             Return htmlDoc.DocumentNode.OuterHtml
         End Function
 
-        Public Shared Function GetRangeHtml(ByVal range As Range) As String
+        Public Shared Function GetRangeHtml(ByVal range As Microsoft.Office.Interop.Word.Range) As String
             Dim htmlContent As String = String.Empty
             Dim tempFile As String = System.IO.Path.GetTempFileName()
 
@@ -1242,16 +1249,161 @@ Namespace SharedLibrary
                     Else
                         requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object)
                     End If
+
+
+
                     Try
-                        Dim mresult As (MimeType As String, EncodedData As String) = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
-                        Dim mimeType As String = mresult.MimeType.Trim()
-                        Dim encodedData As String = mresult.EncodedData.Trim()
+                        Dim mimeType As String
+                        Dim encodedData As String
+
+                        If FileObject = "clipboard" Then
+                            Dim dataObj As IDataObject = Clipboard.GetDataObject()
+                            Dim formats() As String = dataObj.GetFormats()
+
+                            ' 1. Dateien im Clipboard?
+                            If dataObj.GetDataPresent(DataFormats.FileDrop) Then
+                                Dim files = CType(dataObj.GetData(DataFormats.FileDrop), String())
+                                If files.Length > 0 Then
+                                    ' Alle Dateitypen (inkl. PDF, Office, Video, Audio, Archive) mit MimeHelper
+                                    Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(files(0))
+                                    mimeType = mresult.MimeType.Trim()
+                                    encodedData = mresult.EncodedData.Trim()
+                                Else
+                                    Throw New System.Exception("Clipboard enthält keine Dateien.")
+                                End If
+
+                                ' 2. Bitmap
+                            ElseIf dataObj.GetDataPresent(DataFormats.Bitmap) Then
+                                Dim img As Image = Clipboard.GetImage()
+                                Using ms As New MemoryStream()
+                                    img.Save(ms, ImageFormat.Png)
+                                    mimeType = "image/png"
+                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
+                                End Using
+
+                                ' 3. DIB (Device-Independent Bitmap)
+                            ElseIf dataObj.GetDataPresent(DataFormats.Dib) Then
+                                Dim dibObj = dataObj.GetData(DataFormats.Dib)
+                                Using MS As New MemoryStream(CType(dibObj, Byte()))
+                                    Using bmp As New Bitmap(MS)
+                                        Using out As New MemoryStream()
+                                            bmp.Save(out, ImageFormat.Png)
+                                            mimeType = "image/png"
+                                            encodedData = System.Convert.ToBase64String(out.ToArray())
+                                        End Using
+                                    End Using
+                                End Using
+
+                                ' 4. Enhanced Metafile
+                            ElseIf dataObj.GetDataPresent(DataFormats.EnhancedMetafile) Then
+                                Dim emfHandle = CType(dataObj.GetData(DataFormats.EnhancedMetafile), IntPtr)
+                                Using emf As New Metafile(emfHandle, True)
+                                    Using bmp As New Bitmap(emf.Width, emf.Height)
+                                        Using g = Graphics.FromImage(bmp)
+                                            g.DrawImage(emf, 0, 0)
+                                            Using out As New MemoryStream()
+                                                bmp.Save(out, ImageFormat.Png)
+                                                mimeType = "image/png"
+                                                encodedData = System.Convert.ToBase64String(out.ToArray())
+                                            End Using
+                                        End Using
+                                    End Using
+                                End Using
+
+                                ' 5. Audio (WAV)
+                            ElseIf dataObj.GetDataPresent(DataFormats.WaveAudio) Then
+                                Dim audioStream As Stream = CType(dataObj.GetData(DataFormats.WaveAudio), Stream)
+                                Using ms As New MemoryStream()
+                                    audioStream.CopyTo(ms)
+                                    mimeType = "audio/wav"
+                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
+                                End Using
+
+                                ' 6. HTML
+                            ElseIf dataObj.GetDataPresent(DataFormats.Html) Then
+                                Dim html As String = CType(dataObj.GetData(DataFormats.Html), String)
+                                mimeType = "text/html"
+                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(html))
+
+                                ' 7. RTF
+                            ElseIf dataObj.GetDataPresent(DataFormats.Rtf) Then
+                                Dim rtf As String = CType(dataObj.GetData(DataFormats.Rtf), String)
+                                mimeType = "application/rtf"
+                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(rtf))
+
+                                ' 8. Text / JSON / XML / CSV
+                            ElseIf dataObj.GetDataPresent(DataFormats.UnicodeText) OrElse dataObj.GetDataPresent(DataFormats.Text) Then
+                                Dim textData As String = Clipboard.GetText()
+                                Dim trimmed = textData.Trim()
+                                If (trimmed.StartsWith("{") AndAlso trimmed.EndsWith("}")) OrElse
+               (trimmed.StartsWith("[") AndAlso trimmed.EndsWith("]")) Then
+                                    mimeType = "application/json"
+                                ElseIf trimmed.StartsWith("<") AndAlso trimmed.Contains(">") Then
+                                    mimeType = "application/xml"
+                                ElseIf trimmed.Contains(","c) AndAlso trimmed.Contains(vbCr) Then
+                                    mimeType = "text/csv"
+                                Else
+                                    mimeType = "text/plain"
+                                End If
+                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(textData))
+
+                                ' 9. Sonstige Formate (Audio MP3, Video MP4, etc.) oder generisches Objekt
+                            Else
+                                ' Entferne bereits behandelte Formate
+                                Dim handled = New String() {
+                DataFormats.FileDrop,
+                DataFormats.Bitmap,
+                DataFormats.Dib,
+                DataFormats.EnhancedMetafile,
+                DataFormats.WaveAudio,
+                DataFormats.Html,
+                DataFormats.Rtf,
+                DataFormats.UnicodeText,
+                DataFormats.Text
+            }
+                                Dim remaining = formats.Where(Function(f) Not handled.Contains(f)).ToArray()
+                                If remaining.Length > 0 Then
+                                    Dim raw As Object = dataObj.GetData(remaining(0))
+                                    Dim bytes() As Byte = Nothing
+
+                                    If TypeOf raw Is Byte() Then
+                                        bytes = CType(raw, Byte())
+                                    ElseIf TypeOf raw Is Stream Then
+                                        Using ms As New MemoryStream()
+                                            CType(raw, Stream).CopyTo(ms)
+                                            bytes = ms.ToArray()
+                                        End Using
+                                    Else
+                                        ' Versuche Serialization
+                                        Using ms As New MemoryStream()
+                                            Dim bf = New Runtime.Serialization.Formatters.Binary.BinaryFormatter()
+                                            bf.Serialize(ms, raw)
+                                            bytes = ms.ToArray()
+                                        End Using
+                                    End If
+
+                                    mimeType = "application/octet-stream"
+                                    encodedData = System.Convert.ToBase64String(bytes)
+                                Else
+                                    Throw New System.Exception("Keine unterstützten Daten im Clipboard gefunden.")
+                                End If
+                            End If
+
+                        Else
+                            ' Standard-Fall: Datei per MimeHelper
+                            Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
+                            mimeType = mresult.MimeType.Trim()
+                            encodedData = mresult.EncodedData.Trim()
+                        End If
+
                         requestBody = requestBody.Replace("{mimetype}", mimeType)
                         requestBody = requestBody.Replace("{encodeddata}", encodedData)
-                    Catch ex As Exception
-                        ShowCustomMessageBox($"Error encoding file '{FileObject}': {ex.Message}")
+
+                    Catch ex As System.Exception
+                        ShowCustomMessageBox($"Error encoding '{FileObject}': {ex.Message}")
                         Return ""
                     End Try
+
                 End If
                 requestBody = requestBody.Replace("{objectcall}", "")
 
@@ -1343,13 +1495,10 @@ Namespace SharedLibrary
                                     text = vbCrLf & "Image saved to: " & ImageFile & vbCrLf
                                 End If
 
-                                text = text & FindJsonProperty(jsonObject, ResponseKey)
-
+                                'text = text & FindJsonProperty(jsonObject, ResponseKey)
+                                text = text & JsonTemplateFormatter.FormatJsonWithTemplate(jsonObject, ResponseKey)
                                 text = text & ExtractCitations(jsonObject)
 
-                                ' Previous implementation
-                                ' text = ExtractJSONValue(responseText, ResponseKey)
-                                ' text = ConvertEscapeCharacters(text)
                                 If DoubleS Then
                                     text = text.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
                                 End If
@@ -1650,9 +1799,14 @@ Namespace SharedLibrary
 
         Private Shared Function FormatCitations(citationList As List(Of String)) As String
             Dim sb As New StringBuilder()
-            sb.AppendLine(vbCrLf & "References:")
+            sb.AppendLine()
+            sb.AppendLine()
+            sb.AppendLine("References:")
             For i As Integer = 0 To citationList.Count - 1
-                sb.AppendLine($"[{i + 1}] {citationList(i)}")
+                'sb.AppendLine($"[{i + 1}] {citationList(i)}")
+                ' jede URL im Text als [URL](URL) maskieren
+                Dim text As String = Regex.Replace(citationList(i), "(https?://\S+)", "[$1]($1)")
+                sb.AppendLine($"[{i + 1}] {text}")
             Next
             Return sb.ToString()
         End Function
@@ -10513,6 +10667,449 @@ Namespace SharedLibrary
     End Class
 
 
+    Public Module MlNetTokenizer
+
+        Private _tokenizer As LlamaTokenizer
+        Private _padId As Integer = 0
+        Private _unkId As Integer
+
+        ''' <summary>
+        ''' Lädt das SentencePiece-Binary (z.B. spm.model) und setzt unkId
+        ''' </summary>
+        Public Sub LoadModel(spmModelPath As String, Optional unkId As Integer = 3)
+            _unkId = unkId
+            Using fs As FileStream = File.OpenRead(spmModelPath)
+                ' In v1.0.1+ Stable: LlamaTokenizer.Create lädt das SentencePiece Unigram-Modell :contentReference[oaicite:0]{index=0}
+                _tokenizer = LlamaTokenizer.Create(fs)
+            End Using
+        End Sub
+
+        ''' <summary>
+        ''' Pad-ID (für Attention-Mask)
+        ''' </summary>
+        Public ReadOnly Property PadId As Integer
+            Get
+                Return _padId
+            End Get
+        End Property
+
+        ''' <summary>
+        ''' Tokenisiert Text und liefert die IDs, padded/trunziert auf maxLen
+        ''' </summary>
+        Public Function TokenizeToIds(text As String, maxLen As Integer) As Integer()
+            If _tokenizer Is Nothing Then
+                Throw New InvalidOperationException("Tokenizer nicht initialisiert. Ruf erst LoadModel auf.")
+            End If
+
+            ' Instanzmethode EncodeToIds aus SentencePieceTokenizer
+            ' addBeginningOfSentence/EndOfSentence hier auf False gesetzt
+            Dim rawIds As IReadOnlyList(Of Integer) =
+                _tokenizer.EncodeToIds(text, addBeginningOfSentence:=False, addEndOfSentence:=False)
+
+            Dim ids(maxLen - 1) As Integer
+            For i As Integer = 0 To maxLen - 1
+                If i < rawIds.Count Then
+                    ids(i) = rawIds(i)
+                Else
+                    ids(i) = _padId
+                End If
+            Next
+
+            Return ids
+        End Function
+
+    End Module
+
+    Public Module OnnxAnonymizer
+
+            Private _session As InferenceSession
+            Private _maxLen As Integer
+
+            Public _mapping As Dictionary(Of String, String)
+            Private _reverse As Dictionary(Of String, String)
+            Private _counter As Integer
+
+            ''' <summary>
+            ''' Initialisiert ONNX-Session und ML.NET-Tokenizer
+            ''' </summary>
+            Public Sub Initialize(
+        modelPath As String,
+        spmModelPath As String,
+        Optional maxSequenceLength As Integer = 128)
+
+                ' ONNX NER-Modell laden
+                _session = New InferenceSession(modelPath)
+
+                ' SentencePiece-Tokenizer laden
+                MlNetTokenizer.LoadModel(spmModelPath, unkId:=3)
+
+                _maxLen = maxSequenceLength
+                _mapping = New Dictionary(Of String, String)
+                _reverse = New Dictionary(Of String, String)
+            End Sub
+
+            ''' <summary>
+            ''' Anonymisiert Entities im Text; gibt anonymisierten Text zurück
+            ''' </summary>
+            Public Function Anonymize(text As String) As String
+                _mapping.Clear() : _reverse.Clear() : _counter = 1
+
+                ' 1) IDs erzeugen
+                Dim ids = MlNetTokenizer.TokenizeToIds(text, _maxLen)
+
+                ' 2) Tensoren bauen
+                Dim inputIds = New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+                Dim attentionMask = New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+                Dim tokenTypeIds = New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+
+                For i As Integer = 0 To ids.Length - 1
+                    inputIds(0, i) = CType(ids(i), Int64)
+                    attentionMask(0, i) = If(ids(i) = MlNetTokenizer.PadId, 0L, 1L)
+                    tokenTypeIds(0, i) = 0L
+                Next
+
+                ' 3) ONNX-Inferenz
+                Dim inputs = New List(Of NamedOnnxValue) From {
+            NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
+            NamedOnnxValue.CreateFromTensor("attention_mask", attentionMask),
+            NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIds)
+        }
+                Using results = _session.Run(inputs)
+                    ' TODO: hier NER-Labels/Logits aus results extrahieren …
+                End Using
+
+                ' 4) Regex-Fallback
+                Dim result = text
+                For Each m As Match In Regex.Matches(text, "\b[A-ZÄÖÜ][a-zäöüß]+\b")
+                    Dim name = m.Value
+                    If Not _mapping.ContainsKey(name) Then
+                        Dim placeholder = $"ENTITY{_counter}"
+                        _mapping(name) = placeholder
+                        _reverse(placeholder) = name
+                        _counter += 1
+                    End If
+                    result = result.Replace(name, _mapping(name))
+                Next
+
+                Return result
+            End Function
+
+            ''' <summary>
+            ''' Originaltext aus anonymisiertem Text wiederherstellen
+            ''' </summary>
+            Public Function Reverse(anonymized As String) As String
+                Dim txt = anonymized
+                For Each kvp In _reverse
+                    txt = txt.Replace(kvp.Key, kvp.Value)
+                Next
+                Return txt
+            End Function
+
+            ''' <summary>
+            ''' Aufräumen (ONNX-Session freigeben)
+            ''' </summary>
+            Public Sub Dispose()
+                If _session IsNot Nothing Then
+                    _session.Dispose()
+                    _session = Nothing
+                End If
+            End Sub
+
+        End Module
+
+
+
+
+        ''' <summary>
+        ''' Simple WordPiece-Tokenizer für .NET 4.7, ohne externe Bibliotheken
+        ''' </summary>
+        Public Module SimpleTokenizer
+        Private _vocab As Dictionary(Of String, Integer)
+        Private _unkId As Integer
+        Private _padId As Integer = 0  ' id für [PAD]
+
+        ''' <summary>
+        ''' Lädt vocab.txt: eine Zeile pro Token
+        ''' </summary>
+        Public Sub LoadVocab(vocabPath As String)
+            Dim lines = File.ReadAllLines(vocabPath)
+            _vocab = New Dictionary(Of String, Integer)(lines.Length)
+            For i As Integer = 0 To lines.Length - 1
+                _vocab(lines(i)) = i
+            Next
+            If _vocab.ContainsKey("[UNK]") Then
+                _unkId = _vocab("[UNK]")
+            Else
+                _unkId = 0
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Zerlegt Text in WordPiece-Tokens
+        ''' </summary>
+        Public Function Tokenize(text As String) As List(Of String)
+            Dim tokens As New List(Of String)()
+            For Each word As String In Regex.Split(text, "\s+")
+                Dim start = 0
+                While start < word.Length
+                    Dim endPos = word.Length
+                    Dim curPiece As String = Nothing
+                    While start < endPos
+                        Dim piece As String
+                        If start = 0 Then
+                            piece = word.Substring(start, endPos - start)
+                        Else
+                            piece = "##" & word.Substring(start, endPos - start)
+                        End If
+                        If _vocab.ContainsKey(piece) Then
+                            curPiece = piece
+                            Exit While
+                        End If
+                        endPos -= 1
+                    End While
+                    If curPiece Is Nothing Then
+                        curPiece = "[UNK]"
+                        endPos = start + 1
+                    End If
+                    tokens.Add(curPiece)
+                    start = endPos
+                End While
+            Next
+            Return tokens
+        End Function
+
+        ''' <summary>
+        ''' Konvertiert Tokens in IDs, trenct und padded auf maxLen
+        ''' </summary>
+        Public Function Encode(tokens As List(Of String), maxLen As Integer) As Integer()
+            Dim ids As New List(Of Integer)(tokens.Count)
+            For Each t As String In tokens
+                If _vocab.ContainsKey(t) Then
+                    ids.Add(_vocab(t))
+                Else
+                    ids.Add(_unkId)
+                End If
+            Next
+            ' truncate oder pad
+            If ids.Count > maxLen Then
+                ids = ids.GetRange(0, maxLen)
+            ElseIf ids.Count < maxLen Then
+                ids.AddRange(Enumerable.Repeat(_padId, maxLen - ids.Count))
+            End If
+            Return ids.ToArray()
+        End Function
+    End Module
+
+    ''' <summary>
+    ''' ONNX-basierte Anonymisierung mit NER-Fallback
+    ''' </summary>
+
+    Public Module oldOnnxAnonymizer
+        Public _session As InferenceSession
+        Public _mapping As Dictionary(Of String, String)
+        Private _reverse As Dictionary(Of String, String)
+        Private _counter As Integer
+        Private _maxLen As Integer
+
+        ''' <summary>
+        ''' Initialisierung: lädt ONNX-Modell und Vokabular
+        ''' </summary>
+        ''' <param name="modelPath">Pfad zur ner.onnx</param>
+        ''' <param name="vocabPath">Pfad zur vocab.txt</param>
+        ''' <param name="maxSequenceLength">Maximale Tokenlänge, z.B. 128</param>
+        Public Sub Initialize(modelPath As String, vocabPath As String, Optional maxSequenceLength As Integer = 128)
+            ' Model laden
+            _session = New InferenceSession(modelPath)
+            ' Tokenizer-Vokabular laden
+            SimpleTokenizer.LoadVocab(vocabPath)
+            _maxLen = maxSequenceLength
+            ' Mappings initialisieren
+            _mapping = New Dictionary(Of String, String)()
+            _reverse = New Dictionary(Of String, String)()
+        End Sub
+
+        ''' <summary>
+        ''' Anonymisiert Entities im Text; gibt anonymisierten Text zurück
+        ''' </summary>
+        Public Function Anonymize(text As String) As String
+            ' Reset state
+            _mapping.Clear()
+            _reverse.Clear()
+            _counter = 1
+
+            ' 1) WordPiece-Tokenisierung und ID-Conversion
+            Dim toks = SimpleTokenizer.Tokenize(text)
+            Dim ids = SimpleTokenizer.Encode(toks, _maxLen)
+            Dim inputTensor As New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+            For i = 0 To ids.Length - 1
+                inputTensor(0, i) = ids(i)
+            Next
+
+            ' 2) ONNX-Inferenz aufrufen und Labels extrahieren (oder Fallback verwenden)
+            ' Prepare attention_mask and token_type_ids (BERT inputs)
+            Dim attMask As New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+            Dim typeIds As New DenseTensor(Of Int64)(New Integer() {1, ids.Length})
+            For i = 0 To ids.Length - 1
+                ' 1 for real tokens, 0 for padding
+                attMask(0, i) = If(ids(i) = 0, CType(0, Int64), CType(1, Int64))
+                typeIds(0, i) = CType(0, Int64)
+            Next
+            Dim inputs As New List(Of NamedOnnxValue) From {
+                NamedOnnxValue.CreateFromTensor("input_ids", inputTensor),
+                NamedOnnxValue.CreateFromTensor("attention_mask", attMask),
+                NamedOnnxValue.CreateFromTensor("token_type_ids", typeIds)
+            }
+            Using results = _session.Run(inputs)
+                ' Hier könntest Du aus results die Logits/Labels extrahieren
+            End Using
+
+            ' 3) Regex-Fallback: Großbuchstaben-Wörter anonymisieren
+            Dim result = text
+            For Each m As Match In Regex.Matches(text, "\b[A-ZÄÖÜ][a-zäöüß]+\b")
+                Dim name = m.Value
+                If Not _mapping.ContainsKey(name) Then
+                    Dim placeholder = $"ENTITY{_counter}"
+                    _mapping(name) = placeholder
+                    _reverse(placeholder) = name
+                    _counter += 1
+                End If
+                result = result.Replace(name, _mapping(name))
+            Next
+
+            Return result
+        End Function
+
+        ''' <summary>
+        ''' Stellt den originalen Text wieder her
+        ''' </summary>
+        Public Function Reverse(anonymized As String) As String
+            Dim text = anonymized
+            For Each kvp As KeyValuePair(Of String, String) In _reverse
+                text = text.Replace(kvp.Key, kvp.Value)
+            Next
+            Return text
+        End Function
+    End Module
+
+    Public Module JsonTemplateFormatter
+
+        ' Hauptfunktion für String-Eingabe (wie bisher)
+        Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String
+            Dim jObj As JObject
+            Try
+                jObj = JObject.Parse(json)
+            Catch ex As JsonReaderException
+                Return $"[Fehler beim Parsen des JSON: {ex.Message}]"
+            End Try
+            Return FormatJsonWithTemplate(jObj, template)
+        End Function
+
+        ' Neue überladene Funktion: nimmt JObject direkt an
+        Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String
+            If String.IsNullOrWhiteSpace(template) Then Return ""
+
+            template = template _
+                .Replace("\N", vbCrLf) _
+                .Replace("\n", vbCrLf) _
+                .Replace("\R", vbCrLf) _
+                .Replace("\r", vbCrLf)
+            template = Regex.Replace(template, "<cr>", vbCrLf, RegexOptions.IgnoreCase)
+
+            Const loopPattern As String = "\{\%\s*for\s+([^\s\%]+)\s*\%\}"
+            Const phPattern As String = "\{([^}]+)\}"
+
+            Dim hasLoop = Regex.IsMatch(template, loopPattern, RegexOptions.Singleline)
+            Dim hasPh = Regex.IsMatch(template, phPattern)
+
+            ' === Einfache Fallbehandlung ===
+            If Not hasLoop AndAlso Not hasPh Then
+                ' Template enthält keine Platzhalter → als einfacher JSONPath behandeln
+                Return FindJsonProperty(jObj, template)
+            End If
+
+            ' === Loop-Blöcke ===
+            Dim loopRegex = New Regex("\{\%\s*for\s+([^\s\%]+)\s*\%\}(.*?)\{\%\s*endfor\s*\%\}", RegexOptions.Singleline)
+            Dim loopMatch = loopRegex.Match(template)
+            While loopMatch.Success
+                Dim fullBlock = loopMatch.Value
+                Dim path = loopMatch.Groups(1).Value.Trim()
+                Dim innerTpl = loopMatch.Groups(2).Value
+
+                Dim items = jObj.SelectTokens(path).OfType(Of JObject)()
+                Dim blocks As New List(Of String)
+                For Each item In items
+                    blocks.Add(FormatJsonWithTemplate(item, innerTpl))
+                Next
+
+                Dim replacement = If(blocks.Count = 0, "", String.Join(vbCrLf & vbCrLf, blocks))
+                template = template.Replace(fullBlock, replacement)
+                loopMatch = loopRegex.Match(template)
+            End While
+
+            ' === Platzhalter-Verarbeitung ===
+            Dim phMatches = Regex.Matches(template, phPattern)
+            Dim result As String = template
+            For Each m As Match In phMatches
+                Dim fullPh = m.Value
+                Dim parts = m.Groups(1).Value.Split(New Char() {"|"c}, 2)
+                Dim pathPh = parts(0).Trim()
+                Dim sep = If(parts.Length > 1, parts(1).Replace("\n", vbCrLf), vbCrLf)
+                Dim rep = RenderTokens(jObj, pathPh, sep)
+                result = result.Replace(fullPh, rep)
+            Next
+
+            Return result
+        End Function
+
+        ' Wandelt Arrays in Strings um
+        Private Function RenderTokens(jObj As JObject, path As String, sep As String) As String
+            Try
+                If Not path.StartsWith("$") AndAlso Not path.StartsWith("@") Then
+                    path = "$." & path
+                End If
+                Dim tokens = jObj.SelectTokens(path)
+                Dim list As New List(Of String)
+                For Each t As JToken In tokens
+                    If t.Type = JTokenType.Array Then
+                        For Each subItem As JToken In DirectCast(t, JArray)
+                            list.Add(subItem.ToString())
+                        Next
+                    Else
+                        'list.Add(t.ToString())
+                        Dim raw = t.ToString()
+                        raw = HtmlToMarkdownSimple(raw)
+                        list.Add(raw)
+                    End If
+                Next
+                Return If(list.Count = 0, "", String.Join(sep, list))
+            Catch ex As System.Exception
+                Return ""
+            End Try
+        End Function
+
+        Public Function HtmlToMarkdownSimple(html As String) As String
+            Dim s = WebUtility.HtmlDecode(html)
+
+            ' Absätze → zwei Zeilenumbrüche
+            s = Regex.Replace(s, "</?p\s*/?>", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)
+            ' Zeilenumbruch-Tags
+            s = Regex.Replace(s, "<br\s*/?>", vbCrLf, RegexOptions.IgnoreCase)
+            ' Fett/strong → **text**
+            s = Regex.Replace(s, "<strong>(.*?)</strong>", "**$1**", RegexOptions.IgnoreCase)
+            ' Kursiv/em → *text*
+            s = Regex.Replace(s, "<em>(.*?)</em>", "*$1*", RegexOptions.IgnoreCase)
+            ' Listenpunkte <li> → "- text"
+            s = Regex.Replace(s, "<li>(.*?)</li>", "- $1" & vbCrLf, RegexOptions.IgnoreCase)
+
+            ' Alle übrigen Tags entfernen
+            s = Regex.Replace(s, "<[^>]+>", String.Empty)
+            ' Mehrfache Zeilenumbrüche aufräumen
+            s = Regex.Replace(s, "(" & vbCrLf & "){3,}", vbCrLf & vbCrLf)
+
+            Return s.Trim()
+        End Function
+
+    End Module
 
 
 End Namespace
@@ -10804,6 +11401,10 @@ Namespace xMarkdownToRtf
         End Function
 
     End Module
+
+
+
+
 End Namespace
 
 
