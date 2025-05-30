@@ -93,7 +93,7 @@
       <Value Profile="(Default)" />
     </Setting>
     <Setting Name="Duration" Type="System.String" Scope="User">
-      <Value Profile="(Default)">five minutes</Value>
+      <Value Profile="(Default)">1000 words</Value>
     </Setting>
     <Setting Name="Language" Type="System.String" Scope="User">
       <Value Profile="(Default)">English</Value>
@@ -105,6 +105,9 @@
       <Value Profile="(Default)" />
     </Setting>
     <Setting Name="CleanTextPrompt" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="AudioOutputDevice" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
   </Settings>

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 23.4.2025
+' 29.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -15,6 +15,10 @@
 ' Includes NAudio in unchanged form; Copyright (c) 2020 Mark Heath; licensed under a proprietary open source (https://www.nuget.org/packages/NAudio/2.2.1/license) at https://github.com/naudio/NAudio
 ' Includes Vosk in unchanged form; Copyright (c) 2022 Alpha Cephei Inc.; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://alphacephei.com/vosk/
 ' Includes Whisper.net in unchanged form; Copyright (c) 2024 Sandro Hanea; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/sandrohanea/whisper.net
+' Includes Grpc.core in unchanged form; Copyright (c) 2023 The gRPC Authors; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/grpc/grpc
+' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
+' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
+' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 
@@ -1037,7 +1041,15 @@ Public Class frmAIChat
 
                         With workRange.Find
                             .ClearFormatting()
-                            .Text = oldText
+                            If ThisAddIn.INI_Clean Then
+                                .MatchWildcards = True
+                                ' turn each " " into "[ ]@" so Word will match 1+ spaces
+                                .Text = oldText.Replace(" ", "[ ]@")
+                            Else
+                                .MatchWildcards = False
+                                .Text = oldText
+                            End If
+                            '.Text = oldText
                             .Forward = True
                             .Wrap = Word.WdFindWrap.wdFindStop
                             .MatchWholeWord = False
@@ -1177,7 +1189,15 @@ Public Class frmAIChat
                 ' Use Word's Find functionality for shorter searchText
                 With workrange.Find
                     .ClearFormatting()
-                    .Text = searchText
+                    If ThisAddIn.INI_Clean Then
+                        .MatchWildcards = True
+                        ' turn each " " into "[ ]@" so Word will match 1+ spaces
+                        .Text = searchText.Replace(" ", "[ ]@")
+                    Else
+                        .MatchWildcards = False
+                        .Text = searchText
+                    End If
+                    '.Text = searchText
                     .Forward = True
                     .Wrap = Word.WdFindWrap.wdFindStop ' Stop after searching once
                     If .Execute() Then

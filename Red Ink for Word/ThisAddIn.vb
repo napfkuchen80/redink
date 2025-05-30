@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 25.5.2025
+' 30.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -38,7 +38,10 @@ Imports System.Threading
 Imports System.Threading.Tasks
 Imports System.Windows
 Imports System.Windows.Forms
+Imports System.Windows.Forms.VisualStyles
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar
+Imports System.Xml
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
@@ -289,7 +292,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.250525 Gen2 Beta Test"
+    Public Const Version As String = "V.300525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -365,6 +368,13 @@ Public Class ThisAddIn
             "sk-SK", "es-US", "su-ID", "sw-KE", "sv-SE", "ta-IN",
             "te-IN", "th-TH", "tr-TR", "uk-UA", "ur-PK", "vi-VN", "cy-GB"
         }
+
+    Private Const Code_JsonTemplateFormatter As String = "Public Module JsonTemplateFormatter" & vbCrLf & "''' <summary>''' Hauptfunktion für JSON-String + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String" & vbCrLf & "Dim jObj As JObject" & vbCrLf & "Try" & vbCrLf & "jObj = JObject.Parse(json)" & vbCrLf & "Catch ex As Newtonsoft.Json.JsonReaderException" & vbCrLf & "Return $""[Fehler beim Parsen des JSON: {ex.Message}]""" & vbCrLf & "End Try" & vbCrLf & "Return FormatJsonWithTemplate(jObj, template)" & vbCrLf & "End Function" & vbCrLf & "''' <summary>''' Hauptfunktion für direkten JObject + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String" & vbCrLf & "If String.IsNullOrWhiteSpace(template) Then Return """"" & vbCrLf & "template = template.Replace(""\\N"", vbCrLf).Replace(""\\n"", vbCrLf).Replace(""\\R"", vbCrLf).Replace(""\\r"", vbCrLf)" & vbCrLf & "template = Regex.Replace(template, ""<cr>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "Dim hasLoop = Regex.IsMatch(template, ""\\{\\%\\s*for\\s+([^\\s\\%]+)\\s*\\%\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim hasPh = Regex.IsMatch(template, ""\\{([^}]+)\\}"")" & vbCrLf & "If Not hasLoop AndAlso Not hasPh Then Return FindJsonProperty(jObj, template)" & vbCrLf & "Dim loopRegex = New Regex(""\\{\\%\\s*for\\s+([^%\\s]+)\\s*\\%\\}(.*?)\\{\\%\\s*endfor\\s*\\%\\}"", RegexOptions.Singleline Or RegexOptions.IgnoreCase)" & vbCrLf & "Dim mLoop = loopRegex.Match(template)" & vbCrLf & "While mLoop.Success" & vbCrLf & "Dim fullBlock = mLoop.Value" & vbCrLf & "Dim rawPath = mLoop.Groups(1).Value.Trim()" & vbCrLf & "Dim innerTpl = mLoop.Groups(2).Value" & vbCrLf & "Dim path = If(rawPath.StartsWith(""$""), rawPath, ""$."" & rawPath)" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim items = tokens.SelectMany(Function(t) If t.Type = JTokenType.Array Then Return CType(t, JArray).OfType(Of JObject)() ElseIf t.Type = JTokenType.Object Then Return {CType(t, JObject)} Else Return Enumerable.Empty(Of JObject)() End If)" & vbCrLf & "Dim rendered = items.Select(Function(o) FormatJsonWithTemplate(o, innerTpl)).ToArray()" & vbCrLf & "template = template.Replace(fullBlock, If(rendered.Any, String.Join(vbCrLf & vbCrLf, rendered), """"""))" & vbCrLf & "mLoop = loopRegex.Match(template)" & vbCrLf & "End While" & vbCrLf & "Dim phRegex = New Regex(""\\{(.+?)\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim result = template" & vbCrLf & "For Each mPh As Match In phRegex.Matches(template)" & vbCrLf & "Dim fullPh = mPh.Value" & vbCrLf & "Dim content = mPh.Groups(1).Value" & vbCrLf & "Dim isHtml As Boolean = False" & vbCrLf & "Dim isNoCr As Boolean = False" & vbCrLf & "If content.StartsWith(""htmlnocr:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : isNoCr = True : content = content.Substring(""htmlnocr:"".Length) ElseIf content.StartsWith(""html:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : content = content.Substring(""html:"".Length) ElseIf content.StartsWith(""nocr:"", StringComparison.OrdinalIgnoreCase) Then isNoCr = True : content = content.Substring(""nocr:"".Length)" & vbCrLf & "Dim parts = content.Split(New Char() {""|""c}, 2)" & vbCrLf & "Dim pathPh = parts(0).Trim()" & vbCrLf & "Dim remainder = If(parts.Length > 1, parts(1), String.Empty)" & vbCrLf & "Dim sep As String = vbCrLf" & vbCrLf & "Dim mappings As Dictionary(Of String, String) = Nothing" & vbCrLf & "If Not String.IsNullOrEmpty(remainder) Then If remainder.Contains(""=""c) Then mappings = ParseMappings(remainder) Else sep = remainder.Replace(""\\n"", vbCrLf)" & vbCrLf & "Dim replacement = RenderTokens(jObj, pathPh, sep, isHtml, isNoCr, mappings)" & vbCrLf & "result = result.Replace(fullPh, replacement)" & vbCrLf & "Next" & vbCrLf & "Return result" & vbCrLf & "End Function" & vbCrLf & "Private Function RenderTokens(jObj As JObject, path As String, sep As String, isHtml As Boolean, isNoCr As Boolean, mappings As Dictionary(Of String, String)) As String" & vbCrLf & "Try" & vbCrLf & "If Not path.StartsWith(""$"") AndAlso Not path.StartsWith(""@"") Then path = ""$."" & path" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim list As New List(Of String)" & vbCrLf & "For Each t In tokens" & vbCrLf & "Dim raw = t.ToString()" & vbCrLf & "If mappings IsNot Nothing AndAlso mappings.ContainsKey(raw) Then raw = mappings(raw)" & vbCrLf & "If isHtml Then raw = HtmlToMarkdownSimple(raw)" & vbCrLf & "If isNoCr Then raw = Regex.Replace(raw, ""[\r\n]+"", "" "") : raw = Regex.Replace(raw, ""\s{2,}"", "" "") : raw = Regex.Replace(raw, ""[\u2022\u2023\u25E6]"", String.Empty) : raw = raw.Trim()" & vbCrLf & "list.Add(raw)" & vbCrLf & "Next" & vbCrLf & "Return If(list.Count = 0, """", String.Join(sep, list))" & vbCrLf & "Catch ex As System.Exception" & vbCrLf & "Return """"" & vbCrLf & "End Try" & vbCrLf & "End Function" & vbCrLf & "Private Function ParseMappings(defs As String) As Dictionary(Of String, String)" & vbCrLf & "Dim dict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)" & vbCrLf & "For Each pair In defs.Split("";""c)" & vbCrLf & "Dim kv = pair.Split(New Char() {""=""c}, 2)" & vbCrLf & "If kv.Length = 2 Then dict(kv(0).Trim()) = kv(1).Trim()" & vbCrLf & "Next" & vbCrLf & "Return dict" & vbCrLf & "End Function" & vbCrLf & "Public Function HtmlToMarkdownSimple(html As String) As String" & vbCrLf & "Dim s = WebUtility.HtmlDecode(html)" & vbCrLf & "s = Regex.Replace(s, ""</?p\s*/?>"", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<br\s*/?>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<strong>(.*?)</strong>"", ""**$1**"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<em>(.*?)</em>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<span\b[^>]*>(.*?)</span>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<li>(.*?)</li>"", ""- $1"" & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<[^>]+>"", String.Empty)" & vbCrLf & "s = Regex.Replace(s, ""("" & vbCrLf & ""){3,}"", vbCrLf & vbCrLf)" & vbCrLf & "Return s.Trim()" & vbCrLf & "End Function" & vbCrLf & "End Module"
+    Private Const SP_GenerateResponseKey As String = "I have code that will generate from a JSON string an Markdown output using a Template, which the code will parse together with the JSON file. I want you to create me a working template taking into account (i) the code, (ii) the structure of the JSON file and (iii) my instructions. If the JSON has arrays, make sure you correctly handle them. To produce your output, first provide the barebones template one one single line (do not use placeholders, provide the text how template should look like; for linebreaks, use only <cr>), then provide a brief explanation without any formatting. I will provide you in the following first the code, and then you will get the (sample) JSON file and my instructions. Follow them carefully."
+
+    Private Const NER_Model = "model.onnx"
+    Private Const NER_Token = "bpe.model"
+    Private Const NER_Label = "label_map.txt"
 
     Public Shared DragDropFormLabel As String = ""
     Public Shared DragDropFormFilter As String = ""
@@ -1186,6 +1196,7 @@ Public Class ThisAddIn
         End Set
     End Property
 
+
     Public Shared Property SP_BubblesExcel As String
         Get
             Return _context.SP_BubblesExcel
@@ -1584,6 +1595,17 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_LocalModelPath As String
+        Get
+            Return _context.INI_LocalModelPath
+        End Get
+        Set(value As String)
+            _context.INI_LocalModelPath = value
+        End Set
+    End Property
+
+
+
     Public Shared Property INI_TTSEndpoint As String
         Get
             Return _context.INI_TTSEndpoint
@@ -1719,6 +1741,24 @@ Public Class ThisAddIn
             _context.INI_Model_Parameter4 = value
         End Set
     End Property
+
+    Public Shared Property SP_MergePrompt As String
+        Get
+            Return _context.SP_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_MergePrompt = value
+        End Set
+    End Property
+    Public Shared Property SP_Add_MergePrompt As String
+        Get
+            Return _context.SP_Add_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_Add_MergePrompt = value
+        End Set
+    End Property
+
 
 #End Region
 
@@ -2645,7 +2685,7 @@ Public Class ThisAddIn
                     New SLib.InputParameter("Guest name", GuestName),
                     New SLib.InputParameter("Target audience", TargetAudience),
                     New SLib.InputParameter("Context, background info", DialogueContext),
-                    New SLib.InputParameter("Duration", Duration),
+                    New SLib.InputParameter("Target length", Duration),
                     New SLib.InputParameter("Language of dialogue", Language),
                     New SLib.InputParameter("Extra instructions", ExtraInstructions)
                     }
@@ -2764,7 +2804,258 @@ Public Class ThisAddIn
 
     End Sub
 
+
     Public Async Sub SpecialModel()
+        Try
+            If INILoadFail() Then Exit Sub
+            Dim DoPane As Boolean = True
+
+            If String.IsNullOrWhiteSpace(INI_SpecialServicePath) Then
+                ShowCustomMessageBox("No special service path is configured.")
+                Return
+            End If
+
+            If INILoadFail() Then Exit Sub
+            Dim application As Word.Application = Globals.ThisAddIn.Application
+            Dim selection As Word.Selection = application.Selection
+
+            If selection.Type = Word.WdSelectionType.wdSelectionIP Then
+                ShowCustomMessageBox("Please select the text to be processed.")
+                Return
+            End If
+
+            OptionChecked = False
+
+            If Not ShowModelSelection(_context, INI_SpecialServicePath, "Special Service", "Select the special service you want to query:", "Output in a pane (not directly in the document)", 2) Then
+                originalConfigLoaded = False
+                Exit Sub
+            End If
+
+            Debug.WriteLine("Selected model: " & INI_Model_2)
+
+            ' === NEU: Struktur für Typen, Bereiche und Auswahl-Mappings ===
+            Dim iniValues() As String = {INI_Model_Parameter1, INI_Model_Parameter2, INI_Model_Parameter3, INI_Model_Parameter4}
+            Dim parameterDefs As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)()
+            Dim typesList As New List(Of String)()
+            Dim rangesList As New List(Of Tuple(Of Integer, Integer))()
+            Dim optsDisplayList As New List(Of List(Of String))()
+            Dim optsCodeList As New List(Of List(Of String))()
+
+            For Each raw As String In iniValues
+                If String.IsNullOrWhiteSpace(raw) Then Continue For
+                Dim segments = raw.Split(";"c).Select(Function(s) s.Trim()).ToArray()
+                Dim desc = segments(0)
+                Dim t As String = segments(1).ToLowerInvariant()
+                Dim defaultStr = segments(2)
+
+                ' Range-Parsing (nur bei String-Typ): "min-max"
+                Dim rangeTuple As Tuple(Of Integer, Integer) = Nothing
+                Dim optsRaw As List(Of String) = Nothing
+
+                ' Neu: nur numerische Typen
+                If (t = "integer" OrElse t = "long" OrElse t = "double") _
+                           AndAlso segments.Length > 3 _
+                           AndAlso System.Text.RegularExpressions.Regex.IsMatch(segments(3), "^\d+-\d+$") Then
+
+                    Dim parts = segments(3).Split("-"c)
+                    Dim minVal = Integer.Parse(parts(0))
+                    Dim maxVal = Integer.Parse(parts(1))
+                    rangeTuple = Tuple.Create(minVal, maxVal)
+
+                    ' Falls noch Auswahl-Optionen im Feld 4 stehen …
+                    If segments.Length > 4 Then
+                        optsRaw = segments(4).Split(","c).Select(Function(o) o.Trim()).ToList()
+                    End If
+                End If
+
+                If t = "string" AndAlso segments.Length > 3 Then
+                    optsRaw = segments(3).
+                                  Split(","c).
+                                  Select(Function(o) o.Trim()).
+                                  ToList()
+                End If
+
+                ' Aufteilen der rohen Optionen in Display-Text und internen Code
+                Dim displayList As List(Of String) = Nothing
+                Dim codeList As List(Of String) = Nothing
+                If optsRaw IsNot Nothing Then
+                    displayList = New List(Of String)()
+                    codeList = New List(Of String)()
+                    For Each o As String In optsRaw
+                        Dim lbl = o
+                        Dim code = o
+                        Dim idx1 = o.IndexOf("<"c)
+                        Dim idx2 = o.IndexOf(">"c)
+                        If idx1 >= 0 AndAlso idx2 > idx1 Then
+                            lbl = o.Substring(0, idx1).Trim()
+                            code = o.Substring(idx1 + 1, idx2 - idx1 - 1).Trim()
+                        End If
+                        displayList.Add(lbl)
+                        codeList.Add(code)
+                    Next
+                End If
+
+                ' Default-Wert für das Formular: Display-Text anstelle des Codes
+                Dim defaultDisplay As Object = defaultStr
+                If codeList IsNot Nothing Then
+                    Dim idxDef = codeList.IndexOf(defaultStr)
+                    If idxDef >= 0 Then defaultDisplay = displayList(idxDef)
+                End If
+
+                ' Typumwandlung für den Default-Wert
+                Dim val As Object
+                Select Case t
+                    Case "boolean"
+                        Dim b As Boolean
+                        Boolean.TryParse(defaultStr, b)
+                        val = b
+                    Case "integer"
+                        Dim i As Integer
+                        Integer.TryParse(defaultStr, i)
+                        val = i
+                    Case "long"
+                        Dim l As Long
+                        Long.TryParse(defaultStr, l)
+                        val = l
+                    Case "double"
+                        Dim d As Double
+                        Double.TryParse(defaultStr, d)
+                        val = d
+                    Case Else
+                        val = defaultDisplay
+                End Select
+
+                ' ParameterDefs für ShowCustomVariableInputForm aufbauen
+                If displayList IsNot Nothing Then
+                    parameterDefs.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val, displayList))
+                Else
+                    parameterDefs.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val))
+                End If
+
+                ' Metadaten merken
+                typesList.Add(t)
+                rangesList.Add(rangeTuple)
+                optsDisplayList.Add(displayList)
+                optsCodeList.Add(codeList)
+            Next
+
+            OtherPrompt = ""
+
+            If parameterDefs.Count > 0 Then
+                Dim parameters() As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameterDefs.ToArray()
+                If ShowCustomVariableInputForm("Please configure your parameters:", "Use '" & INI_Model_2 & "'", parameters) Then
+
+                    ' === NEU: Werte auslesen mit Range-Clamping und Mapping ===
+                    For i As Integer = 0 To parameters.Length - 1
+                        Dim p As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameters(i)
+                        Dim rawValue As String = p.Value.ToString().Trim()
+                        Dim t As String = typesList(i)
+                        Dim range As Tuple(Of Integer, Integer) = rangesList(i)
+                        Dim dispList = optsDisplayList(i)
+                        Dim codeList = optsCodeList(i)
+
+                        ' paramValue muss vor allen Verzweigungen deklariert werden
+                        Dim paramValue As String
+
+                        ' 1) Boolean → "true"/"false"
+                        If TypeOf p.Value Is System.Boolean Then
+                            paramValue = CType(p.Value, System.Boolean).ToString().ToLowerInvariant()
+
+                        Else
+                            ' 2) Range-Clamping bei numerischen Typen
+                            If (t = "integer" OrElse t = "long" OrElse t = "double") AndAlso range IsNot Nothing Then
+
+                                Dim num As Double
+                                If Double.TryParse(rawValue, num) Then
+                                    ' Clamp auf [Min;Max]
+                                    num = Math.Max(range.Item1, Math.Min(range.Item2, num))
+
+                                    ' Für Integer/Long als Ganzzahl zurückgeben
+                                    If t = "integer" OrElse t = "long" Then
+                                        rawValue = CInt(Math.Round(num)).ToString()
+                                    Else
+                                        rawValue = num.ToString()
+                                    End If
+                                End If
+                            End If
+
+
+                            ' 3) Mapping von Display-Text → interner Code
+                            If dispList IsNot Nothing Then
+                                Dim idx As Integer = dispList.IndexOf(rawValue)
+                                If idx >= 0 Then
+                                    paramValue = codeList(idx)
+                                Else
+                                    ' Fallback: unverändert
+                                    paramValue = rawValue
+                                End If
+
+                            Else
+                                ' 4) Normaler String-Fall: (all)/(alle)/--- filtern
+                                Dim rvLower As String = rawValue.ToLowerInvariant()
+                                If rvLower.Contains("(all)") OrElse rvLower.Contains("(alle)") OrElse rawValue.Contains("---") Then
+                                    rawValue = ""
+                                End If
+                                paramValue = rawValue
+                            End If
+                        End If
+
+                        ' 5) Sonderfall Prompt
+                        If p.Name.ToLowerInvariant().Contains("prompt") Then
+                            OtherPrompt = paramValue
+                        End If
+
+                        ' 6) Platzhalter ersetzen
+                        INI_APICall_2 = INI_APICall_2.Replace("{" & "parameter" & (i + 1) & "}", paramValue)
+                        INI_APICall_Object_2 = INI_APICall_Object_2.Replace("{" & "parameter" & (i + 1) & "}", paramValue)
+                    Next
+
+                Else
+                    Return
+                End If
+            End If
+
+            SelectedText = selection.Text.Trim()
+            Dim llmresult As String = Await LLM(OtherPrompt, SelectedText, "", "", 0, True)
+
+            If Not String.IsNullOrWhiteSpace(llmresult) Then
+                If OptionChecked Then
+                    If DoPane Then
+                        SP_MergePrompt_Cached = SP_MergePrompt
+                        ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
+                    Else
+                        Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, True, True, True)
+                        If FinalText <> "" Then
+                            If FinalText = "Markdown" Then
+                                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                InsertTextWithMarkdown(selection, llmresult, False)
+                            ElseIf FinalText = "Pane" Then
+                                SP_MergePrompt_Cached = SP_MergePrompt
+                                ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
+                            Else
+                                SLib.PutInClipboard(FinalText)
+                            End If
+                        End If
+                    End If
+                Else
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    InsertTextWithMarkdown(selection, llmresult, False)
+                End If
+            End If
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("Fehler im SpecialModel: " & ex.Message)
+        Finally
+            RestoreDefaults(_context, originalConfig)
+            originalConfigLoaded = False
+        End Try
+    End Sub
+
+
+
+    Public Async Sub oldSpecialModel()
         If INILoadFail() Then Exit Sub
         Dim DoPane As Boolean = True
 
@@ -2839,16 +3130,41 @@ Public Class ThisAddIn
         If list.Count > 0 Then
             Dim parameters() As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = list.ToArray()
             If ShowCustomVariableInputForm("Please configure your parameters:", "Use '" & INI_Model_2 & "'", parameters) Then
-                Dim i As Integer = 0
-                For Each p In parameters
-                    i = i + 1
-                    If p.Name.ToLowerInvariant().Contains("prompt") Then
-                        OtherPrompt = p.Value.ToString().Trim()
+
+                ' Schleife über alle Parameter
+                For i As Integer = 0 To parameters.Length - 1
+                    Dim p As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameters(i)
+                    Dim paramValue As String
+
+                    ' 1) Boolean-Typ? dann immer "true"/"false" in lowercase
+                    If TypeOf p.Value Is System.Boolean Then
+                        paramValue = CType(p.Value, System.Boolean) _
+                                      .ToString() _
+                                      .ToLowerInvariant()
+                    Else
+                        ' 2) Sonst: Trim + (all)/(alle)/--- prüfen
+                        Dim rawValue As String = p.Value.ToString().Trim()
+                        Dim rvLower As String = rawValue.ToLowerInvariant()
+                        If rvLower.Contains("(all)") OrElse rvLower.Contains("(alle)") OrElse rawValue.Contains("---") Then
+                            rawValue = ""
+                        End If
+                        paramValue = rawValue
                     End If
-                    If p.Value.ToString().ToLower().Trim().Contains("(all)") Or p.Value.ToString().ToLower().Trim().Contains("(alle)") Or p.Value.ToString().ToLower().Trim().Contains("---") Then p.Value = ""
-                    INI_APICall_2 = INI_APICall_2.Replace("{parameter" & i & "}", p.Value.ToString().Trim())
-                    INI_APICall_Object_2 = INI_APICall_Object_2.Replace("{parameter" & i & "}", p.Value.ToString().Trim())
+
+                    ' 3) Sonderfall Prompt
+                    If p.Name.ToLowerInvariant().Contains("prompt") Then
+                        OtherPrompt = paramValue
+                    End If
+
+                    ' 4) Ersetze Platzhalter {parameter1}, {parameter2}, …
+                    INI_APICall_2 = INI_APICall_2.Replace(
+                                        "{parameter" & (i + 1) & "}",
+                                        paramValue)
+                    INI_APICall_Object_2 = INI_APICall_Object_2.Replace(
+                                        "{parameter" & (i + 1) & "}",
+                                        paramValue)
                 Next
+
             Else
                 Return
             End If
@@ -2861,15 +3177,19 @@ Public Class ThisAddIn
         If Not String.IsNullOrWhiteSpace(llmresult) Then
             If OptionChecked Then
                 If DoPane Then
+                    SP_MergePrompt_Cached = SP_MergePrompt
                     ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
                 Else
-                    Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True)
+                    Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True, True)
 
                     If FinalText <> "" Then
                         If FinalText = "Markdown" Then
                             Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                             Globals.ThisAddIn.Application.Selection.TypeParagraph()
                             InsertTextWithMarkdown(selection, llmresult, False)
+                        ElseIf FinalText = "Pane" Then
+                            SP_MergePrompt_Cached = SP_MergePrompt
+                            ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
                         Else
                             SLib.PutInClipboard(FinalText)
                         End If
@@ -3020,6 +3340,22 @@ Public Class ThisAddIn
                 Call AnonymizeSelection()
                 Exit Sub
             End If
+
+            If OtherPrompt.StartsWith("generateresponsekey", StringComparison.OrdinalIgnoreCase) Then
+
+                If NoText Then
+                    ShowCustomMessageBox("No text has been selected. Select the text containing both the JSON payload to interpret and what you want the output to look like (by referencing to the JSON fields and structure in natural text).")
+                    Return
+                End If
+
+                Dim response As String = Await LLM(SP_GenerateResponseKey & vbCrLf & Code_JsonTemplateFormatter, vbCrLf & SelectedText, "", "", 0, UseSecondAPI)
+
+                selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
+                selection.InsertAfter(vbCrLf & vbCrLf & response)
+
+                Exit Sub
+            End If
+
 
             If OtherPrompt.StartsWith("switch", StringComparison.OrdinalIgnoreCase) Then
                 selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
@@ -4006,17 +4342,21 @@ Public Class ThisAddIn
 
                 ElseIf DoPane Then
 
+                    SP_MergePrompt_Cached = SP_MergePrompt
                     ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane.", AN, False, True)
 
                 ElseIf PutInClipboard Then
 
-                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True)
+                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, True, True, True)
 
                     If FinalText <> "" Then
                         If FinalText = "Markdown" Then
                             Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                             Globals.ThisAddIn.Application.Selection.TypeParagraph()
                             InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                        ElseIf FinalText = "Pane" Then
+                            SP_MergePrompt_Cached = SP_MergePrompt
+                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane.", AN, False, True)
                         Else
                             SLib.PutInClipboard(FinalText)
                         End If
@@ -4382,10 +4722,27 @@ Public Class ThisAddIn
             Dim currentChunk As String = chunks(i)
 
             ' Attempt to find the chunk
+            'With selection.Find
+            '.Text = currentChunk
+            '.Forward = True
+            '.Wrap = Word.WdFindWrap.wdFindStop
+            'End With
+            ' xxxxxxxxxxx
+
+            Dim chunk As String = chunks(i)
+
             With selection.Find
-                .Text = currentChunk
                 .Forward = True
                 .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = False
+                If INI_Clean Then
+                    .MatchWildcards = True
+                    ' replace every literal space with [ ]@ (one-or-more spaces)
+                    .Text = chunk.Replace(" ", "[ ]@")
+                Else
+                    .MatchWildcards = False
+                    .Text = chunk
+                End If
             End With
 
             ' If this is the first chunk, search from the current selection
@@ -4662,7 +5019,15 @@ Public Class ThisAddIn
 
                         With workRange.Find
                             .ClearFormatting()
-                            .Text = oldText
+                            '.Text = oldText
+                            If ThisAddIn.INI_Clean Then
+                                .MatchWildcards = True
+                                ' turn each " " into "[ ]@" so Word will match 1+ spaces
+                                .Text = oldText.Replace(" ", "[ ]@")
+                            Else
+                                .MatchWildcards = False
+                                .Text = oldText
+                            End If
                             .Forward = True
                             .Wrap = Word.WdFindWrap.wdFindStop
                             .MatchWholeWord = True ' Ensures only whole words are matched
@@ -5977,7 +6342,7 @@ Public Class ThisAddIn
 
             Dim OriginalText As String = bodyText
 
-            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
+            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown, New IntelligentMergeCallback(AddressOf HandleIntelligentMerge))
 
             If result <> "" Then
                 If result = "Markdown" Then
@@ -5994,27 +6359,60 @@ Public Class ThisAddIn
     End Sub
 
 
-
-
-    Private Sub EnsureInitialized()
-        Static initialized As Boolean = False
-        If Not initialized Then
-            ' Pfade an dein Add-In anpassen oder aus der Config laden
-            Dim modelPath As String = "c:\models\model.onnx"
-            Dim vocabPath As String = "c:\models\new_bpe.model"
-            OnnxAnonymizer.Initialize(modelPath, vocabPath, 128)
-            initialized = True
-        End If
+    Private Sub HandleIntelligentMerge(selectedText As String)
+        ' Hier Deine bestehende Merge-Logik aufrufen:
+        IntelligentMerge(selectedText)
     End Sub
+
+    Public Async Sub IntelligentMerge(newtext As String)
+        Dim application As Word.Application = Globals.ThisAddIn.Application
+        Dim selection As Selection = application.Selection
+        If selection.Type = WdSelectionType.wdSelectionIP Then
+            ShowCustomMessageBox("Please select the text in your document with which your selection in the pane shall be merged.")
+            Return
+        End If
+        OtherPrompt = SLib.ShowCustomInputBox("If you want, you can amend the prompt that will be used to intelligently merge your selection into your document:", $"{AN} Intelligent Merge", False, SP_MergePrompt_Cached).Trim()
+        If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then Exit Sub
+        Dim result As String = Await ProcessSelectedText(OtherPrompt & " " & SP_Add_MergePrompt & " <INSERT>" & newtext & "</INSERT> ", True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
+    End Sub
+
+    Public ONNX_initialized As Boolean = False
+
+    Private Function EnsureInitialized() As Boolean
+
+        If Not ONNX_initialized AndAlso Not String.IsNullOrEmpty(Globals.ThisAddIn.INI_LocalModelPath) Then
+            ' Pfade an dein Add-In anpassen oder aus der Config laden
+            Try
+                Dim modelpath As String = System.IO.Path.Combine(ExpandEnvironmentVariables(Globals.ThisAddIn.INI_LocalModelPath), NER_Model)
+                Dim vocabpath As String = System.IO.Path.Combine(ExpandEnvironmentVariables(Globals.ThisAddIn.INI_LocalModelPath), NER_Token)
+                Dim labelpath As String = System.IO.Path.Combine(ExpandEnvironmentVariables(Globals.ThisAddIn.INI_LocalModelPath), NER_Label)
+
+                OnnxAnonymizer.Initialize(modelpath, vocabpath, labelpath, 128)
+                ONNX_initialized = True
+                Return True
+            Catch ex As Exception
+                SLib.ShowCustomMessageBox($"Error loading and initializing the NER model ({ex.Message}).")
+                ONNX_initialized = False
+                Return False
+            End Try
+        Else
+            Return ONNX_initialized
+        End If
+    End Function
 
 
     Public Sub AnonymizeSelection()
 
-        EnsureInitialized()
+        If String.IsNullOrEmpty(Globals.ThisAddIn.INI_LocalModelPath) Then
+            SLib.ShowCustomMessageBox("No path set for the NER model ('LocalModelPath').")
+            Return
+        End If
+
+        If Not EnsureInitialized() Then Return
 
         Dim sel As String = Globals.ThisAddIn.Application.Selection.Text
         If String.IsNullOrWhiteSpace(sel) Then
-            MessageBox.Show("Bitte zuerst Text in Word auswählen.", "Anonymizer")
+            SLib.ShowCustomMessageBox("Please select a text to anonymize.")
             Return
         End If
 
@@ -6023,12 +6421,13 @@ Public Class ThisAddIn
         Dim sb As New StringBuilder()
         sb.AppendLine(anon)
         sb.AppendLine()
-        sb.AppendLine("=== Entity-Mapping ===")
-        For Each kvp In OnnxAnonymizer._mapping
+        sb.AppendLine("Entity-Mapping:")
+        sb.AppendLine()
+        For Each kvp In OnnxAnonymizer.mapping
             sb.AppendLine($"{kvp.Key} -> {kvp.Value}")
         Next
 
-        Dim FinalText As String = ShowCustomWindow("ONNX returned the following anonymized text:", sb.ToString(), "Beware that this anonymization method is fast, but not of very high precision. Check the result.", AN, True)
+        Dim FinalText As String = ShowCustomWindow("The NER anonymization returned the following text:", sb.ToString(), "Beware that this anonymization method is fast, but not of very high precision. Check the result.", AN, True)
 
         If FinalText <> "" Then
             SLib.PutInClipboard(FinalText)
@@ -6313,6 +6712,9 @@ Public Class ThisAddIn
 
     Public Async Sub ContextSearch()
 
+        'RunSearch()
+        'Return
+
         Dim wordApp As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
         Dim selection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
         Dim doc As Microsoft.Office.Interop.Word.Document = wordApp.ActiveDocument
@@ -6436,6 +6838,69 @@ Public Class ThisAddIn
             End If
         End If
     End Sub
+
+    Private store As EmbeddingStore = New EmbeddingStore()
+    Private indexedDocs As HashSet(Of String) = New HashSet(Of String)()
+
+
+    Public Sub RunIndexing(Optional refresh As Boolean = False)
+        Dim doc = Application.ActiveDocument
+        Dim docId = doc.FullName
+        If Not indexedDocs.Contains(docId) OrElse refresh Then
+            Dim chunks As New List(Of TextChunk)()
+            Dim pos As Integer = 0
+            For Each sent As Range In doc.Sentences
+                chunks.Add(New TextChunk With {
+                    .Text = sent.Text.Trim(),
+                    .Position = pos,
+                    .StartOffset = sent.Start
+                })
+                pos += 1
+            Next
+            store.IndexDocument(docId, chunks)
+            If Not indexedDocs.Contains(docId) Then indexedDocs.Add(docId)
+        End If
+    End Sub
+
+    Public Sub RunSearch()
+        Try
+            Dim raw As String = ShowCustomInputBox("Suchbegriff (All:optional, (complete), (refresh)):", AN, False)
+            If String.IsNullOrWhiteSpace(raw) Then Return
+            Dim allDocs = False, findAll = False, refresh = False
+            Dim input = raw
+            If input.IndexOf("(complete)", StringComparison.OrdinalIgnoreCase) >= 0 Then findAll = True
+            If input.IndexOf("(refresh)", StringComparison.OrdinalIgnoreCase) >= 0 Then refresh = True
+            input = System.Text.RegularExpressions.Regex.Replace(input, "\(complete\)|\(refresh\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim()
+            If input.StartsWith("All:", StringComparison.OrdinalIgnoreCase) Then allDocs = True : input = input.Substring(4).Trim()
+
+            RunIndexing(refresh)
+            Dim sel = Application.Selection.Range
+            Dim results = store.Search(input, allDocs, findAll, Application.ActiveDocument.FullName, sel.Start)
+
+            If results.Count = 0 Then
+                MessageBox.Show("Keine Treffer gefunden.") : Return
+            End If
+
+            If findAll Then
+                For Each r In results
+                    Dim target = If(r.DocId = Application.ActiveDocument.FullName, Application.ActiveDocument, Application.Documents.Open(r.DocId))
+                    Dim rng = target.Range(r.StartOffset, r.StartOffset + r.Text.Length)
+                    target.Comments.Add(rng, $"RI Context Search: {input}")
+                Next
+                MessageBox.Show($"{results.Count} Treffer kommentiert.")
+            Else
+                Dim first = results(0)
+                Dim target = If(first.DocId = Application.ActiveDocument.FullName, Application.ActiveDocument, Application.Documents.Open(first.DocId))
+                Dim rng = target.Range(first.StartOffset, first.StartOffset + first.Text.Length)
+                rng.Select()
+                target.Comments.Add(rng, $"RI Context Search: {input}")
+                Application.ActiveWindow.ScrollIntoView(rng)
+            End If
+        Catch ex As System.Exception
+            MessageBox.Show("Fehler bei der Suche: " & ex.Message)
+        End Try
+    End Sub
+
 
     ' Other helper functions
     Private Function GetSelectedTextLength() As Integer
@@ -7231,6 +7696,7 @@ Public Class ThisAddIn
         Private StopButton As Forms.Button
         Private ClearButton As Forms.Button
         Private LoadButton As Forms.Button
+        Private AudioButton As Forms.Button
         Private QuitButton As Forms.Button
         Private ProcessButton As Forms.Button
         Private cultureComboBox As Forms.ComboBox
@@ -7379,6 +7845,7 @@ Public Class ThisAddIn
             AddHandler StopButton.Click, AddressOf StopButton_Click
             AddHandler ClearButton.Click, AddressOf ClearButton_Click
             AddHandler LoadButton.Click, AddressOf LoadButton_Click
+            AddHandler AudioButton.Click, AddressOf AudioButton_Click
             AddHandler QuitButton.Click, AddressOf QuitButton_Click
             AddHandler ProcessButton.Click, AddressOf ProcessButton_Click
 
@@ -7428,6 +7895,75 @@ Public Class ThisAddIn
         End Sub
 
 
+
+        Public Sub ConfigureAudioOutputDevice()
+            ' 1) Alle aktiven Render-Endpoints ermitteln
+            Dim enumerator As New MMDeviceEnumerator()
+            Dim devices As MMDeviceCollection =
+        enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+
+            ' 2) FriendlyNames und zugehörige IDs in parallele Arrays packen, inkl. Default als Index 0
+            Dim totalCount As Integer = devices.Count + 1
+            Dim deviceNames(totalCount - 1) As String
+            Dim deviceIds(totalCount - 1) As String
+
+            ' 2a) Default Audio Output Device (wie von WasapiLoopbackCapture)
+            deviceNames(0) = "Default Audio Output Device"
+            deviceIds(0) = String.Empty
+
+            ' 2b) Alle anderen Geräte ab Index 1
+            For i As Integer = 0 To devices.Count - 1
+                deviceNames(i + 1) = devices(i).FriendlyName
+                deviceIds(i + 1) = devices(i).ID
+            Next
+
+            ' 3) Aktuell in den Settings gespeichertes Device ermitteln (leere ID → Default)
+            Dim currentDeviceId As String = My.Settings.AudioOutputDevice
+            Dim currentDeviceName As String = String.Empty
+            Dim idxSaved As Integer = Array.IndexOf(deviceIds, currentDeviceId)
+            If idxSaved >= 0 Then
+                currentDeviceName = deviceNames(idxSaved)
+            End If
+
+            ' 4) Prompt für den Auswahl-Dialog zusammenbauen
+            Dim prompt As String = "Choose the audio output device for capturing"
+            If Not String.IsNullOrEmpty(currentDeviceName) Then
+                prompt &= $" (currently: {currentDeviceName})"
+            End If
+            prompt &= ":"
+
+            ' 5) Auswahl-Dialog anzeigen
+            Dim selection As String = ShowSelectionForm(
+        prompt,
+        $"{AN} Transcriptor",
+        deviceNames)
+
+            ' 6) Wenn Auswahl gültig, Index ermitteln und Settings setzen/clearen
+            If Not String.IsNullOrEmpty(selection) AndAlso selection <> "esc" Then
+                Dim chosenIndex As Integer = Array.IndexOf(deviceNames, selection)
+                If chosenIndex >= 0 Then
+                    If chosenIndex = 0 Then
+                        ' Default gewählt → Setting leeren
+                        My.Settings.AudioOutputDevice = String.Empty
+                    Else
+                        ' Konkrete Device-ID speichern
+                        My.Settings.AudioOutputDevice = deviceIds(chosenIndex)
+                    End If
+
+                    Try
+                        My.Settings.Save()
+                    Catch ex As System.Exception
+                        ' Volle Referenz auf Exception
+                        ShowCustomMessageBox($"Error saving audio output device setting: {ex.Message}")
+                    End Try
+                End If
+            End If
+        End Sub
+
+
+
+
+
         Private Sub InitializeComponents()
             ' --- DPI‐aware form setup ---
             Me.Font = New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
@@ -7452,11 +7988,11 @@ Public Class ThisAddIn
             ' Model / source dropdowns (start 50px wider)
             Me.cultureComboBox = New System.Windows.Forms.ComboBox() With {
         .DropDownStyle = ComboBoxStyle.DropDownList,
-        .Width = 200
+        .Width = 250
     }
             Me.deviceComboBox = New System.Windows.Forms.ComboBox() With {
         .DropDownStyle = ComboBoxStyle.DropDownList,
-        .Width = 400
+        .Width = 450
     }
 
             ' Speaker toggle + threshold
@@ -7485,17 +8021,18 @@ Public Class ThisAddIn
             Me.StopButton = New System.Windows.Forms.Button() With {.Text = "Stop", .AutoSize = True, .Enabled = False}
             Me.ClearButton = New System.Windows.Forms.Button() With {.Text = "Clear", .AutoSize = True}
             Me.LoadButton = New System.Windows.Forms.Button() With {.Text = "Load", .AutoSize = True}
+            Me.AudioButton = New System.Windows.Forms.Button() With {.Text = "Dev", .AutoSize = True}
             Me.QuitButton = New System.Windows.Forms.Button() With {.Text = "Quit", .AutoSize = True}
             Me.ProcessButton = New System.Windows.Forms.Button() With {.Text = "Process:", .AutoSize = True}
             Me.processCombobox = New System.Windows.Forms.ComboBox() With {
         .DropDownStyle = ComboBoxStyle.DropDownList,
-        .Width = 200
+        .Width = 250
     }
 
             ' Add a little right‐margin so controls aren’t jammed
             Dim pad As New Padding(0, 0, 10, 0)
             For Each ctl In {Label1, cultureComboBox, Label2, deviceComboBox, SpeakerIdent, SpeakerDistance,
-                     StartButton, StopButton, ClearButton, LoadButton, QuitButton, ProcessButton}
+                     StartButton, StopButton, ClearButton, LoadButton, AudioButton, QuitButton, ProcessButton}
                 ctl.Margin = pad
             Next
             processCombobox.Margin = pad
@@ -7568,12 +8105,12 @@ Public Class ThisAddIn
         .Dock = DockStyle.Bottom,
         .AutoSize = False,
         .Height = StartButton.PreferredSize.Height + 20,
-        .ColumnCount = 7,
+        .ColumnCount = 8,
         .RowCount = 1,
         .Padding = New Padding(0, 10, 0, 0)
     }
             ' first six columns auto‐size, last column (processCombobox) fills
-            For i = 1 To 6
+            For i = 1 To 7
                 bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.AutoSize))
             Next
             bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
@@ -7584,9 +8121,10 @@ Public Class ThisAddIn
             bottomRow.Controls.Add(StopButton, 1, 0)
             bottomRow.Controls.Add(ClearButton, 2, 0)
             bottomRow.Controls.Add(LoadButton, 3, 0)
-            bottomRow.Controls.Add(QuitButton, 4, 0)
-            bottomRow.Controls.Add(ProcessButton, 5, 0)
-            bottomRow.Controls.Add(processCombobox, 6, 0)
+            bottomRow.Controls.Add(AudioButton, 4, 0)
+            bottomRow.Controls.Add(QuitButton, 5, 0)
+            bottomRow.Controls.Add(ProcessButton, 6, 0)
+            bottomRow.Controls.Add(processCombobox, 7, 0)
 
             root.Controls.Add(bottomRow, 0, 2)
 
@@ -7602,188 +8140,6 @@ Public Class ThisAddIn
             Me.Icon = Icon.FromHandle(bmp.GetHicon())
         End Sub
 
-
-
-        Private Sub xxxxInitializeComponents()
-            ' Set standard font for UI
-            Me.Font = New System.Drawing.Font("Segoe UI", 9)
-
-            ' --- UI Elements ---
-            Me.RichTextBox1 = New RichTextBox() With {
-            .Font = New System.Drawing.Font("Segoe UI", 10),
-            .Multiline = True,
-            .ScrollBars = RichTextBoxScrollBars.Vertical,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Bottom Or AnchorStyles.Left Or AnchorStyles.Right
-        }
-
-            Me.StartButton = New Forms.Button() With {.Text = "Start", .Enabled = True, .AutoSize = True}
-            Me.StopButton = New Forms.Button() With {.Text = "Stop", .Enabled = False, .AutoSize = True}
-            Me.ClearButton = New Forms.Button() With {.Text = "Clear", .AutoSize = True}
-            Me.LoadButton = New Forms.Button() With {.Text = "Load", .AutoSize = True}
-            Me.QuitButton = New Forms.Button() With {.Text = "Quit", .AutoSize = True}
-            Me.ProcessButton = New Forms.Button() With {.Text = "Process:", .AutoSize = True}
-
-            Me.cultureComboBox = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList
-        }
-
-            Me.deviceComboBox = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList
-        }
-
-            Me.processCombobox = New Forms.ComboBox() With {
-            .DropDownStyle = ComboBoxStyle.DropDownList
-        }
-
-            Me.Label1 = New Label() With {
-            .Text = "Model:",
-            .AutoSize = True
-        }
-
-            Me.Label2 = New Label() With {
-            .Text = "Source:",
-            .AutoSize = True
-        }
-
-            Me.SpeakerIdent = New System.Windows.Forms.CheckBox() With {
-            .Text = VoskToggle,
-            .AutoSize = True,
-            .Checked = My.Settings.LastSpeakerEnabled
-        }
-
-
-            ' Initialize the TextBox and set the ToolTip
-            Me.SpeakerDistance = New System.Windows.Forms.TextBox() With {
-                    .AutoSize = False,
-                    .Width = 31,
-                    .Text = If(My.Settings.LastSpeakerDistance <= 0, "1.0", My.Settings.LastSpeakerDistance.ToString)
-                }
-
-
-            ' Status Label (New)
-            Me.StatusLabel = New Label() With {
-            .Text = "Transcribing:",
-            .Font = New System.Drawing.Font("Segoe UI", 9, FontStyle.Regular),
-            .ForeColor = Color.Black,
-            .AutoSize = True
-        }
-
-            ' Partial Text Label
-            Me.PartialTextLabel = New Label() With {
-                .Font = New System.Drawing.Font("Segoe UI", 9, FontStyle.Italic),
-                .ForeColor = Color.DimGray,
-                .Text = "...",
-                .AutoSize = False,
-                .Height = 60,
-                .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
-            }
-
-
-            ' Panel for Buttons
-            Me.ButtonPanel = New Panel() With {
-            .Anchor = AnchorStyles.Bottom Or AnchorStyles.Left Or AnchorStyles.Right,
-            .Height = 45
-        }
-
-            ' --- Layout ---
-
-            Me.ClientSize = New Drawing.Size(800, 580)
-            Me.Text = $"{AN} Transcriptor (editable text, audio will not be stored)"
-            Me.FormBorderStyle = FormBorderStyle.Sizable
-
-            ' Define padding values
-            Dim horizontalPadding As Integer = 10 ' Space between elements in a row
-            Dim verticalPadding As Integer = 10   ' Space between rows
-
-            ' Absolute position of Label1
-            Label1.Location = New System.Drawing.Point(12, 15)
-
-            ' Calculate actual width of Label1
-            Dim label1Width As Integer = Label1.PreferredSize.Width
-
-            ' Position cultureComboBox relative to Label1, ensuring enough space
-            cultureComboBox.Location = New System.Drawing.Point(Label1.Left + label1Width + horizontalPadding + horizontalPadding, Label1.Top - 3)
-            cultureComboBox.Size = New Size(250, 21)
-
-            ' Calculate actual width of Label2
-            Dim label2Width As Integer = Label2.PreferredSize.Width
-
-            ' Position Label2 relative to cultureComboBox
-            Label2.Location = New System.Drawing.Point(cultureComboBox.Left + cultureComboBox.Width + horizontalPadding + horizontalPadding, Label1.Top)
-
-            ' Position deviceComboBox relative to Label2, ensuring enough space
-            deviceComboBox.Location = New System.Drawing.Point(Label2.Left + label2Width + horizontalPadding + horizontalPadding, Label1.Top - 3)
-            deviceComboBox.Size = New Size(250, 21)
-
-            SpeakerIdent.Location = New System.Drawing.Point(deviceComboBox.Left + deviceComboBox.Width + horizontalPadding + horizontalPadding, Label1.Top - 1)
-            SpeakerDistance.Location = New System.Drawing.Point(SpeakerIdent.Left + SpeakerIdent.PreferredSize.Width + 10, Label1.Top - 1)
-
-            ' Position StatusLabel below the first row with consistent padding
-            StatusLabel.Location = New System.Drawing.Point(12, Label1.Bottom + verticalPadding)
-
-            ' Position PartialTextLabel below StatusLabel
-            PartialTextLabel.Location = New System.Drawing.Point(12, StatusLabel.Bottom + verticalPadding)
-            PartialTextLabel.Size = New Size(770, 60) ' Wider, not shrinking
-
-            ' Position RichTextBox1 below PartialTextLabel with extra spacing
-            RichTextBox1.Location = New System.Drawing.Point(12, PartialTextLabel.Bottom + verticalPadding)
-            RichTextBox1.Size = New Size(770, 350)
-
-            ' Position ButtonPanel below RichTextBox1
-            ButtonPanel.Location = New System.Drawing.Point(12, RichTextBox1.Bottom + verticalPadding)
-            ButtonPanel.Size = New Size(770, 45)
-
-            ' Define padding values
-            Dim buttonPadding As Integer = 10 ' Space between buttons inside the panel
-            Dim buttonTopMargin As Integer = 5 ' Vertical margin from the top of ButtonPanel
-
-            StartButton.Location = New System.Drawing.Point(0, buttonTopMargin)
-            StopButton.Location = New System.Drawing.Point(StartButton.Right + buttonPadding, buttonTopMargin)
-            ClearButton.Location = New System.Drawing.Point(StopButton.Right + buttonPadding, buttonTopMargin)
-            LoadButton.Location = New System.Drawing.Point(ClearButton.Right + buttonPadding, buttonTopMargin)
-            QuitButton.Location = New System.Drawing.Point(LoadButton.Right + buttonPadding, buttonTopMargin)
-            ProcessButton.Location = New System.Drawing.Point(QuitButton.Right + buttonPadding + buttonPadding, buttonTopMargin)
-
-            processCombobox.Location = New System.Drawing.Point(ProcessButton.Right + buttonPadding, buttonTopMargin)
-            processCombobox.Size = New Size(250, 21)
-
-            ButtonPanel.Size = New Size(770, buttonTopMargin + verticalPadding + StartButton.Height + 3)
-            ButtonPanel.Padding = New Padding(buttonPadding)
-
-            Me.ClientSize = New Drawing.Size(800, ButtonPanel.Bottom + verticalPadding)
-
-            ' Ensure the form cannot be resized closer than 20 pixels to the right of SpeakerDistance
-            Dim minWidth As Integer = SpeakerDistance.Left + SpeakerDistance.Width + 40
-
-            ' Set Minimum Size
-            Me.MinimumSize = New Size(minWidth, Me.Height)
-
-
-            ' Add elements to Form
-            Me.Controls.Add(Label1)
-            Me.Controls.Add(cultureComboBox)
-            Me.Controls.Add(Label2)
-            Me.Controls.Add(deviceComboBox)
-            Me.Controls.Add(SpeakerIdent)
-            Me.Controls.Add(SpeakerDistance)
-            Me.Controls.Add(StatusLabel)
-            Me.Controls.Add(PartialTextLabel)
-            Me.Controls.Add(RichTextBox1)
-            Me.Controls.Add(ButtonPanel)
-
-            ' Add buttons to panel
-            ButtonPanel.Controls.Add(StartButton)
-            ButtonPanel.Controls.Add(StopButton)
-            ButtonPanel.Controls.Add(ClearButton)
-            ButtonPanel.Controls.Add(LoadButton)
-            ButtonPanel.Controls.Add(QuitButton)
-            ButtonPanel.Controls.Add(ProcessButton)
-            ButtonPanel.Controls.Add(processCombobox)
-
-            ' Icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            Me.Icon = Icon.FromHandle(bmp.GetHicon())
-        End Sub
 
         Private Sub Form1_Resize(sender As Object, e As EventArgs) Handles Me.Resize
             Dim minWidth As Integer = SpeakerDistance.Left + SpeakerDistance.Width + 40
@@ -7887,6 +8243,7 @@ Public Class ThisAddIn
                     STTCanceled = True
 
                     Me.StopButton.Enabled = False
+                    Me.AudioButton.Enabled = False
                     Me.QuitButton.Enabled = False
                     If STTModel <> "vosk" Then
                         PartialTextLabel.Text = "Stopping…"
@@ -7916,6 +8273,10 @@ Public Class ThisAddIn
             End If
         End Sub
 
+        Private Sub AudioButton_Click(sender As Object, e As EventArgs)
+            ConfigureAudioOutputDevice()
+        End Sub
+
         Private Sub QuitButton_Click(sender As Object, e As EventArgs)
 
             If capturing Then
@@ -7923,6 +8284,7 @@ Public Class ThisAddIn
                 STTCanceled = True
 
                 Me.StopButton.Enabled = False
+                Me.AudioButton.Enabled = False
                 Me.QuitButton.Enabled = False
                 If STTModel <> "vosk" Then
                     PartialTextLabel.Text = "Stopping…"
@@ -8091,6 +8453,7 @@ Public Class ThisAddIn
                 Me.SpeakerDistance.Enabled = False
                 Me.StopButton.Enabled = True
                 Me.LoadButton.Enabled = False
+                Me.AudioButton.Enabled = False
                 splash.Close()
 
                 Select Case STTModel
@@ -8445,6 +8808,7 @@ Public Class ThisAddIn
                 Me.SpeakerDistance.Enabled = False
                 Me.StopButton.Enabled = True
                 Me.LoadButton.Enabled = False
+                Me.AudioButton.Enabled = False
                 splash.Close()
 
             Catch ex As Exception
@@ -8471,12 +8835,67 @@ Public Class ThisAddIn
                     .WaveFormat = New WaveFormat(16000, 1)
                 }
 
+
             If MultiSourceEnabled Then
+
+                ' Versuche, das in den Einstellungen gesetzte Ausgabegerät zu verwenden
+                Dim audioOutputDeviceId As String = My.Settings.AudioOutputDevice
+                Dim chosenDevice As MMDevice = Nothing
+
+                Debug.WriteLine("audioOutputDeviceId=" & audioOutputDeviceId)
+
+                If Not String.IsNullOrEmpty(audioOutputDeviceId) Then
+                    Try
+                        Dim enumerator As New MMDeviceEnumerator()
+                        chosenDevice = enumerator.GetDevice(audioOutputDeviceId)
+                    Catch ex As System.Exception
+                        ' Ungültige ID oder Gerät nicht gefunden → Fallback auf Default
+                        chosenDevice = Nothing
+                    End Try
+                End If
+
+                ' 1) LoopbackCapture mit spezifischem Gerät oder Default erstellen
+                If chosenDevice IsNot Nothing Then
+                    loopbackCapture = New WasapiLoopbackCapture(chosenDevice)
+                Else
+                    loopbackCapture = New WasapiLoopbackCapture()
+                End If
+
+                ' 2) Raw-Provider in native Format
+                loopbackRawProvider = New BufferedWaveProvider(loopbackCapture.WaveFormat) With {
+                                .DiscardOnBufferOverflow = True
+                            }
+                AddHandler loopbackCapture.DataAvailable, Sub(s, ev)
+                                                              loopbackRawProvider.AddSamples(ev.Buffer, 0, ev.BytesRecorded)
+                                                          End Sub
+
+                ' 3) Resample von native → Mic-Format (16 kHz mono 16-bit)
+                loopbackResampler = New MediaFoundationResampler(loopbackRawProvider, waveIn.WaveFormat) With {
+                            .ResamplerQuality = 60
+                        }
+
+                ' 4) Aufnahme starten
+                Try
+                    loopbackCapture.StartRecording()
+                Catch ex As System.Exception
+                    ' Gerät evtl. exklusiv belegt → Fallback auf Mic-only
+                    ShowCustomMessageBox("Cannot capture system audio: Device is in exclusive use or invalid. Continuing with mic only.")
+                    loopbackCapture.Dispose()
+                    loopbackCapture = Nothing
+                    loopbackResampler?.Dispose()
+                    loopbackResampler = Nothing
+                    loopbackRawProvider = Nothing
+                End Try
+            End If
+
+            ' The old procedure
+
+            If False Then
                 ' 1) start loopback capture in its native format
                 loopbackCapture = New WasapiLoopbackCapture()
                 loopbackRawProvider = New BufferedWaveProvider(loopbackCapture.WaveFormat) With {
-        .DiscardOnBufferOverflow = True
-    }
+                                    .DiscardOnBufferOverflow = True
+                                }
                 AddHandler loopbackCapture.DataAvailable, Sub(s, ev)
                                                               loopbackRawProvider.AddSamples(ev.Buffer, 0, ev.BytesRecorded)
                                                           End Sub
@@ -8499,10 +8918,6 @@ Public Class ThisAddIn
                 End Try
 
             End If
-
-            Debug.Print("_multisourcselected =" & _multiSourceSelected)
-            Debug.Print("MultiSourceEnabled =" & MultiSourceEnabled)
-
 
             If STTModel = "google" Then
                 AddHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
@@ -8663,49 +9078,6 @@ Public Class ThisAddIn
         End Sub
 
 
-
-
-        Private Async Sub OldOnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
-
-            If _googleStreamCompleted Then
-                Return
-            End If
-
-            Dim now = System.DateTime.UtcNow
-            Dim elapsed = (now - streamingStartTime).TotalMilliseconds
-
-            Dim chunk As ByteString = ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
-
-            ' 1) Zeitbasiertes Reconnect knapp vor 5-Minuten-Limit
-            If elapsed > STREAMING_LIMIT_MS Then
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = System.DateTime.UtcNow
-                Return
-            End If
-
-            ' 2) Try/Catch ohne Await im Catch
-            Dim shouldRecover As Boolean = False
-
-            Try
-                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
-                    .AudioContent = chunk
-                       })
-            Catch ex As RpcException _
-                     When ex.Status.StatusCode = StatusCode.DeadlineExceeded _
-                       OrElse ex.Status.StatusCode = StatusCode.Unavailable
-
-                System.Diagnostics.Debug.WriteLine(
-                              $"Google STT stream interrupted ({ex.Status.StatusCode}). Restarting…")
-                shouldRecover = True
-            End Try
-
-            ' 3) Outside Catch: Fire-and-await Recovery
-            If shouldRecover Then
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = System.DateTime.UtcNow
-            End If
-
-        End Sub
 
         Private Async Function RecoverGoogleStream(failedChunk As ByteString) As System.Threading.Tasks.Task
             Try
@@ -9502,7 +9874,7 @@ Public Class ThisAddIn
 
     Public Shared cts As New CancellationTokenSource()
 
-    Public Shared Async Function GenerateAudioFromText(input As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional nossml As Boolean = False, Optional Pitch As Double = 0, Optional SpeakingRate As Double = 1) As Task(Of Byte())
+    Public Shared Async Function GenerateAudioFromText(input As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional nossml As Boolean = False, Optional Pitch As Double = 0, Optional SpeakingRate As Double = 1, Optional CurrentPara As String = "") As Task(Of Byte())
         Try
             Using httpClient As New HttpClient()
 
@@ -9598,7 +9970,8 @@ Public Class ThisAddIn
                             Return Nothing
                         End If
                     Else
-                        ShowCustomMessageBox($"Error generating audio: API returned status {response.StatusCode}. Response: {responseString}")
+                        ShowCustomMessageBox($"Error generating audio: API returned status {response.StatusCode}. Response: {responseString}{If(String.IsNullOrEmpty(CurrentPara), "", "Text: " & CurrentPara) & " [in clipboard]"}).")
+                        If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(response.StatusCode & vbCrLf & vbCrLf & responseString & vbCrLf & vbCrLf & CurrentPara)
                         Return Nothing
                     End If
                 Catch ex As TaskCanceledException
@@ -9949,6 +10322,9 @@ Public Class ThisAddIn
 
 
     Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
+
+        Dim CurrentPara As String = ""
+
         Try
 
             Dim Temporary As Boolean = (filepath = "")
@@ -10095,6 +10471,7 @@ Public Class ThisAddIn
 
                 Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
                 Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
+                CurrentPara = Left(paraText, 400) & "..."
 
                 If isTitle And Alternate Then
                     If Not firstTitleEncountered Then
@@ -10125,18 +10502,23 @@ Public Class ThisAddIn
 
                 ' For bullet lists, insert a short pause BEFORE the paragraph.
                 If isBullet Then
-                    Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.3)
+                    Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.1)
                     If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
                 End If
 
                 If CleanText Then
                     ' Remove any unwanted characters from the paragraph text.
-                    paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", False, True)
+                    paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", 0, False, True)
                     paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
+                    CurrentPara = Left(CurrentPara, 100) & $"... [cleaned: {Left(paraText, 400)}...]"
+                    Debug.WriteLine("Cleaned Para = " & paraText & vbCrLf & vbCrLf)
                 End If
 
                 ' Generate the audio for the paragraph via your TTS API.
-                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate)
+                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate, CurrentPara)
+
+                CurrentPara = ""
+
                 If paragraphAudioBytes IsNot Nothing Then
                     Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
                     File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
@@ -10201,7 +10583,8 @@ Public Class ThisAddIn
             End If
 
         Catch ex As Exception
-            ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}).")
+            ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}{If(String.IsNullOrEmpty(CurrentPara), "", "; Text: " & CurrentPara) & " [in clipboard]"}).")
+            If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(ex.Message & vbCrLf & vbCrLf & CurrentPara)
         End Try
     End Sub
 

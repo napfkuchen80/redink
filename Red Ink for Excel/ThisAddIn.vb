@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.5.2025
+' 30.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -163,6 +163,7 @@ End Class
 Public Class ThisAddIn
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+        SharedMethods.Initialize(Me.CustomTaskPanes)
         InitializeAddInFeatures()
     End Sub
 
@@ -172,7 +173,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.160525 Gen2 Beta Test"
+    Public Const Version As String = "V.300525 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -184,8 +185,11 @@ Public Class ThisAddIn
     Private Const CellByCellPrefix As String = "CellByCell:"
     Private Const CellByCellPrefix2 As String = "CBC:"
     Private Const PurePrefix As String = "Pure:"
+    Private Const PanePrefix As String = "Pane:"
     Private Const BubblesPrefix As String = "Bubbles:"
     Private Const ExtTrigger As String = "{doc}"
+    Private Const ObjectTrigger As String = "(file)"
+    Private Const ObjectTrigger2 As String = "(clip)"
     Private Const ColorTrigger As String = "(color)"
     Private Const RIMenu = AN
     Private Const MinHelperVersion = 1           ' Minimum version of the helper file that is required
@@ -1464,6 +1468,60 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_Model_Parameter1 As String
+        Get
+            Return _context.INI_Model_Parameter1
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter1 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter2 As String
+        Get
+            Return _context.INI_Model_Parameter2
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter2 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter3 As String
+        Get
+            Return _context.INI_Model_Parameter3
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter3 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter4 As String
+        Get
+            Return _context.INI_Model_Parameter4
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter4 = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MergePrompt As String
+        Get
+            Return _context.SP_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_MergePrompt = value
+        End Set
+    End Property
+    Public Shared Property SP_Add_MergePrompt As String
+        Get
+            Return _context.SP_Add_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_Add_MergePrompt = value
+        End Set
+    End Property
+
+
 #End Region
 
     ' Functions of SharedLibrary
@@ -1481,8 +1539,8 @@ Public Class ThisAddIn
     Public Shared Async Function PostCorrection(inputText As String, Optional ByVal UseSecondAPI As Boolean = False) As Task(Of String)
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = True, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = True, Optional ByVal AddUserPrompt As String = "", Optional ByVal FileObject As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, Hidesplash, AddUserPrompt, FileObject)
     End Function
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
         SharedMethods.ShowSettingsWindow(Settings, SettingsTips, _context)
@@ -2078,6 +2136,9 @@ Public Class ThisAddIn
         Dim DoFormulas As Boolean = True
         Dim DoBubbles As Boolean = False
         Dim DoColor As Boolean = False
+        Dim DoFileObject As Boolean = False
+        Dim DoFileObjectClip As Boolean = False
+        Dim DoPane As Boolean = False
 
         Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
         Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -2090,26 +2151,35 @@ Public Class ThisAddIn
         Dim CBCInstruct As String = $"with '{CellByCellPrefix}' or '{CellByCellPrefix2} if the instruction should be executed cell-by-cell"
         Dim TextInstruct As String = $"use '{TextPrefix}' or '{TextPrefix2}' if the instruction should apply cell-by-cell, but only to text cells"
         Dim BubblesInstruct As String = $"use '{BubblesPrefix}' for inserting comments only"
+        Dim PaneInstruct As String = $"use '{PanePrefix}' for using the pane"
         Dim ExtInstruct As String = $"; insert '{ExtTrigger}' for text of a file (txt, docx, pdf)"
         Dim AddonInstruct As String = $"; add'{ColorTrigger}' to check for colorcodes"
+        Dim ObjectInstruct As String = $"; add '{ObjectTrigger}'/'{ObjectTrigger2}' for adding a file object"
+        Dim FileObject As String = ""
+
+        If UseSecondAPI Then
+            If Not String.IsNullOrWhiteSpace(INI_APICall_Object_2) Then
+                AddonInstruct += ObjectInstruct.Replace("; add", ",")
+                DoFileObject = True
+            End If
+        Else
+            If Not String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                AddonInstruct += ObjectInstruct.Replace("; add", ",")
+                DoFileObject = True
+            End If
+        End If
 
         Dim PromptLibInstruct As String = ""
         If INI_PromptLib Then
             PromptLibInstruct = " or press 'OK' for the prompt library"
         End If
 
-        'SLib.StoreClipboard()
-
-        'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
-
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & ExtInstruct & AddonInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {PaneInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & ExtInstruct & AddonInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
         Else
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet){PureInstruct}{ExtInstruct}{AddonInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet); {PaneInstruct}{PureInstruct}{ExtInstruct}{AddonInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt))
             DoRange = True
         End If
-
-        'SLib.RestoreClipboard()
 
         If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
 
@@ -2151,7 +2221,22 @@ Public Class ThisAddIn
         If OtherPrompt.StartsWith(BubblesPrefix, StringComparison.OrdinalIgnoreCase) And selectedRange IsNot Nothing Then
             OtherPrompt = OtherPrompt.Substring(BubblesPrefix.Length).Trim()
             DoBubbles = True
+            DoRange = True
         End If
+        If OtherPrompt.StartsWith(PanePrefix, StringComparison.OrdinalIgnoreCase) And DoRange Then
+            OtherPrompt = OtherPrompt.Substring(PanePrefix.Length).Trim()
+            DoPane = True
+            DoRange = True
+        End If
+        If DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            OtherPrompt = OtherPrompt.Replace(ObjectTrigger, "(a file object follows)").Trim()
+        ElseIf DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger2, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            OtherPrompt = OtherPrompt.Replace(ObjectTrigger2, "(a file object follows)").Trim()
+            DoFileObjectClip = True
+        Else
+            DoFileObject = False
+        End If
+
         If selectedRange IsNot Nothing Then
             selectedRange.Select()
         End If
@@ -2173,18 +2258,34 @@ Public Class ThisAddIn
             ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
         End If
 
+        If DoFileObject Then
+            If DoFileObjectClip Then
+                FileObject = "clipboard"
+            Else
+                DragDropFormLabel = "All file types that are supported by your LLM."
+                DragDropFormFilter = "Supported Files|*.*"
+                FileObject = GetFileName()
+                DragDropFormLabel = ""
+                DragDropFormFilter = ""
+                If String.IsNullOrWhiteSpace(FileObject) Then
+                    ShowCustomMessageBox("No file object has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
+                    Return False
+                End If
+            End If
+        End If
+
         If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
             OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
-            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
+            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
         Else
             If Not NoSelectedCells Then
                 If DoRange Then
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
                 Else
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor, DoPane, FileObject)
                 End If
             Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor)
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
             End If
         End If
 
@@ -2205,8 +2306,10 @@ Public Class ThisAddIn
     ' - Optional: ShortenPercentValue: A percentage value by which the text should be shortened (for calculating the word count for each cell individually)
     ' - Optional: Freestyle: A boolean value indicating whether to use freestyle mode
     ' - Optional: DoColor: A boolean value indicating whether to check for color codes
+    ' - Optional: DoPane: A boolean value indicating whether the output should go into the pane
+    ' - Optional: FileObject: The name of the file (or clipboard) where to get an object to include in the LLM call
 
-    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False) As Task(Of Boolean)
+    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False, Optional DoPane As Boolean = False, Optional FileObject As String = "") As Task(Of Boolean)
 
         Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
 
@@ -2305,7 +2408,7 @@ Public Class ThisAddIn
 
                                 Await System.Threading.Tasks.Task.Delay(500)
 
-                                Dim LLMResult As String = Await LLM(SysCommand & " " & SP_Add_KeepFormulasIntact, If(NoSelectedCells, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, True)
+                                Dim LLMResult As String = Await LLM(SysCommand & " " & SP_Add_KeepFormulasIntact, If(NoSelectedCells, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, True, "", FileObject)
 
                                 LLMResult = Trim(LLMResult)
 
@@ -2364,7 +2467,7 @@ Public Class ThisAddIn
 
                                 Await System.Threading.Tasks.Task.Delay(500)
 
-                                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI)
+                                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, True, "", FileObject)
 
                                 If Not String.IsNullOrEmpty(LLMResult) Then
                                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
@@ -2424,7 +2527,7 @@ Public Class ThisAddIn
                     SelectedText = ConvertRangeToString(selectedRange, DoFormulas, DoColor)
                 End If
 
-                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False, OtherPrompt)
+                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
 
@@ -2439,22 +2542,36 @@ Public Class ThisAddIn
 
                 If instructions.Count > 0 Then
 
-                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} implement this, if possible (don't worry, formulas will be automatically converted in to the locale of the your Excel application)?", AN, True)
+                    If DoPane Then
+                        SP_MergePrompt_Cached = ""
+                        ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                    Else
+                        Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} insert the square backets into your worksheet, where possible?", AN, True, False, False, True)
 
-                    ' Handle the user's response
-                    If Not String.IsNullOrWhiteSpace(FinalText) Then
-                        instructions = ParseLLMResponse(FinalText)
-                        ApplyLLMInstructions(instructions, DoBubbles)
-                        PutInClipboard(FinalText)
-                        ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+                        ' Handle the user's response
+                        If FinalText = "Pane" Then
+                            SP_MergePrompt_Cached = ""
+                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                        ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
+                            instructions = ParseLLMResponse(FinalText)
+                            ApplyLLMInstructions(instructions, DoBubbles)
+                            PutInClipboard(FinalText)
+                            ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+                        End If
                     End If
-
                 Else
-
-                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "If you chose OK, it will be put in the clipboard.", AN)
-
-                    If Not String.IsNullOrWhiteSpace(FinalText) Then PutInClipboard(FinalText)
-
+                    If DoPane Then
+                        SP_MergePrompt_Cached = ""
+                        ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
+                    Else
+                        Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "If you chose OK, it will be put in the clipboard.", AN)
+                        If FinalText = "Pane" Then
+                            SP_MergePrompt_Cached = ""
+                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
+                        ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
+                            PutInClipboard(FinalText)
+                        End If
+                    End If
                 End If
 
             Catch ex As Exception
@@ -2468,9 +2585,42 @@ Public Class ThisAddIn
 
     End Function
 
+
+    Private Async Sub ShowPaneAsync(
+                              introLine As String,
+                              bodyText As String,
+                              finalRemark As String,
+                              header As String,
+                              Optional NoRtf As Boolean = False,
+                              Optional insertMarkdown As Boolean = False
+                            )
+        Try
+
+            Dim OriginalText As String = bodyText
+
+            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, NoRtf, insertMarkdown, New IntelligentMergeCallback(AddressOf HandleIntelligentMerge))
+
+        Catch ex As Exception
+            MessageBox.Show("Error in ShowPaneAsync: " & ex.Message)
+        End Try
+    End Sub
+
+
+    Private Sub HandleIntelligentMerge(selectedText As String)
+        ' Hier Deine bestehende Merge-Logik aufrufen:
+        IntelligentMerge(selectedText)
+    End Sub
+
+    Public Async Sub IntelligentMerge(newtext As String)
+        Dim instructions As New List(Of String)
+        instructions = ParseLLMResponse(newtext)
+        ApplyLLMInstructions(instructions, True)  ' Always DoBubbles
+        ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+    End Sub
+
+
+
     ' Helpers for the Range Functionality
-
-
 
     Public Function ConvertRangeToString(
     ByVal CellRange As Excel.Range,
@@ -2840,6 +2990,35 @@ Public Class ThisAddIn
 
         splash.Close()
         Return sb.ToString()
+    End Function
+
+
+    Public Function GetFileName() As String
+        Dim filePath As String = ""
+        Try
+            If String.IsNullOrWhiteSpace(filePath) Then
+                Using form As New DragDropForm()
+                    If form.ShowDialog() = DialogResult.OK Then
+                        filePath = form.SelectedFilePath
+                    Else
+                        ' User cancelled or closed form
+                        Return String.Empty
+                    End If
+                End Using
+            End If
+
+            filePath = RemoveCR(filePath.Trim())
+            filePath = Path.GetFullPath(filePath)
+            If Not File.Exists(filePath) Then
+                ShowCustomMessageBox($"The file '{filePath}' was not found.")
+                Return ""
+            End If
+            Return filePath
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox($"An error occurred reading the file '{filePath}': {ex.Message}")
+            Return ""
+        End Try
     End Function
 
 

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.5.2025
+' 30.5.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -98,7 +98,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.160525 Gen2 Beta Test"
+    Public Const Version As String = "V.300525 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -120,6 +120,7 @@ Public Class ThisAddIn
     Private Const KPFTrigger As String = "(keepparaformat)"
     Private Const KPFTrigger2 As String = "(kpf)"
     Private Const InPlacePrefix As String = "Replace:"
+    Private Const ObjectTrigger2 As String = "(clip)"
 
     Private Const ESC_KEY As Integer = &H1B
 
@@ -1392,6 +1393,59 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_Model_Parameter1 As String
+        Get
+            Return _context.INI_Model_Parameter1
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter1 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter2 As String
+        Get
+            Return _context.INI_Model_Parameter2
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter2 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter3 As String
+        Get
+            Return _context.INI_Model_Parameter3
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter3 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Model_Parameter4 As String
+        Get
+            Return _context.INI_Model_Parameter4
+        End Get
+        Set(value As String)
+            _context.INI_Model_Parameter4 = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MergePrompt As String
+        Get
+            Return _context.SP_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_MergePrompt = value
+        End Set
+    End Property
+    Public Shared Property SP_Add_MergePrompt As String
+        Get
+            Return _context.SP_Add_MergePrompt
+        End Get
+        Set(value As String)
+            _context.SP_Add_MergePrompt = value
+        End Set
+    End Property
+
 
 #End Region
 
@@ -1411,8 +1465,8 @@ Public Class ThisAddIn
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
 
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False, Optional ByVal AddUserPrompt As String = "") As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash, AddUserPrompt)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional ByVal FileObject As String = "") As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash, AddUserPrompt, FileObject)
     End Function
 
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
@@ -2138,6 +2192,8 @@ Public Class ThisAddIn
             Dim KeepFormatCap = INI_KeepFormatCap ' currently not used
             Dim DoKeepFormat As Boolean = INI_KeepFormat2 ' currently not used
             Dim DoKeepParaFormat As Boolean = INI_KeepParaFormatInline ' currently not used
+            Dim DoFileObject As Boolean = False
+            Dim FileObject As String = ""
 
             Dim UseSecondAPI As Boolean = False
 
@@ -2148,6 +2204,7 @@ Public Class ThisAddIn
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
             Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use the secondary model ({INI_Model_2})", "")
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
+            Dim ObjectInstruct As String = $"; add '{ObjectTrigger2}' for including a clipboard object"
 
             Dim AddOnInstruct As String = "; add " & SecondAPIInstruct
 
@@ -2188,11 +2245,19 @@ Public Class ThisAddIn
                 NoText = True
             End If
 
+            If UseSecondAPI Then
+                If Not String.IsNullOrWhiteSpace(INI_APICall_Object_2) Then
+                    AddOnInstruct += ObjectInstruct.Replace("; add", ",")
+                    DoFileObject = True
+                End If
+            Else
+                If Not String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                    AddOnInstruct += ObjectInstruct.Replace("; add", ",")
+                    DoFileObject = True
+                End If
+            End If
+
             ' Prompt for the text to process
-
-            'SLib.StoreClipboard()
-
-            'If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
 
             If Not NoText Then
                 OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {InplaceInstruct}, {ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
@@ -2275,6 +2340,10 @@ Public Class ThisAddIn
                 OtherPrompt = OtherPrompt.Replace(KPFTrigger2, "").Trim()
                 DoKeepParaFormat = True
             End If
+            If DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger2, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                OtherPrompt = OtherPrompt.Replace(ObjectTrigger2, "(a file object follows)").Trim()
+                FileObject = "clipboard"
+            End If
 
             If INI_SecondAPI Then
                 If OtherPrompt.Contains(SecondAPICode) Then
@@ -2302,11 +2371,11 @@ Public Class ThisAddIn
             Dim LLMResult As String
 
             If Not NoText Then
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI, False, OtherPrompt)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
             Else
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText), "", "", "", 0, UseSecondAPI, False, OtherPrompt)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText), "", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
             End If
 
             If INI_PostCorrection <> "" Then
