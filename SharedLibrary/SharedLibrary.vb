@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.5.2025
+' 2.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -21,7 +21,6 @@
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
-Imports System
 Imports System.Deployment.Application
 Imports System.Drawing
 Imports System.Drawing.Imaging
@@ -33,14 +32,12 @@ Imports System.Net.Http
 Imports System.Reflection
 Imports System.Reflection.Emit
 Imports System.Runtime.InteropServices
-Imports System.Runtime.Remoting.Contexts
+Imports System.Runtime.InteropServices.WindowsRuntime
 Imports System.Text
 Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports System.Windows.Forms
-Imports BlingFire
 Imports HtmlAgilityPack
-Imports Markdig
 Imports Markdig.Extensions
 Imports Microsoft.ML.OnnxRuntime
 Imports Microsoft.ML.OnnxRuntime.Tensors
@@ -51,20 +48,16 @@ Imports Microsoft.Office.Tools
 Imports Microsoft.Win32
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
-Imports Org.BouncyCastle.Asn1
 Imports Org.BouncyCastle.Crypto
 Imports Org.BouncyCastle.Crypto.Parameters
 Imports Org.BouncyCastle.OpenSsl
 Imports Org.BouncyCastle.Security
-Imports Org.BouncyCastle.Utilities
 Imports Org.BouncyCastle.Utilities.IO.Pem
 Imports SharedLibrary.MarkdownToRtf
 Imports SharedLibrary.SharedLibrary.SharedContext
-Imports SharedLibrary.SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports UglyToad.PdfPig
 Imports UglyToad.PdfPig.Content
-Imports UglyToad.PdfPig.Tokenization
 
 
 Namespace SharedLibrary
@@ -89,6 +82,7 @@ Namespace SharedLibrary
             Property INI_APICall As String
             Property INI_APICall_Object As String
             Property INI_Response As String
+            Property INI_Anon As String
             Property INI_DoubleS As Boolean
             Property INI_Clean As Boolean
             Property INI_PreCorrection As String
@@ -118,6 +112,7 @@ Namespace SharedLibrary
             Property INI_APICall_2 As String
             Property INI_APICall_Object_2 As String
             Property INI_Response_2 As String
+            Property INI_Anon_2 As String
             Property INI_APIEncrypted_2 As Boolean
             Property INI_APIKeyPrefix_2 As String
             Property INI_OAuth2_2 As Boolean
@@ -257,6 +252,7 @@ Namespace SharedLibrary
         Public Property INI_APICall As String Implements ISharedContext.INI_APICall
         Public Property INI_APICall_Object As String Implements ISharedContext.INI_APICall_Object
         Public Property INI_Response As String Implements ISharedContext.INI_Response
+        Public Property INI_Anon As String Implements ISharedContext.INI_Anon
         Public Property INI_DoubleS As Boolean Implements ISharedContext.INI_DoubleS
         Public Property INI_Clean As Boolean Implements ISharedContext.INI_Clean
         Public Property INI_PreCorrection As String Implements ISharedContext.INI_PreCorrection
@@ -285,6 +281,7 @@ Namespace SharedLibrary
         Public Property INI_APICall_2 As String Implements ISharedContext.INI_APICall_2
         Public Property INI_APICall_Object_2 As String Implements ISharedContext.INI_APICall_Object_2
         Public Property INI_Response_2 As String Implements ISharedContext.INI_Response_2
+        Public Property INI_Anon_2 As String Implements ISharedContext.INI_Anon_2
         Public Property INI_APIEncrypted_2 As Boolean Implements ISharedContext.INI_APIEncrypted_2
         Public Property INI_APIKeyPrefix_2 As String Implements ISharedContext.INI_APIKeyPrefix_2
         Public Property INI_OAuth2_2 As Boolean Implements ISharedContext.INI_OAuth2_2
@@ -578,6 +575,11 @@ Namespace SharedLibrary
 
         Public Shared SP_MergePrompt_Cached As String = ""
 
+        Public Const AnonFile = "redink-anon.txt"
+        Public Const AnonPlaceholder = "redacted"
+        Public Const AnonPrefix = "<"
+        Public Const AnonSuffix = ">"
+
         Public Delegate Sub IntelligentMergeCallback(selectedText As String)
 
         Public Shared RemoveMenu As Boolean = False
@@ -649,7 +651,7 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepFormulasIntact As String = "Beware, the text contains an Excel formula. Unless expressly instructed otherwise, make sure that the formula still works as intended."
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text."
-        Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting verbatim the relevant portion of the TEXTTOPROCESS followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the portion of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted portion of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks.\n4. Keep the verbatim quoted text as short as possible (ensuring that it is still unique in the TEXTTOPROCESS) and that the comment for such portion is drafted meaningful. The verbatim quote should never be more than a Paragraph, preferrably less. \n5. When quoting a portion of TEXTTOPROCESS make sure that you NEVER start with a title, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. NEVER quote a portion of TEXTTOPROCESS that consists of several paragraphs and line breaks. If you need to comment more than one paragraph, select ONLY the first sentence and state that your comment refers to the entire section. Always limit yourself to at maximum one Paragraph. \n6. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n7. Follow these rules strictly, because your output will otherwise not be valid."
+        Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting verbatim the relevant portion of the TEXTTOPROCESS followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the portion of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted portion of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks.\n4. Keep the verbatim quoted text as short as possible (ensuring that it is still unique in the TEXTTOPROCESS) and that the comment for such portion is drafted meaningful. The verbatim quote should never be more than a paragraph, preferrably less. \n5. When quoting a portion of TEXTTOPROCESS make sure that you NEVER start with a title, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the portions of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a portion of TEXTTOPROCESS that consists of several paragraphs and line breaks. If you need to comment more than one paragraph, select ONLY the first sentence and state that your comment refers to the entire section. Always limit yourself to at maximum one Paragraph. \n8. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n9. Follow these rules strictly, because your output will otherwise not be valid."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instructions refer to markups, changes, insertions, deletions or revisions in the text, they are found within the tags <ins>...</ins> for insertions and within the tags <del> ... </del> for deletions."
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
@@ -663,8 +665,8 @@ Namespace SharedLibrary
         Const Default_INI_ISearch_Apply_SP As String = "You are a legal professional with excellent legal, language and logical skills and you precisely comply with your instructions step by step. You will execute the following instruction in the language of the command using (1) the knowledge and Information contained in the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, and (2) the text provided within the <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present. {INI_PreCorrection} \n Instruction: '{OtherPrompt}'\n {SearchResult} \n"
         Const Default_INI_ISearch_Apply_SP_Markup As String = "You are a legal professional With excellent legal, Language And logical skills And you precisely comply With your instructions Step by Step. You will execute the following instruction In the language Of the command Using the knowledge And Information contained In the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, And applying it directly To text provided within the <TEXTTOPROCESS> And </TEXTTOPROCESS> tags (amending it, as per the instruction). {INI_PreCorrection} \n Instruction: '{OtherPrompt} \n {SearchResult} \n"
 
-        Const Default_SP_ContextSearch As String = "You are a meticulous legal document analyst specializing in precise text extraction. Your task is to identify and extract the most relevant section of text that corresponds to a given search context. Follow these instructions exactly:\n\n1. **Analyze the Search Context:**\n   * Understand the core meaning and intent of the Search Context provided below.\n   * Identify key concepts, synonyms, related terms, and potential paraphrasing that might appear in the text related to this context. Consider the *topic*, *subject matter*, and *potential implications* described in the Search Context.\n\n2. **Examine the Target Text:**\n   * Carefully read the entire text provided between the `<TEXTTOSEARCH>` and `</TEXTTOSEARCH>` tags.\n   * Keep the Search Context and your analysis from Step 1 firmly in mind while reading.\n\n3. **Identify the BEST Matching Section:**\n   * Locate the section of text (this could be a phrase, sentence, multiple sentences, a paragraph, or multiple paragraphs) that *most directly and completely* addresses the Search Context. Prioritize the *best* match, not necessarily the *first* potential match.\n   * The match may be direct (using similar wording) or indirect (conveying the same meaning or addressing the same topic).\n   * Consider the overall meaning and context of the text, not just isolated words.\n\n4. **Extract the Relevant Text:**\n   * Copy the identified section *verbatim* from the text.\n   * Include enough surrounding text to provide *clear and unambiguous context*. The extracted text should be self-contained and understandable *without needing to refer back to the full text*. \n Make sure that the extracted text is never more than *one paragraph*.\n\n5. **Output Requirements:**\n   * Output *only* the extracted text, exactly as it appears in the original.\n   * Do *not* add any commentary, explanations, headings, quotation marks, or extra formatting.\n   * If *no* section of the text matches the Search Context, provide an empty output.\n\n6. **Strict Compliance:** Any deviation from these instructions will be considered an error.\n\nNow here is the Search Context: {SearchContext}"
-        Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph, or multiple paragraphs) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract the relevant snippet verbatim from the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting.\n\n6. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n7. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
+        Const Default_SP_ContextSearch As String = "You are a meticulous legal document analyst specializing in precise text extraction. Your task is to identify and extract the most relevant section of text that corresponds to a given search context. Follow these instructions exactly:\n\n1. **Analyze the Search Context:**\n   * Understand the core meaning and intent of the Search Context provided below.\n   * Identify key concepts, synonyms, related terms, and potential paraphrasing that might appear in the text related to this context. Consider the *topic*, *subject matter*, and *potential implications* described in the Search Context.\n\n2. **Examine the Target Text:**\n   * Carefully read the entire text provided between the `<TEXTTOSEARCH>` and `</TEXTTOSEARCH>` tags.\n   * Keep the Search Context and your analysis from Step 1 firmly in mind while reading.\n\n3. **Identify the BEST Matching Section:**\n   * Locate the section of text (this could be a phrase, sentence, multiple sentences, a paragraph, or multiple paragraphs) that *most directly and completely* addresses the Search Context. Prioritize the *best* match, not necessarily the *first* potential match.\n   * The match may be direct (using similar wording) or indirect (conveying the same meaning or addressing the same topic).\n   * Consider the overall meaning and context of the text, not just isolated words.\n\n4. **Extract the Relevant Text:**\n   * Copy the identified section *verbatim* from the text.\n   * Include enough surrounding text to provide *clear and unambiguous context*. The extracted text should be self-contained and understandable *without needing to refer back to the full text*. \n Make sure that the extracted text is never more than *one paragraph*. The extract text should only contain a group of words, a sentence or sentences. Never include an additional heading or title, never include leading bullets or numbers. Select the extracted text to make sure it does never include special characters. \n\n5. **Output Requirements:**\n   * Output *only* the extracted text, exactly as it appears in the original.\n   * Do *not* add any commentary, explanations, headings, quotation marks, or extra formatting.\n   * If *no* section of the text matches the Search Context, provide an empty output.\n\n6. **Strict Compliance:** Any deviation from these instructions will be considered an error.\n\nNow here is the Search Context: {SearchContext}"
+        Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph, or multiple paragraphs) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract the relevant snippet verbatim from the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than a paragraph, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters.\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
 
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. The user wishes that the dialogue you generate has a particular minimum length, meaning that if the duration is more than five minutes or 1000 words, you a) need to go very deep into the topic and text given and b) ensure that you structure the dialogue to have an introduction, multiple chapters to cover each core topic of the text, and a summary and closing segment. For every five minutes of dialogue, create at least 1000 words. You MUST comply with the minimum lenght instruction given, and your output MUST include the ENTIRE dialogue. You may not end your output before you have provided the FULL dialogue (e.g., you are NOT PERMITTED to say that the dialogue continues without providing it). The minimum lenght instruction for the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n16. You shall use SSML tags, but never use any XML tags or XML headers and never provide any Markdown formatting.\n\17. It is important that you really comply with these rules, otherwise the output will be invalid. 18. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
         Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. Create me an advanced prompt for an advanced large language model that will analyze a Text (the Texttoprocess) it is provided between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, including any errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special fied of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand and provide it in the original language of the Texttoprocess. {INI_PreCorrection}"
@@ -1186,6 +1188,42 @@ Namespace SharedLibrary
 
         Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional FileObject As String = "") As Task(Of String)
 
+            ' Anonymization features
+
+            Dim ModelName As String = If(UseSecondAPI, context.INI_Model_2, context.INI_Model)
+            Dim AnonSetting As String = If(UseSecondAPI, context.INI_Anon_2, context.INI_Anon)
+            Dim OverrideAnonSetting As String = LoadAnonSettingsForModel(ModelName)
+            Dim AnonActive As Boolean = False
+            If Not String.IsNullOrWhiteSpace(OverrideAnonSetting) Then AnonSetting = OverrideAnonSetting
+            If Not String.IsNullOrWhiteSpace(AnonSetting) Then
+                Dim AnonType As Integer = GetTypeFromSettings(AnonSetting)
+                If AnonType > 0 And Not String.IsNullOrWhiteSpace(promptUser) Then
+                    Dim AnonMode As String = GetModeFromSettings(AnonSetting)
+
+                    Dim TTPPrefix As Boolean = False
+                    Dim TTPSuffix As Boolean = False
+                    If promptUser.TrimStart().StartsWith("<TEXTTOPROCESS>", StringComparison.OrdinalIgnoreCase) Then
+                        TTPPrefix = True
+                        promptUser = promptUser.TrimStart()
+                        promptUser = promptUser.Substring("<TEXTTOPROCESS>".Length)
+                    End If
+                    If promptUser.TrimEnd().EndsWith("</TEXTTOPROCESS>", StringComparison.OrdinalIgnoreCase) Then
+                        TTPSuffix = True
+                        promptUser = promptUser.TrimEnd()
+                        promptUser = promptUser.Substring(0, promptUser.Length - "</TEXTTOPROCESS>".Length)
+                    End If
+
+                    promptUser = AnonymizeText(promptUser, ModelName, AnonMode, AnonType)
+
+                    If String.IsNullOrWhiteSpace(promptUser) Then Return ""
+
+                    If TTPPrefix Then promptUser = "<TEXTTOPROCESS>" & promptUser
+                    If TTPSuffix Then promptUser = promptUser & "</TEXTTOPROCESS>"
+
+                    AnonActive = True
+                End If
+            End If
+
             Dim splash As New SplashScreen("Waiting for the LLM to respond...")
 
             If Not Hidesplash Then
@@ -1266,6 +1304,11 @@ Namespace SharedLibrary
                     TimeoutValue = If(Timeout = 0, context.INI_Timeout, Timeout)
                 End If
 
+                Endpoint = Endpoint.Replace("{promptsystem}", CleanString(promptSystem))
+                Endpoint = Endpoint.Replace("{promptuser}", CleanString(promptUser.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()))
+                Endpoint = Endpoint.Replace("{userinstruction}", CleanString(AddUserPrompt))
+                Endpoint = Endpoint.Trim().Replace(" ", "+")
+
                 Dim epParts() As String = Endpoint.Split(New String() {sep}, StringSplitOptions.None)
                 Dim apiParts() As String = APICall.Split(New String() {sep}, StringSplitOptions.None)
                 Dim respParts() As String = ResponseKey.Split(New String() {sep}, StringSplitOptions.None)
@@ -1288,7 +1331,12 @@ Namespace SharedLibrary
                 APICall = postAPICall
                 ResponseKey = postResponseKey
 
-
+                Dim useGetMethod As Boolean = False
+                If Endpoint.StartsWith("get:", System.StringComparison.OrdinalIgnoreCase) Then
+                    useGetMethod = True
+                    ' "get:"-Prefix entfernen
+                    Endpoint = Endpoint.Substring(4)
+                End If
 
                 ' Replace placeholders in the request body
                 Dim requestBody As String = APICall
@@ -1473,13 +1521,13 @@ Namespace SharedLibrary
                         client.Timeout = TimeSpan.FromMilliseconds(TimeoutValue)
 
                         ' Add headers
-                        If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                            client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
-                        End If
+                        'If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
+                        'client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
+                        'End If
 
-                        If context.INI_APIDebug Then
-                            Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
-                        End If
+                        'If context.INI_APIDebug Then
+                        'Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                        'End If
 
                         ' Send the request
                         Try
@@ -1498,7 +1546,33 @@ Namespace SharedLibrary
                                 End If
 
                                 Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-                                Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
+                                'Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
+
+                                Dim response As System.Net.Http.HttpResponseMessage
+
+                                If useGetMethod Then
+                                    ' 1) GET-Request erstellen
+                                    Dim getReq As New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, Endpoint)
+                                    '    Falls der GET-Endpunkt einen Body erwartet (selten), könnte man hier requestContent setzen:
+                                    '    getReq.Content = requestContent
+                                    If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
+                                        getReq.Headers.Add(HeaderA, HeaderB)
+                                    End If
+                                    If context.INI_APIDebug Then
+                                        Debug.WriteLine($"SENT TO API as GET ({Endpoint}):{Environment.NewLine}{String.Empty}") ' Kein Body
+                                    End If
+                                    response = Await client.SendAsync(getReq)
+                                Else
+                                    ' Klassischer POST-Request
+                                    If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
+                                        client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
+                                    End If
+                                    If context.INI_APIDebug Then
+                                        Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                                    End If
+                                    response = Await client.PostAsync(Endpoint, requestContent)
+                                End If
+
 
                                 If response.IsSuccessStatusCode Then
                                     ' Read and return the response if the call succeeded.
@@ -1654,6 +1728,8 @@ Namespace SharedLibrary
                     Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
                     Returnvalue = RemoveHiddenMarkers(Returnvalue)
                 End If
+
+                If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
 
                 Return Returnvalue
 
@@ -2463,12 +2539,13 @@ Namespace SharedLibrary
                     accessToken = Await GoogleOAuthHelper.GetAccessToken()
                     If SecondAPI Then
                         context.TokenExpiry_2 = DateTime.UtcNow.AddSeconds(GoogleOAuthHelper.token_life - 300) ' Set expiry 5 minutes before actual
+                        context.DecodedAPI_2 = accessToken
                     Else
                         context.TokenExpiry = DateTime.UtcNow.AddSeconds(GoogleOAuthHelper.token_life - 300) ' Set expiry 5 minutes before actual
+                        context.DecodedAPI = accessToken
                     End If
                 End If
                 Return accessToken
-                Exit Function
 
             Catch ex As System.Exception
                 ' Handle exceptions explicitly with System.Exception
@@ -2824,6 +2901,7 @@ Namespace SharedLibrary
                 context.INI_HeaderA = If(configDict.ContainsKey("HeaderA"), configDict("HeaderA"), "")
                 context.INI_HeaderB = If(configDict.ContainsKey("HeaderB"), configDict("HeaderB"), "")
                 context.INI_Response = If(configDict.ContainsKey("Response"), configDict("Response"), "")
+                context.INI_ANON = If(configDict.ContainsKey("Anon"), configDict("Anon"), "")
                 context.INI_APICall = If(configDict.ContainsKey("APICall"), configDict("APICall"), "")
                 context.INI_APICall_Object = If(configDict.ContainsKey("APICall_Object"), configDict("APICall_Object"), "")
                 context.INI_Timeout = If(configDict.ContainsKey("Timeout"), CLng(configDict("Timeout")), 0)
@@ -2957,6 +3035,7 @@ Namespace SharedLibrary
                     context.INI_HeaderA_2 = If(configDict.ContainsKey("HeaderA_2"), configDict("HeaderA_2"), "")
                     context.INI_HeaderB_2 = If(configDict.ContainsKey("HeaderB_2"), configDict("HeaderB_2"), "")
                     context.INI_Response_2 = If(configDict.ContainsKey("Response_2"), configDict("Response_2"), "")
+                    context.INI_Anon_2 = If(configDict.ContainsKey("Anon_2"), configDict("Anon_2"), "")
                     context.INI_APICall_2 = If(configDict.ContainsKey("APICall_2"), configDict("APICall_2"), "")
                     context.INI_APICall_Object_2 = If(configDict.ContainsKey("APICall_Object_2"), configDict("APICall_Object_2"), "")
                     context.INI_Timeout_2 = If(configDict.ContainsKey("Timeout_2"), CLng(configDict("Timeout_2")), 0)
@@ -3270,6 +3349,7 @@ Namespace SharedLibrary
                 mc.HeaderA = If(String.IsNullOrEmpty(context.INI_HeaderA_2), "", context.INI_HeaderA_2)
                 mc.HeaderB = If(String.IsNullOrEmpty(context.INI_HeaderB_2), "", context.INI_HeaderB_2)
                 mc.Response = If(String.IsNullOrEmpty(context.INI_Response_2), "", context.INI_Response_2)
+                mc.Anon = If(String.IsNullOrEmpty(context.INI_Anon_2), "", context.INI_Anon_2)
                 mc.APICall = If(String.IsNullOrEmpty(context.INI_APICall_2), "", context.INI_APICall_2)
                 mc.APICall_Object = If(String.IsNullOrEmpty(context.INI_APICall_Object_2), "", context.INI_APICall_Object_2)
                 mc.Timeout = context.INI_Timeout_2
@@ -3302,6 +3382,7 @@ Namespace SharedLibrary
                 context.INI_HeaderA_2 = If(Not String.IsNullOrEmpty(config.HeaderA), config.HeaderA, "")
                 context.INI_HeaderB_2 = If(Not String.IsNullOrEmpty(config.HeaderB), config.HeaderB, "")
                 context.INI_Response_2 = If(Not String.IsNullOrEmpty(config.Response), config.Response, "")
+                context.INI_Anon_2 = If(Not String.IsNullOrEmpty(config.Anon), config.Anon, "")
                 context.INI_APICall_2 = If(Not String.IsNullOrEmpty(config.APICall), config.APICall, "")
                 context.INI_APICall_Object_2 = If(Not String.IsNullOrEmpty(config.APICall_Object), config.APICall_Object, "")
                 context.INI_Timeout_2 = If(config.Timeout <> 0, config.Timeout, 0)
@@ -6154,7 +6235,8 @@ Namespace SharedLibrary
                             Optional NoRTF As Boolean = False,
                             Optional Getfocus As Boolean = False,
                             Optional InsertMarkdown As Boolean = False,
-                            Optional TransferToPane As Boolean = False
+                            Optional TransferToPane As Boolean = False,
+                            Optional parentWindowHwnd As IntPtr = Nothing
                         ) As String
 
 
@@ -6374,7 +6456,7 @@ Namespace SharedLibrary
                                                   Else
                                                       btnCancel.Location = New System.Drawing.Point(btnMark.Right + gapButtons, btnY)
                                                   End If
-                                              ElseIf TransfertoPane Then
+                                              ElseIf TransferToPane Then
                                                   btnPane.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
                                                   btnCancel.Location = New System.Drawing.Point(btnPane.Right + gapButtons, btnY)
                                               Else
@@ -6447,7 +6529,10 @@ Namespace SharedLibrary
             ' --- Dialog anzeigen ---
             styledForm.BringToFront()
             styledForm.Focus()
-            If Getfocus Then
+
+            If parentWindowHwnd <> IntPtr.Zero Then
+                styledForm.ShowDialog(New WindowWrapper(parentWindowHwnd))
+            ElseIf Getfocus Then
                 Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
                 styledForm.ShowDialog(New WindowWrapper(outlookHwnd))
             Else
@@ -7763,6 +7848,8 @@ Namespace SharedLibrary
                     Return context.INI_APICall_Object
                 Case "Response"
                     Return context.INI_Response
+                Case "Anon"
+                    Return context.INI_ANON
                 Case "APIKey_2"
                     Return context.INI_APIKeyBack_2
                 Case "Temperature_2"
@@ -7929,6 +8016,8 @@ Namespace SharedLibrary
                     context.INI_APICall_Object = value
                 Case "Response"
                     context.INI_Response = value
+                Case "Anon"
+                    context.INI_ANON = value
                 Case "APIKey_2"
                     context.INI_APIKeyBack_2 = value
                 Case "APIKeyPrefix_2"
@@ -7951,6 +8040,8 @@ Namespace SharedLibrary
                     context.INI_APICall_Object_2 = value
                 Case "Response_2"
                     context.INI_Response_2 = value
+                Case "Anon_2"
+                    context.INI_Anon_2 = value
                 Case "OAuth2ClientMail"
                     context.INI_OAuth2ClientMail = value
                 Case "OAuth2Scopes"
@@ -8127,6 +8218,10 @@ Namespace SharedLibrary
             context.INI_Response = context.INI_Response_2
             context.INI_Response_2 = temp
 
+            temp = context.INI_ANON
+            context.INI_ANON = context.INI_Anon_2
+            context.INI_Anon_2 = temp
+
             temp = context.INI_APICall
             context.INI_APICall = context.INI_APICall_2
             context.INI_APICall_2 = temp
@@ -8217,6 +8312,7 @@ Namespace SharedLibrary
                     {"HeaderA", context.INI_HeaderA},
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
+                    {"Anon", context.INI_ANON},
                     {"APICall", context.INI_APICall},
                     {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
@@ -8251,6 +8347,7 @@ Namespace SharedLibrary
                     {"HeaderA_2", context.INI_HeaderA_2},
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
+                    {"Anon_2", context.INI_Anon_2},
                     {"APICall_2", context.INI_APICall_2},
                     {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
@@ -8474,6 +8571,7 @@ Namespace SharedLibrary
                     {"HeaderA", context.INI_HeaderA},
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
+                    {"Anon", context.INI_ANON},
                     {"APICall", context.INI_APICall},
                     {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
@@ -8488,6 +8586,7 @@ Namespace SharedLibrary
                     {"HeaderA_2", context.INI_HeaderA_2},
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
+                    {"Anon_2", context.INI_Anon_2},
                     {"APICall_2", context.INI_APICall_2},
                     {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
@@ -8739,6 +8838,7 @@ Namespace SharedLibrary
             variableValues.Add("APICall", context.INI_APICall)
             variableValues.Add("APICall_Object", context.INI_APICall_Object)
             variableValues.Add("Response", context.INI_Response)
+            variableValues.Add("Anon", context.INI_ANON)
             variableValues.Add("DoubleS", context.INI_DoubleS)
             variableValues.Add("Clean", context.INI_Clean)
             variableValues.Add("PreCorrection", context.INI_PreCorrection)
@@ -8766,6 +8866,7 @@ Namespace SharedLibrary
             variableValues.Add("APICall_2", context.INI_APICall_2)
             variableValues.Add("APICall_Object_2", context.INI_APICall_Object_2)
             variableValues.Add("Response_2", context.INI_Response_2)
+            variableValues.Add("Anon_2", context.INI_Anon_2)
             variableValues.Add("APIEncrypted_2", context.INI_APIEncrypted_2)
             variableValues.Add("APIKeyPrefix_2", context.INI_APIKeyPrefix_2)
             variableValues.Add("OAuth2_2", context.INI_OAuth2_2)
@@ -8875,6 +8976,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("APICall") Then context.INI_APICall = updatedValues("APICall")
                     If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
                     If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
+                    If updatedValues.ContainsKey("Anon") Then context.INI_ANON = updatedValues("Anon")
                     If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
                     If updatedValues.ContainsKey("Clean") Then context.INI_Clean = CBool(updatedValues("Clean"))
                     If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
@@ -8902,6 +9004,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("APICall_2") Then context.INI_APICall_2 = updatedValues("APICall_2")
                     If updatedValues.ContainsKey("APICall_Object_2") Then context.INI_APICall_Object_2 = updatedValues("APICall_Object_2")
                     If updatedValues.ContainsKey("Response_2") Then context.INI_Response_2 = updatedValues("Response_2")
+                    If updatedValues.ContainsKey("Anon_2") Then context.INI_Anon_2 = updatedValues("Anon_2")
                     If updatedValues.ContainsKey("APIEncrypted_2") Then context.INI_APIEncrypted_2 = CBool(updatedValues("APIEncrypted_2"))
                     If updatedValues.ContainsKey("APIKeyPrefix_2") Then context.INI_APIKeyPrefix_2 = updatedValues("APIKeyPrefix_2")
                     If updatedValues.ContainsKey("OAuth2_2") Then context.INI_OAuth2_2 = CBool(updatedValues("OAuth2_2"))
@@ -11338,6 +11441,7 @@ Namespace SharedLibrary
         Public Property APICall As String
         Public Property APICall_Object As String
         Public Property Response As String
+        Public Property Anon As String
         Public Property APIEncrypted As Boolean
         Public Property APIKeyPrefix As String
         Public Property OAuth2 As Boolean
@@ -11530,56 +11634,931 @@ Namespace SharedLibrary
     End Class
 
 
+    ' anonx
+
+
+    ' --------------------------------------------------------------------------
+    ' AnonymizationModule for VSTO Add-In
+    '
+    ' File structure of redink-anon.txt (located at AnonFilepath):
+    '
+    '   ; Comment lines start with semicolon
+    '
+    '   [All]
+    '   Anon = mode; type
+    '
+    '   [ModelName1, ModelName2]
+    '   Anon = mode; type
+    '   Regex:regexcode
+    '   ENTITY1
+    '   ENTITY2*{{placeholder}}
+    '   ENTITY3, EnTITY4, ENTITY5
+    '
+    ' Sections:
+    '   [All] applies to any model. Subsequent lines until next [Section] apply to All.
+    '   [ModelName, OtherModel] applies only to those models. In case of conflict, model-specific overrides [All].
+    '
+    ' Lines under a section:
+    '   Anon = mode; type
+    '     - mode = none, silent, ask, askshow, show
+    '     - type = 0 (none), 1 (user prompt with last prompt default), 2 (user prompt empty), 
+    '              3 (file-based only), 4 (user prompt with file-based default)
+    '   Regex:pattern      (regular expression pattern; may include {{prefix}} to override placeholder)
+    '   ENTITY literal     (exact match, escaped for regex)
+    '   WILDCARD*          (wildcard '*' converts to ".*")
+    '   Multiple entities can be comma-separated on one line; quoted strings ( "multi word" ) are treated as single terms.
+    '
+    ' Placeholder format: [prefix_GGGG_SSS]
+    '   - prefix: default "redacted" or custom via {{prefix}}
+    '   - GGGG: 4-digit GroupID (unique per pattern)
+    '   - SSS:  sub-index (starts at 1 for first match of that pattern, increments for subsequent distinct matches)
+    '
+    ' Modes:
+    '   "none"    = No anonymization.
+    '   "silent"  = Anonymize automatically without prompts or previews.
+    '   "ask"     = Prompt Yes/No. If Yes, anonymize silently.
+    '   "askshow" = Prompt Yes/No. If Yes, anonymize then show for editing.
+    '   "show"    = Always anonymize, then show for editing.
+    '
+    ' Types:
+    '   0 = No anonymization.
+    '   1 = Prompt user; default = last-used prompt (My.Settings.LastAnonPrompt).
+    '   2 = Prompt user; default = empty.
+    '   3 = Use only patterns from file; error if file missing or no patterns.
+    '   4 = Prompt user; default = literals/wildcards from file.
+    ' --------------------------------------------------------------------------
+
+    Public Module AnonymizationModule
+
+        ' Path to the anonymization configuration file on the desktop.
+        Public AnonFilepath As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), AnonFile)
+
+        ' Default placeholder prefix if none specified via {{prefix}}.
+        Private Const DEFAULT_PLACEHOLDER As String = AnonPlaceholder
+
+        ' Temporary in-memory mapping of placeholders to original entities.
+        Private EntitiesMappings As New List(Of KeyValuePair(Of String, String))
+
+        ' Internal class to hold each compiled pattern's information.
+        Private Class PatternInfo
+            Public Property RegexPattern As Regex
+            Public Property Prefix As String
+            Public Property GroupID As Integer
+
+            Public Sub New(rx As Regex, prefix As String, groupID As Integer)
+                Me.RegexPattern = rx
+                Me.Prefix = prefix
+                Me.GroupID = groupID
+            End Sub
+        End Class
+
+        ' ------------------------------------------------------------------------
+        ' 1. LoadAnonSettingsForModel(modelName) As String
+        '    Reads redink-anon.txt and returns the "mode; type" for the given model.
+        '    Searches [All] and [ModelName]; model-specific overrides [All].
+        '    Returns empty string if no setting found or on error.
+        ' ------------------------------------------------------------------------
+        Public Function LoadAnonSettingsForModel(ByVal modelName As String) As String
+            Dim allSetting As String = String.Empty
+            Dim modelSetting As String = String.Empty
+
+            Try
+                If Not File.Exists(AnonFilepath) Then
+                    Return String.Empty
+                End If
+
+                Dim lines As String() = File.ReadAllLines(AnonFilepath)
+                Dim currentSection As String = String.Empty
+                Dim isAllSection As Boolean = False
+                Dim isModelSection As Boolean = False
+
+                For Each rawLine As String In lines
+                    Dim line As String = rawLine.Trim()
+                    If line.StartsWith(";") OrElse String.IsNullOrEmpty(line) Then
+                        Continue For
+                    End If
+
+                    If line.StartsWith("[") AndAlso line.EndsWith("]") Then
+                        currentSection = line.Substring(1, line.Length - 2).Trim()
+                        isAllSection = String.Equals(currentSection, "All", StringComparison.OrdinalIgnoreCase)
+
+                        If Not isAllSection Then
+                            Dim modelTokens As String() = currentSection.Split(","c)
+                            Dim found As Boolean = False
+                            For Each tok In modelTokens
+                                If String.Equals(tok.Trim(), modelName, StringComparison.OrdinalIgnoreCase) Then
+                                    found = True
+                                    Exit For
+                                End If
+                            Next
+                            isModelSection = found
+                        Else
+                            isModelSection = False
+                        End If
+
+                        Continue For
+                    End If
+
+                    If line.StartsWith("Anon", StringComparison.OrdinalIgnoreCase) Then
+                        Dim parts() As String = line.Split(New Char() {"="c}, 2)
+                        If parts.Length = 2 Then
+                            Dim valuePart As String = parts(1).Trim()
+                            If isAllSection Then
+                                allSetting = valuePart
+                            ElseIf isModelSection Then
+                                modelSetting = valuePart
+                            End If
+                        End If
+                    End If
+                Next
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error loading anonymization settings: {ex.Message}")
+                Return String.Empty
+            End Try
+
+            ' Model-specific takes precedence.
+            If Not String.IsNullOrWhiteSpace(modelSetting) Then
+                Return modelSetting
+            End If
+            Return allSetting
+        End Function
+
+        ' ------------------------------------------------------------------------
+        ' 2. GetModeFromSettings(settingsString) As String
+        '    Splits "mode; type" and returns mode in lowercase, or empty if invalid.
+        ' ------------------------------------------------------------------------
+        Public Function GetModeFromSettings(ByVal settingsString As String) As String
+            Try
+                If String.IsNullOrWhiteSpace(settingsString) Then
+                    Return String.Empty
+                End If
+                Dim parts() As String = settingsString.Split(";"c)
+                If parts.Length >= 1 Then
+                    Return parts(0).Trim().ToLowerInvariant()
+                End If
+                Return String.Empty
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error extracting mode: {ex.Message}")
+                Return String.Empty
+            End Try
+        End Function
+
+        ' ------------------------------------------------------------------------
+        ' 3. GetTypeFromSettings(settingsString) As Integer
+        '    Splits "mode; type" and returns type as integer, or 0 if invalid.
+        ' ------------------------------------------------------------------------
+        Public Function GetTypeFromSettings(ByVal settingsString As String) As Integer
+            Try
+                If String.IsNullOrWhiteSpace(settingsString) Then
+                    Return 0
+                End If
+                Dim parts() As String = settingsString.Split(";"c)
+                If parts.Length >= 2 Then
+                    Dim typePart As String = parts(1).Trim()
+                    Dim result As Integer = 0
+                    If Integer.TryParse(typePart, result) Then
+                        Return result
+                    End If
+                End If
+                Return 0
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error extracting type: {ex.Message}")
+                Return 0
+            End Try
+        End Function
+
+        ' ------------------------------------------------------------------------
+        ' 4. AnonymizeText(inputText, modelName, mode, typeValue) As String
+        '    Performs anonymization based on mode and type for the specified model.
+        '    Returns anonymized text or original text on error or "no anonymization".
+        ' ------------------------------------------------------------------------
+        Public Function AnonymizeText(ByVal inputText As String,
+                              ByVal modelName As String,
+                              ByVal mode As String,
+                              ByVal typeValue As Integer) As String
+
+            Dim result As String = inputText
+
+            Try
+                ' 1) Wenn keine Anonymisierung gewünscht:
+                If String.IsNullOrEmpty(mode) OrElse mode = "none" OrElse typeValue = 0 Then
+                    Return inputText
+                End If
+
+                ' 2) Bei "ask" oder "askshow" den Nutzer fragen:
+                If mode = "ask" OrElse mode = "askshow" Then
+                    Dim promptText As String = "Do you want to anonymize?"
+                    If mode = "askshow" Then
+                        promptText = "Do you want to anonymize and see the text?"
+                    End If
+
+                    ' ShowCustomYesNoBox liefert: 1 = Ja, 0 = Nein
+                    Dim choice As Integer = ShowCustomYesNoBox(promptText, "Yes", "No", $"{AN} Anonymization")
+                    If choice <> 1 Then
+                        Return inputText
+                    End If
+                    ' Weiter mit Anonymisierung
+                End If
+
+                ' 3) Musterliste bauen (aus Datei oder Prompt):
+                Dim patternsList As New List(Of PatternInfo)()
+
+                If typeValue = 3 Then
+                    patternsList = CompilePatternsForModel(modelName)
+                    If patternsList.Count = 0 AndAlso mode <> "silent" Then
+                        ShowCustomMessageBox("No patterns found in file or file missing for type = 3.")
+                        Return inputText
+                    End If
+
+                ElseIf typeValue = 4 Then
+                    Dim defaultPrompt As String = BuildDefaultPromptFromFile(modelName)
+                    Dim promptResponse As String = ShowCustomInputBox(
+                $"Enter entities to anonymize (comma-separated); you can use wildcards and ""...""; default comes from your file '{AnonFilepath}':",
+                $"{AN} Anonymization", False, defaultPrompt)
+
+                    If promptResponse Is Nothing Then
+                        Return inputText
+                    End If
+                    If promptResponse = "esc" Then
+                        Return ""
+                    End If
+                    If String.IsNullOrWhiteSpace(promptResponse) Then
+                        Return inputText
+                    End If
+
+                    patternsList = BuildPatternInfosFromRawInput(promptResponse)
+
+                ElseIf typeValue = 1 OrElse typeValue = 2 Then
+                    Dim defaultPrompt As String = String.Empty
+                    If typeValue = 1 Then
+                        defaultPrompt = If(My.Settings.LastAnonPrompt, String.Empty)
+                    End If
+
+                    Dim promptResponse As String = ShowCustomInputBox(
+                $"Enter entities to anonymize (comma-separated); you can use wildcards and ""..."":",
+                $"{AN} Anonymization", False, defaultPrompt)
+
+                    If promptResponse Is Nothing Then
+                        Return inputText
+                    End If
+                    If promptResponse = "esc" Then
+                        Return ""
+                    End If
+                    If String.IsNullOrWhiteSpace(promptResponse) Then
+                        Return inputText
+                    End If
+
+                    If typeValue = 1 Then
+                        Try
+                            My.Settings.LastAnonPrompt = promptResponse
+                            My.Settings.Save()
+                        Catch setEx As System.Exception
+                            ShowCustomMessageBox($"Error saving settings: {setEx.Message}")
+                        End Try
+                    End If
+
+                    patternsList = BuildPatternInfosFromRawInput(promptResponse)
+
+                Else
+                    Return inputText
+                End If
+
+                ' 4) Anonymisierungsschleife: stets den frühesten Match suchen und ersetzen:
+                EntitiesMappings.Clear()
+                Dim workingText As String = result
+
+                ' Statt nur eines Zählers pro GroupID, brauchen wir:
+                '  - pro Gruppe einen Integer-Zähler (für neue Sub-Indices)
+                '  - pro Gruppe ein Dictionary, das jedes neu gefundene matchedValue auf seinen Sub-Index abbildet
+                Dim groupSubCounters As New Dictionary(Of Integer, Integer)()
+                Dim groupValueToIndex As New Dictionary(Of Integer, Dictionary(Of String, Integer))()
+
+                For Each pi In patternsList
+                    groupSubCounters(pi.GroupID) = 0
+                    groupValueToIndex(pi.GroupID) = New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+                Next
+
+                While True
+                    Dim earliestMatch As System.Text.RegularExpressions.Match = Nothing
+                    Dim matchPatternInfo As PatternInfo = Nothing
+
+                    ' Suche über alle Patterns den Matcher mit niedrigstem Index:
+                    For Each pi In patternsList
+                        Dim m As System.Text.RegularExpressions.Match = pi.RegexPattern.Match(workingText)
+                        If m.Success Then
+                            If earliestMatch Is Nothing OrElse m.Index < earliestMatch.Index Then
+                                earliestMatch = m
+                                matchPatternInfo = pi
+                            End If
+                        End If
+                    Next
+
+                    If earliestMatch Is Nothing OrElse matchPatternInfo Is Nothing Then
+                        Exit While
+                    End If
+
+                    Dim grpID As Integer = matchPatternInfo.GroupID
+                    Dim matchedValue As String = earliestMatch.Value
+
+                    Dim subIndex As Integer
+                    Dim placeholdersForGroup As Dictionary(Of String, Integer) = groupValueToIndex(grpID)
+
+                    If placeholdersForGroup.ContainsKey(matchedValue) Then
+                        ' Wenn wir diese Zeichenfolge schon gesehen haben, benutzen wir denselben Index
+                        subIndex = placeholdersForGroup(matchedValue)
+                    Else
+                        ' Neue Zeichenfolge für diese Gruppe → Zähler inkrementieren
+                        Dim nextSub As Integer = groupSubCounters(grpID) + 1
+                        groupSubCounters(grpID) = nextSub
+                        subIndex = nextSub
+                        placeholdersForGroup(matchedValue) = subIndex
+
+                        ' Nur beim ersten Auftreten einer neuen Zeichenfolge in dieser Gruppe fügen wir den EntitiesMappings-Eintrag hinzu
+                        Dim newPlaceholder As String = AnonPrefix & $"{matchPatternInfo.Prefix}_{grpID.ToString("D4")}_{subIndex}" & AnonSuffix
+                        EntitiesMappings.Add(New KeyValuePair(Of String, String)(newPlaceholder, matchedValue))
+                    End If
+
+                    ' Erstellt den Platzhalter-String:
+                    Dim placeholder As String = AnonPrefix & $"{matchPatternInfo.Prefix}_{grpID.ToString("D4")}_{subIndex}" & AnonSuffix
+
+                    ' Text neu zusammensetzen:
+                    Dim before As String = workingText.Substring(0, earliestMatch.Index)
+                    Dim after As String = workingText.Substring(earliestMatch.Index + earliestMatch.Length)
+                    workingText = before & placeholder & after
+
+                End While
+
+                result = workingText
+
+                ' 5) Bei "show" oder "askshow" den anonymisierten Text zur Bearbeitung anzeigen:
+                If mode = "show" OrElse mode = "askshow" Then
+
+                    'Debug.WriteLine(ExportEntitiesMappings)
+
+                    Dim editedResponse As String = ShowCustomWindow(
+                "Review your anonymized text. You may edit it before having it processed:",
+                result,
+                "You can choose to go on with the original text or your edits. Do not remove formatting code and do not change placeholders. Also avoid adding or removing lines, as this may distort the formatting of the results.",
+                $"{AN} Anonymization", True, False)
+
+                    If editedResponse Is Nothing OrElse editedResponse = "esc" OrElse String.IsNullOrWhiteSpace(editedResponse) Then
+                        Return ""
+                    End If
+
+                    result = editedResponse
+                End If
+
+                Return result
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error during AnonymizeText: {ex.Message}")
+                Return inputText
+            End Try
+        End Function
+
+
+
+        ' ------------------------------------------------------------------------
+        ' 5. ReidentifyText(inputText) As String
+        '    Replaces placeholders in inputText with original entities from EntitiesMappings.
+        ' ------------------------------------------------------------------------
+        Public Function ReidentifyText(ByVal inputText As String) As String
+            Try
+                Dim output As String = inputText
+                For Each kvp In EntitiesMappings
+                    output = output.Replace(kvp.Key, kvp.Value)
+                Next
+                Return output
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error during ReIdentifyText: {ex.Message}")
+                Return inputText
+            End Try
+        End Function
+
+        ' ------------------------------------------------------------------------
+        ' 6. ExportEntitiesMappings() As String
+        '    Returns the EntitiesMappings as a multi-line text:
+        '      [prefix_0001_1]: OriginalEntity1
+        '      [prefix_0002_1]: OriginalEntity2
+        ' ------------------------------------------------------------------------
+        Public Function ExportEntitiesMappings() As String
+            Try
+                Dim sb As New StringBuilder()
+                For Each kvp In EntitiesMappings
+                    sb.AppendLine($"{kvp.Key}: {kvp.Value}")
+                Next
+                Return sb.ToString()
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error exporting entity mappings: {ex.Message}")
+                Return String.Empty
+            End Try
+        End Function
+
+
+        ' ------------------------------------------------------------------------
+        ' Helper: BuildPatternInfosFromRawInput(rawInput) As List(Of PatternInfo)
+        '   Parsers comma-separated Tokens, erkennt "{{prefix}}", Zitate und Wildcards.
+        '   Wandelt "*" in "[\p{L}\p{N}-]*" (nur Satzzeichen), statt ".*?".
+        ' ------------------------------------------------------------------------
+        Private Function BuildPatternInfosFromRawInput(ByVal rawInput As String) As List(Of PatternInfo)
+            Dim patternInfos As New List(Of PatternInfo)()
+
+            Try
+                Dim tokens As New List(Of String)()
+                Dim current As New StringBuilder()
+                Dim inQuotes As Boolean = False
+
+                For i As Integer = 0 To rawInput.Length - 1
+                    Dim ch As Char = rawInput(i)
+                    If ch = """"c Then
+                        inQuotes = Not inQuotes
+                        current.Append(ch)
+                    ElseIf ch = ","c AndAlso Not inQuotes Then
+                        tokens.Add(current.ToString().Trim())
+                        current.Clear()
+                    Else
+                        current.Append(ch)
+                    End If
+                Next
+                If current.Length > 0 Then
+                    tokens.Add(current.ToString().Trim())
+                End If
+
+                Dim groupIDCounter As Integer = 0
+
+                For Each rawTok As String In tokens
+                    Dim tok As String = rawTok.Trim()
+                    If String.IsNullOrEmpty(tok) Then
+                        Continue For
+                    End If
+
+                    ' Detect custom prefix marker "{{prefix}}"
+                    Dim prefix As String = DEFAULT_PLACEHOLDER
+                    Dim tokenWithoutMarker As String = tok
+                    Dim markerStart As Integer = tok.IndexOf("{{")
+                    Dim markerEnd As Integer = tok.IndexOf("}}")
+                    If markerStart >= 0 AndAlso markerEnd > markerStart Then
+                        Dim between As String = tok.Substring(markerStart + 2, markerEnd - markerStart - 2).Trim()
+                        If Not String.IsNullOrEmpty(between) Then
+                            prefix = between
+                        End If
+                        tokenWithoutMarker = tok.Remove(markerStart, (markerEnd + 2) - markerStart).Trim()
+                    End If
+
+                    ' Determine regex pattern from tokenWithoutMarker (wildcard → "[\p{L}\p{N}-]*")
+                    Dim patternText As String = String.Empty
+                    If tokenWithoutMarker.StartsWith("""") AndAlso tokenWithoutMarker.EndsWith("""") AndAlso tokenWithoutMarker.Length >= 2 Then
+                        Dim inner As String = tokenWithoutMarker.Substring(1, tokenWithoutMarker.Length - 2)
+                        patternText = Regex.Escape(inner)
+                    ElseIf tokenWithoutMarker.Contains("*") Then
+                        Dim sbPat As New StringBuilder()
+                        For Each c As Char In tokenWithoutMarker
+                            If c = "*"c Then
+                                sbPat.Append("[\p{L}\p{N}-]*")  ' wildcard nur für Satzzeichen
+                            Else
+                                sbPat.Append(Regex.Escape(c.ToString()))
+                            End If
+                        Next
+                        patternText = sbPat.ToString()
+                    Else
+                        patternText = Regex.Escape(tokenWithoutMarker)
+                    End If
+
+                    Try
+                        Dim rx As New Regex(patternText, RegexOptions.IgnoreCase Or RegexOptions.Compiled)
+                        groupIDCounter += 1
+                        patternInfos.Add(New PatternInfo(rx, prefix, groupIDCounter))
+                    Catch rgEx As System.Exception
+                        ShowCustomMessageBox($"Invalid pattern '{patternText}': {rgEx.Message}")
+                    End Try
+                Next
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error building patterns from input: {ex.Message}")
+            End Try
+
+            Return patternInfos
+        End Function
+
+        ' ------------------------------------------------------------------------
+        ' Helper: CompilePatternsForModel(modelName) As List(Of PatternInfo)
+        '   Liest Datei unter [All] und [ModelName], verarbeitet "Regex:"-Zeilen
+        '   und literal/wildcard-Zeilen. Wandelt "*" in "\w*".
+        ' ------------------------------------------------------------------------
+        Private Function CompilePatternsForModel(ByVal modelName As String) As List(Of PatternInfo)
+            Dim patternInfos As New List(Of PatternInfo)()
+
+            Try
+                If Not File.Exists(AnonFilepath) Then
+                    Return patternInfos
+                End If
+
+                Dim lines As String() = File.ReadAllLines(AnonFilepath)
+                Dim currentSection As String = String.Empty
+                Dim isAllSection As Boolean = False
+                Dim isModelSection As Boolean = False
+
+                Dim entityLines As New List(Of String)()
+
+                For Each rawLine As String In lines
+                    Dim line As String = rawLine.Trim()
+                    If line.StartsWith(";") OrElse String.IsNullOrEmpty(line) Then
+                        Continue For
+                    End If
+
+                    If line.StartsWith("[") AndAlso line.EndsWith("]") Then
+                        currentSection = line.Substring(1, line.Length - 2).Trim()
+                        isAllSection = String.Equals(currentSection, "All", StringComparison.OrdinalIgnoreCase)
+
+                        If Not isAllSection Then
+                            Dim modelTokens As String() = currentSection.Split(","c)
+                            Dim found As Boolean = False
+                            For Each tok In modelTokens
+                                If String.Equals(tok.Trim(), modelName, StringComparison.OrdinalIgnoreCase) Then
+                                    found = True
+                                    Exit For
+                                End If
+                            Next
+                            isModelSection = found
+                        Else
+                            isModelSection = False
+                        End If
+
+                        Continue For
+                    End If
+
+                    If line.StartsWith("Anon", StringComparison.OrdinalIgnoreCase) Then
+                        Continue For
+                    End If
+
+                    If isAllSection OrElse isModelSection Then
+                        entityLines.Add(line)
+                    End If
+                Next
+
+                Dim groupIDCounter As Integer = 0
+
+                For Each item As String In entityLines
+                    If item.StartsWith("Regex:", StringComparison.OrdinalIgnoreCase) Then
+                        Dim remainder As String = item.Substring("Regex:".Length).Trim()
+                        Dim prefix As String = DEFAULT_PLACEHOLDER
+                        Dim patternRaw As String = remainder
+
+                        Dim markerStart As Integer = remainder.IndexOf("{{")
+                        Dim markerEnd As Integer = remainder.IndexOf("}}")
+                        If markerStart >= 0 AndAlso markerEnd > markerStart Then
+                            Dim between As String = remainder.Substring(markerStart + 2, markerEnd - markerStart - 2).Trim()
+                            If Not String.IsNullOrEmpty(between) Then
+                                prefix = between
+                            End If
+                            patternRaw = remainder.Remove(markerStart, (markerEnd + 2) - markerStart).Trim()
+                        End If
+
+                        Try
+                            Dim rx As New Regex(patternRaw, RegexOptions.IgnoreCase Or RegexOptions.Compiled)
+                            groupIDCounter += 1
+                            patternInfos.Add(New PatternInfo(rx, prefix, groupIDCounter))
+                        Catch rgEx As System.Exception
+                            ShowCustomMessageBox($"Invalid regex '{patternRaw}': {rgEx.Message}")
+                        End Try
+
+                    Else
+                        ' Literal/Wildcard-Zeile: split bei Komma außerhalb von Anführungszeichen
+                        Dim tokens As New List(Of String)()
+                        Dim sb As New StringBuilder()
+                        Dim inQuotes As Boolean = False
+                        For i As Integer = 0 To item.Length - 1
+                            Dim ch As Char = item(i)
+                            If ch = """"c Then
+                                inQuotes = Not inQuotes
+                                sb.Append(ch)
+                            ElseIf ch = ","c AndAlso Not inQuotes Then
+                                tokens.Add(sb.ToString().Trim())
+                                sb.Clear()
+                            Else
+                                sb.Append(ch)
+                            End If
+                        Next
+                        If sb.Length > 0 Then
+                            tokens.Add(sb.ToString().Trim())
+                        End If
+
+                        For Each rawTok As String In tokens
+                            Dim tok As String = rawTok.Trim()
+                            If String.IsNullOrEmpty(tok) Then
+                                Continue For
+                            End If
+
+                            Dim prefix As String = DEFAULT_PLACEHOLDER
+                            Dim tokenWithoutMarker As String = tok
+                            Dim markerStart As Integer = tok.IndexOf("{{")
+                            Dim markerEnd As Integer = tok.IndexOf("}}")
+                            If markerStart >= 0 AndAlso markerEnd > markerStart Then
+                                Dim between As String = tok.Substring(markerStart + 2, markerEnd - markerStart - 2).Trim()
+                                If Not String.IsNullOrEmpty(between) Then
+                                    prefix = between
+                                End If
+                                tokenWithoutMarker = tok.Remove(markerStart, (markerEnd + 2) - markerStart).Trim()
+                            End If
+
+                            ' Erzeuge Regex: "*" → "[\p{L}\p{N}-]*", Zitate und Literale escapen
+                            Dim patternText As String = String.Empty
+                            If tokenWithoutMarker.StartsWith("""") AndAlso tokenWithoutMarker.EndsWith("""") AndAlso tokenWithoutMarker.Length >= 2 Then
+                                Dim inner As String = tokenWithoutMarker.Substring(1, tokenWithoutMarker.Length - 2)
+                                patternText = Regex.Escape(inner)
+                            ElseIf tokenWithoutMarker.Contains("*") Then
+                                Dim sbPat As New StringBuilder()
+                                For Each c As Char In tokenWithoutMarker
+                                    If c = "*"c Then
+                                        sbPat.Append("[\p{L}\p{N}-]*")
+                                    Else
+                                        sbPat.Append(Regex.Escape(c.ToString()))
+                                    End If
+                                Next
+                                patternText = sbPat.ToString()
+                            Else
+                                patternText = Regex.Escape(tokenWithoutMarker)
+                            End If
+
+                            Try
+                                Dim rx As New Regex(patternText, RegexOptions.IgnoreCase Or RegexOptions.Compiled)
+                                groupIDCounter += 1
+                                patternInfos.Add(New PatternInfo(rx, prefix, groupIDCounter))
+                            Catch rgEx As System.Exception
+                                ShowCustomMessageBox($"Invalid pattern '{patternText}': {rgEx.Message}")
+                            End Try
+                        Next
+                    End If
+                Next
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error parsing anonymization file: {ex.Message}")
+            End Try
+
+            Return patternInfos
+        End Function
+
+
+        ' ------------------------------------------------------------------------
+        ' Helper: BuildDefaultPromptFromFile(modelName) As String
+        '   Returns a comma-separated list of literal/wildcard tokens (with {{prefix}} intact)
+        '   from [All] and [ModelName], ignoring "Regex:" lines.
+        ' ------------------------------------------------------------------------
+        Private Function BuildDefaultPromptFromFile(ByVal modelName As String) As String
+            Dim literals As New List(Of String)()
+
+            Try
+                If Not File.Exists(AnonFilepath) Then
+                    Return String.Empty
+                End If
+
+                Dim lines As String() = File.ReadAllLines(AnonFilepath)
+                Dim currentSection As String = String.Empty
+                Dim isAllSection As Boolean = False
+                Dim isModelSection As Boolean = False
+
+                For Each rawLine As String In lines
+                    Dim line As String = rawLine.Trim()
+                    If line.StartsWith(";") OrElse String.IsNullOrEmpty(line) Then
+                        Continue For
+                    End If
+
+                    If line.StartsWith("[") AndAlso line.EndsWith("]") Then
+                        currentSection = line.Substring(1, line.Length - 2).Trim()
+                        isAllSection = String.Equals(currentSection, "All", StringComparison.OrdinalIgnoreCase)
+
+                        If Not isAllSection Then
+                            Dim modelTokens As String() = currentSection.Split(","c)
+                            Dim found As Boolean = False
+                            For Each tok In modelTokens
+                                If String.Equals(tok.Trim(), modelName, StringComparison.OrdinalIgnoreCase) Then
+                                    found = True
+                                    Exit For
+                                End If
+                            Next
+                            isModelSection = found
+                        Else
+                            isModelSection = False
+                        End If
+
+                        Continue For
+                    End If
+
+                    If line.StartsWith("Anon", StringComparison.OrdinalIgnoreCase) Then
+                        Continue For
+                    End If
+
+                    If (isAllSection OrElse isModelSection) AndAlso Not line.StartsWith("Regex:", StringComparison.OrdinalIgnoreCase) Then
+                        ' Split by commas ignoring quoted segments:
+                        Dim tokens As New List(Of String)()
+                        Dim sb As New StringBuilder()
+                        Dim inQuotes As Boolean = False
+                        For i As Integer = 0 To line.Length - 1
+                            Dim ch As Char = line(i)
+                            If ch = """"c Then
+                                inQuotes = Not inQuotes
+                                sb.Append(ch)
+                            ElseIf ch = ","c AndAlso Not inQuotes Then
+                                tokens.Add(sb.ToString().Trim())
+                                sb.Clear()
+                            Else
+                                sb.Append(ch)
+                            End If
+                        Next
+                        If sb.Length > 0 Then
+                            tokens.Add(sb.ToString().Trim())
+                        End If
+
+                        For Each tok As String In tokens
+                            If Not String.IsNullOrWhiteSpace(tok) Then
+                                literals.Add(tok.Trim())
+                            End If
+                        Next
+                    End If
+                Next
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox($"Error building default prompt from file: {ex.Message}")
+            End Try
+
+            Return String.Join(", ", literals)
+        End Function
+
+    End Module
+
+
+
     Public Class TextChunk
         Public Property Text As String
         Public Property Position As Integer
         Public Property StartOffset As Integer
+        Public Property EndOffset As Integer
         Public Property Vector As Single()
     End Class
+
 
     Public Class SearchResult
         Public Property DocId As String
         Public Property Text As String
         Public Property StartOffset As Integer
+        Public Property EndOffset As Integer
         Public Property Score As Single
     End Class
 
+
     Public Class EmbeddingStore
+
+        ' Description:
+        '   - Loads and uses an ONNX-based Sentence-Transformer model (e.g., all-MiniLM-L6-v2-onnx)
+        '   - Tokenizes text with WordPieceTokenizer
+        '   - Computes text embeddings (Float32 array)
+        '   - Indexes and searches documents using cosine similarity
+        '
+        ' ONNX Model Specifications (Example: all-MiniLM-L6-v2-onnx):
+        '   • Model Name (ONNX): all-MiniLM-L6-v2-onnx
+        '     – Download ONNX: https://huggingface.co/onnx-models/all-MiniLM-L6-v2-onnx
+        '     – Download vocab.txt: https://huggingface.co/onnx-models/all-MiniLM-L6-v2-onnx/resolve/main/vocab.txt
+        '   • Embedding Dimension: 384 (Float32 array)
+        '   • Maximum Sequence Length: 256 tokens
+        '   • Input Tensors (Type Int64, Shape [1, seqLen]):
+        '       – "input_ids"
+        '       – "attention_mask"
+        '       – "token_type_ids"
+        '   • Output Tensor: Float32 array of length 384
+        '   • ONNX Opset: ≥ 11, compatible with Microsoft.ML.OnnxRuntime v1.15.0+
+        '   • File Size (ONNX): ≈ 80 MB
+        '
+        ' Alternative ONNX Models (usable without code changes):
+        '   1. all-mpnet-base-v2-onnx
+        '      – URL: https://huggingface.co/onnx-models/all-mpnet-base-v2-onnx
+        '      – Dimension: 768, Max. Seq Length: 384
+        '   2. all-MiniLM-L12-v2-onnx
+        '      – URL: https://huggingface.co/onnx-models/all-MiniLM-L12-v2-onnx
+        '      – Dimension: 384, Max. Seq Length: 128
+        '   3. all-MiniLM-L6-v2-fine-tuned-epochs-8-onnx
+        '      – URL: https://huggingface.co/onnx-models/all-MiniLM-L6-v2-fine-tuned-epochs-8-onnx
+        '      – Dimension: 384, Max. Seq Length: 256
+        '   4. LightEmbed/sbert-all-MiniLM-L6-v2-onnx
+        '      – URL: https://huggingface.co/LightEmbed/sbert-all-MiniLM-L6-v2-onnx
+        '      – Dimension: 384, Max. Seq Length: 256
+        '
+        ' Important Notes for Developers:
+        '   • The modelPath and vocabPath parameters must point to an existing ONNX file and its corresponding vocab.txt.
+        '   • WordPieceTokenizer uses the same vocab file (vocab.txt) that the model expects.
+        '   • If using a different ONNX model, ensure the input tensor names ("input_ids", "attention_mask", "token_type_ids")
+        '     and tensor data types (Int64) match exactly.
+        '   • Know the embedding dimension and maximum sequence length so input text can be truncated or padded correctly.
+
         Private ReadOnly store As Dictionary(Of String, List(Of TextChunk))
         Private ReadOnly session As InferenceSession
-        Private ReadOnly tokenizer As Tokenizer
-
-        <DllImport("kernel32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
-        Private Shared Function GetPrivateProfileString(
-            lpAppName As String,
-            lpKeyName As String,
-            lpDefault As String,
-            lpReturnedString As System.Text.StringBuilder,
-            nSize As Integer,
-            lpFileName As String) As Integer
-        End Function
+        Private ReadOnly tokenizer As WordPieceTokenizer
 
         Public Sub New()
-            store = New Dictionary(Of String, List(Of TextChunk))()
-            ' INI-Datei im selben Verzeichnis wie die AddIn-DLL
-            Dim dllPath = Assembly.GetExecutingAssembly().Location
-            Dim iniPath = Path.Combine(Path.GetDirectoryName(dllPath), "Settings.ini")
-            Dim sb = New System.Text.StringBuilder(255)
-            GetPrivateProfileString("Paths", "INI_InternalModelPath", String.Empty, sb, sb.Capacity, iniPath)
-            Dim modelPath = sb.ToString()
-            If String.IsNullOrEmpty(modelPath) OrElse Not File.Exists(modelPath) Then
-                Throw New FileNotFoundException("INTERNAL MODEL PATH nicht gefunden: " & modelPath)
-            End If
-            session = New InferenceSession(modelPath)
-            ' Tokenizer im gleichen Ordner wie das ONNX-Modell (tokenizer.json)
-            Dim tokenPath = Path.Combine(Path.GetDirectoryName(modelPath), "tokenizer.json")
-            If Not File.Exists(tokenPath) Then Throw New FileNotFoundException("Tokenizer nicht gefunden: " & tokenPath)
-            tokenizer = Nothing ' tokenizer.FromFile(tokenPath) xxxxxx
+            ' Default-Pfade
+            Me.New(
+            modelPath:="model.onnx",
+            vocabPath:="vocab.txt"
+                )
         End Sub
 
-        ''' <summary>
-        ''' Index a document: chunking + embedding
-        ''' </summary>
+        Public Sub New(modelPath As String, vocabPath As String)
+            ' 1) store initialisieren, bevor es je benutzt wird
+            Me.store = New Dictionary(Of String, List(Of TextChunk))()
+
+            ' 2) ONNX-Modell laden
+            If Not File.Exists(modelPath) Then
+                MessageBox.Show($"Error in Embeddingstore: Embedding model not found: {modelPath}")
+                Me.store = Nothing
+                Return
+            End If
+            Me.session = New InferenceSession(modelPath)
+
+            ' 3) Vokabular laden und Tokenizer aufsetzen
+            If Not File.Exists(vocabPath) Then
+                MessageBox.Show($"Error in Embeddingstore: Embedding vocabular not found: {vocabPath}")
+                Me.store = Nothing
+                Return
+            End If
+
+            Dim options As New WordPieceOptions() With {
+            .Normalizer = New LowerCaseNormalizer()
+        }
+            Me.tokenizer = WordPieceTokenizer.Create(vocabPath, options)
+
+            ' Zusätzlicher Schutz: niemals Nothing sein
+            If Me.tokenizer Is Nothing Then
+                MessageBox.Show("Error in Embeddingstore: Failed to initialize tokenizer")
+                Me.store = Nothing
+                Return
+            End If
+            If Me.session Is Nothing Then
+                MessageBox.Show("Error in Embeddingstore: Failed to inialize ONNX-Session")
+                Me.store = Nothing
+                Return
+            End If
+
+        End Sub
+
+        Private Function GetEmbedding(text As String) As Single()
+            ' 1) Schutz-Check, dass alles initialisiert ist
+            If Me.tokenizer Is Nothing Then
+                Debug.WriteLine("Tokenizer wurde nicht initialisiert")
+            End If
+            If Me.session Is Nothing Then
+                Debug.WriteLine("ONNX-Session wurde nicht initialisiert")
+            End If
+
+            ' 2) Text tokenisieren
+            Const maxLen As Integer = 256
+            Dim normalized As String = Nothing
+            Dim charsUsed As Integer = 0
+            Dim ids As IReadOnlyList(Of Integer) =
+            Me.tokenizer.EncodeToIds(
+                text,
+                maxLen,
+                normalized,
+                charsUsed,
+                considerPreTokenization:=True,
+                considerNormalization:=True)
+
+            If ids Is Nothing OrElse ids.Count = 0 Then
+                Debug.WriteLine("Keine Token-IDs zurückgegeben")
+            End If
+
+            ' 3) Tensoren bauen: [1, seqLen]
+            Dim seqLen = ids.Count
+            Dim inputIds = New DenseTensor(Of Int64)(New Integer() {1, seqLen})
+            Dim attentionMask = New DenseTensor(Of Int64)(New Integer() {1, seqLen})
+            Dim tokenTypeIds = New DenseTensor(Of Int64)(New Integer() {1, seqLen})
+
+            For i As Integer = 0 To seqLen - 1
+                inputIds(0, i) = ids(i)
+                attentionMask(0, i) = 1L
+                tokenTypeIds(0, i) = 0L
+            Next
+
+            ' 4) NamedOnnxValue (mit explizitem Int64) erzeugen
+            Dim inputs = New List(Of NamedOnnxValue) From {
+            NamedOnnxValue.CreateFromTensor(Of Int64)("input_ids", inputIds),
+            NamedOnnxValue.CreateFromTensor(Of Int64)("attention_mask", attentionMask),
+            NamedOnnxValue.CreateFromTensor(Of Int64)("token_type_ids", tokenTypeIds)
+        }
+
+            ' 5) Inferenz ausführen
+            Using results = Me.session.Run(inputs)
+                If results Is Nothing OrElse results.Count = 0 Then
+                    Debug.WriteLine("ONNX-Runtime lieferte kein Ergebnis")
+                End If
+
+                Dim outTensor = results.First().AsTensor(Of Single)()
+                If outTensor Is Nothing Then
+                    Debug.WriteLine("Ergebnis konnte nicht als Tensor(Of Single) gelesen werden")
+                End If
+
+                Return outTensor.ToArray()
+            End Using
+        End Function
         Public Sub IndexDocument(docId As String, chunks As List(Of TextChunk))
             For Each chunk In chunks
                 chunk.Vector = GetEmbedding(chunk.Text)
@@ -11587,15 +12566,121 @@ Namespace SharedLibrary
             store(docId) = chunks
         End Sub
 
-        ''' <summary>
-        ''' Perform a semantic search
-        ''' </summary>
+        Public Function Search(query As String,
+                       allDocs As Boolean,
+                       findAll As Boolean,
+                       currentDocId As String,
+                       currentPosition As Integer) As List(Of SearchResult)
+
+            Dim qVec = GetEmbedding(query)
+            Dim results As New List(Of SearchResult)()
+
+            ' 1) DOC-Iteration alphabetisch
+            For Each docId In store.Keys.OrderBy(Function(k) k)
+                If Not allDocs AndAlso docId <> currentDocId Then Continue For
+
+                ' 2) CHUNKS nach StartOffset aufsteigend
+                For Each chunk In store(docId).OrderBy(Function(c) c.StartOffset)
+                    If Not findAll AndAlso docId = currentDocId AndAlso chunk.StartOffset < currentPosition Then
+                        Continue For
+                    End If
+
+                    Dim score = CosineSimilarity(qVec, chunk.Vector)
+                    If score > 0 Then
+                        results.Add(New SearchResult With {
+                    .DocId = docId,
+                    .Text = chunk.Text,
+                    .StartOffset = chunk.StartOffset,
+                    .EndOffset = chunk.EndOffset,
+                    .Score = score
+                })
+                    End If
+                Next
+            Next
+
+            ' 3) Endgültiges Sortieren: Score ↓, DocId ↑, StartOffset ↑
+            results.Sort(Function(a, b)
+                             Dim cmp = b.Score.CompareTo(a.Score)
+                             If cmp <> 0 Then Return cmp
+                             cmp = a.DocId.CompareTo(b.DocId)
+                             If cmp <> 0 Then Return cmp
+                             Return a.StartOffset.CompareTo(b.StartOffset)
+                         End Function)
+
+            ' 4) falls nur der Top-1 gewünscht ist…
+            If Not findAll AndAlso results.Count > 0 Then
+                Return New List(Of SearchResult) From {results(0)}
+            End If
+
+            Return results
+        End Function
+
+        Private Function CosineSimilarity(vec1 As Single(), vec2 As Single()) As Single
+            Dim dot As Single = 0, normA As Single = 0, normB As Single = 0
+            For i = 0 To Math.Min(vec1.Length, vec2.Length) - 1
+                dot += vec1(i) * vec2(i)
+                normA += vec1(i) * vec1(i)
+                normB += vec2(i) * vec2(i)
+            Next
+            Return If(normA > 0 AndAlso normB > 0, dot / (Math.Sqrt(normA) * Math.Sqrt(normB)), 0)
+        End Function
+    End Class
+
+
+
+    Public Class EmbeddingStore_BagofWords
+        Private store As Dictionary(Of String, List(Of TextChunk))
+        Private vocab As Dictionary(Of String, Integer)
+
+        Public Sub New()
+            store = New Dictionary(Of String, List(Of TextChunk))()
+            vocab = New Dictionary(Of String, Integer)()
+        End Sub
+
+        Public Sub IndexDocument(docId As String, chunks As List(Of TextChunk))
+            store(docId) = chunks
+            RebuildVectors()
+        End Sub
+
+        Private Sub RebuildVectors()
+            ' Build vocabulary across all chunks
+            vocab.Clear()
+            For Each chunks In store.Values
+                For Each chunk In chunks
+                    For Each token In SimpleTokenizer(chunk.Text)
+                        If Not vocab.ContainsKey(token) Then
+                            vocab(token) = vocab.Count
+                        End If
+                    Next
+                Next
+            Next
+            ' Assign vector for each chunk
+            For Each kvp In store
+                For Each chunk In kvp.Value
+                    Dim counts As New Dictionary(Of Integer, Single)()
+                    For Each token In SimpleTokenizer(chunk.Text)
+                        Dim idx = vocab(token)
+                        If counts.ContainsKey(idx) Then
+                            counts(idx) += 1
+                        Else
+                            counts(idx) = 1
+                        End If
+                    Next
+                    Dim vector(vocab.Count - 1) As Single
+                    For Each c In counts
+                        vector(c.Key) = c.Value
+                    Next
+                    chunk.Vector = vector
+                Next
+            Next
+        End Sub
+
         Public Function Search(query As String,
                                allDocs As Boolean,
                                findAll As Boolean,
                                currentDocId As String,
                                currentPosition As Integer) As List(Of SearchResult)
-            Dim qVec = GetEmbedding(query)
+            Dim qVec = GetVectorForText(query)
             Dim results As New List(Of SearchResult)()
             For Each kvp In store
                 Dim docId = kvp.Key
@@ -11607,6 +12692,7 @@ Namespace SharedLibrary
                         .DocId = docId,
                         .Text = chunk.Text,
                         .StartOffset = chunk.StartOffset,
+                        .EndOffset = chunk.EndOffset,
                         .Score = score
                     })
                 Next
@@ -11618,37 +12704,63 @@ Namespace SharedLibrary
             Return results
         End Function
 
-        Private Function GetEmbedding(text As String) As Single()
-            ' Tokenisieren mit HuggingFace.Tokenizers
-            Dim enc = Nothing ' tokenizer.Encode(text) xxxxx
-            Dim ids = enc.Ids.Select(Function(i) CType(i, Int64)).ToArray()
-            Dim mask = enc.AttentionMask.Select(Function(m) CType(m, Int64)).ToArray()
-
-            ' ONNX-Inputs: input_ids und attention_mask
-            Dim idTensor = New DenseTensor(Of Int64)(ids, New Integer() {1, ids.Length})
-            Dim maskTensor = New DenseTensor(Of Int64)(mask, New Integer() {1, mask.Length})
-            Dim inputs = New List(Of NamedOnnxValue) From {
-                NamedOnnxValue.CreateFromTensor(Of Int64)("input_ids", idTensor),
-                NamedOnnxValue.CreateFromTensor(Of Int64)("attention_mask", maskTensor)
-            }
-            Using results = session.Run(inputs)
-                ' Ausgabe annehmen: erster Output ist Embedding
-                Dim outTensor = results.First().AsTensor(Of Single)()
-                Return outTensor.ToArray()
-            End Using
+        Private Function GetVectorForText(text As String) As Single()
+            Dim counts As New Dictionary(Of Integer, Single)()
+            For Each token In SimpleTokenizer(text)
+                If vocab.ContainsKey(token) Then
+                    Dim idx = vocab(token)
+                    If counts.ContainsKey(idx) Then
+                        counts(idx) += 1
+                    Else
+                        counts(idx) = 1
+                    End If
+                End If
+            Next
+            Dim vector(vocab.Count - 1) As Single
+            For Each c In counts
+                vector(c.Key) = c.Value
+            Next
+            Return vector
         End Function
 
         Private Function CosineSimilarity(vec1 As Single(), vec2 As Single()) As Single
-            Dim dot As Single = 0
-            Dim normA As Single = 0
-            Dim normB As Single = 0
-            For i = 0 To vec1.Length - 1
+            Dim dot As Single = 0, normA As Single = 0, normB As Single = 0
+            For i = 0 To Math.Min(vec1.Length, vec2.Length) - 1
                 dot += vec1(i) * vec2(i)
                 normA += vec1(i) * vec1(i)
                 normB += vec2(i) * vec2(i)
             Next
-            Return dot / (Math.Sqrt(normA) * Math.Sqrt(normB) + 0.00000001F)
+            Return If(normA > 0 AndAlso normB > 0, dot / (Math.Sqrt(normA) * Math.Sqrt(normB)), 0)
         End Function
+
+        ''' <summary>
+        ''' Splits text into tokens, filters stopwords, and adds bigrams.
+        ''' </summary>
+        Private Iterator Function SimpleTokenizer(text As String) As IEnumerable(Of String)
+            ' Basis-Tokenisierung: Wörter und Zahlen
+            Dim tokens = Regex.Matches(text.ToLowerInvariant(), "[\p{L}\p{N}]+") _
+                      .Cast(Of Match)() _
+                      .Select(Function(m) m.Value) _
+                      .ToList()
+
+            ' Stopwort-Liste (Beispiel Deutsch/Englisch)
+            Dim stopwords As New HashSet(Of String) From {
+                    "und", "oder", "der", "die", "das", "ist", "zu", "in", "im",
+                    "on", "the", "and", "a", "an", "of", "for"
+                }
+            ' Filtere Stopwörter
+            Dim filtered = tokens.Where(Function(t) Not stopwords.Contains(t)).ToList()
+
+            ' Yield Einzeltokens
+            For Each token In filtered
+                Yield token
+            Next
+            ' Yield Bigrams
+            For i As Integer = 0 To filtered.Count - 2
+                Yield filtered(i) & "_" & filtered(i + 1)
+            Next
+        End Function
+
     End Class
 
 

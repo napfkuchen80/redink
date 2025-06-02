@@ -77,6 +77,7 @@ Partial Class Ribbon1
         Me.RI_SpecialModel = Me.Factory.CreateRibbonButton
         Me.RI_CreatePodcast = Me.Factory.CreateRibbonButton
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
+        Me.RI_Anonymization = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
         Me.RI_Search = Me.Factory.CreateRibbonButton
@@ -251,6 +252,7 @@ Partial Class Ribbon1
         Me.Menu3.Items.Add(Me.RI_SpecialModel)
         Me.Menu3.Items.Add(Me.RI_CreatePodcast)
         Me.Menu3.Items.Add(Me.RI_CreateAudio)
+        Me.Menu3.Items.Add(Me.RI_Anonymization)
         Me.Menu3.Label = "Analyze"
         Me.Menu3.Name = "Menu3"
         Me.Menu3.OfficeImageId = "PivotTableNonVisualTotals"
@@ -304,6 +306,14 @@ Partial Class Ribbon1
         Me.RI_CreateAudio.OfficeImageId = "OmsInsertAudio"
         Me.RI_CreateAudio.ScreenTip = "Create an audiobook or podcast out of the text selected"
         Me.RI_CreateAudio.ShowImage = True
+        '
+        'RI_Anonymization
+        '
+        Me.RI_Anonymization.Label = "Anonymization"
+        Me.RI_Anonymization.Name = "RI_Anonymization"
+        Me.RI_Anonymization.OfficeImageId = "ApplyCoAuthoringLock"
+        Me.RI_Anonymization.ScreenTip = "Will anonymize the selected text using local means (e.g., redink-anon.txt)"
+        Me.RI_Anonymization.ShowImage = True
         '
         'RI_FreestyleNM
         '
@@ -501,7 +511,7 @@ Partial Class Ribbon1
         AddHandler RI_NoFillers.Click, AddressOf RI_NoFillers_Click
         AddHandler RI_Convincing.Click, AddressOf RI_Convincing_Click
         AddHandler RI_SpecialModel.Click, AddressOf RI_SpecialModel_Click
-
+        AddHandler RI_Anonymization.Click, AddressOf RI_Anonymization_Click
         AddHandler Group2.DialogLauncherClick, AddressOf Easteregg_Click
 
     End Sub
@@ -611,6 +621,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_Friendly As RibbonButton
     Friend WithEvents RI_Convincing As RibbonButton
     Friend WithEvents RI_SpecialModel As RibbonButton
+    Friend WithEvents RI_Anonymization As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

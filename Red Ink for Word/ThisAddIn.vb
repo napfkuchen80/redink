@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.5.2025
+' 2.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -29,8 +29,8 @@ Imports System.Drawing
 Imports System.IO
 Imports System.Net
 Imports System.Net.Http
+Imports System.Net.WebSockets
 Imports System.Runtime.InteropServices
-Imports System.Security.Cryptography
 Imports System.Security.Policy
 Imports System.Speech.Synthesis
 Imports System.Text.RegularExpressions
@@ -38,34 +38,25 @@ Imports System.Threading
 Imports System.Threading.Tasks
 Imports System.Windows
 Imports System.Windows.Forms
-Imports System.Windows.Forms.VisualStyles
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement
-Imports System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar
-Imports System.Xml
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
-Imports Google.Api.Gax
-Imports Google.Api.Gax.Grpc
 Imports Google.Cloud.Speech.V1
+Imports Google.Cloud.Speech.V1.LanguageCodes
 Imports Google.Protobuf
 Imports Grpc.Core
-Imports Grpc.Net
 Imports HtmlAgilityPack
 Imports Markdig
 Imports Microsoft.Office.Core
 Imports Microsoft.Office.Interop.Word
-Imports NAudio
 Imports NAudio.CoreAudioApi
-Imports NAudio.MediaFoundation
 Imports NAudio.Wave
-Imports NAudio.Wave.SampleProviders
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedContext
 Imports SharedLibrary.SharedLibrary.SharedMethods
-Imports SharedLibrary.xMarkdownToRtf
 Imports Vosk
 Imports Whisper.net
 Imports Whisper.net.LibraryLoader
@@ -103,6 +94,7 @@ Module Module1
     <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
     Public Function GetAsyncKeyState(ByVal vKey As Integer) As Short
     End Function
+
 End Module
 
 #Region "BridgeSubs"
@@ -198,10 +190,25 @@ End Class
 
 Public Class ThisAddIn
 
+    <DllImport("user32.dll", SetLastError:=True)>
+    Private Shared Function FindWindow(
+                                ByVal lpClassName As String,
+                                ByVal lpWindowName As String
+                            ) As IntPtr
+    End Function
+
+    Private Function GetWordMainWindowHandle() As IntPtr
+        ' Word’s top-level windows all have the class name "OpusApp" (Office 2013+)
+        Dim hwnd = FindWindow("OpusApp", Nothing)
+        Return hwnd
+    End Function
+
 
     Private mainThreadControl As New System.Windows.Forms.Control()
     Public StartupInitialized As Boolean = False
     Private WithEvents wordApp As Word.Application
+
+    Private ReadOnly _uiContext As SynchronizationContext = WindowsFormsSynchronizationContext.Current
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
 
@@ -292,7 +299,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.300525 Gen2 Beta Test"
+    Public Const Version As String = "V.020625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -333,8 +340,10 @@ Public Class ThisAddIn
     Private Const PanePrefix As String = "Pane:"
     Private Const BubblesPrefix As String = "Bubbles:"
     Private Const BubbleCutText As String = " (" & ChrW(&H2702) & ")"
-    Private Const SearchAllTrigger As String = "(full)"
-    Private Const SearchMultiTrigger As String = "All:"
+    Private Const SearchNextTrigger As String = "Next:"
+    Private Const BoWTrigger As String = "(bow)"
+    Private Const EmbedTrigger As String = "(embed)"
+    Private Const RefreshTrigger As String = "(refresh)"
 
     Private Const RegexSeparator1 As String = "|||"  ' Set also in SharedLibrary
     Private Const RegexSeparator2 As String = "§§§"  ' Set also in SharedLibrary 
@@ -372,9 +381,17 @@ Public Class ThisAddIn
     Private Const Code_JsonTemplateFormatter As String = "Public Module JsonTemplateFormatter" & vbCrLf & "''' <summary>''' Hauptfunktion für JSON-String + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String" & vbCrLf & "Dim jObj As JObject" & vbCrLf & "Try" & vbCrLf & "jObj = JObject.Parse(json)" & vbCrLf & "Catch ex As Newtonsoft.Json.JsonReaderException" & vbCrLf & "Return $""[Fehler beim Parsen des JSON: {ex.Message}]""" & vbCrLf & "End Try" & vbCrLf & "Return FormatJsonWithTemplate(jObj, template)" & vbCrLf & "End Function" & vbCrLf & "''' <summary>''' Hauptfunktion für direkten JObject + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String" & vbCrLf & "If String.IsNullOrWhiteSpace(template) Then Return """"" & vbCrLf & "template = template.Replace(""\\N"", vbCrLf).Replace(""\\n"", vbCrLf).Replace(""\\R"", vbCrLf).Replace(""\\r"", vbCrLf)" & vbCrLf & "template = Regex.Replace(template, ""<cr>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "Dim hasLoop = Regex.IsMatch(template, ""\\{\\%\\s*for\\s+([^\\s\\%]+)\\s*\\%\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim hasPh = Regex.IsMatch(template, ""\\{([^}]+)\\}"")" & vbCrLf & "If Not hasLoop AndAlso Not hasPh Then Return FindJsonProperty(jObj, template)" & vbCrLf & "Dim loopRegex = New Regex(""\\{\\%\\s*for\\s+([^%\\s]+)\\s*\\%\\}(.*?)\\{\\%\\s*endfor\\s*\\%\\}"", RegexOptions.Singleline Or RegexOptions.IgnoreCase)" & vbCrLf & "Dim mLoop = loopRegex.Match(template)" & vbCrLf & "While mLoop.Success" & vbCrLf & "Dim fullBlock = mLoop.Value" & vbCrLf & "Dim rawPath = mLoop.Groups(1).Value.Trim()" & vbCrLf & "Dim innerTpl = mLoop.Groups(2).Value" & vbCrLf & "Dim path = If(rawPath.StartsWith(""$""), rawPath, ""$."" & rawPath)" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim items = tokens.SelectMany(Function(t) If t.Type = JTokenType.Array Then Return CType(t, JArray).OfType(Of JObject)() ElseIf t.Type = JTokenType.Object Then Return {CType(t, JObject)} Else Return Enumerable.Empty(Of JObject)() End If)" & vbCrLf & "Dim rendered = items.Select(Function(o) FormatJsonWithTemplate(o, innerTpl)).ToArray()" & vbCrLf & "template = template.Replace(fullBlock, If(rendered.Any, String.Join(vbCrLf & vbCrLf, rendered), """"""))" & vbCrLf & "mLoop = loopRegex.Match(template)" & vbCrLf & "End While" & vbCrLf & "Dim phRegex = New Regex(""\\{(.+?)\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim result = template" & vbCrLf & "For Each mPh As Match In phRegex.Matches(template)" & vbCrLf & "Dim fullPh = mPh.Value" & vbCrLf & "Dim content = mPh.Groups(1).Value" & vbCrLf & "Dim isHtml As Boolean = False" & vbCrLf & "Dim isNoCr As Boolean = False" & vbCrLf & "If content.StartsWith(""htmlnocr:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : isNoCr = True : content = content.Substring(""htmlnocr:"".Length) ElseIf content.StartsWith(""html:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : content = content.Substring(""html:"".Length) ElseIf content.StartsWith(""nocr:"", StringComparison.OrdinalIgnoreCase) Then isNoCr = True : content = content.Substring(""nocr:"".Length)" & vbCrLf & "Dim parts = content.Split(New Char() {""|""c}, 2)" & vbCrLf & "Dim pathPh = parts(0).Trim()" & vbCrLf & "Dim remainder = If(parts.Length > 1, parts(1), String.Empty)" & vbCrLf & "Dim sep As String = vbCrLf" & vbCrLf & "Dim mappings As Dictionary(Of String, String) = Nothing" & vbCrLf & "If Not String.IsNullOrEmpty(remainder) Then If remainder.Contains(""=""c) Then mappings = ParseMappings(remainder) Else sep = remainder.Replace(""\\n"", vbCrLf)" & vbCrLf & "Dim replacement = RenderTokens(jObj, pathPh, sep, isHtml, isNoCr, mappings)" & vbCrLf & "result = result.Replace(fullPh, replacement)" & vbCrLf & "Next" & vbCrLf & "Return result" & vbCrLf & "End Function" & vbCrLf & "Private Function RenderTokens(jObj As JObject, path As String, sep As String, isHtml As Boolean, isNoCr As Boolean, mappings As Dictionary(Of String, String)) As String" & vbCrLf & "Try" & vbCrLf & "If Not path.StartsWith(""$"") AndAlso Not path.StartsWith(""@"") Then path = ""$."" & path" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim list As New List(Of String)" & vbCrLf & "For Each t In tokens" & vbCrLf & "Dim raw = t.ToString()" & vbCrLf & "If mappings IsNot Nothing AndAlso mappings.ContainsKey(raw) Then raw = mappings(raw)" & vbCrLf & "If isHtml Then raw = HtmlToMarkdownSimple(raw)" & vbCrLf & "If isNoCr Then raw = Regex.Replace(raw, ""[\r\n]+"", "" "") : raw = Regex.Replace(raw, ""\s{2,}"", "" "") : raw = Regex.Replace(raw, ""[\u2022\u2023\u25E6]"", String.Empty) : raw = raw.Trim()" & vbCrLf & "list.Add(raw)" & vbCrLf & "Next" & vbCrLf & "Return If(list.Count = 0, """", String.Join(sep, list))" & vbCrLf & "Catch ex As System.Exception" & vbCrLf & "Return """"" & vbCrLf & "End Try" & vbCrLf & "End Function" & vbCrLf & "Private Function ParseMappings(defs As String) As Dictionary(Of String, String)" & vbCrLf & "Dim dict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)" & vbCrLf & "For Each pair In defs.Split("";""c)" & vbCrLf & "Dim kv = pair.Split(New Char() {""=""c}, 2)" & vbCrLf & "If kv.Length = 2 Then dict(kv(0).Trim()) = kv(1).Trim()" & vbCrLf & "Next" & vbCrLf & "Return dict" & vbCrLf & "End Function" & vbCrLf & "Public Function HtmlToMarkdownSimple(html As String) As String" & vbCrLf & "Dim s = WebUtility.HtmlDecode(html)" & vbCrLf & "s = Regex.Replace(s, ""</?p\s*/?>"", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<br\s*/?>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<strong>(.*?)</strong>"", ""**$1**"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<em>(.*?)</em>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<span\b[^>]*>(.*?)</span>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<li>(.*?)</li>"", ""- $1"" & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<[^>]+>"", String.Empty)" & vbCrLf & "s = Regex.Replace(s, ""("" & vbCrLf & ""){3,}"", vbCrLf & vbCrLf)" & vbCrLf & "Return s.Trim()" & vbCrLf & "End Function" & vbCrLf & "End Module"
     Private Const SP_GenerateResponseKey As String = "I have code that will generate from a JSON string an Markdown output using a Template, which the code will parse together with the JSON file. I want you to create me a working template taking into account (i) the code, (ii) the structure of the JSON file and (iii) my instructions. If the JSON has arrays, make sure you correctly handle them. To produce your output, first provide the barebones template one one single line (do not use placeholders, provide the text how template should look like; for linebreaks, use only <cr>), then provide a brief explanation without any formatting. I will provide you in the following first the code, and then you will get the (sample) JSON file and my instructions. Follow them carefully."
 
-    Private Const NER_Model = "model.onnx"
-    Private Const NER_Token = "bpe.model"
-    Private Const NER_Label = "label_map.txt"
+    Private Const NER_Model = "anon\model.onnx"
+    Private Const NER_Token = "anon\bpe.model"
+    Private Const NER_Label = "anon\label_map.txt"
+    Private Const Embed_Model = "embed\model.onnx"
+    Private Const Embed_Vocab = "embed\vocab.txt"
+    Private Default_Embed_Min_Score = 0.2
+    Private Default_Embed_Top_K = 5
+    Private Default_Embed_Chunks = 2
+    Private Default_Embed_Overlap = 1
+    Private Default_Embed_Chunks_bow = 1
+    Private Default_Embed_Overlap_bow = 0
 
     Public Shared DragDropFormLabel As String = ""
     Public Shared DragDropFormFilter As String = ""
@@ -384,10 +401,16 @@ Public Class ThisAddIn
     Public Shared hostTags As String() = {"H:", "Host:", "A:", "1:"}
     Public Shared guestTags As String() = {"G:", "Guest:", "Gast:", "B:", "2:"}
     Public Shared GoogleIdentifier As String = "googleapis.com"
+    Public Shared OpenAIIdentifier As String = "openai.com"
     Public Shared TTSSecondAPI As Boolean = False
 
     Public Shared GoogleSTT_Desc As String = "Google STT V1 (run in EU)"
     Public Shared STTEndpoint As String = "eu-speech.googleapis.com"
+
+
+    Public Shared OpenAISTTModel As String = "gpt-4o-realtime-preview"
+    Public Shared OpenAISTT_Desc As String = $"OpenAI Streaming"
+    Public Shared STTEndpoint_OpenAI As String = $"wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 
     Public Shared GoogleSTTsupportedLanguages As String() = {
     "en-US", "de-DE",
@@ -407,6 +430,7 @@ Public Class ThisAddIn
     "tn-Latn-ZA", "tr-TR", "uk-UA", "ur-IN", "ur-PK", "uz-UZ", "ve-ZA", "vi-VN", "xh-ZA",
     "yue-Hant-HK", "zu-ZA"
         }
+
 
 
 
@@ -522,6 +546,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_Response = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Anon As String
+        Get
+            Return _context.INI_Anon
+        End Get
+        Set(value As String)
+            _context.INI_Anon = value
         End Set
     End Property
 
@@ -776,6 +809,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_Response_2 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Anon_2 As String
+        Get
+            Return _context.INI_Anon_2
+        End Get
+        Set(value As String)
+            _context.INI_Anon_2 = value
         End Set
     End Property
 
@@ -1816,7 +1858,7 @@ Public Class ThisAddIn
 
         Dim result = Globals.Ribbons.Ribbon1.InitializeAppAsync()
 
-        If MenusAdded Then Exit Sub
+        If MenusAdded Then Return
 
         ' Remove existing context menus from relevant context menus
         If RemoveMenu Then
@@ -1824,11 +1866,11 @@ Public Class ThisAddIn
             RemoveMenu = False
         End If
 
-        If Not INI_ContextMenu Then Exit Sub
+        If Not INI_ContextMenu Then Return
 
-        If Not VBAModuleWorking() Then Exit Sub
+        If Not VBAModuleWorking() Then Return
 
-        If INIloaded = False Then Exit Sub
+        If INIloaded = False Then Return
 
         MenusAdded = True
 
@@ -2141,7 +2183,7 @@ Public Class ThisAddIn
             If shortcutDict.ContainsKey(controlName) Then
                 shortcutKey = shortcutDict(controlName)
             Else
-                Exit Sub ' No shortcut assigned
+                Return ' No shortcut assigned
             End If
 
             ' Build KeyCode from shortcutKey text
@@ -2388,7 +2430,7 @@ Public Class ThisAddIn
     Private chatForm As frmAIChat
 
     Public Sub Transcriptor()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         If Not String.IsNullOrEmpty(INI_SpeechModelPath) Then
             Dim SpeechPath As String = ExpandEnvironmentVariables(INI_SpeechModelPath)
             If Not String.IsNullOrEmpty(SpeechPath) AndAlso Not SpeechPath.EndsWith("\") Then
@@ -2409,7 +2451,7 @@ Public Class ThisAddIn
     End Sub
 
     Public Sub ShowChatForm()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         If chatForm Is Nothing OrElse chatForm.IsDisposed Then
             chatForm = New frmAIChat(_context)
 
@@ -2456,7 +2498,7 @@ Public Class ThisAddIn
         OtherPrompt = SLib.ShowCustomInputBox("Describe the image to generate (the image will be saved to the desktop):", $"{AN} Image Generator", True)
 
         If String.IsNullOrWhiteSpace(OtherPrompt) Then
-            Exit Sub
+            Return
         End If
 
         Dim result2 As String = Await LLM("You are an image generator. You will complete the following command.", "Create the following image: " & OtherPrompt, "", "", 0, True)
@@ -2467,18 +2509,18 @@ Public Class ThisAddIn
 
     Public Async Sub InLanguage1()
 
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         TranslateLanguage = INI_Language1
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub InLanguage2()
 
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         TranslateLanguage = INI_Language2
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub InOther()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language", $"{AN} Translate", True)
         If Not String.IsNullOrEmpty(TranslateLanguage) Then
             Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
@@ -2486,27 +2528,27 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub Correct()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Correct), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Improve()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Improve), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Friendly()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Friendly), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Convincing()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Convincing), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub NoFillers()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_NoFillers), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Anonymize()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
 
         Dim DoMarkup As Boolean = INI_DoMarkupWord
         Dim DoReplace As Boolean = INI_ReplaceText2
@@ -2540,16 +2582,16 @@ Public Class ThisAddIn
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Anonymize), True, INI_KeepFormat2, INI_KeepParaFormatInline, DoReplace, DoMarkup, MarkupMethod, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Explain()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Explain), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub SuggestTitles()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_SuggestTitles), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub Shorten()
 
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2564,7 +2606,7 @@ Public Class ThisAddIn
         Do
             UserInput = SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%").Trim()
             If String.IsNullOrEmpty(UserInput) Then
-                Exit Sub
+                Return
             End If
             UserInput = UserInput.Replace("%", "").Trim()
             If Integer.TryParse(UserInput, ShortenPercentValue) AndAlso ShortenPercentValue >= 1 AndAlso ShortenPercentValue <= 99 Then
@@ -2573,18 +2615,18 @@ Public Class ThisAddIn
                 ShowCustomMessageBox("Please enter a valid percentage between 1 And 99.")
             End If
         Loop
-        If ShortenPercentValue = 0 Then Exit Sub
+        If ShortenPercentValue = 0 Then Return
         ShortenLength = (Textlength - (Textlength * (100 - ShortenPercentValue) / 100))
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Improve), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
     Public Async Sub SwitchParty()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim UserInput As String
         Do
             UserInput = SLib.ShowCustomInputBox("Please provide the original party name And the New party name, separated by a comma (example: Elvis Presley, Taylor Swift):", $"{AN} Switch Party", True).Trim()
 
             If String.IsNullOrEmpty(UserInput) Then
-                Exit Sub
+                Return
             End If
 
             Dim parts() As String = UserInput.Split(","c)
@@ -2630,7 +2672,7 @@ Public Class ThisAddIn
 
     End Sub
     Public Async Sub Summarize()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2648,7 +2690,7 @@ Public Class ThisAddIn
             UserInput = SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(CInt(SummaryPercent * Textlength / 100))).Trim()
 
             If String.IsNullOrEmpty(UserInput) Then
-                Exit Sub
+                Return
             End If
 
             If Integer.TryParse(UserInput, SummaryLength) AndAlso SummaryLength >= 1 AndAlso SummaryLength <= Textlength Then
@@ -2657,13 +2699,13 @@ Public Class ThisAddIn
                 ShowCustomMessageBox("Please enter a valid word count between 1 and " & Textlength & ".")
             End If
         Loop
-        If SummaryLength = 0 Then Exit Sub
+        If SummaryLength = 0 Then Return
 
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Summarize), False, False, False, False, False, False, True, False, True, False, 0)
     End Sub
 
     Public Async Sub CreatePodcast()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
 
@@ -2716,7 +2758,7 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub CreateAudio()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim Endpoint As String = INI_Endpoint
         Dim Endpoint_2 As String = INI_Endpoint_2
         Dim TTSEndpoint As String = INI_TTSEndpoint
@@ -2726,7 +2768,7 @@ Public Class ThisAddIn
         ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
             TTSSecondAPI = True
         Else
-            Exit Sub
+            Return
         End If
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
@@ -2769,7 +2811,7 @@ Public Class ThisAddIn
                     End If
                 End If
                 GenerateAndPlayAudio(selection.Text, selectedoutputpath, "", "")
-                Exit Sub
+                Return
             Else
                 Dim Voices As Integer = ShowCustomYesNoBox("Do you want to use alternate voices to read the text?", "No, one voice", "Yes, alternate", "Create Audio")
                 If Voices = 0 Then Return
@@ -2785,17 +2827,17 @@ Public Class ThisAddIn
         End If
     End Sub
     Public Async Sub FreeStyleNM()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         FreeStyle(False)
     End Sub
     Public Async Sub FreeStyleAM()
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
 
         If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
 
             If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
                 originalConfigLoaded = False
-                Exit Sub
+                Return
             End If
 
         End If
@@ -2807,7 +2849,7 @@ Public Class ThisAddIn
 
     Public Async Sub SpecialModel()
         Try
-            If INILoadFail() Then Exit Sub
+            If INILoadFail() Then Return
             Dim DoPane As Boolean = True
 
             If String.IsNullOrWhiteSpace(INI_SpecialServicePath) Then
@@ -2815,7 +2857,7 @@ Public Class ThisAddIn
                 Return
             End If
 
-            If INILoadFail() Then Exit Sub
+            If INILoadFail() Then Return
             Dim application As Word.Application = Globals.ThisAddIn.Application
             Dim selection As Word.Selection = application.Selection
 
@@ -2828,7 +2870,7 @@ Public Class ThisAddIn
 
             If Not ShowModelSelection(_context, INI_SpecialServicePath, "Special Service", "Select the special service you want to query:", "Output in a pane (not directly in the document)", 2) Then
                 originalConfigLoaded = False
-                Exit Sub
+                Return
             End If
 
             Debug.WriteLine("Selected model: " & INI_Model_2)
@@ -3006,6 +3048,7 @@ Public Class ThisAddIn
                         End If
 
                         ' 6) Platzhalter ersetzen
+                        INI_Endpoint_2 = INI_Endpoint_2.Replace("{" & "parameter" & (i + 1) & "}", paramValue)
                         INI_APICall_2 = INI_APICall_2.Replace("{" & "parameter" & (i + 1) & "}", paramValue)
                         INI_APICall_Object_2 = INI_APICall_Object_2.Replace("{" & "parameter" & (i + 1) & "}", paramValue)
                     Next
@@ -3020,28 +3063,115 @@ Public Class ThisAddIn
 
             If Not String.IsNullOrWhiteSpace(llmresult) Then
                 If OptionChecked Then
+
+                    Dim ClipPaneText1 As String = "Your service has provided the following result (you can edit it):"
+                    Dim ClipText2 As String = "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard."
+
                     If DoPane Then
-                        SP_MergePrompt_Cached = SP_MergePrompt
-                        ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
-                    Else
-                        Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, True, True, True)
-                        If FinalText <> "" Then
-                            If FinalText = "Markdown" Then
-                                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                                Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                                InsertTextWithMarkdown(selection, llmresult, False)
-                            ElseIf FinalText = "Pane" Then
-                                SP_MergePrompt_Cached = SP_MergePrompt
-                                ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
-                            Else
-                                SLib.PutInClipboard(FinalText)
-                            End If
+
+                        If _uiContext IsNot Nothing Then  ' Make sure we run in the UI Thread
+                            _uiContext.Post(Sub(s)
+                                                SP_MergePrompt_Cached = SP_MergePrompt
+                                                ShowPaneAsync(
+                                        ClipPaneText1,
+                                        llmresult,
+                                        "",
+                                        AN,
+                                        noRTF:=False,
+                                        insertMarkdown:=True
+                                        )
+                                            End Sub, Nothing)
+                        Else
+
+                            SP_MergePrompt_Cached = SP_MergePrompt
+                            ShowPaneAsync(ClipPaneText1, llmresult, "", AN, noRTF:=False, insertMarkdown:=True)
+
                         End If
+
+                    Else
+
+                        Dim dialogResult As String = ""
+
+                        If _uiContext IsNot Nothing Then
+                            Dim doneEvent As New ManualResetEventSlim(False)            ' Make sure we run in the UI Thread
+
+                            _uiContext.Post(Sub(state)
+                                                Try
+
+                                                    Dim wordHwnd As IntPtr = GetWordMainWindowHandle()
+
+                                                    dialogResult = ShowCustomWindow(ClipPaneText1,
+                                                                            llmresult,
+                                                                            ClipText2,
+                                                                            AN,
+                                                                            NoRTF:=False,
+                                                                            Getfocus:=False,
+                                                                            InsertMarkdown:=True,
+                                                                            TransferToPane:=True,
+                                                                            parentWindowHwnd:=wordHwnd)
+
+                                                    If dialogResult <> "" And dialogResult <> "Pane" Then
+                                                        If dialogResult = "Markdown" Then
+                                                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                                                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                                            InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & llmresult, False)
+                                                        Else
+                                                            SLib.PutInClipboard(dialogResult)
+                                                        End If
+                                                    ElseIf dialogResult = "Pane" Then
+                                                        SP_MergePrompt_Cached = SP_MergePrompt
+                                                        ShowPaneAsync(
+                                                                            ClipPaneText1,
+                                                                            llmresult,
+                                                                            "",
+                                                                            AN,
+                                                                            noRTF:=False,
+                                                                            insertMarkdown:=True
+                                                                            )
+                                                    End If
+
+                                                Finally
+                                                    doneEvent.Set()
+                                                End Try
+                                            End Sub, Nothing)
+                            ' doneEvent.Wait()
+
+                        Else
+                            dialogResult = ShowCustomWindow(
+                                            ClipPaneText1,
+                                            llmresult,
+                                            ClipText2,
+                                            AN,
+                                            NoRTF:=False,
+                                            Getfocus:=False,
+                                            InsertMarkdown:=True,
+                                            TransferToPane:=True)
+
+                            If dialogResult <> "" And dialogResult <> "Pane" Then
+                                If dialogResult = "Markdown" Then
+                                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                    InsertTextWithMarkdown(selection, vbCrLf & llmresult, False)
+                                Else
+                                    SLib.PutInClipboard(dialogResult)
+                                End If
+                            ElseIf dialogResult = "Pane" Then
+                                SP_MergePrompt_Cached = SP_MergePrompt
+                                ShowPaneAsync(
+                                                    ClipPaneText1,
+                                                    llmresult,
+                                                    "",
+                                                    AN,
+                                                    noRTF:=False,
+                                                    insertMarkdown:=True
+                                                    )
+                            End If
+
+                        End If
+
                     End If
-                Else
-                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                    InsertTextWithMarkdown(selection, llmresult, False)
                 End If
             End If
 
@@ -3055,160 +3185,9 @@ Public Class ThisAddIn
 
 
 
-    Public Async Sub oldSpecialModel()
-        If INILoadFail() Then Exit Sub
-        Dim DoPane As Boolean = True
-
-        If String.IsNullOrWhiteSpace(INI_SpecialServicePath) Then
-            ShowCustomMessageBox("No special service path is configured.")
-            Return
-        End If
-
-        If INILoadFail() Then Exit Sub
-        Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
-
-        If selection.Type = WdSelectionType.wdSelectionIP Then
-            ShowCustomMessageBox("Please select the text to be processed.")
-            Return
-        End If
-
-        OptionChecked = False
-
-        If Not ShowModelSelection(_context, INI_SpecialServicePath, "Special Service", "Select the special service you want to query:", "Output in a pane (not directly in the document)", 2) Then
-            originalConfigLoaded = False
-            Exit Sub
-        End If
-
-        Debug.WriteLine("Selected model: " & INI_Model_2)
-
-        Dim iniValues() As String = {INI_Model_Parameter1, INI_Model_Parameter2, INI_Model_Parameter3, INI_Model_Parameter4}
-        Dim list As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)
-
-        For Each raw As String In iniValues
-            If String.IsNullOrWhiteSpace(raw) Then Continue For
-            Dim segments = raw.Split(";"c)
-            Dim desc = segments(0).Trim()
-            Dim t As String = segments(1).Trim().ToLowerInvariant()
-            Dim defaultStr = segments(2).Trim()
-            Dim opts As List(Of String) = Nothing
-            If segments.Length > 3 Then
-                opts = segments(3).Split(","c).Select(Function(o) o.Trim()).ToList()
-            End If
-
-            Dim val As Object
-            Select Case t
-                Case "boolean"
-                    Dim b As Boolean
-                    Boolean.TryParse(defaultStr, b)
-                    val = b
-                Case "integer"
-                    Dim i As Integer
-                    Integer.TryParse(defaultStr, i)
-                    val = i
-                Case "long"
-                    Dim l As Long
-                    Integer.TryParse(defaultStr, l)
-                    val = l
-                Case "double"
-                    Dim d As Double
-                    Double.TryParse(defaultStr, d)
-                    val = d
-                Case Else
-                    val = defaultStr
-            End Select
-
-            If opts IsNot Nothing AndAlso opts.Count > 0 Then
-                list.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val, opts))  ' Use overload with options
-            Else
-                list.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, val))
-            End If
-        Next
-
-        OtherPrompt = ""
-
-        If list.Count > 0 Then
-            Dim parameters() As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = list.ToArray()
-            If ShowCustomVariableInputForm("Please configure your parameters:", "Use '" & INI_Model_2 & "'", parameters) Then
-
-                ' Schleife über alle Parameter
-                For i As Integer = 0 To parameters.Length - 1
-                    Dim p As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameters(i)
-                    Dim paramValue As String
-
-                    ' 1) Boolean-Typ? dann immer "true"/"false" in lowercase
-                    If TypeOf p.Value Is System.Boolean Then
-                        paramValue = CType(p.Value, System.Boolean) _
-                                      .ToString() _
-                                      .ToLowerInvariant()
-                    Else
-                        ' 2) Sonst: Trim + (all)/(alle)/--- prüfen
-                        Dim rawValue As String = p.Value.ToString().Trim()
-                        Dim rvLower As String = rawValue.ToLowerInvariant()
-                        If rvLower.Contains("(all)") OrElse rvLower.Contains("(alle)") OrElse rawValue.Contains("---") Then
-                            rawValue = ""
-                        End If
-                        paramValue = rawValue
-                    End If
-
-                    ' 3) Sonderfall Prompt
-                    If p.Name.ToLowerInvariant().Contains("prompt") Then
-                        OtherPrompt = paramValue
-                    End If
-
-                    ' 4) Ersetze Platzhalter {parameter1}, {parameter2}, …
-                    INI_APICall_2 = INI_APICall_2.Replace(
-                                        "{parameter" & (i + 1) & "}",
-                                        paramValue)
-                    INI_APICall_Object_2 = INI_APICall_Object_2.Replace(
-                                        "{parameter" & (i + 1) & "}",
-                                        paramValue)
-                Next
-
-            Else
-                Return
-            End If
-        End If
-
-        SelectedText = selection.Text.Trim()
-
-        Dim llmresult As String = Await LLM(OtherPrompt, SelectedText, "", "", 0, True)
-
-        If Not String.IsNullOrWhiteSpace(llmresult) Then
-            If OptionChecked Then
-                If DoPane Then
-                    SP_MergePrompt_Cached = SP_MergePrompt
-                    ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
-                Else
-                    Dim FinalText = ShowCustomWindow("Your service has provided the following result (you can edit it):", llmresult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, False, True, True)
-
-                    If FinalText <> "" Then
-                        If FinalText = "Markdown" Then
-                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                            InsertTextWithMarkdown(selection, llmresult, False)
-                        ElseIf FinalText = "Pane" Then
-                            SP_MergePrompt_Cached = SP_MergePrompt
-                            ShowPaneAsync("Your service has provided the following result (you can edit it):", llmresult, "", AN, False, True)
-                        Else
-                            SLib.PutInClipboard(FinalText)
-                        End If
-                    End If
-                End If
-            Else
-                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                InsertTextWithMarkdown(selection, llmresult, False)
-            End If
-        End If
-
-        RestoreDefaults(_context, originalConfig)
-        originalConfigLoaded = False
-
-    End Sub
 
     Public Async Sub FreeStyle(UseSecondAPI)
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Try
             OtherPrompt = ""
             SysPrompt = ""
@@ -3296,12 +3275,12 @@ Public Class ThisAddIn
                 If OtherPrompt.StartsWith("codebasis", StringComparison.OrdinalIgnoreCase) Then
                     SLib.WriteToRegistry(RemoveCR(RegPath_CodeBasis), RemoveCR(selection.Text))
                     selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
-                    Exit Sub
+                    Return
                 End If
                 If OtherPrompt.StartsWith("inipath", StringComparison.OrdinalIgnoreCase) Then
                     SLib.WriteToRegistry(RemoveCR(RegPath_IniPath), RemoveCR(selection.Text))
                     selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
-                    Exit Sub
+                    Return
                 End If
                 If OtherPrompt.StartsWith("encode", StringComparison.OrdinalIgnoreCase) Then
                     Dim Key As String = CodeAPIKey(RemoveCR(selection.Text))
@@ -3310,7 +3289,7 @@ Public Class ThisAddIn
                     selection.TypeText(vbCrLf & "Encoded key (also in clipboard):" & vbCrLf & Key)
                     selection.ParagraphFormat.Hyphenation = False ' Turn off hyphenation
                     SLib.PutInClipboard(Key)
-                    Exit Sub
+                    Return
                 End If
 
                 If OtherPrompt.StartsWith("decode", StringComparison.OrdinalIgnoreCase) Then
@@ -3319,29 +3298,29 @@ Public Class ThisAddIn
                     selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
                     selection.TypeText(vbCrLf & "Decoded key (also in clipboard):" & vbCrLf & Key)
                     selection.ParagraphFormat.Hyphenation = False ' Turn off hyphenation
-                    Exit Sub
+                    Return
                 End If
 
             End If
             If OtherPrompt.StartsWith("domain", StringComparison.OrdinalIgnoreCase) Then
                 ShowCustomMessageBox($"{AN} is running in the domain '{GetDomain()}' and configured to run in {If(String.IsNullOrEmpty(SLib.alloweddomains), "any domain ('alloweddomains' has not been set).", "'" & SLib.alloweddomains & "'.")}", "")
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("model", StringComparison.OrdinalIgnoreCase) Then
                 ShowCustomMessageBox("I am using the " & INI_Model & " model as my primary model with a default timeout of " & (INI_Timeout / 1000) & " seconds (" & Format(INI_Timeout / 60000, "0.00") & " minutes)." & If(INI_MaxOutputToken > 0, "The maximum output token length is " & INI_MaxOutputToken & ".", ""))
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("terms", StringComparison.OrdinalIgnoreCase) Then
                 selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
                 selection.TypeText(vbCrLf & If(INI_UsageRestrictions = "", "No usage restrictions or permissions have been defined in the configuration file.", "The defined usage restrictions or permissions defined in the configuration file are: " & INI_UsageRestrictions) & vbCrLf)
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("anonymize", StringComparison.OrdinalIgnoreCase) Then
                 Call AnonymizeSelection()
-                Exit Sub
+                Return
             End If
 
-            If OtherPrompt.StartsWith("generateresponsekey", StringComparison.OrdinalIgnoreCase) Then
+            If OtherPrompt.StartsWith("generateresponsekey", StringComparison.OrdinalIgnoreCase) Or OtherPrompt.StartsWith("generateresponsetemplate", StringComparison.OrdinalIgnoreCase) Then
 
                 If NoText Then
                     ShowCustomMessageBox("No text has been selected. Select the text containing both the JSON payload to interpret and what you want the output to look like (by referencing to the JSON fields and structure in natural text).")
@@ -3353,7 +3332,7 @@ Public Class ThisAddIn
                 selection.Range.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
                 selection.InsertAfter(vbCrLf & vbCrLf & response)
 
-                Exit Sub
+                Return
             End If
 
 
@@ -3365,11 +3344,11 @@ Public Class ThisAddIn
                 Else
                     ShowCustomMessageBox("You have defined only one model ('" & INI_Model & "').")
                 End If
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("version", StringComparison.OrdinalIgnoreCase) Then
                 ShowCustomMessageBox("You are using " & Version & $" of {AN}. (c) by David Rosenthal, VISCHER. Go to https://vischer.com/{AN2} for more information. This copy of {AN} is set to expire on {LicensedTill.ToString("dd-MMM-yyyy")}", AN)
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("reset", StringComparison.OrdinalIgnoreCase) Then
                 If ShowCustomYesNoBox($"Do you really want to reset your local configuration file and settings (if any) by removing non-mandatory entries? The current configuration file '{AN2}.ini' will NOT be saved to a '.bak' file. If you only want to reload the configuration settings for giving up any temporary changes, use 'reload' instead.", "Yes", "No") = 1 Then
@@ -3379,24 +3358,24 @@ Public Class ThisAddIn
                     AddContextMenu()
                     ShowCustomMessageBox($"Following the reset, the configuration file '{AN2}.ini' has been be reloaded.")
                 End If
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("speech", StringComparison.OrdinalIgnoreCase) Then
                 Transcriptor()
-                Exit Sub
+                Return
 
             End If
 
             If OtherPrompt.StartsWith("readlocal", StringComparison.OrdinalIgnoreCase) Then
                 SpeakSelectedText()
-                Exit Sub
+                Return
 
             End If
 
             If OtherPrompt.StartsWith("voiceslocal", StringComparison.OrdinalIgnoreCase) Then
                 SelectVoiceByNumber()
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("voices2", StringComparison.OrdinalIgnoreCase) Then
@@ -3422,7 +3401,7 @@ Public Class ThisAddIn
                     End If
                 End Using
 
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("voices", StringComparison.OrdinalIgnoreCase) Then
@@ -3448,22 +3427,22 @@ Public Class ThisAddIn
                     End If
                 End Using
 
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("createpodcast", StringComparison.OrdinalIgnoreCase) Then
                 CreatePodcast()
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("readpodcast", StringComparison.OrdinalIgnoreCase) Then
                 ReadPodcast(selection.Text)
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("read", StringComparison.OrdinalIgnoreCase) Then
                 CreateAudio()
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("cleanmenu", StringComparison.OrdinalIgnoreCase) Then
@@ -3471,7 +3450,7 @@ Public Class ThisAddIn
                 RemoveVeryOldContextMenu()
                 MenusAdded = False
                 AddContextMenu()
-                Exit Sub
+                Return
             End If
 
             If OtherPrompt.StartsWith("reload", StringComparison.OrdinalIgnoreCase) Then
@@ -3480,11 +3459,11 @@ Public Class ThisAddIn
                 MenusAdded = False
                 AddContextMenu()
                 ShowCustomMessageBox($"The configuration file '{AN2}.ini' has been be reloaded.")
-                Exit Sub
+                Return
             End If
             If OtherPrompt.StartsWith("settings", StringComparison.OrdinalIgnoreCase) Then
                 ShowSettings()
-                Exit Sub
+                Return
             End If
 
             If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
@@ -3499,10 +3478,10 @@ Public Class ThisAddIn
                 DoClipboard = promptlibresult.Item4
 
                 If OtherPrompt = "" Then
-                    Exit Sub
+                    Return
                 End If
             Else
-                If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then Exit Sub
+                If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then Return
             End If
 
             My.Settings.LastPrompt = OtherPrompt
@@ -3622,7 +3601,7 @@ Public Class ThisAddIn
                 doc = GetFileContent()
                 If String.IsNullOrWhiteSpace(doc) Then
                     ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
-                    Exit Sub
+                    Return
                 End If
                 OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
                 ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
@@ -3639,7 +3618,7 @@ Public Class ThisAddIn
                     DragDropFormFilter = ""
                     If String.IsNullOrWhiteSpace(FileObject) Then
                         ShowCustomMessageBox("No file object has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
-                        Exit Sub
+                        Return
                     End If
                 End If
             End If
@@ -3652,7 +3631,7 @@ Public Class ThisAddIn
                     document.Content.Select()
                     NoText = False
                 Else
-                    Exit Sub
+                    Return
                 End If
             End If
 
@@ -3663,14 +3642,14 @@ Public Class ThisAddIn
                     document.Content.Select()
                     NoText = False
                 Else
-                    Exit Sub
+                    Return
                 End If
             End If
 
             If Not DoInplace And DoMarkup Then
                 Dim AppendMarkup As Integer = ShowCustomYesNoBox("You have asked for a markup to be created, but according to the configuration, it will not replace your current selection but added to it at the end. Is this really what you want?", "Yes, add markup ", "No, replace text with markup")
                 If AppendMarkup = 0 Then
-                    Exit Sub
+                    Return
                 ElseIf AppendMarkup = 2 Then
                     DoInplace = True
                 End If
@@ -3682,10 +3661,10 @@ Public Class ThisAddIn
             Else
                 If DoLib Then
                     Dim isSuccess As Boolean = Await ConsultLibrary(DoMarkup) ' updates SysPrompt
-                    If Not isSuccess Then Exit Sub
+                    If Not isSuccess Then Return
                 ElseIf DoNet Then
                     Dim isSuccess As Boolean = Await ConsultInternet(DoMarkup) ' updates SysPrompt
-                    If Not isSuccess Then Exit Sub
+                    If Not isSuccess Then Return
                 ElseIf NoText Then
                     SysPrompt = SP_FreestyleNoText
                 Else
@@ -4304,6 +4283,10 @@ Public Class ThisAddIn
 
             If Not String.IsNullOrEmpty(LLMResult) Then
 
+                Dim ClipPaneText1 As String = "The LLM has provided the following result (you can edit it):"
+                Dim ClipText2 As String = "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard."
+                Dim PaneText2 As String = "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane."
+
                 If CreatePodcast Then
 
                     Dim IsGoogle As Boolean = False
@@ -4342,24 +4325,105 @@ Public Class ThisAddIn
 
                 ElseIf DoPane Then
 
-                    SP_MergePrompt_Cached = SP_MergePrompt
-                    ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane.", AN, False, True)
+                    If _uiContext IsNot Nothing Then  ' Make sure we run in the UI Thread
+                        _uiContext.Post(Sub(s)
+                                            SP_MergePrompt_Cached = SP_MergePrompt
+                                            ShowPaneAsync(
+                                        ClipPaneText1,
+                                        LLMResult,
+                                        PaneText2,
+                                        AN,
+                                        noRTF:=False,
+                                        insertMarkdown:=True
+                                        )
+                                        End Sub, Nothing)
+                    Else
+
+                        SP_MergePrompt_Cached = SP_MergePrompt
+                        ShowPaneAsync(ClipPaneText1, LLMResult, PaneText2, AN, noRTF:=False, insertMarkdown:=True)
+                    End If
 
                 ElseIf PutInClipboard Then
 
-                    Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard.", AN, False, True, True, True)
+                    Dim dialogResult As String = ""
 
-                    If FinalText <> "" Then
-                        If FinalText = "Markdown" Then
-                            Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                            Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                            InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-                        ElseIf FinalText = "Pane" Then
+                    If _uiContext IsNot Nothing Then
+                        Dim doneEvent As New ManualResetEventSlim(False)            ' Make sure we run in the UI Thread
+
+                        _uiContext.Post(Sub(state)
+                                            Try
+
+                                                Dim wordHwnd As IntPtr = GetWordMainWindowHandle()
+
+                                                dialogResult = ShowCustomWindow(ClipPaneText1,
+                                                                            LLMResult,
+                                                                            ClipText2,
+                                                                            AN,
+                                                                            NoRTF:=False,
+                                                                            Getfocus:=False,
+                                                                            InsertMarkdown:=True,
+                                                                            TransferToPane:=True,
+                                                                            parentWindowHwnd:=wordHwnd)
+
+                                                If dialogResult <> "" And dialogResult <> "Pane" Then
+                                                    If dialogResult = "Markdown" Then
+                                                        Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                                                        Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                                        Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                                        InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, LLMResult, False)
+                                                    Else
+                                                        SLib.PutInClipboard(dialogResult)
+                                                    End If
+                                                ElseIf dialogResult = "Pane" Then
+                                                    SP_MergePrompt_Cached = SP_MergePrompt
+                                                    ShowPaneAsync(
+                                                                            ClipPaneText1,
+                                                                            LLMResult,
+                                                                            PaneText2,
+                                                                            AN,
+                                                                            noRTF:=False,
+                                                                            insertMarkdown:=True
+                                                                            )
+                                                End If
+
+                                            Finally
+                                                doneEvent.Set()
+                                            End Try
+                                        End Sub, Nothing)
+                        ' doneEvent.Wait()
+
+                    Else
+                        dialogResult = ShowCustomWindow(
+                                            ClipPaneText1,
+                                            LLMResult,
+                                            ClipText2,
+                                            AN,
+                                            NoRTF:=False,
+                                            Getfocus:=False,
+                                            InsertMarkdown:=True,
+                                            TransferToPane:=True)
+
+                        If dialogResult <> "" And dialogResult <> "Pane" Then
+                            If dialogResult = "Markdown" Then
+                                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                                InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, LLMResult, False)
+                            Else
+                                SLib.PutInClipboard(dialogResult)
+                            End If
+                        ElseIf dialogResult = "Pane" Then
                             SP_MergePrompt_Cached = SP_MergePrompt
-                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane.", AN, False, True)
-                        Else
-                            SLib.PutInClipboard(FinalText)
+                            ShowPaneAsync(
+                                                    ClipPaneText1,
+                                                    LLMResult,
+                                                    PaneText2,
+                                                    AN,
+                                                    noRTF:=False,
+                                                    insertMarkdown:=True
+                                                    )
                         End If
+
                     End If
 
                 ElseIf PutInBubbles Then
@@ -4789,7 +4853,7 @@ Public Class ThisAddIn
 
         If regexList.Count = 0 Then
             ShowCustomMessageBox("The Regex markup method did not work, as the the LLM delivered no valid regex patterns. You may want to retry.")
-            Exit Sub
+            Return
         End If
 
         Try
@@ -4798,7 +4862,7 @@ Public Class ThisAddIn
 
             If selection Is Nothing OrElse selection.Range Is Nothing Then
                 MessageBox.Show("Error in MarkupSelectedTextWithRegex: No text selected (anymore). Can't proceed.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                Exit Sub
+                Return
             End If
 
             'Dim splash As New SplashScreen("Applying changes... press 'Esc' to abort") 
@@ -5087,7 +5151,7 @@ Public Class ThisAddIn
     Public Shared Sub InsertTextWithMarkdown(selection As Microsoft.Office.Interop.Word.Selection, Result As String, Optional TrailingCR As Boolean = False)
         If selection Is Nothing Then
             MessageBox.Show("Error in InsertTextWithMarkdown: The selection object is null", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-            Exit Sub
+            Return
         End If
 
         Dim insertionStart As Integer = selection.Range.Start
@@ -5921,7 +5985,7 @@ Public Class ThisAddIn
                 tagEndPos = inputText.IndexOf("[INS_END]", pos - 1) + 1
                 If tagEndPos = -1 Then
                     MessageBox.Show("Error in ParseText: Missing [INS_END] tag.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                    Exit Sub
+                    Return
                 End If
                 tagText = inputText.Substring(pos - 1, tagEndPos - pos)
                 pos = tagEndPos + 9
@@ -5931,7 +5995,7 @@ Public Class ThisAddIn
                 tagEndPos = inputText.IndexOf("[DEL_END]", pos - 1) + 1
                 If tagEndPos = -1 Then
                     MessageBox.Show("Error in ParseText: Missing [DEL_END] tag.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                    Exit Sub
+                    Return
                 End If
                 tagText = inputText.Substring(pos - 1, tagEndPos - pos)
                 pos = tagEndPos + 9
@@ -6283,7 +6347,7 @@ Public Class ThisAddIn
         ' Check if there are any markups
         If sel.Revisions.Count = 0 Then
             ShowCustomMessageBox($"No revisions found {DocRef}.")
-            Exit Sub
+            Return
         End If
 
         Dim splash As New SplashScreen("Accepting revisions related to formatting... press 'Esc' to abort")
@@ -6349,11 +6413,12 @@ Public Class ThisAddIn
                     Dim currentSelection As Word.Selection = Globals.ThisAddIn.Application.Selection
                     currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                     Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
                     InsertTextWithMarkdown(currentSelection, OriginalText, False)
                 End If
             End If
 
-        Catch ex As Exception
+        Catch ex As System.Exception
             MessageBox.Show("Error in ShowPaneAsync: " & ex.Message)
         End Try
     End Sub
@@ -6372,7 +6437,7 @@ Public Class ThisAddIn
             Return
         End If
         OtherPrompt = SLib.ShowCustomInputBox("If you want, you can amend the prompt that will be used to intelligently merge your selection into your document:", $"{AN} Intelligent Merge", False, SP_MergePrompt_Cached).Trim()
-        If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then Exit Sub
+        If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then Return
         Dim result As String = Await ProcessSelectedText(OtherPrompt & " " & SP_Add_MergePrompt & " <INSERT>" & newtext & "</INSERT> ", True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap)
     End Sub
 
@@ -6403,6 +6468,33 @@ Public Class ThisAddIn
 
     Public Sub AnonymizeSelection()
 
+        Dim sel As String = Globals.ThisAddIn.Application.Selection.Text
+
+        If String.IsNullOrWhiteSpace(sel) Then
+            SLib.ShowCustomMessageBox("Please select a text to anonymize.")
+            Return
+        End If
+
+        Dim AnonSetting As String = INI_Anon
+        Dim OverrideAnonSetting As String = LoadAnonSettingsForModel(INI_Model)
+
+        If Not String.IsNullOrWhiteSpace(OverrideAnonSetting) Then AnonSetting = OverrideAnonSetting
+        If Not String.IsNullOrWhiteSpace(AnonSetting) Then
+            Dim AnonType As Integer = ShowCustomYesNoBox($"Which anonymization type do you want (using keys for '{INI_Model}')?", "3 - file based", "4 - prompt", $"{AN} Anonymization") + 2
+            If AnonType > 2 Then
+                Dim AnonMode As String = "silent"
+                Dim AnonText As String = AnonymizeText(sel, INI_Model, AnonMode, AnonType)
+                AnonText = AnonText & vbCrLf & vbCrLf & "**Entities:**  " & vbCrLf & vbCrLf & ExportEntitiesMappings()
+                Dim result As String = ShowCustomWindow("The anonymization returned the following text:", AnonText, $"Beware that this anonymization depends entirely on the keys you provided in your file '{AnonFile}' (for your model '{INI_Model}') or your prompt. Check the result. Choose what to put into the clipboard.", $"{AN} Anonymization", True)
+
+                If result <> "" Then
+                    SLib.PutInClipboard(result)
+                End If
+            End If
+        End If
+
+        Return
+
         If String.IsNullOrEmpty(Globals.ThisAddIn.INI_LocalModelPath) Then
             SLib.ShowCustomMessageBox("No path set for the NER model ('LocalModelPath').")
             Return
@@ -6410,7 +6502,7 @@ Public Class ThisAddIn
 
         If Not EnsureInitialized() Then Return
 
-        Dim sel As String = Globals.ThisAddIn.Application.Selection.Text
+        'Dim sel As String = Globals.ThisAddIn.Application.Selection.Text
         If String.IsNullOrWhiteSpace(sel) Then
             SLib.ShowCustomMessageBox("Please select a text to anonymize.")
             Return
@@ -6452,7 +6544,7 @@ Public Class ThisAddIn
 
         ' Step 1: Get regex patterns
         Dim RegexPattern As String = ShowCustomInputBox("Step 1: Enter your Regex pattern(s), one per line (more info about Regex: vischerlnk.com/regexinfo):", "Regex Search & Replace", False, LastRegexPattern)?.Trim()
-        If String.IsNullOrEmpty(RegexPattern) Then Exit Sub
+        If String.IsNullOrEmpty(RegexPattern) Then Return
 
         ' Step 2: Get regex options
         Dim optionsInput As String = ShowCustomInputBox("Enter regex option(s) (i for IgnoreCase, m for Multiline, s for Singleline, c for Compiled, r for RightToLeft, e for ExplicitCapture):", "Regex Search & Replace", True, LastRegexOptions)
@@ -6484,7 +6576,7 @@ Public Class ThisAddIn
         ' Check if patterns and replacements match
         If replacements IsNot Nothing AndAlso patterns.Length <> replacements.Length Then
             ShowCustomMessageBox("The number of regex patterns does not match the number of replacement lines. Aborting without any replacements done.")
-            Exit Sub
+            Return
         End If
 
         ' Validate all regex patterns first
@@ -6493,7 +6585,7 @@ Public Class ThisAddIn
                 Dim regexTest As New Regex(pattern, regexOptions)
             Catch ex As ArgumentException
                 ShowCustomMessageBox($"Your regex pattern '{pattern}' is invalid ({ex.Message}). Aborting without any replacements done.")
-                Exit Sub
+                Return
             End Try
         Next
 
@@ -6523,10 +6615,10 @@ Public Class ThisAddIn
                     sel.End = sel.Start + match.Length
                     Globals.ThisAddIn.Application.Selection.Select()
                     Globals.ThisAddIn.Application.ActiveWindow.ScrollIntoView(sel, True)
-                    Exit Sub
+                    Return
                 Else
                     ShowCustomMessageBox($"No matches found for '{pattern}' {DocRef}.")
-                    Exit Sub
+                    Return
                 End If
             End If
         Next
@@ -6685,7 +6777,7 @@ Public Class ThisAddIn
         ' If number of non-empty paragraphs is uneven or zero, abort
         If nonEmptyParaCount Mod 2 <> 0 Or nonEmptyParaCount = 0 Then
             ShowCustomMessageBox("The number of non-empty paragraphs in the selection is uneven or zero. Please select an even number of non-empty paragraphs.")
-            Exit Sub
+            Return
         End If
 
         ' Determine the halfway point
@@ -6710,54 +6802,88 @@ Public Class ThisAddIn
         End If
     End Sub
 
+    Private embed_store As EmbeddingStore
+    Private embed_indexedDocs As HashSet(Of String) = New HashSet(Of String)()
+
     Public Async Sub ContextSearch()
 
-        'RunSearch()
-        'Return
+        Dim EmbedModel As String = ""
+        Dim EmbedVocab As String = ""
+
+        If Not String.IsNullOrEmpty(INI_LocalModelPath) Then
+
+            EmbedModel = System.IO.Path.Combine(ExpandEnvironmentVariables(INI_LocalModelPath), Embed_Model)
+            EmbedVocab = System.IO.Path.Combine(ExpandEnvironmentVariables(INI_LocalModelPath), Embed_Vocab)
+
+            If File.Exists(EmbedModel) And File.Exists(EmbedVocab) Then
+                If embed_store Is Nothing Then embed_store = New EmbeddingStore(EmbedModel, EmbedVocab)
+            End If
+        End If
+
+        Dim EmbeddingAvailable As Boolean = Not embed_store Is Nothing
 
         Dim wordApp As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
         Dim selection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
         Dim doc As Microsoft.Office.Interop.Word.Document = wordApp.ActiveDocument
-        Dim SearchAll As Boolean = False
-        Dim SearchMulti As Boolean = False
+        Dim DoSearchNext As Boolean = False
+        Dim EmbedInstruct As String = If(EmbeddingAvailable, $"add '{EmbedTrigger} to use embeddings, ", "")
+        Dim DoBoW As Boolean = False
+        Dim DoRefresh As Boolean = False
+        Dim DoEmbed As Boolean = False
 
         Dim lastcontextsearch As String = If(String.IsNullOrWhiteSpace(My.Settings.LastContextSearch), "", My.Settings.LastContextSearch)
 
-        SearchContext = ShowCustomInputBox($"Enter the search term (start with '{SearchMultiTrigger}' if you want to find and highlight all occurrences at once and add '{SearchAllTrigger}' if you want to search the entire document):", "Context Search", True, lastcontextsearch).Trim()
-        If String.IsNullOrWhiteSpace(SearchContext) Or SearchContext = "ESC" Then Exit Sub
+        SearchContext = ShowCustomInputBox($"Enter the search term (use '{SearchNextTrigger}' if you only want to find the next term; {EmbedInstruct}{BoWTrigger} to use Bag of Words and {RefreshTrigger} to refresh embedding/BoW index first):", "Context Search", True, lastcontextsearch).Trim()
+        If String.IsNullOrWhiteSpace(SearchContext) Or SearchContext = "ESC" Then Return
 
         My.Settings.LastContextSearch = SearchContext
         My.Settings.Save()
 
-        If SearchContext.IndexOf(SearchAllTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
-            SearchContext = SearchContext.Replace(SearchAllTrigger, "").Trim()
-            SearchAll = True
+        If SearchContext.StartsWith(SearchNextTrigger, StringComparison.OrdinalIgnoreCase) Then
+            SearchContext = SearchContext.Substring(SearchNextTrigger.Length).Trim()
+            DoSearchNext = True
         End If
-        If SearchContext.StartsWith(SearchMultiTrigger, StringComparison.OrdinalIgnoreCase) Then
-            SearchContext = SearchContext.Replace(SearchMultiTrigger, "").Trim()
-            SearchMulti = True
+
+        If SearchContext.IndexOf(EmbedTrigger, StringComparison.OrdinalIgnoreCase) >= 0 And EmbeddingAvailable Then
+            SearchContext = SearchContext.Replace(EmbedTrigger, "").Trim()
+            DoEmbed = True
+        ElseIf SearchContext.IndexOf(BoWTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            SearchContext = SearchContext.Replace(BoWTrigger, "").Trim()
+            DoBow = True
+        End If
+        If SearchContext.IndexOf(RefreshTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            SearchContext = SearchContext.Replace(RefreshTrigger, "").Trim()
+            DoRefresh = True
         End If
 
         SearchContext = SearchContext.Replace("  ", "")
 
-        Dim SearchText As String
+        If DoEmbed Then
+            RunSearch_Embed(EmbedModel, EmbedVocab, SearchContext, DoSearchNext, DoRefresh)
+            Return
+        ElseIf DoBoW Then
+            RunSearch_bow(SearchContext, DoSearchNext, DoRefresh)
+            Return
+        End If
 
-        If Not String.IsNullOrWhiteSpace(selection.Text) And Len(selection.Text) > 3 And Not SearchAll Then
+        Dim SearchText As String = ""
+
+        If Not String.IsNullOrWhiteSpace(selection.Text) And Len(selection.Text) > 3 And DoSearchNext Then
             SearchText = selection.Text
-        ElseIf selection.Start < selection.Document.Content.End And Not SearchAll Then
+        ElseIf selection.Start < selection.Document.Content.End And DoSearchNext Then
             SearchText = selection.Document.Range(selection.Start, selection.Document.Content.End).Text
             selection.SetRange(selection.Start, selection.Document.Content.End)
         Else
             SearchText = selection.Document.Content.Text
             selection.SetRange(0, selection.Document.Content.End)
-            SearchAll = True
+            DoSearchNext = False
         End If
 
-        Dim LLMResult As String = Await LLM(InterpolateAtRuntime(If(SearchMulti, SP_ContextSearchMulti, SP_ContextSearch)), "<TEXTTOSEARCH>" & SearchText & "</TEXTTOSEARCH>", "", "", 0)
+        Dim LLMResult As String = Await LLM(InterpolateAtRuntime(If(DoSearchNext, SP_ContextSearch, SP_ContextSearchMulti)), "<TEXTTOSEARCH>" & SearchText & "</TEXTTOSEARCH>", "", "", 0)
 
         LLMResult = LLMResult.Replace("<TEXTTOSEARCH>", "").Replace("</TEXTTOSEARCH>", "")
 
-        If SearchMulti Then
+        If Not DoSearchNext Then
 
             Dim parts() As String = LLMResult.Split(New String() {"@@@"}, StringSplitOptions.RemoveEmptyEntries)
             Dim notFoundParts As New List(Of String)
@@ -6776,7 +6902,6 @@ Public Class ThisAddIn
                 Dim originalAuthor As String = doc.Application.UserName
 
                 doc.TrackRevisions = True
-                'doc.Application.UserName = AN
 
                 Dim SuccessHits As Integer = 0
 
@@ -6797,7 +6922,8 @@ Public Class ThisAddIn
 
                     Dim findText As String = part.Trim()
                     If FindLongTextInChunks(findText, 255, selection) And selection IsNot Nothing Then
-                        selection.Range.HighlightColorIndex = Word.WdColorIndex.wdYellow
+                        'selection.Range.HighlightColorIndex = Word.WdColorIndex.wdYellow
+                        doc.Comments.Add(selection.Range, $"{AN5}: '{SearchContext}'")
                         selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                         SuccessHits += 1
                     Else
@@ -6818,10 +6944,9 @@ Public Class ThisAddIn
                 ' Restore the original selection
                 selection.SetRange(originalStart, originalEnd)
                 doc.TrackRevisions = trackChangesEnabled
-                'doc.Application.UserName = originalAuthor
 
             Else
-                ShowCustomMessageBox($"The LLM has found no hits for the context '{SearchContext}'{If(SearchAll, " (searched full document)", "")}.", "Context Search")
+                ShowCustomMessageBox($"The LLM has found no hits for the context '{SearchContext}'.", "Context Search")
             End If
 
         Else
@@ -6834,72 +6959,420 @@ Public Class ThisAddIn
                     ShowCustomMessageBox($"The LLM found this section:" & vbCrLf & vbCrLf & FindText & vbCrLf & vbCrLf & $"However, {AN} could not locate it in the document for technical reasons (may be due to special characters, line breaks of the LLM not quoting the text properly).", "Context Search")
                 End If
             Else
-                ShowCustomMessageBox($"The LLM did not find the context '{SearchContext}'{If(SearchAll, " (searched full document)", " (search direction was down)")}.", "Context Search")
+                ShowCustomMessageBox($"The LLM did not find any (further) hits for the context '{SearchContext}'.", "Context Search")
             End If
         End If
     End Sub
 
-    Private store As EmbeddingStore = New EmbeddingStore()
-    Private indexedDocs As HashSet(Of String) = New HashSet(Of String)()
 
+    Public Sub RunIndexing_Embed(refresh As Boolean, EmbedModel As String, EmbedVocab As String, ChunkLength As Integer, ChunkOverlap As Integer)
 
-    Public Sub RunIndexing(Optional refresh As Boolean = False)
+        If embed_store Is Nothing Then embed_store = New EmbeddingStore(EmbedModel, EmbedVocab)
+
         Dim doc = Application.ActiveDocument
         Dim docId = doc.FullName
-        If Not indexedDocs.Contains(docId) OrElse refresh Then
-            Dim chunks As New List(Of TextChunk)()
-            Dim pos As Integer = 0
-            For Each sent As Range In doc.Sentences
-                chunks.Add(New TextChunk With {
-                    .Text = sent.Text.Trim(),
-                    .Position = pos,
-                    .StartOffset = sent.Start
-                })
-                pos += 1
-            Next
-            store.IndexDocument(docId, chunks)
-            If Not indexedDocs.Contains(docId) Then indexedDocs.Add(docId)
+
+        ' 0) Early return, wenn schon indexiert und kein Refresh gewünscht
+        If embed_indexedDocs.Contains(docId) AndAlso Not refresh Then
+            Return
         End If
+
+        ' 1) Parameter validieren
+        Dim nn As Integer = ChunkLength     ' Sätze pro Chunk
+        Dim mm As Integer = ChunkOverlap     ' Überlappung
+        Dim stepSize = nn - mm
+        If nn <= 0 OrElse mm < 0 OrElse stepSize <= 0 Then
+            Throw New ArgumentException("Bitte nn>0, mm≥0 und mm<nn wählen.")
+        End If
+
+        ' 2) Sätze holen und leere filtern
+        Dim sentences = doc.Sentences.Cast(Of Range)() _
+                        .Where(Function(r) Not String.IsNullOrWhiteSpace(r.Text)) _
+                        .ToList()
+        Dim total = sentences.Count
+
+        If total < nn Then
+            Return
+        End If
+
+        ' 3) Chunks bauen (nur volle nn-Satz-Chunks)
+        Dim chunks As New List(Of TextChunk)()
+        For idx As Integer = 0 To total - nn Step stepSize
+            Dim startIdx = idx
+            Dim endIdx = idx + nn - 1  ' garantiert ≤ total-1
+
+            ' Text zusammenbauen
+            Dim parts = sentences.Skip(startIdx).Take(nn).Select(Function(r) r.Text.Trim())
+            Dim chunkText = String.Join(" ", parts)
+
+            ' Sehr kurze Chunks überspringen
+            If chunkText.Length < 10 Then
+                Continue For
+            End If
+
+            ' 4) Offset berechnen – direkt aus Range.Start, kein doc.Range mehr
+            Dim rangeStart = sentences(startIdx).Start
+            Dim startOffset = If(rangeStart < 0, 0, rangeStart)
+            Dim rangeEnd = sentences(endIdx).End
+
+            ' Chunk hinzufügen
+            chunks.Add(New TextChunk With {
+            .Text = chunkText,
+            .StartOffset = startOffset,
+            .EndOffset = rangeEnd
+        })
+        Next
+        ' 4) Indexieren
+        embed_store.IndexDocument(docId, chunks)
+        If Not embed_indexedDocs.Contains(docId) Then embed_indexedDocs.Add(docId)
     End Sub
 
-    Public Sub RunSearch()
+    Public Sub RunSearch_Embed(EmbedModel As String, EmbedVocab As String, SearchContext As String, DoNext As Boolean, DoRefresh As Boolean)
         Try
-            Dim raw As String = ShowCustomInputBox("Suchbegriff (All:optional, (complete), (refresh)):", AN, False)
-            If String.IsNullOrWhiteSpace(raw) Then Return
-            Dim allDocs = False, findAll = False, refresh = False
-            Dim input = raw
-            If input.IndexOf("(complete)", StringComparison.OrdinalIgnoreCase) >= 0 Then findAll = True
-            If input.IndexOf("(refresh)", StringComparison.OrdinalIgnoreCase) >= 0 Then refresh = True
-            input = System.Text.RegularExpressions.Regex.Replace(input, "\(complete\)|\(refresh\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim()
-            If input.StartsWith("All:", StringComparison.OrdinalIgnoreCase) Then allDocs = True : input = input.Substring(4).Trim()
 
-            RunIndexing(refresh)
-            Dim sel = Application.Selection.Range
-            Dim results = store.Search(input, allDocs, findAll, Application.ActiveDocument.FullName, sel.Start)
+            ' 1) Parameter
 
-            If results.Count = 0 Then
-                MessageBox.Show("Keine Treffer gefunden.") : Return
-            End If
+            Dim ChunkLength As Integer = Default_Embed_Chunks
+            Dim ChunkOverlap As Integer = Default_Embed_Overlap
+            Dim Min_Score As Double = Default_Embed_Min_Score
+            Dim Top_K As Integer = Default_Embed_Top_K
+            Dim allDocs As Boolean = False
+            Dim Fallback As Boolean = False
 
-            If findAll Then
-                For Each r In results
-                    Dim target = If(r.DocId = Application.ActiveDocument.FullName, Application.ActiveDocument, Application.Documents.Open(r.DocId))
-                    Dim rng = target.Range(r.StartOffset, r.StartOffset + r.Text.Length)
-                    target.Comments.Add(rng, $"RI Context Search: {input}")
-                Next
-                MessageBox.Show($"{results.Count} Treffer kommentiert.")
+
+            If Not embed_indexedDocs.Contains(Application.ActiveDocument.FullName) Or DoRefresh Then
+
+                Dim params() As SLib.InputParameter = {
+                    New SLib.InputParameter("Sentences per chunk:", ChunkLength),
+                    New SLib.InputParameter("Overlap per chunk", ChunkOverlap),
+                    New SLib.InputParameter("Minimum relevance", Min_Score),
+                    New SLib.InputParameter("Maximum hits", Top_K),
+                    New SLib.InputParameter("Always hits", Fallback)
+                    }
+
+                If ShowCustomVariableInputForm("Please set your embedding and search values:", $"Context Search (Embedding)", params) Then
+
+                    ChunkLength = CInt(params(0).Value)
+                    ChunkOverlap = CInt(params(1).Value)
+                    Min_Score = CDbl(params(2).Value)
+                    Top_K = CInt(params(3).Value)
+                    Fallback = CBool(params(4).Value)
+
+                Else
+                    Return
+                End If
+
             Else
-                Dim first = results(0)
-                Dim target = If(first.DocId = Application.ActiveDocument.FullName, Application.ActiveDocument, Application.Documents.Open(first.DocId))
-                Dim rng = target.Range(first.StartOffset, first.StartOffset + first.Text.Length)
-                rng.Select()
-                target.Comments.Add(rng, $"RI Context Search: {input}")
-                Application.ActiveWindow.ScrollIntoView(rng)
+                Dim params() As SLib.InputParameter = {
+                    New SLib.InputParameter("Minimum relevance", Min_Score),
+                    New SLib.InputParameter("Maximum hits:", Top_K),
+                    New SLib.InputParameter("Always hits", Fallback)
+                    }
+                If ShowCustomVariableInputForm("Please set your search values:", $"Context Search (Embedding)", params) Then
+
+                    Min_Score = CDbl(params(0).Value)
+                    Top_K = CBool(params(1).Value)
+                    Fallback = CBool(params(2).Value)
+
+                Else
+                    Return
+                End If
+
             End If
-        Catch ex As System.Exception
-            MessageBox.Show("Fehler bei der Suche: " & ex.Message)
+
+            ' 2) Für Next-Suche: Selektion zurücksetzen & Cursor ans Ende
+            Dim selRange As Word.Range = Application.Selection.Range
+            If DoNext Then selRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+
+            ' 3) Index ggf. neu aufbauen
+            RunIndexing_Embed(DoRefresh, EmbedModel, EmbedVocab, ChunkLength, ChunkOverlap)
+
+            Dim currentDocId = Application.ActiveDocument.FullName
+            Dim cursorPos = selRange.Start
+
+            If Not DoNext Then
+                ' --- COMPLETE: Suche im (Rest)Dokument oder in allen Docs ---
+                Dim rawHits = embed_store.Search(SearchContext, allDocs, True, currentDocId, cursorPos) _
+                            .Where(Function(r) r.Score > 0 _
+                                             AndAlso (allDocs OrElse r.StartOffset > cursorPos)) _
+                            .OrderByDescending(Function(r) r.Score) _
+                            .ToList()
+
+                ' Treffer über Schwellwert
+                Dim scoredHits = rawHits.Where(Function(r) r.Score >= Min_Score).ToList()
+                Dim hits As List(Of SearchResult)
+                If scoredHits.Count > 0 Then
+                    hits = scoredHits.Take(Top_K).ToList()
+                ElseIf Fallback Then
+                    ' Fallback: die besten TOP_K unabhängig vom Score
+                    hits = rawHits.Take(Top_K).ToList()
+                End If
+
+                If hits.Count = 0 Then
+                    ShowCustomMessageBox($"No hits found for '{SearchContext}'" & If(Fallback, ".", " and minimum relevance of {Min_Score}."))
+                    Return
+                End If
+
+                Dim trackChangesEnabled As Boolean = Application.ActiveDocument.TrackRevisions
+                Application.ActiveDocument.TrackRevisions = True
+
+                For Each r In hits
+                    Dim doc = If(r.DocId = currentDocId,
+                             Application.ActiveDocument,
+                             Application.Documents.Open(r.DocId))
+                    Dim rng = doc.Range(r.StartOffset, r.EndOffset)
+                    doc.Comments.Add(rng, $"{AN5}: '{SearchContext}' (Score {r.Score:F3})")
+                Next
+
+                Application.ActiveDocument.TrackRevisions = trackChangesEnabled
+
+                ShowCustomMessageBox($"{hits.Count} hits found for '{SearchContext}', a minimum relevance of {Min_Score} and a maximum of {Top_K} hits. Comments have been added to them.")
+            Else
+                ' --- NEXT: Suche nur ab Cursor im aktuellen Dokument ---
+                Dim rawHits = embed_store.Search(SearchContext, False, True, currentDocId, cursorPos) _
+                            .Where(Function(r) r.Score > 0 AndAlso r.StartOffset > cursorPos) _
+                            .OrderByDescending(Function(r) r.Score) _
+                            .ToList()
+
+                ' Treffer über Schwellwert
+                Dim scoredHits = rawHits.Where(Function(r) r.Score >= Min_Score).ToList()
+                Dim hits As List(Of SearchResult)
+                If scoredHits.Count > 0 Then
+                    hits = scoredHits.Take(Top_K).ToList()
+                ElseIf Fallback Then
+                    ' Fallback: die besten TOP_K unabhängig vom Score
+                    hits = rawHits.Take(Top_K).ToList()
+                End If
+
+                If hits.Count = 0 Then
+                    ShowCustomMessageBox($"No (further) hits found for '{SearchContext}'" & If(Fallback, ".", " and minimum relevance of {Min_Score}."))
+                    Return
+                End If
+
+                Dim trackChangesEnabled As Boolean = Application.ActiveDocument.TrackRevisions
+                Application.ActiveDocument.TrackRevisions = True
+
+                For Each r In hits
+                    Dim doc = If(r.DocId = currentDocId,
+                             Application.ActiveDocument,
+                             Application.Documents.Open(r.DocId))
+                    Dim rng = doc.Range(r.StartOffset, r.EndOffset)
+                    doc.Comments.Add(rng, $"{AN5}: '{SearchContext}' (Score {r.Score:F3})")
+                Next
+
+                Application.ActiveDocument.TrackRevisions = trackChangesEnabled
+
+                ShowCustomMessageBox($"The (next) {hits.Count} have been found for '{SearchContext}', with a maximum of {Top_K} hits. Comments have been added to them.")
+            End If
+
+        Catch ex As Exception
+            MessageBox.Show("Error in RunSearch_Embed: " & ex.Message)
         End Try
     End Sub
+
+
+    ' Bag-of-Words–Store und Index-Tracking
+    Private store_bow As EmbeddingStore_BagofWords = New EmbeddingStore_BagofWords()
+    Private indexedDocs_bow As HashSet(Of String) = New HashSet(Of String)()
+
+    Public Sub RunIndexing_bow(refresh As Boolean, ChunkLength As Integer, ChunkOverlap As Integer)
+        Dim doc = Application.ActiveDocument
+        Dim docId = doc.FullName
+
+        ' 0) Early return, wenn schon indexiert und kein Refresh gewünscht
+        If indexedDocs_bow.Contains(docId) AndAlso Not refresh Then
+            Return
+        End If
+
+        ' 1) Parameter validieren
+        Dim nn As Integer = ChunkLength     ' Sätze pro Chunk
+        Dim mm As Integer = ChunkOverlap     ' Überlappung
+        Dim stepSize = nn - mm
+        If nn <= 0 OrElse mm < 0 OrElse stepSize <= 0 Then
+            Throw New System.ArgumentException("Bitte nn>0, mm≥0 und mm<nn wählen.")
+        End If
+
+        ' 2) Sätze holen und leere filtern
+        Dim sentences = doc.Sentences.Cast(Of Word.Range)() _
+                    .Where(Function(r) Not String.IsNullOrWhiteSpace(r.Text)) _
+                    .ToList()
+        Dim total = sentences.Count
+        If total < nn Then
+            Return
+        End If
+
+        ' 3) Chunks bauen (nur volle nn-Satz-Chunks)
+        Dim chunks As New List(Of TextChunk)()
+        For idx As Integer = 0 To total - nn Step stepSize
+            Dim startIdx = idx
+            Dim endIdx = idx + nn - 1  ' garantiert ≤ total-1
+
+            ' Text zusammenbauen
+            Dim parts = sentences.Skip(startIdx).Take(nn).Select(Function(r) r.Text.Trim())
+            Dim chunkText = String.Join(" ", parts)
+            If chunkText.Length < 10 Then Continue For
+
+            ' Offsets aus den Ranges
+            Dim rangeStart = sentences(startIdx).Start
+            Dim startOffset = If(rangeStart < 0, 0, rangeStart)
+            Dim rangeEnd = sentences(endIdx).End
+
+            chunks.Add(New TextChunk With {
+            .Text = chunkText,
+            .StartOffset = startOffset,
+            .EndOffset = rangeEnd
+        })
+        Next
+
+        ' 4) Indexieren
+        store_bow.IndexDocument(docId, chunks)
+        If Not indexedDocs_bow.Contains(docId) Then indexedDocs_bow.Add(docId)
+    End Sub
+
+    Public Sub RunSearch_bow(SearchContext As String, DoNext As Boolean, DoRefresh As Boolean)
+        Try
+
+            ' 1) Parameter
+
+            Dim ChunkLength As Integer = Default_Embed_Chunks_bow
+            Dim ChunkOverlap As Integer = Default_Embed_Overlap_bow
+            Dim Min_Score As Double = Default_Embed_Min_Score
+            Dim Top_K As Integer = Default_Embed_Top_K
+            Dim allDocs As Boolean = False
+            Dim Fallback As Boolean = False
+
+            If embed_store Is Nothing Or DoRefresh Then
+
+                Dim params() As SLib.InputParameter = {
+                    New SLib.InputParameter("Sentences per chunk:", ChunkLength),
+                    New SLib.InputParameter("Overlap per chunk", ChunkOverlap),
+                    New SLib.InputParameter("Minimum relevance", Min_Score),
+                    New SLib.InputParameter("Maximum hits", Top_K),
+                    New SLib.InputParameter("Always hits", Fallback)
+                    }
+
+                If ShowCustomVariableInputForm("Please set your 'Bag of Words' and search values:", $"Context Search (Bag of Words)", params) Then
+
+                    ChunkLength = CInt(params(0).Value)
+                    ChunkOverlap = CInt(params(1).Value)
+                    Min_Score = CDbl(params(2).Value)
+                    Top_K = CInt(params(3).Value)
+                    Fallback = CBool(params(4).Value)
+
+                Else
+                    Return
+                End If
+
+            Else
+                Dim params() As SLib.InputParameter = {
+                    New SLib.InputParameter("Minimum relevance", Min_Score),
+                    New SLib.InputParameter("Maximum hits:", Top_K),
+                    New SLib.InputParameter("Always hits", Fallback),
+                    New SLib.InputParameter("Search all indexed docs:", allDocs)
+                    }
+                If ShowCustomVariableInputForm("Please set your search values:", $"Context Search (Bag of Words)", params) Then
+
+                    Min_Score = CDbl(params(0).Value)
+                    Top_K = CBool(params(1).Value)
+                    Fallback = CBool(params(2).Value)
+                    allDocs = CBool(params(3).Value)
+
+                Else
+                    Return
+                End If
+
+            End If
+
+            ' 2) Für Next-Suche: Selektion zurücksetzen & Cursor ans Ende
+            Dim selRange As Word.Range = Application.Selection.Range
+            If DoNext Then selRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+
+            ' 3) Index ggf. neu aufbauen
+            RunIndexing_bow(DoRefresh, ChunkLength, ChunkOverlap)
+
+            Dim currentDocId = Application.ActiveDocument.FullName
+            Dim cursorPos = selRange.Start
+
+            If Not DoNext Then
+                ' --- COMPLETE: Suche im (Rest-)Dokument oder in allen Docs ---
+                Dim rawHits = store_bow.Search(SearchContext, allDocs, True, currentDocId, cursorPos) _
+                        .Where(Function(r) r.Score > 0 _
+                                         AndAlso (allDocs OrElse r.StartOffset > cursorPos)) _
+                        .OrderByDescending(Function(r) r.Score) _
+                        .ToList()
+
+                ' Treffer über Schwellwert
+                Dim scoredHits = rawHits.Where(Function(r) r.Score >= Min_Score).ToList()
+                Dim hits As List(Of SearchResult)
+                If scoredHits.Count > 0 Then
+                    hits = scoredHits.Take(Top_K).ToList()
+                ElseIf Fallback Then
+                    ' Fallback: die besten TOP_K unabhängig vom Score
+                    hits = rawHits.Take(Top_K).ToList()
+                End If
+
+                If hits.Count = 0 Then
+                    ShowCustomMessageBox($"No hits found for '{SearchContext}'" & If(Fallback, ".", " And minimum relevance of {Min_Score}."))
+                    Return
+                End If
+
+                Dim trackChangesEnabled As Boolean = Application.ActiveDocument.TrackRevisions
+                Application.ActiveDocument.TrackRevisions = True
+
+                For Each r In hits
+                    Dim docTarget = If(r.DocId = currentDocId,
+                                   Application.ActiveDocument,
+                                   Application.Documents.Open(r.DocId))
+                    Dim rng = docTarget.Range(r.StartOffset, r.EndOffset)
+                    docTarget.Comments.Add(rng, $"{AN5}: '{SearchContext}' (BoW score {r.Score:F3})")
+                Next
+
+                Application.ActiveDocument.TrackRevisions = trackChangesEnabled
+
+                ShowCustomMessageBox($"{hits.Count} hits found for '{SearchContext}', a minimum relevance of {Min_Score} and a maximum of {Top_K} hits. Comments have been added to them.")
+            Else
+                ' --- NEXT: Suche nur ab Cursor im aktuellen Dokument ---
+                Dim rawHits = store_bow.Search(SearchContext, False, True, currentDocId, cursorPos) _
+                        .Where(Function(r) r.Score > 0 AndAlso r.StartOffset > cursorPos) _
+                        .OrderByDescending(Function(r) r.Score) _
+                        .ToList()
+
+                Dim scoredHits = rawHits.Where(Function(r) r.Score >= Min_Score).ToList()
+                Dim hits As List(Of SearchResult)
+                If scoredHits.Count > 0 Then
+                    hits = scoredHits.Take(Top_K).ToList()
+                ElseIf Fallback Then
+                    ' Fallback: die besten TOP_K unabhängig vom Score
+                    hits = rawHits.Take(Top_K).ToList()
+                End If
+
+                If hits.Count = 0 Then
+                    ShowCustomMessageBox($"No (further) hits found for '{SearchContext}'" & If(Fallback, ".", " And minimum relevance of {Min_Score}."))
+                    Return
+                End If
+
+                Dim trackChangesEnabled As Boolean = Application.ActiveDocument.TrackRevisions
+                Application.ActiveDocument.TrackRevisions = True
+
+                For Each r In hits
+                    Dim docTarget = If(r.DocId = currentDocId,
+                                   Application.ActiveDocument,
+                                   Application.Documents.Open(r.DocId))
+                    Dim rng = docTarget.Range(r.StartOffset, r.EndOffset)
+                    docTarget.Comments.Add(rng, $"{AN5}: '{SearchContext}' (BoW score {r.Score:F3})")
+                Next
+
+                Application.ActiveDocument.TrackRevisions = trackChangesEnabled
+
+                ShowCustomMessageBox($"The (next) {hits.Count} have been found for '{SearchContext}', with a maximum of {Top_K} hits. Comments have been added to them.")
+            End If
+        Catch ex As System.Exception
+            MessageBox.Show("Error in RunSearch_BoW: " & ex.Message)
+        End Try
+    End Sub
+
+
+
 
 
     ' Other helper functions
@@ -6997,7 +7470,7 @@ Public Class ThisAddIn
 
     Public Sub ShowSettings()
 
-        If INILoadFail() Then Exit Sub
+        If INILoadFail() Then Return
         Dim Settings As New Dictionary(Of String, String) From {
                 {"Temperature", "Temperature of {model}"},
                 {"Timeout", "Timeout of {model}"},
@@ -8363,15 +8836,15 @@ Public Class ThisAddIn
 
                     Case "google"
 
-                        Dim accessToken As String = ""
+                        'Dim accessToken As String = ""
                         readerCts = New CancellationTokenSource()
-                        If STTSecondAPI Then
-                            DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
-                            accessToken = DecodedAPI_2
-                        Else
-                            DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
-                            accessToken = DecodedAPI
-                        End If
+                        'If STTSecondAPI Then
+                        'DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
+                        'accessToken = DecodedAPI_2
+                        'Else
+                        'DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
+                        'accessToken = DecodedAPI
+                        'End If
 
                         ' Ask user for language code
                         Dim language As String = ShowSelectionForm("Select the language code you want to transcribe in:", $"{GoogleSTT_Desc}", GoogleSTTsupportedLanguages)
@@ -8393,7 +8866,7 @@ Public Class ThisAddIn
 
                         GoogleLanguageCode = language
 
-                        Await StartGoogleSTT(accessToken)
+                        Await StartGoogleSTT()
 
                         ' Spawn the response‐reader
 
@@ -8580,26 +9053,113 @@ Public Class ThisAddIn
             End If
         End Sub
 
-        Private Async Function StartGoogleSTT(accessToken As String) As System.Threading.Tasks.Task
-            ' Innerhalb Deiner Initialisierungsroutine (z. B. StartGoogleSTT):
-            Dim callCreds = CallCredentials.FromInterceptor(
-                Async Function(context, metadata)
-                    metadata.Add("Authorization", $"Bearer {accessToken}")
-                    Await System.Threading.Tasks.Task.CompletedTask
-                End Function)
+        ''' <summary>
+        ''' Baut den Google SpeechClient so auf, dass er bei jedem (Wieder-)Öffnen des Streams automatisch 
+        ''' einen frischen Token aus GetFreshAccessToken(...) holt.
+        ''' </summary>
+        Private Async Function StartGoogleSTT() As System.Threading.Tasks.Task
+            ' ─── 1) Interceptor definieren, der bei jedem neuen Streaming-Aufruf einen frischen Token holt ───
+            Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+                                                Async Function(contextCall, metadata)
+                                                    Dim tokenToSend As String
 
-            Dim channelCreds = ChannelCredentials.Create(
-                ChannelCredentials.SecureSsl,
-                callCreds)
+                                                    If STTSecondAPI Then
+                                                        ' Hol Token für API #2
+                                                        tokenToSend = Await GetFreshAccessToken(
+                                                            _context,
+                                                            INI_OAuth2ClientMail_2,
+                                                            INI_OAuth2Scopes_2,
+                                                            INI_APIKey_2,
+                                                            INI_OAuth2Endpoint_2,
+                                                            INI_OAuth2ATExpiry_2,
+                                                            True
+                                                        )
+                                                    Else
+                                                        ' Hol Token für API #1
+                                                        tokenToSend = Await GetFreshAccessToken(
+                                                            _context,
+                                                            INI_OAuth2ClientMail,
+                                                            INI_OAuth2Scopes,
+                                                            INI_APIKey,
+                                                            INI_OAuth2Endpoint,
+                                                            INI_OAuth2ATExpiry,
+                                                            False
+                                                        )
+                                                    End If
 
-            Dim builder As New SpeechClientBuilder() With {
-                .Endpoint = "eu-speech.googleapis.com",
-                .ChannelCredentials = channelCreds
-}
+                                                    ' Füge den Authorization-Header hinzu – Google lehnt ab, wenn tokenToSend = "" oder abgelaufen ist
+                                                    metadata.Add("Authorization", $"Bearer {tokenToSend}")
+                                                    Await System.Threading.Tasks.Task.CompletedTask
+                                                End Function
+                                            )
+
+            ' ─── 2) Baue die ChannelCredentials mit Secure SSL + unserem Interceptor ───
+            Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
+        Grpc.Core.ChannelCredentials.SecureSsl,
+        callCreds
+    )
+
+            ' ─── 3) Erzeuge einen brandneuen SpeechClient, der das obige channelCreds verwendet ───
+            Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+        .Endpoint = STTEndpoint,
+        .ChannelCredentials = channelCreds
+    }
             client = builder.Build()
 
+            ' ─── 4) Öffne die Streaming-Verbindung mit InitializeGoogleStream() ───
+            '      Das ruft im Hintergrund “_stream = client.StreamingRecognize() …” und sendet die 
+            '      StreamingConfig per WriteAsync. Beim ersten WriteAsync wird der Interceptor aktiv.
             Await InitializeGoogleStream()
+        End Function
 
+
+        Private Async Function xxStartGoogleSTT() As System.Threading.Tasks.Task
+            ' We no longer pass "accessToken" into this method.
+            ' Instead, each time gRPC needs metadata, we call GetFreshAccessToken(...) afresh.
+
+            Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+        Async Function(context, metadata)
+            Dim newToken As String
+
+            If STTSecondAPI Then
+                ' “True” at the end because this is API #2
+                newToken = Await GetFreshAccessToken(
+                    _context,
+                    INI_OAuth2ClientMail_2,
+                    INI_OAuth2Scopes_2,
+                    INI_APIKey_2,
+                    INI_OAuth2Endpoint_2,
+                    INI_OAuth2ATExpiry_2,
+                    True)
+            Else
+                ' “False” at the end because this is API #1
+                newToken = Await GetFreshAccessToken(
+                    _context,
+                    INI_OAuth2ClientMail,
+                    INI_OAuth2Scopes,
+                    INI_APIKey,
+                    INI_OAuth2Endpoint,
+                    INI_OAuth2ATExpiry,
+                    False)
+            End If
+
+            metadata.Add("Authorization", $"Bearer {newToken}")
+            Await System.Threading.Tasks.Task.CompletedTask
+        End Function)
+
+            Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
+        Grpc.Core.ChannelCredentials.SecureSsl,
+        callCreds)
+
+            ' NOTE: Fully qualify the Google client builder
+            Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+        .Endpoint = "eu-speech.googleapis.com",
+        .ChannelCredentials = channelCreds
+    }
+            client = builder.Build()
+
+            ' Now open the streaming connection with the fresh‐token interceptor in place
+            Await InitializeGoogleStream()
         End Function
 
         Private Sub ResetGoogleStreamFlag()
@@ -8728,7 +9288,7 @@ Public Class ThisAddIn
 
                         Try
                             GoogleLanguageCode = language
-                            Await StartGoogleSTT(AccessToken)
+                            Await StartGoogleSTT()
                         Catch ex As System.Exception
                             ShowCustomMessageBox("Error starting transcription service: {ex.Message}", $"{GoogleSTT_Desc}")
                             STTCanceled = True
@@ -9016,8 +9576,83 @@ Public Class ThisAddIn
             loopbackBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded)
         End Sub
 
-
         Private Async Sub OnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
+            If _googleStreamCompleted Then Return
+
+            Dim now = DateTime.UtcNow
+            Dim elapsed = (now - streamingStartTime).TotalMilliseconds
+
+            ' ——————— 1) MIX IN LOOPBACK, falls aktiviert ———————
+            If MultiSourceEnabled AndAlso loopbackCapture IsNot Nothing AndAlso loopbackResampler IsNot Nothing Then
+                Dim mixBuf(e.BytesRecorded - 1) As Byte
+                Dim bytesRead = loopbackResampler.Read(mixBuf, 0, e.BytesRecorded)
+                If bytesRead > 0 Then
+                    For i As Integer = 0 To bytesRead - 1 Step 2
+                        Dim micSample As Integer = BitConverter.ToInt16(e.Buffer, i)
+                        Dim outSample As Integer = BitConverter.ToInt16(mixBuf, i)
+                        Dim summedSample As Integer = micSample + outSample
+
+                        If summedSample > Short.MaxValue Then summedSample = Short.MaxValue
+                        If summedSample < Short.MinValue Then summedSample = Short.MinValue
+
+                        Dim ba() As Byte = BitConverter.GetBytes(CShort(summedSample))
+                        e.Buffer(i) = ba(0)
+                        e.Buffer(i + 1) = ba(1)
+                    Next
+                End If
+            End If
+
+            ' ——————— 2) Google-Chunk bauen ———————
+            Dim chunk As Google.Protobuf.ByteString =
+        Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+
+            ' ——————— 3) Wenn Streaming-Limit erreicht, sofort neu verbinden ———————
+            If elapsed > STREAMING_LIMIT_MS Then
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = DateTime.UtcNow
+                Return
+            End If
+
+            ' ——————— 4) NORMAL WRITE mit erweitertem Catch ———————
+            Dim writeFailed As Boolean = False
+            Try
+                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
+            .AudioContent = chunk
+        })
+
+            Catch exRpc As Grpc.Core.RpcException
+                ' Wenn Google wegen abgelaufenem Token oder Unverfügbarkeit zurückweist:
+                If exRpc.Status.StatusCode = Grpc.Core.StatusCode.DeadlineExceeded _
+                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.Unavailable _
+                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.Unauthenticated _
+                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.PermissionDenied Then
+
+                    writeFailed = True
+                Else
+                    ' Ungewöhnlicher RPC-Status – protokollieren und Recover versuchen
+                    Debug.WriteLine($"Unexpected RpcException in OnGoogleDataAvailable: {exRpc.Status.StatusCode} – {exRpc.Status.Detail}")
+                    writeFailed = True
+                End If
+
+            Catch exIO As System.IO.IOException
+                ' Deckt WinHttpException Error 12019 und ähnliche I/O-Fehler ab
+                writeFailed = True
+
+            Catch exAny As System.Exception
+                ' Alles andere abfangen, damit der Callback nicht abstürzt
+                Debug.WriteLine($"Unexpected exception in OnGoogleDataAvailable: {exAny.Message}")
+                writeFailed = True
+            End Try
+
+            If writeFailed Then
+                ' ─── 5) Führe die komplette Wiederherstellung durch ───
+                Await RecoverGoogleStream(chunk)
+                streamingStartTime = DateTime.UtcNow
+            End If
+        End Sub
+
+
+        Private Async Sub xxxOnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
             If _googleStreamCompleted Then Return
 
             Dim now = DateTime.UtcNow
@@ -9078,30 +9713,148 @@ Public Class ThisAddIn
         End Sub
 
 
-
-        Private Async Function RecoverGoogleStream(failedChunk As ByteString) As System.Threading.Tasks.Task
+        ''' <summary>
+        ''' Wenn ein WriteAsync fehlschlägt (z.B. weil der JWT abgelaufen ist oder WinHttpError), 
+        ''' holt diese Routine einen neuen Token, baut den SpeechClient neu auf und 
+        ''' öffnet eine neue Streaming-Verbindung. Anschließend sendet sie das fehlgeschlagene Chunk 
+        ''' erneut.
+        ''' </summary>
+        Private Async Function RecoverGoogleStream(failedChunk As Google.Protobuf.ByteString) As System.Threading.Tasks.Task
             Try
+                ' ─── 1) Frischen Token abrufen ───
+                Dim newToken As String
+                If STTSecondAPI Then
+                    newToken = Await GetFreshAccessToken(
+                _context,
+                INI_OAuth2ClientMail_2,
+                INI_OAuth2Scopes_2,
+                INI_APIKey_2,
+                INI_OAuth2Endpoint_2,
+                INI_OAuth2ATExpiry_2,
+                True
+            )
+                Else
+                    newToken = Await GetFreshAccessToken(
+                _context,
+                INI_OAuth2ClientMail,
+                INI_OAuth2Scopes,
+                INI_APIKey,
+                INI_OAuth2Endpoint,
+                INI_OAuth2ATExpiry,
+                False
+            )
+                End If
 
+                ' ─── 2) Den SpeechClient mit neuem Header-Interceptor aufbauen ───
+                Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+            Async Function(contextCall, metadata)
+                ' Dieser Interceptor benutzt explizit den gerade angeforderten newToken
+                metadata.Add("Authorization", $"Bearer {newToken}")
+                Await System.Threading.Tasks.Task.CompletedTask
+            End Function
+        )
+
+                Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
+            Grpc.Core.ChannelCredentials.SecureSsl,
+            callCreds
+        )
+
+                Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+            .Endpoint = "eu-speech.googleapis.com",
+            .ChannelCredentials = channelCreds
+        }
+                client = builder.Build()
+
+                ' ─── 3) Streaming neu initialisieren ───
                 streamingStartTime = DateTime.UtcNow
-
-                ' A) Neuen Stream initialisieren
+                ResetGoogleStreamFlag()
                 Await InitializeGoogleStream()
 
-                ' B) Reader neu starten
+                ' ─── 4) Reader-Task neu starten ───
                 StartGoogleReaderTask()
 
-                ' C) Neuen Offset holen (muss im UI‑Thread passieren)
+                ' ─── 5) Offset zurücksetzen, damit die Partial-Ersetzungen wieder am richtigen Punkt starten ───
                 Dim offset As Integer = 0
                 Me.Invoke(Sub() offset = RichTextBox1.TextLength)
                 googleTranscriptStart = offset
 
-                ' D) Fehlgeschlagenen Chunk nochmal senden
-                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
+                ' ─── 6) Fehlgeschlagenes Chunk erneut senden ───
+                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
             .AudioContent = failedChunk
         })
 
-            Catch ex As Exception
-                Debug.WriteLine($"Error in RecoverGoogleStream: {ex}")
+            Catch ex As System.Exception
+                ' Im Fehlerfall wenigstens Protokollieren
+                Debug.WriteLine($"Error in RecoverGoogleStream: {ex.Message}")
+            End Try
+        End Function
+
+        Private Async Function xxRecoverGoogleStream(failedChunk As Google.Protobuf.ByteString) As System.Threading.Tasks.Task
+            Try
+                ' ─── 1) GET A FRESH ACCESS TOKEN ───
+                Dim newToken As String
+
+                If STTSecondAPI Then
+                    ' Refresh for API #2
+                    newToken = Await GetFreshAccessToken(
+                _context,
+                INI_OAuth2ClientMail_2,
+                INI_OAuth2Scopes_2,
+                INI_APIKey_2,
+                INI_OAuth2Endpoint_2,
+                INI_OAuth2ATExpiry_2,
+                True)
+                Else
+                    ' Refresh for API #1
+                    newToken = Await GetFreshAccessToken(
+                _context,
+                INI_OAuth2ClientMail,
+                INI_OAuth2Scopes,
+                INI_APIKey,
+                INI_OAuth2Endpoint,
+                INI_OAuth2ATExpiry,
+                False)
+                End If
+
+                ' ─── 2) REBUILD THE CLIENT WITH NEW CALL CREDENTIALS ───
+                Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+            Async Function(context, metadata)
+                metadata.Add("Authorization", $"Bearer {newToken}")
+                Await System.Threading.Tasks.Task.CompletedTask
+            End Function)
+
+                Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
+            Grpc.Core.ChannelCredentials.SecureSsl,
+            callCreds)
+
+                Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+            .Endpoint = "eu-speech.googleapis.com",
+            .ChannelCredentials = channelCreds
+        }
+                client = builder.Build()
+
+                ' ─── 3) RE-INITIALIZE THE STREAM ───
+                streamingStartTime = DateTime.UtcNow
+                ResetGoogleStreamFlag()
+
+                ' Call InitializeGoogleStream on the brand-new client/credentials
+                Await InitializeGoogleStream()
+
+                ' ─── 4) RESTART THE READER TASK ───
+                StartGoogleReaderTask()
+
+                ' ─── 5) RESET THE “googleTranscriptStart” OFFSET ───
+                Dim offset As Integer = 0
+                Me.Invoke(Sub() offset = RichTextBox1.TextLength)
+                googleTranscriptStart = offset
+
+                ' ─── 6) RESEND THE FAILED CHUNK ───
+                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
+            .AudioContent = failedChunk
+        })
+
+            Catch ex As System.Exception
+                Debug.WriteLine($"Error in RecoverGoogleStream: {ex.Message}")
             End Try
         End Function
 
@@ -9786,7 +10539,6 @@ Public Class ThisAddIn
 
     End Class
 
-
     ' Text-to-Speech
 
     Private synth As New SpeechSynthesizer()
@@ -9816,7 +10568,7 @@ Public Class ThisAddIn
 
         Dim UserInput As String = ShowCustomInputBox(sb.ToString(), "Select Voice for Text Reader", True)
 
-        If String.IsNullOrWhiteSpace(UserInput) Then Exit Sub
+        If String.IsNullOrWhiteSpace(UserInput) Then Return
 
         Dim selectedIndex As Integer
         If Integer.TryParse(UserInput, selectedIndex) AndAlso selectedIndex >= 0 AndAlso selectedIndex < voiceNames.Count Then
@@ -9843,7 +10595,7 @@ Public Class ThisAddIn
         If synth.State = SynthesizerState.Speaking Then
             synth.SpeakAsyncCancelAll()
             ShowCustomMessageBox("Reading out aborted.", "Text-to-Speech")
-            Exit Sub
+            Return
         End If
 
         Try
@@ -10057,7 +10809,7 @@ Public Class ThisAddIn
                 Dim AccessToken As String = If(TTSSecondAPI, DecodedAPI_2, DecodedAPI)
                 If String.IsNullOrEmpty(AccessToken) Then
                     ShowCustomMessageBox("Error generating audio - authentication failed (no token).")
-                    Exit Sub
+                    Return
                 End If
 
                 httpClient.DefaultRequestHeaders.Authorization = New Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken)
@@ -10149,7 +10901,7 @@ Public Class ThisAddIn
             End Using
             If Exited Then
                 ShowCustomMessageBox("Multi-speaker audio generation aborted.")
-                Exit Sub
+                Return
             Else
                 Try
                     Dim Result As Integer = ShowCustomYesNoBox($"Your multi-speaker audio sequence has been generated ('{filepath}') and is ready to be played. Play it?", "Yes", "No (file remains available)")
@@ -10160,10 +10912,10 @@ Public Class ThisAddIn
 
                 End Try
             End If
-            Exit Sub
+            Return
         Catch ex As Exception
             Debug.WriteLine($"Error generating podcast audio: {ex.Message}")
-            Exit Sub
+            Return
         End Try
     End Sub
 
@@ -11302,7 +12054,7 @@ Public Class ThisAddIn
 
             If NotAllSelected Then
                 ShowCustomMessageBox("Please complete your voice selection (or 'Cancel').")
-                Exit Sub
+                Return
             End If
 
             ' Save selected radio button (for one-voice mode)

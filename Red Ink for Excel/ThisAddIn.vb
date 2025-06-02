@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.5.2025
+' 2.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -173,7 +173,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.300525 Gen2 Beta Test"
+    Public Const Version As String = "V.020625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -312,6 +312,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_Response = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Anon As String
+        Get
+            Return _context.INI_Anon
+        End Get
+        Set(value As String)
+            _context.INI_Anon = value
         End Set
     End Property
 
@@ -565,6 +574,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_Response_2 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_Anon_2 As String
+        Get
+            Return _context.INI_Anon_2
+        End Get
+        Set(value As String)
+            _context.INI_Anon_2 = value
         End Set
     End Property
 

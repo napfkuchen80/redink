@@ -132,4 +132,8 @@ Public Class Ribbon1
         Globals.ThisAddIn.SpecialModel()
     End Sub
 
+    Private Sub RI_Anonymization_Click(sender As Object, e As RibbonControlEventArgs)
+        Globals.ThisAddIn.AnonymizeSelection()
+    End Sub
+
 End Class
