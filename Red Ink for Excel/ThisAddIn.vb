@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.6.2025
+' 9.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -162,7 +162,36 @@ End Class
 
 Public Class ThisAddIn
 
+    <DllImport("user32.dll", SetLastError:=True)>
+    Private Shared Function FindWindow(
+                                ByVal lpClassName As String,
+                                ByVal lpWindowName As String
+                            ) As IntPtr
+    End Function
+
+    Private mainThreadControl As New System.Windows.Forms.Control()
+
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+
+        ' Necessary for Update Handler to work correctly
+
+        ' 1) Force the creation of the Control's handle on the Office UI thread
+        Dim dummy = mainThreadControl.Handle
+
+        ' 2) Give that Control to the UpdateHandler so it can Invoke on it
+        UpdateHandler.MainControl = mainThreadControl
+
+        ' 3) Capture the host window’s HWND (Word / Excel / Outlook)
+        Dim hwnd As IntPtr
+        Dim progId = Me.Application.GetType().Name.ToLowerInvariant()
+        If progId.Contains("word") OrElse progId.Contains("excel") Then
+            hwnd = New IntPtr(CInt(Me.Application.Hwnd))
+        Else
+            hwnd = FindWindow("rctrl_renwnd32", Nothing)
+        End If
+
+        ' Other startup tasks
+
         SharedMethods.Initialize(Me.CustomTaskPanes)
         InitializeAddInFeatures()
     End Sub
@@ -173,7 +202,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.020625 Gen2 Beta Test"
+    Public Const Version As String = "V.090625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2904,113 +2933,6 @@ Public Class ThisAddIn
     End Function
 
 
-
-    Public Function xxxConvertRangeToString(ByVal CellRange As Excel.Range, ByVal IncludeFormulas As Boolean, Optional ByVal DoColor As Boolean = False) As String
-        ' Anzeige eines Splash-Screens
-        Dim splash As New SplashScreen("Gathering the content from your worksheet...")
-        splash.Show()
-        splash.Refresh()
-
-        If CellRange Is Nothing Then
-            splash.Close()
-            Return String.Empty
-        End If
-
-        ' Excel-UI abschalten
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = False
-            .EnableEvents = False
-            .Calculation = Excel.XlCalculation.xlCalculationManual
-        End With
-
-        ' Werte auslesen
-        Dim rawVals As Object = CellRange.Value2
-
-        ' Nur ein nullbasiertes Array für Value2
-        Dim vals(,) As Object
-        If TypeOf rawVals Is Object(,) Then
-            vals = CType(rawVals, Object(,))
-        Else
-            ReDim vals(0, 0)
-            vals(0, 0) = rawVals
-        End If
-
-        ' Grenzen ermitteln
-        Dim rowLB = vals.GetLowerBound(0)
-        Dim rowUB = vals.GetUpperBound(0)
-        Dim colLB = vals.GetLowerBound(1)
-        Dim colUB = vals.GetUpperBound(1)
-
-        Dim sb As New System.Text.StringBuilder()
-
-        For r As Integer = rowLB To rowUB
-            For c As Integer = colLB To colUB
-                Dim raw = vals(r, c)
-                If raw IsNot Nothing Then
-                    ' 1-basierte Koordinaten innerhalb des Range
-                    Dim relativeRow = r - rowLB + 1
-                    Dim relativeCol = c - colLB + 1
-                    Dim cell As Excel.Range = CellRange.Cells(relativeRow, relativeCol)
-                    Dim addr As String = cell.Address(False, False)
-
-                    sb.AppendLine($"Cell {addr}:")
-                    sb.AppendLine($"  Value: {raw}")
-
-                    ' Formeln nur bei Bedarf pro Zelle holen
-                    If IncludeFormulas AndAlso cell.HasFormula Then
-                        Dim f As String = String.Empty
-                        Try
-                            ' Formula2 bis 32 767 Zeichen
-                            f = cell.Formula2.ToString()
-                        Catch ex As System.Runtime.InteropServices.COMException _
-                          When ex.ErrorCode = &H800A03EC
-                            ' Fallback auf Limit-Version
-                            f = cell.Formula.ToString()
-                        End Try
-                        sb.AppendLine($"  Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
-                    End If
-
-                    ' 1) Klassischer Kommentar
-                    If cell.Comment IsNot Nothing Then
-                        sb.AppendLine($"  Comment: {cell.Comment.Text()}")
-                    End If
-
-                    ' 2) Neue ThreadedComments per Reflection
-                    Try
-                        Dim tc = cell.GetType().InvokeMember("ThreadedComments",
-                                                         Reflection.BindingFlags.GetProperty,
-                                                         Nothing, cell, Nothing)
-                        If tc IsNot Nothing Then
-                            For Each cx In tc
-                                Dim txt = cx.GetType().InvokeMember("Text", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
-                                Dim auth = cx.GetType().InvokeMember("Author", Reflection.BindingFlags.GetProperty, Nothing, cx, Nothing).ToString()
-                                sb.AppendLine($"  Comment: {txt} (by {auth})")
-                            Next
-                        End If
-                    Catch ex As System.Exception
-                        ' ignorieren, wenn nicht verfügbar
-                    End Try
-
-                    sb.AppendLine(New String("-"c, 40))
-
-                    ' COM-Objekt freigeben
-                    System.Runtime.InteropServices.Marshal.ReleaseComObject(cell)
-                End If
-            Next
-        Next
-
-        ' Excel-UI wieder aktivieren
-        With Globals.ThisAddIn.Application
-            .ScreenUpdating = True
-            .EnableEvents = True
-            .Calculation = Excel.XlCalculation.xlCalculationAutomatic
-        End With
-
-        splash.Close()
-        Return sb.ToString()
-    End Function
-
-
     Public Function GetFileName() As String
         Dim filePath As String = ""
         Try
@@ -3339,38 +3261,6 @@ Public Class ThisAddIn
     End Sub
 
 
-
-    Public Sub xxSetFormulaSafe(cell As Excel.Range, formulaOrValue As String, excelApp As Excel.Application)
-        Try
-            ' Try setting using English formula
-            cell.Formula2 = formulaOrValue
-
-            ' Check for #NAME? result
-            If cell.Text.ToString().Trim() = "#NAME?" Then
-                ' Try fallback with FormulaLocal
-                Try
-                    cell.FormulaLocal = formulaOrValue
-
-                    If cell.Text.ToString().Trim() = "#NAME?" Then
-                        ' Final fallback: try conversion if available
-                        Dim converted = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
-                        cell.FormulaLocal = converted
-
-                        If cell.Text.ToString().Trim() = "#NAME?" Then
-                            ShowCustomMessageBox($"Excel rejected the formula '{formulaOrValue}' for cell {cell.Address}. Resulted in #NAME?.")
-                        End If
-                    End If
-                Catch exLocal As COMException
-                    ShowCustomMessageBox($"Failed to set formula using FormulaLocal: {exLocal.Message}")
-                End Try
-            End If
-
-        Catch ex As COMException
-            ShowCustomMessageBox($"COM Error setting formula: {ex.Message}")
-        Catch ex As Exception
-            ShowCustomMessageBox($"General error setting formula: {ex.Message}")
-        End Try
-    End Sub
 
     Public Function ConvertFormulaToLocale(ByVal englishFormula As String, ByVal excelApp As Excel.Application) As String
 
@@ -3932,15 +3822,7 @@ Public Class ThisAddIn
         ' Return True if all cells are locked and the worksheet is protected
         Return allLocked
     End Function
-    Private Function OldCellProtected(ByVal cell As Excel.Range) As Boolean
-        ' Check if the cell is locked and the worksheet is protected
-        If cell.Worksheet.ProtectContents Then
-            If cell.Locked AndAlso Not cell.Worksheet.Protection.AllowEditRanges.Cast(Of Excel.AllowEditRange).Any(Function(r) r.Range.Address = cell.Address) Then
-                Return True
-            End If
-        End If
-        Return False
-    End Function
+
 
     Private Function CellProtected(ByVal cell As Excel.Range) As Boolean
         ' If the worksheet is not protected, no cell is actually protected

@@ -94,6 +94,7 @@ Partial Class Ribbon1
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
+        Me.RI_InsertClipboard = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -348,6 +349,7 @@ Partial Class Ribbon1
         Me.Menu2.Items.Add(Me.RI_TimeSpan)
         Me.Menu2.Items.Add(Me.RI_Regex)
         Me.Menu2.Items.Add(Me.RI_Import)
+        Me.Menu2.Items.Add(Me.RI_InsertClipboard)
         Me.Menu2.Label = "Word Helpers"
         Me.Menu2.Name = "Menu2"
         Me.Menu2.OfficeImageId = "GalInsertAspNet"
@@ -456,6 +458,15 @@ Partial Class Ribbon1
         Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
         Me.RI_Chat.ShowImage = True
         '
+        'RI_InsertClipboard
+        '
+        Me.RI_InsertClipboard.Label = "Clipboard to Text"
+        Me.RI_InsertClipboard.Name = "RI_InsertClipboard"
+        Me.RI_InsertClipboard.OfficeImageId = "ConvertInkMenu"
+        Me.RI_InsertClipboard.ScreenTip = "Will convert to text what is contained in the clipboard (e.g., screenshot, video," &
+    " audio, image)"
+        Me.RI_InsertClipboard.ShowImage = True
+        '
         'Ribbon1
         '
         Me.Name = "Ribbon1"
@@ -541,22 +552,35 @@ Partial Class Ribbon1
             Me.RI_PrimLang2.Enabled = True
         End If
 
+        Dim TTS_Available As Boolean = False
         Dim IsGoogle As Boolean = False
-        Dim Endpoint As String = Trim(ThisAddIn.INI_Endpoint)
-        Dim Endpoint_2 As String = Trim(ThisAddIn.INI_Endpoint_2)
-        Dim TTSEndpoint As String = Trim(ThisAddIn.INI_TTSEndpoint)
+        Dim endp As String = ThisAddIn.INI_Endpoint
+        Dim endp_2 As String = ThisAddIn.INI_Endpoint_2
+        Dim GoogleIdentifier As String = ThisAddIn.GoogleIdentifier
+        Dim OpenAIIdentifier As String = ThisAddIn.OpenAIIdentifier
 
-        If Endpoint.Contains(ThisAddIn.GoogleIdentifier) Then
-            If Endpoint.Contains(ThisAddIn.GoogleIdentifier) Then
-                ThisAddIn.TTSSecondAPI = False
-                IsGoogle = True
-            ElseIf Endpoint_2.Contains(ThisAddIn.GoogleIdentifier) Then
-                ThisAddIn.TTSSecondAPI = True
-                IsGoogle = True
-            End If
+        If endp IsNot Nothing AndAlso endp.Contains(GoogleIdentifier) AndAlso ThisAddIn.INI_OAuth2 Then
+            TTS_Available = True
+            IsGoogle = True
+        End If
+        If endp_2 IsNot Nothing AndAlso endp_2.Contains(GoogleIdentifier) AndAlso ThisAddIn.INI_OAuth2_2 Then
+            TTS_Available = True
+            IsGoogle = True
+        End If
+        If endp_2 IsNot Nothing AndAlso endp_2.Contains(OpenAIIdentifier) Then
+            TTS_Available = True
+        End If
+        If endp IsNot Nothing AndAlso endp.Contains(OpenAIIdentifier) Then
+            TTS_Available = True
         End If
 
-        If Not IsGoogle Then
+        If String.IsNullOrWhiteSpace(ThisAddIn.INI_APICall_Object) Then
+            Me.RI_InsertClipboard.Visible = False
+        Else
+            Me.RI_InsertClipboard.Visible = True
+        End If
+
+        If Not TTS_Available Then
             Me.RI_CreateAudio.Visible = False
             Me.RI_CreatePodcast.Label = "Create Podcast Script"
         Else
@@ -622,6 +646,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_Convincing As RibbonButton
     Friend WithEvents RI_SpecialModel As RibbonButton
     Friend WithEvents RI_Anonymization As RibbonButton
+    Friend WithEvents RI_InsertClipboard As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

@@ -136,4 +136,7 @@ Public Class Ribbon1
         Globals.ThisAddIn.AnonymizeSelection()
     End Sub
 
+    Private Sub RI_InsertClipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_InsertClipboard.Click
+        Globals.ThisAddIn.InsertClipboard()
+    End Sub
 End Class

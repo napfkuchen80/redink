@@ -101,6 +101,18 @@ Namespace My
                 Me("LastAnonPrompt") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property PaneWidth() As Integer
+            Get
+                Return CType(Me("PaneWidth"),Integer)
+            End Get
+            Set
+                Me("PaneWidth") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

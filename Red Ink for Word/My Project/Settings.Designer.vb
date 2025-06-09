@@ -485,6 +485,18 @@ Namespace My
                 Me("AudioOutputDevice") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property TTSProvider() As String
+            Get
+                Return CType(Me("TTSProvider"),String)
+            End Get
+            Set
+                Me("TTSProvider") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

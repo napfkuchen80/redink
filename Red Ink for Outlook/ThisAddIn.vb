@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.6.2025
+' 9.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -43,6 +43,7 @@ Imports System.IO
 Imports System.Net
 Imports System.Threading
 
+
 Module Module1
     ' Correct attribute declaration for DllImport
     <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
@@ -52,11 +53,38 @@ End Module
 
 Public Class ThisAddIn
 
+    <DllImport("user32.dll", SetLastError:=True)>
+    Private Shared Function FindWindow(
+                                ByVal lpClassName As String,
+                                ByVal lpWindowName As String
+                            ) As IntPtr
+    End Function
+
     Public StartupInitialized As Boolean = False
     Private mainThreadControl As New System.Windows.Forms.Control()
     Private WithEvents outlookExplorer As Outlook.Explorer
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+
+        ' Necessary for Update Handler to work correctly
+
+        ' 1) Force the creation of the Control's handle on the Office UI thread
+        Dim dummy = mainThreadControl.Handle
+
+        ' 2) Give that Control to the UpdateHandler so it can Invoke on it
+        UpdateHandler.MainControl = mainThreadControl
+
+        ' 3) Capture the host window’s HWND (Word / Excel / Outlook)
+        Dim hwnd As IntPtr
+        Dim progId = Me.Application.GetType().Name.ToLowerInvariant()
+        If progId.Contains("word") OrElse progId.Contains("excel") Then
+            hwnd = New IntPtr(CInt(Me.Application.Hwnd))
+        Else
+            hwnd = FindWindow("rctrl_renwnd32", Nothing)
+        End If
+        UpdateHandler.HostHandle = hwnd
+
+        ' Other tasks that need to be done at startup
 
         mainThreadControl.CreateControl()
 
@@ -98,7 +126,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.020625 Gen2 Beta Test"
+    Public Const Version As String = "V.090625 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -2283,9 +2311,7 @@ Public Class ThisAddIn
                 OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
             End If
 
-            'SLib.RestoreClipboard()
-
-            If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
+            If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
 
                 Dim promptlibresult As (String, Boolean, Boolean, Boolean)
 
@@ -3085,51 +3111,6 @@ Public Class ThisAddIn
 
 
 
-    Private Async Function oldStartHttpListener() As Task(Of String)
-        Dim prefix As String = "http://127.0.0.1:12333/"
-        Try
-            ' Initialize the listener once.
-            If httpListener Is Nothing Then
-                httpListener = New HttpListener()
-                httpListener.Prefixes.Add(prefix)
-                httpListener.Start()
-                Debug.WriteLine("HttpListener started.")
-            End If
-
-            While Not isShuttingDown
-                ' If for some reason the listener is not listening (disposed), restart it.
-                If httpListener Is Nothing OrElse Not httpListener.IsListening Then
-                    Try
-                        If httpListener IsNot Nothing Then
-                            httpListener.Close()
-                        End If
-                    Catch ex As System.Exception
-                        Debug.WriteLine("Error closing HttpListener: " & ex.Message)
-                    End Try
-
-                    httpListener = New HttpListener()
-                    httpListener.Prefixes.Add(prefix)
-                    httpListener.Start()
-                    Debug.WriteLine("HttpListener restarted.")
-                End If
-
-                Try
-                    ' Use asynchronous call to wait for an incoming request.
-                    Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
-                    Dim result As String = Await HandleHttpRequest(context)
-                Catch ex As System.ObjectDisposedException
-                    Debug.WriteLine("HttpListener was disposed. Restarting listener...")
-                    ' Continue to the next iteration so that the above block restarts the listener.
-                    Continue While
-                Catch ex As System.Exception
-                    Debug.WriteLine("Error httplistener handling request: " & ex.Message)
-                End Try
-            End While
-        Catch ex As System.Exception
-            Debug.WriteLine("Error in StartHttpListener: " & ex.Message)
-        End Try
-        Return ""
-    End Function
 
     Private Async Function HandleHttpRequest(ByVal context As HttpListenerContext) As Task(Of String)
         Try
@@ -3323,7 +3304,7 @@ Public Class ThisAddIn
                         Dim MarkupInstruct As String = $"start with '{MarkupPrefix}' for markups"
                         Dim InsertInstruct As String = $"with '{InsertPrefix}' for directly inserting the result"
                         Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
-                        Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-v for your last prompt")
+                        Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-p for your last prompt")
 
                         Dim NoText As Boolean = False
                         Dim DoMarkup As Boolean = False
@@ -3331,19 +3312,13 @@ Public Class ThisAddIn
 
                         If String.IsNullOrWhiteSpace(Textbody) Then NoText = True
 
-                        SLib.StoreClipboard()
-
-                        If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then SLib.PutInClipboard(My.Settings.LastPrompt)
-
                         If Not NoText Then
-                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute using the selected text ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False)
+                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute using the selected text ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False, "", My.Settings.LastPrompt)
                         Else
-                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False)
+                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False, "", My.Settings.LastPrompt)
                         End If
 
-                        SLib.RestoreClipboard()
-
-                        If String.IsNullOrEmpty(OtherPrompt) And OtherPrompt <> "ESC" And INI_PromptLib Then
+                        If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
 
                             Dim promptlibresult As (String, Boolean, Boolean, Boolean)
 
@@ -3354,7 +3329,7 @@ Public Class ThisAddIn
                             DoInsert = Not promptlibresult.Item4
 
                         Else
-                            If String.IsNullOrEmpty(OtherPrompt) Or OtherPrompt = "ESC" Then OtherPrompt = ""
+                            If String.IsNullOrEmpty(OtherPrompt) OrElse OtherPrompt = "ESC" Then OtherPrompt = ""
                         End If
 
                         If OtherPrompt <> "" Then

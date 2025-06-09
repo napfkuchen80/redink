@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.6.2025
+' 9.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -23,6 +23,7 @@
 
 Option Explicit On
 
+Imports System.Collections.Concurrent
 Imports System.Data
 Imports System.Diagnostics
 Imports System.Drawing
@@ -42,14 +43,17 @@ Imports System.Windows.Forms.VisualStyles.VisualStyleElement
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
+Imports Google.Api.Gax.Grpc
 Imports Google.Cloud.Speech.V1
 Imports Google.Cloud.Speech.V1.LanguageCodes
 Imports Google.Protobuf
+Imports Google.Rpc.Context.AttributeContext.Types
 Imports Grpc.Core
 Imports HtmlAgilityPack
 Imports Markdig
 Imports Microsoft.Office.Core
 Imports Microsoft.Office.Interop.Word
+Imports NAudio
 Imports NAudio.CoreAudioApi
 Imports NAudio.Wave
 Imports Newtonsoft.Json
@@ -190,6 +194,12 @@ End Class
 
 Public Class ThisAddIn
 
+
+
+    <DllImport("kernel32.dll", SetLastError:=True)>
+    Private Shared Function SetThreadExecutionState(esFlags As UInteger) As UInteger
+    End Function
+
     <DllImport("user32.dll", SetLastError:=True)>
     Private Shared Function FindWindow(
                                 ByVal lpClassName As String,
@@ -203,7 +213,6 @@ Public Class ThisAddIn
         Return hwnd
     End Function
 
-
     Private mainThreadControl As New System.Windows.Forms.Control()
     Public StartupInitialized As Boolean = False
     Private WithEvents wordApp As Word.Application
@@ -211,6 +220,26 @@ Public Class ThisAddIn
     Private ReadOnly _uiContext As SynchronizationContext = WindowsFormsSynchronizationContext.Current
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+
+        ' Necessary for Update Handler to work correctly
+
+        ' 1) Force the creation of the Control's handle on the Office UI thread
+        Dim dummy = mainThreadControl.Handle
+
+        ' 2) Give that Control to the UpdateHandler so it can Invoke on it
+        UpdateHandler.MainControl = mainThreadControl
+
+        ' 3) Capture the host window’s HWND (Word / Excel / Outlook)
+        Dim hwnd As IntPtr
+        Dim progId = Me.Application.GetType().Name.ToLowerInvariant()
+        If progId.Contains("word") OrElse progId.Contains("excel") Then
+            hwnd = New IntPtr(CInt(Me.Application.Hwnd))
+        Else
+            hwnd = FindWindow("rctrl_renwnd32", Nothing)
+        End If
+        UpdateHandler.HostHandle = hwnd
+
+        ' Other tasks that need to be done at startup
 
         SharedMethods.Initialize(Me.CustomTaskPanes)
         wordApp = Application
@@ -299,7 +328,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.020625 Gen2 Beta Test"
+    Public Const Version As String = "V.090625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -378,6 +407,41 @@ Public Class ThisAddIn
             "te-IN", "th-TH", "tr-TR", "uk-UA", "ur-PK", "vi-VN", "cy-GB"
         }
 
+    ' Human-readable descriptions for each OpenAI voice.
+    Private Shared ReadOnly OpenAIDescriptions As New Dictionary(Of String, String) From {
+    {"alloy", "Female: Versatile and balanced"},
+    {"ash", "Male: Clear and precise"},
+    {"ballad", "Male: Melodic and smooth"},
+    {"coral", "Female: Warm and friendly"},
+    {"echo", "Male: Warm and natural"},
+    {"fable", "Male: Engaging storyteller"},
+    {"nova", "Female: Bright and energetic"},
+    {"onyx", "Male: Deep and authoritative"},
+    {"sage", "Male: Calm and thoughtful"},
+    {"shimmer", "Female: Clear and expressive"},
+    {"verse", "Male: Versatile and expressive"}
+}
+
+    Private Const TTS_OpenAI_Model = "gpt-4o-mini-tts"
+
+    Private Shared ReadOnly OpenAIVoices As String() = OpenAIDescriptions.Keys.ToArray()
+    Private Shared ReadOnly OpenAILanguages As String() = {
+    "de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh",
+    "ar", "bg", "ca", "cs", "da", "el", "et", "fi", "hi", "hu",
+    "id", "nl", "no", "pl", "ro", "sv", "th", "tr", "uk", "vi"
+}
+
+    Private Const ES_CONTINUOUS As UInteger = &H80000000UI
+    Private Const ES_SYSTEM_REQUIRED As UInteger = &H1UI
+    Private Const ES_DISPLAY_REQUIRED As UInteger = &H2UI
+    Private Const ES_AWAYMODE_REQUIRED As UInteger = &H40UI
+
+    Private Const ES_KEEP_SYSTEM_ONLY As UInteger = ES_CONTINUOUS Or ES_SYSTEM_REQUIRED
+    Private Const ES_KEEP_SYSTEM_AND_DISPLAY As UInteger = ES_CONTINUOUS Or ES_SYSTEM_REQUIRED Or ES_DISPLAY_REQUIRED
+    Private Const ES_KEEP_CURRENT_SETTING As UInteger = ES_KEEP_SYSTEM_ONLY
+
+    Private Shared prevExecState As UInteger = Nothing
+
     Private Const Code_JsonTemplateFormatter As String = "Public Module JsonTemplateFormatter" & vbCrLf & "''' <summary>''' Hauptfunktion für JSON-String + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String" & vbCrLf & "Dim jObj As JObject" & vbCrLf & "Try" & vbCrLf & "jObj = JObject.Parse(json)" & vbCrLf & "Catch ex As Newtonsoft.Json.JsonReaderException" & vbCrLf & "Return $""[Fehler beim Parsen des JSON: {ex.Message}]""" & vbCrLf & "End Try" & vbCrLf & "Return FormatJsonWithTemplate(jObj, template)" & vbCrLf & "End Function" & vbCrLf & "''' <summary>''' Hauptfunktion für direkten JObject + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String" & vbCrLf & "If String.IsNullOrWhiteSpace(template) Then Return """"" & vbCrLf & "template = template.Replace(""\\N"", vbCrLf).Replace(""\\n"", vbCrLf).Replace(""\\R"", vbCrLf).Replace(""\\r"", vbCrLf)" & vbCrLf & "template = Regex.Replace(template, ""<cr>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "Dim hasLoop = Regex.IsMatch(template, ""\\{\\%\\s*for\\s+([^\\s\\%]+)\\s*\\%\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim hasPh = Regex.IsMatch(template, ""\\{([^}]+)\\}"")" & vbCrLf & "If Not hasLoop AndAlso Not hasPh Then Return FindJsonProperty(jObj, template)" & vbCrLf & "Dim loopRegex = New Regex(""\\{\\%\\s*for\\s+([^%\\s]+)\\s*\\%\\}(.*?)\\{\\%\\s*endfor\\s*\\%\\}"", RegexOptions.Singleline Or RegexOptions.IgnoreCase)" & vbCrLf & "Dim mLoop = loopRegex.Match(template)" & vbCrLf & "While mLoop.Success" & vbCrLf & "Dim fullBlock = mLoop.Value" & vbCrLf & "Dim rawPath = mLoop.Groups(1).Value.Trim()" & vbCrLf & "Dim innerTpl = mLoop.Groups(2).Value" & vbCrLf & "Dim path = If(rawPath.StartsWith(""$""), rawPath, ""$."" & rawPath)" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim items = tokens.SelectMany(Function(t) If t.Type = JTokenType.Array Then Return CType(t, JArray).OfType(Of JObject)() ElseIf t.Type = JTokenType.Object Then Return {CType(t, JObject)} Else Return Enumerable.Empty(Of JObject)() End If)" & vbCrLf & "Dim rendered = items.Select(Function(o) FormatJsonWithTemplate(o, innerTpl)).ToArray()" & vbCrLf & "template = template.Replace(fullBlock, If(rendered.Any, String.Join(vbCrLf & vbCrLf, rendered), """"""))" & vbCrLf & "mLoop = loopRegex.Match(template)" & vbCrLf & "End While" & vbCrLf & "Dim phRegex = New Regex(""\\{(.+?)\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim result = template" & vbCrLf & "For Each mPh As Match In phRegex.Matches(template)" & vbCrLf & "Dim fullPh = mPh.Value" & vbCrLf & "Dim content = mPh.Groups(1).Value" & vbCrLf & "Dim isHtml As Boolean = False" & vbCrLf & "Dim isNoCr As Boolean = False" & vbCrLf & "If content.StartsWith(""htmlnocr:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : isNoCr = True : content = content.Substring(""htmlnocr:"".Length) ElseIf content.StartsWith(""html:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : content = content.Substring(""html:"".Length) ElseIf content.StartsWith(""nocr:"", StringComparison.OrdinalIgnoreCase) Then isNoCr = True : content = content.Substring(""nocr:"".Length)" & vbCrLf & "Dim parts = content.Split(New Char() {""|""c}, 2)" & vbCrLf & "Dim pathPh = parts(0).Trim()" & vbCrLf & "Dim remainder = If(parts.Length > 1, parts(1), String.Empty)" & vbCrLf & "Dim sep As String = vbCrLf" & vbCrLf & "Dim mappings As Dictionary(Of String, String) = Nothing" & vbCrLf & "If Not String.IsNullOrEmpty(remainder) Then If remainder.Contains(""=""c) Then mappings = ParseMappings(remainder) Else sep = remainder.Replace(""\\n"", vbCrLf)" & vbCrLf & "Dim replacement = RenderTokens(jObj, pathPh, sep, isHtml, isNoCr, mappings)" & vbCrLf & "result = result.Replace(fullPh, replacement)" & vbCrLf & "Next" & vbCrLf & "Return result" & vbCrLf & "End Function" & vbCrLf & "Private Function RenderTokens(jObj As JObject, path As String, sep As String, isHtml As Boolean, isNoCr As Boolean, mappings As Dictionary(Of String, String)) As String" & vbCrLf & "Try" & vbCrLf & "If Not path.StartsWith(""$"") AndAlso Not path.StartsWith(""@"") Then path = ""$."" & path" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim list As New List(Of String)" & vbCrLf & "For Each t In tokens" & vbCrLf & "Dim raw = t.ToString()" & vbCrLf & "If mappings IsNot Nothing AndAlso mappings.ContainsKey(raw) Then raw = mappings(raw)" & vbCrLf & "If isHtml Then raw = HtmlToMarkdownSimple(raw)" & vbCrLf & "If isNoCr Then raw = Regex.Replace(raw, ""[\r\n]+"", "" "") : raw = Regex.Replace(raw, ""\s{2,}"", "" "") : raw = Regex.Replace(raw, ""[\u2022\u2023\u25E6]"", String.Empty) : raw = raw.Trim()" & vbCrLf & "list.Add(raw)" & vbCrLf & "Next" & vbCrLf & "Return If(list.Count = 0, """", String.Join(sep, list))" & vbCrLf & "Catch ex As System.Exception" & vbCrLf & "Return """"" & vbCrLf & "End Try" & vbCrLf & "End Function" & vbCrLf & "Private Function ParseMappings(defs As String) As Dictionary(Of String, String)" & vbCrLf & "Dim dict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)" & vbCrLf & "For Each pair In defs.Split("";""c)" & vbCrLf & "Dim kv = pair.Split(New Char() {""=""c}, 2)" & vbCrLf & "If kv.Length = 2 Then dict(kv(0).Trim()) = kv(1).Trim()" & vbCrLf & "Next" & vbCrLf & "Return dict" & vbCrLf & "End Function" & vbCrLf & "Public Function HtmlToMarkdownSimple(html As String) As String" & vbCrLf & "Dim s = WebUtility.HtmlDecode(html)" & vbCrLf & "s = Regex.Replace(s, ""</?p\s*/?>"", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<br\s*/?>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<strong>(.*?)</strong>"", ""**$1**"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<em>(.*?)</em>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<span\b[^>]*>(.*?)</span>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<li>(.*?)</li>"", ""- $1"" & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<[^>]+>"", String.Empty)" & vbCrLf & "s = Regex.Replace(s, ""("" & vbCrLf & ""){3,}"", vbCrLf & vbCrLf)" & vbCrLf & "Return s.Trim()" & vbCrLf & "End Function" & vbCrLf & "End Module"
     Private Const SP_GenerateResponseKey As String = "I have code that will generate from a JSON string an Markdown output using a Template, which the code will parse together with the JSON file. I want you to create me a working template taking into account (i) the code, (ii) the structure of the JSON file and (iii) my instructions. If the JSON has arrays, make sure you correctly handle them. To produce your output, first provide the barebones template one one single line (do not use placeholders, provide the text how template should look like; for linebreaks, use only <cr>), then provide a brief explanation without any formatting. I will provide you in the following first the code, and then you will get the (sample) JSON file and my instructions. Follow them carefully."
 
@@ -402,7 +466,13 @@ Public Class ThisAddIn
     Public Shared guestTags As String() = {"G:", "Guest:", "Gast:", "B:", "2:"}
     Public Shared GoogleIdentifier As String = "googleapis.com"
     Public Shared OpenAIIdentifier As String = "openai.com"
-    Public Shared TTSSecondAPI As Boolean = False
+
+    Public Shared TTS_googleAvailable As Boolean = False
+    Private Shared TTS_googleSecondary As Boolean = False
+    Public Shared TTS_openAIAvailable As Boolean = False
+    Private Shared TTS_openAISecondary As Boolean = False
+    Private Shared TTS_GoogleEndpoint As String = ""
+    Private Shared TTS_OpenAIEndpoint As String = ""
 
     Public Shared GoogleSTT_Desc As String = "Google STT V1 (run in EU)"
     Public Shared STTEndpoint As String = "eu-speech.googleapis.com"
@@ -929,6 +999,16 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_MarkdownConvert As Boolean
+        Get
+            Return _context.INI_MarkdownConvert
+        End Get
+        Set(value As Boolean)
+            _context.INI_MarkdownConvert = value
+        End Set
+    End Property
+
+
     Public Shared Property INI_KeepFormat2 As Boolean
         Get
             Return _context.INI_KeepFormat2
@@ -1090,6 +1170,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Shorten = value
+        End Set
+    End Property
+
+    Public Shared Property SP_InsertClipboard As String
+        Get
+            Return _context.SP_InsertClipboard
+        End Get
+        Set(value As String)
+            _context.SP_InsertClipboard = value
         End Set
     End Property
 
@@ -2589,6 +2678,33 @@ Public Class ThisAddIn
         If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_SuggestTitles), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap)
     End Sub
+
+    Public Async Sub InsertClipboard()
+
+        If String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+            ShowCustomMessageBox($"Your model ({INI_Model}) is not configured to process clipboard data (i.e. binary objects).")
+            Return
+        End If
+
+        With Globals.ThisAddIn.Application.Selection
+            If .Start <> .End Then
+                .Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+            End If
+        End With
+
+        If INILoadFail() Then Return
+
+        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_InsertClipboard), False, False, False, False, False, 0, False, False, False, False, 0, False, "", False, "clipboard")
+
+        If result <> "" Then
+            Globals.ThisAddIn.Application.Selection.TypeParagraph()
+            Globals.ThisAddIn.Application.Selection.TypeParagraph()
+            InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & result & vbCrLf, False)
+        End If
+
+    End Sub
+
+
     Public Async Sub Shorten()
 
         If INILoadFail() Then Return
@@ -2759,17 +2875,14 @@ Public Class ThisAddIn
 
     Public Async Sub CreateAudio()
         If INILoadFail() Then Return
-        Dim Endpoint As String = INI_Endpoint
-        Dim Endpoint_2 As String = INI_Endpoint_2
-        Dim TTSEndpoint As String = INI_TTSEndpoint
 
-        If Endpoint.Contains(GoogleIdentifier) And INI_OAuth2 Then
-            TTSSecondAPI = False
-        ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
-            TTSSecondAPI = True
-        Else
-            Return
+        DetectTTSEngines()
+
+        ' — Nothing at all? bail out —
+        If Not TTS_googleAvailable AndAlso Not TTS_openAIAvailable Then
+            Return   ' no TTS provider configured
         End If
+
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Selection = application.Selection
@@ -2815,7 +2928,7 @@ Public Class ThisAddIn
             Else
                 Dim Voices As Integer = ShowCustomYesNoBox("Do you want to use alternate voices to read the text?", "No, one voice", "Yes, alternate", "Create Audio")
                 If Voices = 0 Then Return
-                Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Google Text-To-Speech - Select Voices", Voices = 2)
+                Using frm As New TTSSelectionForm("Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2)
                     If frm.ShowDialog() = DialogResult.OK Then
                         Dim selectedVoices As List(Of String) = frm.SelectedVoices
                         Dim selectedLanguage As String = frm.SelectedLanguage
@@ -2850,6 +2963,7 @@ Public Class ThisAddIn
     Public Async Sub SpecialModel()
         Try
             If INILoadFail() Then Return
+
             Dim DoPane As Boolean = True
 
             If String.IsNullOrWhiteSpace(INI_SpecialServicePath) Then
@@ -2873,9 +2987,6 @@ Public Class ThisAddIn
                 Return
             End If
 
-            Debug.WriteLine("Selected model: " & INI_Model_2)
-
-            ' === NEU: Struktur für Typen, Bereiche und Auswahl-Mappings ===
             Dim iniValues() As String = {INI_Model_Parameter1, INI_Model_Parameter2, INI_Model_Parameter3, INI_Model_Parameter4}
             Dim parameterDefs As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)()
             Dim typesList As New List(Of String)()
@@ -3061,6 +3172,8 @@ Public Class ThisAddIn
             SelectedText = selection.Text.Trim()
             Dim llmresult As String = Await LLM(OtherPrompt, SelectedText, "", "", 0, True)
 
+            SP_MergePrompt_Cached = SP_MergePrompt
+
             If Not String.IsNullOrWhiteSpace(llmresult) Then
                 If OptionChecked Then
 
@@ -3071,7 +3184,7 @@ Public Class ThisAddIn
 
                         If _uiContext IsNot Nothing Then  ' Make sure we run in the UI Thread
                             _uiContext.Post(Sub(s)
-                                                SP_MergePrompt_Cached = SP_MergePrompt
+
                                                 ShowPaneAsync(
                                         ClipPaneText1,
                                         llmresult,
@@ -3083,7 +3196,6 @@ Public Class ThisAddIn
                                             End Sub, Nothing)
                         Else
 
-                            SP_MergePrompt_Cached = SP_MergePrompt
                             ShowPaneAsync(ClipPaneText1, llmresult, "", AN, noRTF:=False, insertMarkdown:=True)
 
                         End If
@@ -3120,7 +3232,11 @@ Public Class ThisAddIn
                                                             SLib.PutInClipboard(dialogResult)
                                                         End If
                                                     ElseIf dialogResult = "Pane" Then
-                                                        SP_MergePrompt_Cached = SP_MergePrompt
+
+                                                        Debug.WriteLine($"SP_Mergeprompt = {SP_MergePrompt}")
+                                                        Debug.WriteLine($"SP_Mergeprompt_Cached = {SP_MergePrompt_Cached}")
+
+
                                                         ShowPaneAsync(
                                                                             ClipPaneText1,
                                                                             llmresult,
@@ -3158,7 +3274,7 @@ Public Class ThisAddIn
                                     SLib.PutInClipboard(dialogResult)
                                 End If
                             ElseIf dialogResult = "Pane" Then
-                                SP_MergePrompt_Cached = SP_MergePrompt
+
                                 ShowPaneAsync(
                                                     ClipPaneText1,
                                                     llmresult,
@@ -3172,13 +3288,20 @@ Public Class ThisAddIn
                         End If
 
                     End If
+                Else
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, llmresult, False)
                 End If
             End If
 
         Catch ex As System.Exception
-            ShowCustomMessageBox("Fehler im SpecialModel: " & ex.Message)
+            MessageBox.Show("Error in SpecialModel: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         Finally
-            RestoreDefaults(_context, originalConfig)
+            If originalConfig IsNot Nothing Then
+                RestoreDefaults(_context, originalConfig)
+            End If
             originalConfigLoaded = False
         End Try
     End Sub
@@ -3319,6 +3442,10 @@ Public Class ThisAddIn
                 Call AnonymizeSelection()
                 Return
             End If
+            If OtherPrompt.StartsWith("insertclipboard", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("insertclip", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("clipboard", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("iclip", StringComparison.OrdinalIgnoreCase) Then
+                Call InsertClipboard()
+                Return
+            End If
 
             If OtherPrompt.StartsWith("generateresponsekey", StringComparison.OrdinalIgnoreCase) Or OtherPrompt.StartsWith("generateresponsetemplate", StringComparison.OrdinalIgnoreCase) Then
 
@@ -3379,7 +3506,7 @@ Public Class ThisAddIn
             End If
 
             If OtherPrompt.StartsWith("voices2", StringComparison.OrdinalIgnoreCase) Then
-                Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voices you wish to use.", $"{AN} Google Text-to-Speech - Select Voices", True)
+                Using frm As New TTSSelectionForm("Select the voices you wish to use.", $"{AN} Text-to-Speech - Select Voices", True) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voices you wish to use.", $"{AN} Text-to-Speech - Select Voices", True)
                     If frm.ShowDialog() = DialogResult.OK Then
                         ' Retrieve selected voices
                         Dim selectedVoices As List(Of String) = frm.SelectedVoices
@@ -3405,7 +3532,7 @@ Public Class ThisAddIn
             End If
 
             If OtherPrompt.StartsWith("voices", StringComparison.OrdinalIgnoreCase) Then
-                Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voices you wish to use.", $"{AN} Google Text-to-Speech - Select Voices", False)
+                Using frm As New TTSSelectionForm("Select the voices you wish to use.", $"{AN} Text-to-Speech - Select Voices", False) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voices you wish to use.", $"{AN} Text-to-Speech - Select Voices", False)
                     If frm.ShowDialog() = DialogResult.OK Then
                         ' Retrieve selected voices
                         Dim selectedVoices As List(Of String) = frm.SelectedVoices
@@ -4168,7 +4295,7 @@ Public Class ThisAddIn
 
             paraCount = 0
 
-            If Not ParaFormatInline And Not NoFormatting And Not NoSelectedText Then
+            If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoSelectedText Then
 
                 paraCount = rng.Paragraphs.Count
 
@@ -4204,6 +4331,11 @@ Public Class ThisAddIn
 
                 Next
 
+            End If
+
+            If Not NoSelectedText AndAlso INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) Then
+                ConvertRangeFormattingToMarkdown()
+                rng = selection.Range
             End If
 
             If Not NoSelectedText Then
@@ -4288,21 +4420,18 @@ Public Class ThisAddIn
                 Dim PaneText2 As String = "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane."
 
                 If CreatePodcast Then
+                    Dim TTSAvailable As Boolean = False
 
-                    Dim IsGoogle As Boolean = False
-                    Dim Endpoint As String = INI_Endpoint
-                    Dim Endpoint_2 As String = INI_Endpoint_2
-                    Dim TTSEndpoint As String = INI_TTSEndpoint
+                    DetectTTSEngines()
 
-                    If Endpoint.Contains(GoogleIdentifier) And INI_OAuth2 Then
-                        TTSSecondAPI = False
-                        IsGoogle = True
-                    ElseIf Endpoint_2.Contains(GoogleIdentifier) And INI_OAuth2_2 Then
-                        TTSSecondAPI = True
-                        IsGoogle = True
+                    If Not TTS_googleAvailable AndAlso Not TTS_openAIAvailable Then
+                        TTSAvailable = False
+                    Else
+                        TTSAvailable = True
                     End If
 
-                    If IsGoogle Then
+
+                    If TTSAvailable Then
                         Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do not have to manually remove the SSML codes, if you do not like them):", LLMResult, "The next step is the production of an audio file. You can choose whether you want to use the original text or your text with any changes you have made. The text will also be put in the clipboard. If you select Cancel, the original text will only be put into the clipboard.", AN, True)
 
                         If FinalText = "" Then
@@ -4310,7 +4439,7 @@ Public Class ThisAddIn
                         Else
                             FinalText = FinalText.Trim()
                             SLib.PutInClipboard(FinalText)
-                            If FinalText.Contains("H: ") And FinalText.Contains("G: ") Then ReadPodcast(FinalText)
+                            If FinalText.Contains("H: ") AndAlso FinalText.Contains("G: ") Then ReadPodcast(FinalText)
                         End If
                     Else
                         Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do not have to manually remove the SSML codes, if you do not like them):", LLMResult, $"The next step is the production of an audio file. Since you have not configured {AN} for Google, you unfortunately cannot do that here. However, you can choose whether you want the original text or the text with your changes to put in the clipboard for further use. If you select Cancel, no text will be put in the clipboard.", AN, True)
@@ -4535,7 +4664,7 @@ Public Class ThisAddIn
                     ' End Extended Selection Mode
                     Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
 
-                ElseIf KeepFormat And Not NoFormatting Then
+                ElseIf KeepFormat AndAlso Not NoFormatting Then
                     SelectedText = selection.Text
                     SLib.InsertTextWithFormat(LLMResult, rng, InPlace)
                     If DoMarkup Then
@@ -4558,20 +4687,25 @@ Public Class ThisAddIn
 
                 Else
                     SelectedText = selection.Text
+
                     If InPlace Then
                         If DoMarkup Then
                             If MarkupMethod = 2 Or MarkupMethod = 3 Then
                                 If MarkupMethod = 3 Then
                                     InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                                    'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                     rng = selection.Range
+                                Else
+                                    If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                 End If
                                 Dim SaveRng As Range = rng.Duplicate
                                 CompareAndInsert(SelectedText, LLMResult, rng, MarkupMethod = 3, "This is the markup of the text inserted:")
-                                If Not ParaFormatInline And Not NoFormatting Then
+                                If Not ParaFormatInline AndAlso Not NoFormatting Then
                                     ApplyParagraphFormat(rng)
                                 End If
                                 RestoreSpecialTextElements(SaveRng)
                             Else
+                                If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                 CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
                                 RestoreSpecialTextElements(rng)
                             End If
@@ -4593,7 +4727,14 @@ Public Class ThisAddIn
                         If DoMarkup Then
                             If MarkupMethod = 2 Or MarkupMethod = 3 Then
                                 If MarkupMethod = 3 Then
-                                    SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                                    Dim pattern As String = "\{\{.*?\}\}"
+                                    If System.Text.RegularExpressions.Regex.IsMatch(LLMResult, pattern) Then
+                                        SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                                        'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
+                                    Else
+                                        InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                                        'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
+                                    End If
                                     rng = selection.Range
                                 End If
                                 Dim SaveRng As Range = rng.Duplicate
@@ -4603,11 +4744,19 @@ Public Class ThisAddIn
                                 End If
                                 RestoreSpecialTextElements(SaveRng)
                             Else
+                                If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                 CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
                                 RestoreSpecialTextElements(rng)
                             End If
                         Else
-                            SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                            Dim pattern As String = "\{\{.*?\}\}"
+                            If System.Text.RegularExpressions.Regex.IsMatch(LLMResult, pattern) Then
+                                SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                                'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
+                            Else
+                                InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                                'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
+                            End If
                             rng = selection.Range
                             Dim SaveRng As Range = rng.Duplicate
                             If Not ParaFormatInline And Not NoFormatting Then
@@ -4631,6 +4780,123 @@ Public Class ThisAddIn
             MessageBox.Show("Error in ProcessSelectedText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return ""
+    End Function
+
+
+    Public Sub ConvertRangeFormattingToMarkdown()
+        Dim app As Word.Application = Globals.ThisAddIn.Application
+        Dim sel As Word.Selection = app.Selection
+
+        ' --- 1. PRELIMINARY CHECKS ---
+        If sel Is Nothing OrElse sel.Type = Word.WdSelectionType.wdSelectionIP Then
+            Return
+        End If
+
+        Dim rng As Word.Range = sel.Range
+        Dim originalStart As Integer = rng.Start
+        If rng.Characters.Count = 0 Then Return
+
+        Dim sb As New StringBuilder()
+
+        ' --- 2. STATE TRACKING ---
+        Dim isBold As Boolean = False
+        Dim isItalic As Boolean = False
+        Dim isUnderlined As Boolean = False
+
+        ' --- 3. ITERATE THROUGH CHARACTERS ---
+        For i As Integer = 1 To rng.Characters.Count
+            Dim charRng As Word.Range = rng.Characters(i)
+
+            Dim currentBold As Boolean = (charRng.Font.Bold = -1)
+            Dim currentItalic As Boolean = (charRng.Font.Italic = -1)
+            Dim currentUnderline As Boolean = (charRng.Font.Underline <> Word.WdUnderline.wdUnderlineNone)
+            Dim charText As String = charRng.Text
+            Dim isEndOfLine As Boolean = (charText = vbCr)
+
+            ' --- A. HANDLE CLOSING TAGS ---
+            If isUnderlined AndAlso (Not currentUnderline OrElse isEndOfLine) Then sb.Append("</u>")
+            If isItalic AndAlso (Not currentItalic OrElse isEndOfLine) Then sb.Append("*")
+            If isBold AndAlso (Not currentBold OrElse isEndOfLine) Then sb.Append("**")
+
+            ' --- B. HANDLE OPENING TAGS ---
+            If Not isBold AndAlso currentBold AndAlso Not isEndOfLine Then sb.Append("**")
+            If Not isItalic AndAlso currentItalic AndAlso Not isEndOfLine Then sb.Append("*")
+            If Not isUnderlined AndAlso currentUnderline AndAlso Not isEndOfLine Then sb.Append("<u>")
+
+            ' Update state for the next character
+            If isEndOfLine Then
+                isBold = False
+                isItalic = False
+                isUnderlined = False
+            Else
+                isBold = currentBold
+                isItalic = currentItalic
+                isUnderlined = currentUnderline
+            End If
+
+            ' --- C. APPEND THE CHARACTER TEXT ---
+            sb.Append(charText)
+        Next
+
+        ' --- 4. CLOSE ANY REMAINING DANGLING TAGS ---
+        If isUnderlined Then sb.Append("</u>")
+        If isItalic Then sb.Append("*")
+        If isBold Then sb.Append("**")
+
+        ' For debugging: Check final string in Visual Studio's "Output" window.
+        Debug.WriteLine("Generated Markdown: " & sb.ToString())
+
+        ' --- 5. REPLACE TEXT, FIX FORMATTING, AND UPDATE SELECTION ---
+
+        ' First, replace the original range's text. At this moment, Word might
+        ' incorrectly apply formatting from the first original character.
+        rng.Text = sb.ToString()
+
+        ' *** THE CORRECTED FIX ***
+        ' The 'rng' object now refers to the new content we just inserted.
+        ' We now explicitly remove the character formatting from this new range
+        ' to ensure it's plain text, leaving only our markdown tags.
+        ' Word Interop uses 0 for False.
+        rng.Font.Bold = 0
+        rng.Font.Italic = 0
+        rng.Font.Underline = Word.WdUnderline.wdUnderlineNone
+
+        ' Reselect the range to include the newly added tags.
+        Dim newEnd As Integer = originalStart + sb.Length
+        app.ActiveDocument.Range(originalStart, newEnd).Select()
+
+    End Sub
+
+
+
+    Public Function RemoveMarkdownFormatting(ByVal input As String) As String
+        Try
+            Dim output As String = input
+
+            ' 1) Fett+Kursiv: ***Text*** → Text
+            output = Regex.Replace(output, "\*\*\*(.+?)\*\*\*", "$1", RegexOptions.Singleline)
+
+            ' 2) Fett: **Text** → Text
+            output = Regex.Replace(output, "\*\*(.+?)\*\*", "$1", RegexOptions.Singleline)
+
+            ' 3) Kursiv: *Text* → Text
+            output = Regex.Replace(output, "(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "$1", RegexOptions.Singleline)
+
+            ' 4) Durchgestrichen: ~~Text~~ → Text
+            output = Regex.Replace(output, "~~(.+?)~~", "$1", RegexOptions.Singleline)
+
+            ' 5) Superscript: <sup>Text</sup> → Text
+            output = Regex.Replace(output, "<sup>(.+?)</sup>", "$1", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
+
+            ' 6) Subscript: <sub>Text</sub> → Text
+            output = Regex.Replace(output, "<sub>(.+?)</sub>", "$1", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
+
+            Return output
+
+        Catch ex As System.Exception
+            ' Hier könntest Du Logging oder eine Meldung einfügen
+            Throw New System.Exception("Error in RemoveMarkdownFormatting: " & ex.Message, ex)
+        End Try
     End Function
 
     Public Sub ApplyParagraphFormat(ByRef rng As Range)
@@ -4784,14 +5050,6 @@ Public Class ThisAddIn
 
         For i As Integer = 0 To chunks.Count - 1
             Dim currentChunk As String = chunks(i)
-
-            ' Attempt to find the chunk
-            'With selection.Find
-            '.Text = currentChunk
-            '.Forward = True
-            '.Wrap = Word.WdFindWrap.wdFindStop
-            'End With
-            ' xxxxxxxxxxx
 
             Dim chunk As String = chunks(i)
 
@@ -5149,6 +5407,7 @@ Public Class ThisAddIn
 
 
     Public Shared Sub InsertTextWithMarkdown(selection As Microsoft.Office.Interop.Word.Selection, Result As String, Optional TrailingCR As Boolean = False)
+
         If selection Is Nothing Then
             MessageBox.Show("Error in InsertTextWithMarkdown: The selection object is null", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
@@ -5158,6 +5417,37 @@ Public Class ThisAddIn
 
         ' Extract the range from the selection
         Dim range As Microsoft.Office.Interop.Word.Range = selection.Range
+
+        Dim LeadingTrailingSpace As Boolean = False
+
+        If range.Start < range.End AndAlso Not TrailingCR Then
+
+            ' Prüfen, ob vor und hinter range Platz im Dokument ist; erforderlich, weil beim Löschen eines solchen Texts Word automatisch einen Space entfernt
+            Dim docStart As Integer = range.Document.Content.Start
+            Dim docEnd As Integer = range.Document.Content.End
+
+            If range.Start > docStart AndAlso range.End < docEnd Then
+                ' Ein 1‐Zeichen‐Range vor range
+                Dim beforerange As Range = range.Document.Range(range.Start - 1, range.Start)
+                ' Ein 1‐Zeichen‐Range nach range
+                Dim afterrange As Range = range.Document.Range(range.End, range.End + 1)
+
+                If beforerange.Text = " " AndAlso afterrange.Text = " " Then
+                    LeadingTrailingSpace = True
+                Else
+                    LeadingTrailingSpace = False
+                End If
+            Else
+                LeadingTrailingSpace = False
+            End If
+        End If
+
+        If range.Start < range.End Then
+            If TrailingCR Then
+                range.End = range.End - 1
+            End If
+        End If
+
         range.Delete()
 
         Dim markdownpipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
@@ -5189,13 +5479,18 @@ Public Class ThisAddIn
 
         selection.Document.Fields.Update()
 
-        If TrailingCR Then
+        If LeadingTrailingSpace Then
             range.Collapse(WdCollapseDirection.wdCollapseEnd)
-            range.InsertParagraphAfter()
-            range.Collapse(WdCollapseDirection.wdCollapseEnd)
+            range.InsertAfter(" ")
         End If
 
-        Dim insertionEnd As Integer = range.End
+        'If Trailing CR Then
+        'range.Collapse(WdCollapseDirection.wdCollapseEnd)
+        'range.InsertParagraphAfter()
+        'range.Collapse(WdCollapseDirection.wdCollapseEnd)
+        'End If
+
+        Dim InsertionEnd As Integer = range.End
 
         Dim doc As Microsoft.Office.Interop.Word.Document = selection.Document
         selection.SetRange(insertionStart, insertionEnd)
@@ -5422,6 +5717,10 @@ Public Class ThisAddIn
                         Dim ulRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(listStart, range.End)
                         ulRange.ListFormat.ApplyBulletDefault()
                         ulRange.ListFormat.ListIndent()
+                        With ulRange.ParagraphFormat
+                            .LeftIndent = .Application.CentimetersToPoints(0.75)
+                            .FirstLineIndent = - .Application.CentimetersToPoints(0.75)
+                        End With
                         range.SetRange(ulRange.End, ulRange.End)
                     End If
 
@@ -5436,6 +5735,11 @@ Public Class ThisAddIn
                     Dim olRange As Microsoft.Office.Interop.Word.Range = range.Document.Range(numStart, range.End)
                     olRange.ListFormat.ApplyNumberDefault()
                     olRange.ListFormat.ListIndent()
+                    With olRange.ParagraphFormat
+                        .LeftIndent = .Application.CentimetersToPoints(0.75)
+                        .FirstLineIndent = - .Application.CentimetersToPoints(0.75)
+                    End With
+
                     range.SetRange(olRange.End, olRange.End)
 
                 Case "dl"
@@ -6833,7 +7137,7 @@ Public Class ThisAddIn
 
         Dim lastcontextsearch As String = If(String.IsNullOrWhiteSpace(My.Settings.LastContextSearch), "", My.Settings.LastContextSearch)
 
-        SearchContext = ShowCustomInputBox($"Enter the search term (use '{SearchNextTrigger}' if you only want to find the next term; {EmbedInstruct}{BoWTrigger} to use Bag of Words and {RefreshTrigger} to refresh embedding/BoW index first):", "Context Search", True, lastcontextsearch).Trim()
+        SearchContext = ShowCustomInputBox($"Enter the search term (use '{SearchNextTrigger}' if you only want to find the next term; {EmbedInstruct}'{BoWTrigger}' to use Bag of Words and '{RefreshTrigger}' to refresh the index first):", "Context Search", True, lastcontextsearch).Trim()
         If String.IsNullOrWhiteSpace(SearchContext) Or SearchContext = "ESC" Then Return
 
         My.Settings.LastContextSearch = SearchContext
@@ -7477,6 +7781,7 @@ Public Class ThisAddIn
                 {"Temperature_2", "Temperature of {model2}"},
                 {"Timeout_2", "Timeout of {model2}"},
                 {"DoubleS", "Convert '" & ChrW(223) & "' to 'ss'"},
+                {"MarkdownConvert", "Keep character formatting"},
                 {"KeepFormat1", "Keep format (translations)"},
                 {"ReplaceText1", "Replace text (translations)"},
                 {"KeepFormat2", "Keep format (other commands)"},
@@ -7504,6 +7809,7 @@ Public Class ThisAddIn
                 {"Temperature_2", "The higher, the more creative the LLM will be (0.0-2.0)"},
                 {"Timeout_2", "In milliseconds"},
                 {"DoubleS", "For Switzerland"},
+                {"MarkdownConvert", "If selected, bold, italic, underline and some more formatting will be preserved converting it to Markdown coding before passing it to the LLM (most LLM support it)"},
                 {"KeepFormat1", "If selected, the original's text basic character and paragraph formatting of a translated text will be retained (by HTML encoding, takes time!)"},
                 {"ReplaceText1", "If selected, the response of the LLM for translations will replace the original text"},
                 {"KeepFormat2", "If selected, the original's text basic character formatting will be retained for commands other than translations (by HTML encoding, takes time!)"},
@@ -8164,6 +8470,8 @@ Public Class ThisAddIn
 
         Inherits Form
 
+        Private STT_PreExistingSleepBlocker As Boolean = False
+
         Private RichTextBox1 As Forms.RichTextBox
         Private StartButton As Forms.Button
         Private StopButton As Forms.Button
@@ -8218,6 +8526,29 @@ Public Class ThisAddIn
         Private Const STREAMING_LIMIT_MS As Integer = 290000  ' 4 Minuten 50 Sekunden
         Private streamingStartTime As DateTime
 
+        Private ReadOnly ringBuffer As New Queue(Of Google.Protobuf.ByteString)()
+        Private Const RING_BUFFER_SIZE As Integer = 50
+
+        Private ReadOnly recoverySemaphore As New System.Threading.SemaphoreSlim(1, 1)
+        Private writerTask As System.Threading.Tasks.Task
+
+        ' The watchdog timer that will check for API responsiveness.
+        Private _apiWatchdogTimer As System.Threading.Timer
+        ' Tracks the last time we received ANY response (partial or final) from Google.
+        ' We use a long representing Ticks for thread-safe updates.
+        Private _lastApiResponseTicks As Long
+        ' Configurable: The number of seconds of API silence before triggering a restart.
+        Private Const API_RESPONSE_TIMEOUT_SECONDS As Integer = 3
+        Private _lastKnownPartialResult As String = ""
+        Private _justCommittedPartialText As String = ""
+
+        ' Maps a temporary SpeakerTag (e.g., 1, 2) from the API to a consistent,
+        ' human-readable label (e.g., "Speaker 1", "Speaker 2").
+        Private _speakerTagToLabelMap As New Dictionary(Of Integer, String)
+
+        ' Counter to ensure we always assign a new, unique speaker number.
+        Private _nextSpeakerNumber As Integer = 1
+
         Private loopback As WasapiLoopbackCapture
         Private loopbackBuffer As BufferedWaveProvider
         Private loopbackCapture As WasapiLoopbackCapture
@@ -8231,7 +8562,84 @@ Public Class ThisAddIn
             End Get
         End Property
 
+        Private sttAccessToken1 As String = String.Empty
+        Private sttTokenExpiry1 As DateTime = DateTime.MinValue
+        Private sttAccessToken2 As String = String.Empty
+        Private sttTokenExpiry2 As DateTime = DateTime.MinValue
 
+
+
+        ' Hilfs‐Methode: PrivateKey in 64-Zeichen-Zeilen brechen
+        Public Shared Function FormatPrivateKey(rawKey As String) As String
+            Dim noEscapes = rawKey.Replace("\n", "")
+            Dim sb As New System.Text.StringBuilder()
+            For i As Integer = 0 To noEscapes.Length - 1 Step 64
+                Dim chunk = If(i + 64 <= noEscapes.Length,
+                      noEscapes.Substring(i, 64),
+                      noEscapes.Substring(i))
+                sb.AppendLine(chunk)
+            Next
+            Return "-----BEGIN PRIVATE KEY-----" & vbLf &
+           sb.ToString() &
+           "-----END PRIVATE KEY-----" & vbLf
+        End Function
+
+        ' Neu: Holt lokal einen frischen STT-Token für die gewählte API
+        Private Async Function GetFreshSTTToken(useSecond As Boolean) As System.Threading.Tasks.Task(Of String)
+
+            Try
+                Dim token As String
+                Dim expiry As DateTime
+
+                If useSecond Then
+                    token = sttAccessToken2
+                    expiry = sttTokenExpiry2
+                Else
+                    token = sttAccessToken1
+                    expiry = sttTokenExpiry1
+                End If
+
+                If String.IsNullOrEmpty(token) OrElse DateTime.UtcNow >= expiry Then
+                    ' Parameter je nach API auswählen
+                    Dim clientEmail = If(useSecond, INI_OAuth2ClientMail_2, INI_OAuth2ClientMail)
+                    Dim scopes = If(useSecond, INI_OAuth2Scopes_2, INI_OAuth2Scopes)
+                    Dim rawKey = If(useSecond, INI_APIKey_2, INI_APIKey)
+                    Dim authServer = If(useSecond, INI_OAuth2Endpoint_2, INI_OAuth2Endpoint)
+                    Dim life = If(useSecond, INI_OAuth2ATExpiry_2, INI_OAuth2ATExpiry)
+
+                    ' GoogleOAuthHelper konfigurieren
+                    GoogleOAuthHelper.client_email = clientEmail
+                    GoogleOAuthHelper.private_key = FormatPrivateKey(rawKey)
+                    GoogleOAuthHelper.scopes = scopes
+                    GoogleOAuthHelper.token_uri = authServer
+                    GoogleOAuthHelper.token_life = life
+
+                    ' neuen Token holen
+                    Dim newToken As String = Await GoogleOAuthHelper.GetAccessToken()
+                    Dim newExpiry As DateTime = DateTime.UtcNow.AddSeconds(life - 300)
+
+                    If useSecond Then
+                        sttAccessToken2 = newToken
+                        sttTokenExpiry2 = newExpiry
+                    Else
+                        sttAccessToken1 = newToken
+                        sttTokenExpiry1 = newExpiry
+                    End If
+
+                    token = newToken
+                End If
+
+                Return token
+
+            Catch ex As System.Exception
+                System.Windows.Forms.MessageBox.Show(
+            $"Error fetching STT token: {ex.Message}",
+            "Transcription Error",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+                Return String.Empty
+            End Try
+        End Function
 
         Public Sub New()
             ' Initialize UI Components
@@ -8648,15 +9056,23 @@ Public Class ThisAddIn
             CancelTranscription()
 
             If STTModel = "google" AndAlso _stream IsNot Nothing Then
-                Await SafeCompleteAndDisposeGoogleStreamAsync()
+                Await SafeCompleteAndDisposeGoogleStreamAsync(readerCts.Token)
             End If
 
             If WhisperRecognizer IsNot Nothing Then
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Whisper stopped...")
-                WhisperRecognizer.DisposeAsync()
+                Await WhisperRecognizer.DisposeAsync()
                 WhisperRecognizer = Nothing
             End If
 
+            If IsNothing(prevExecState) Then
+                SetThreadExecutionState(ES_CONTINUOUS)
+            Else
+                If Not STT_PreExistingSleepBlocker Then
+                    SetThreadExecutionState(prevExecState)
+                    prevExecState = Nothing
+                End If
+            End If
 
         End Function
 
@@ -8676,6 +9092,7 @@ Public Class ThisAddIn
             System.Threading.Tasks.Task.Run(Async Function()
                                                 Try
                                                     Await StopRecording()
+                                                    If STTModel = "google" Then StopApiWatchdogTimer()
                                                 Catch ex As System.Exception
 
                                                 End Try
@@ -8683,6 +9100,7 @@ Public Class ThisAddIn
                                                 Me.Invoke(Sub()
                                                               Me.StartButton.Enabled = True
                                                               Me.LoadButton.Enabled = True
+                                                              Me.AudioButton.Enabled = True
                                                               Me.cultureComboBox.Enabled = True
                                                               Me.deviceComboBox.Enabled = True
                                                               Me.SpeakerIdent.Enabled = True
@@ -8725,6 +9143,7 @@ Public Class ThisAddIn
                     System.Threading.Tasks.Task.Run(Async Function()
                                                         Try
                                                             Await StopRecording()
+                                                            If STTModel = "google" Then StopApiWatchdogTimer()
                                                         Catch ex As System.Exception
 
                                                         End Try
@@ -8823,6 +9242,10 @@ Public Class ThisAddIn
             splash.Show()
             splash.Refresh()
 
+            cts = New CancellationTokenSource()
+            STTCanceled = False
+            audioBuffer.Clear()
+
             Try
                 If Me.cultureComboBox.SelectedItem.ToString().StartsWith(GoogleSTT_Desc) Then
                     STTModel = "google"
@@ -8836,15 +9259,7 @@ Public Class ThisAddIn
 
                     Case "google"
 
-                        'Dim accessToken As String = ""
                         readerCts = New CancellationTokenSource()
-                        'If STTSecondAPI Then
-                        'DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
-                        'accessToken = DecodedAPI_2
-                        'Else
-                        'DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
-                        'accessToken = DecodedAPI
-                        'End If
 
                         ' Ask user for language code
                         Dim language As String = ShowSelectionForm("Select the language code you want to transcribe in:", $"{GoogleSTT_Desc}", GoogleSTTsupportedLanguages)
@@ -8865,14 +9280,6 @@ Public Class ThisAddIn
                         ' Configure the streaming recognizer
 
                         GoogleLanguageCode = language
-
-                        Await StartGoogleSTT()
-
-                        ' Spawn the response‐reader
-
-                        googleTranscriptStart = RichTextBox1.TextLength
-
-                        StartGoogleReaderTask()
 
                     Case "vosk"
                         StartVosk()
@@ -8932,7 +9339,49 @@ Public Class ThisAddIn
                 Select Case STTModel
                     Case "google"
                         googleTranscriptStart = RichTextBox1.TextLength
-                        Await GoogleTranscribeAudioFile(filepath)
+                        Dim methodChoice As Integer = ShowCustomYesNoBox("Select your Google transcription method (you may have to try which one works better):", "Send chunks (faster)", "Stream (less gaps)")
+
+                        Debug.WriteLine("Choice = " & methodChoice)
+
+                        If methodChoice = 0 Then
+                            splash.Close()
+                            Return
+                        End If
+
+                        ' Splash schließen, UI ist bereits deaktiviert
+                        splash.Close()
+
+                        splash = New SplashScreen($"Transcribing file ...")
+                        splash.Show()
+                        splash.Refresh()
+
+                        Try
+
+                            ' Chunking vs. Streaming aufrufen
+                            If methodChoice = 1 Then
+                                Await GoogleChunkedTranscribeAudioFile(filepath)
+                            Else
+                                Await GoogleFileStreamTranscription(filepath)
+                            End If
+
+                        Catch ex As Exception
+                            splash.Close()
+                            ShowCustomMessageBox($"Error in Transcribing File using Google: {ex.Message}")
+                        Finally
+                            splash.Close()
+                            Me.Invoke(Sub()
+                                          capturing = False
+                                          StartButton.Enabled = True
+                                          StopButton.Enabled = False
+                                          LoadButton.Enabled = True
+                                          AudioButton.Enabled = True
+                                          cultureComboBox.Enabled = True
+                                          deviceComboBox.Enabled = True
+                                          SpeakerIdent.Enabled = True
+                                          SpeakerDistance.Enabled = True
+                                      End Sub)
+                        End Try
+
                     Case "vosk"
                         VoskTranscribeAudioFile(filepath)
                     Case "whisper"
@@ -9053,113 +9502,42 @@ Public Class ThisAddIn
             End If
         End Sub
 
-        ''' <summary>
-        ''' Baut den Google SpeechClient so auf, dass er bei jedem (Wieder-)Öffnen des Streams automatisch 
-        ''' einen frischen Token aus GetFreshAccessToken(...) holt.
-        ''' </summary>
         Private Async Function StartGoogleSTT() As System.Threading.Tasks.Task
             ' ─── 1) Interceptor definieren, der bei jedem neuen Streaming-Aufruf einen frischen Token holt ───
+
             Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
-                                                Async Function(contextCall, metadata)
-                                                    Dim tokenToSend As String
-
-                                                    If STTSecondAPI Then
-                                                        ' Hol Token für API #2
-                                                        tokenToSend = Await GetFreshAccessToken(
-                                                            _context,
-                                                            INI_OAuth2ClientMail_2,
-                                                            INI_OAuth2Scopes_2,
-                                                            INI_APIKey_2,
-                                                            INI_OAuth2Endpoint_2,
-                                                            INI_OAuth2ATExpiry_2,
-                                                            True
-                                                        )
-                                                    Else
-                                                        ' Hol Token für API #1
-                                                        tokenToSend = Await GetFreshAccessToken(
-                                                            _context,
-                                                            INI_OAuth2ClientMail,
-                                                            INI_OAuth2Scopes,
-                                                            INI_APIKey,
-                                                            INI_OAuth2Endpoint,
-                                                            INI_OAuth2ATExpiry,
-                                                            False
-                                                        )
-                                                    End If
-
-                                                    ' Füge den Authorization-Header hinzu – Google lehnt ab, wenn tokenToSend = "" oder abgelaufen ist
-                                                    metadata.Add("Authorization", $"Bearer {tokenToSend}")
-                                                    Await System.Threading.Tasks.Task.CompletedTask
-                                                End Function
-                                            )
+                    Async Function(contextCall, metadata)
+                        ' Nicht mehr context.GetFresh…, sondern unser lokaler Helper
+                        Dim tokenToSend As String = Await GetFreshSTTToken(STTSecondAPI)
+                        metadata.Add("Authorization", $"Bearer {tokenToSend}")
+                        Await System.Threading.Tasks.Task.CompletedTask
+                    End Function
+                )
 
             ' ─── 2) Baue die ChannelCredentials mit Secure SSL + unserem Interceptor ───
             Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
-        Grpc.Core.ChannelCredentials.SecureSsl,
-        callCreds
-    )
+                            Grpc.Core.ChannelCredentials.SecureSsl,
+                            callCreds
+                        )
 
             ' ─── 3) Erzeuge einen brandneuen SpeechClient, der das obige channelCreds verwendet ───
             Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
-        .Endpoint = STTEndpoint,
-        .ChannelCredentials = channelCreds
-    }
+                            .Endpoint = STTEndpoint,
+                            .ChannelCredentials = channelCreds
+                        }
             client = builder.Build()
 
             ' ─── 4) Öffne die Streaming-Verbindung mit InitializeGoogleStream() ───
             '      Das ruft im Hintergrund “_stream = client.StreamingRecognize() …” und sendet die 
             '      StreamingConfig per WriteAsync. Beim ersten WriteAsync wird der Interceptor aktiv.
             Await InitializeGoogleStream()
-        End Function
 
+            SyncLock ringBuffer
+                ringBuffer.Clear()
+            End SyncLock
 
-        Private Async Function xxStartGoogleSTT() As System.Threading.Tasks.Task
-            ' We no longer pass "accessToken" into this method.
-            ' Instead, each time gRPC needs metadata, we call GetFreshAccessToken(...) afresh.
+            StartAudioQueueWriter()
 
-            Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
-        Async Function(context, metadata)
-            Dim newToken As String
-
-            If STTSecondAPI Then
-                ' “True” at the end because this is API #2
-                newToken = Await GetFreshAccessToken(
-                    _context,
-                    INI_OAuth2ClientMail_2,
-                    INI_OAuth2Scopes_2,
-                    INI_APIKey_2,
-                    INI_OAuth2Endpoint_2,
-                    INI_OAuth2ATExpiry_2,
-                    True)
-            Else
-                ' “False” at the end because this is API #1
-                newToken = Await GetFreshAccessToken(
-                    _context,
-                    INI_OAuth2ClientMail,
-                    INI_OAuth2Scopes,
-                    INI_APIKey,
-                    INI_OAuth2Endpoint,
-                    INI_OAuth2ATExpiry,
-                    False)
-            End If
-
-            metadata.Add("Authorization", $"Bearer {newToken}")
-            Await System.Threading.Tasks.Task.CompletedTask
-        End Function)
-
-            Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
-        Grpc.Core.ChannelCredentials.SecureSsl,
-        callCreds)
-
-            ' NOTE: Fully qualify the Google client builder
-            Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
-        .Endpoint = "eu-speech.googleapis.com",
-        .ChannelCredentials = channelCreds
-    }
-            client = builder.Build()
-
-            ' Now open the streaming connection with the fresh‐token interceptor in place
-            Await InitializeGoogleStream()
         End Function
 
         Private Sub ResetGoogleStreamFlag()
@@ -9176,7 +9554,22 @@ Public Class ThisAddIn
 
                 If Me.SpeakerIdent.Checked Then
 
-                    Dim maxSpk As Integer = CInt(Math.Ceiling(Double.Parse(Me.SpeakerDistance.Text)))
+                    'Dim maxSpk As Integer = CInt(Math.Ceiling(Double.Parse(Me.SpeakerDistance.Text)))
+
+                    Dim minSpeakers As Integer = 2
+                    Dim maxSpeakers As Integer = 6 ' Standard-Maximum, anpassen falls nötig
+
+                    ' Versuchen Sie, die Werte aus der UI zu lesen, mit sicheren Standardwerten
+                    Try
+                        ' Annahme: SpeakerDistance ist jetzt MaxCount und ein neues TextFeld ist MinCount
+                        maxSpeakers = CInt(Double.Parse(Me.SpeakerDistance.Text))
+                    Catch
+                        ' Bei Fehler Standardwerte verwenden
+                    End Try
+
+                    ' Die Werte auf den von Google unterstützten Bereich begrenzen
+                    minSpeakers = Math.Max(2, minSpeakers)
+                    maxSpeakers = Math.Max(minSpeakers, maxSpeakers)
 
                     _stream = client.StreamingRecognize()
                     Dim streamingConfig As New StreamingRecognitionConfig With {
@@ -9186,14 +9579,21 @@ Public Class ThisAddIn
                             .LanguageCode = GoogleLanguageCode,
                             .EnableAutomaticPunctuation = True,
                             .EnableSpokenPunctuation = True,
+                            .EnableWordTimeOffsets = False,
+                            .EnableWordConfidence = False,
+                            .Model = "latest_long",
+                            .UseEnhanced = True,
                             .DiarizationConfig = New SpeakerDiarizationConfig With {
                                 .EnableSpeakerDiarization = Me.SpeakerIdent.Checked,
-                                .MaxSpeakerCount = maxSpk
-                            }
+                                        .MinSpeakerCount = minSpeakers,
+                                    .MaxSpeakerCount = maxSpeakers
+                                                            }
                         },
-                        .InterimResults = True
+                        .InterimResults = True,
+                        .SingleUtterance = False
                     }
                     Await _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig})
+
 
                 Else
                     _stream = client.StreamingRecognize()
@@ -9201,9 +9601,16 @@ Public Class ThisAddIn
                     .Config = New RecognitionConfig With {
                         .Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
                         .SampleRateHertz = 16000,
-                        .LanguageCode = GoogleLanguageCode
+                        .LanguageCode = GoogleLanguageCode,
+                        .EnableAutomaticPunctuation = True,
+                            .EnableSpokenPunctuation = True,
+                            .EnableWordTimeOffsets = False,
+                            .EnableWordConfidence = False,
+                            .Model = "latest_long",
+                            .UseEnhanced = True
                                 },
-                                .InterimResults = True
+                                .InterimResults = True,
+                                .SingleUtterance = False
                             }
                     Await _stream.WriteAsync(New StreamingRecognizeRequest With {.StreamingConfig = streamingConfig})
                 End If
@@ -9238,6 +9645,10 @@ Public Class ThisAddIn
             splash.Show()
             splash.Refresh()
 
+            cts = New CancellationTokenSource()
+            STTCanceled = False
+            audioBuffer.Clear()
+
             Try
                 If Me.cultureComboBox.SelectedItem.ToString().StartsWith(GoogleSTT_Desc) Then
                     STTModel = "google"
@@ -9252,17 +9663,6 @@ Public Class ThisAddIn
                     Case "google"
 
                         readerCts = New CancellationTokenSource()
-
-                        If STTSecondAPI Then
-                            DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
-                        Else
-                            DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
-                        End If
-                        Dim AccessToken As String = If(STTSecondAPI, DecodedAPI_2, DecodedAPI)
-                        If String.IsNullOrEmpty(AccessToken) Then
-                            ShowCustomMessageBox("Error starting Google STT - authentication failed (no token).")
-                            Return
-                        End If
 
                         Dim language As String = ShowSelectionForm("Select the language code you want to transcribe in:", $"{GoogleSTT_Desc}", GoogleSTTsupportedLanguages)
 
@@ -9302,7 +9702,10 @@ Public Class ThisAddIn
 
                         googleTranscriptStart = RichTextBox1.TextLength
 
-                        StartGoogleReaderTask()
+                        _speakerTagToLabelMap.Clear()
+                        _nextSpeakerNumber = 1
+
+                        Me.googleReaderTask = StartGoogleReaderTask()
 
                     Case "vosk"
 
@@ -9360,6 +9763,8 @@ Public Class ThisAddIn
 
                 My.Settings.Save()
 
+                If STTModel = "google" Then StartApiWatchdogTimer()
+
                 capturing = True
                 Me.StartButton.Enabled = False
                 Me.cultureComboBox.Enabled = False
@@ -9402,7 +9807,7 @@ Public Class ThisAddIn
                 Dim audioOutputDeviceId As String = My.Settings.AudioOutputDevice
                 Dim chosenDevice As MMDevice = Nothing
 
-                Debug.WriteLine("audioOutputDeviceId=" & audioOutputDeviceId)
+                'Debug.WriteLine("audioOutputDeviceId=" & audioOutputDeviceId)
 
                 If Not String.IsNullOrEmpty(audioOutputDeviceId) Then
                     Try
@@ -9448,37 +9853,6 @@ Public Class ThisAddIn
                 End Try
             End If
 
-            ' The old procedure
-
-            If False Then
-                ' 1) start loopback capture in its native format
-                loopbackCapture = New WasapiLoopbackCapture()
-                loopbackRawProvider = New BufferedWaveProvider(loopbackCapture.WaveFormat) With {
-                                    .DiscardOnBufferOverflow = True
-                                }
-                AddHandler loopbackCapture.DataAvailable, Sub(s, ev)
-                                                              loopbackRawProvider.AddSamples(ev.Buffer, 0, ev.BytesRecorded)
-                                                          End Sub
-
-                ' 2) resample from native -> mic format (16 kHz mono 16-bit)
-                loopbackResampler = New MediaFoundationResampler(loopbackRawProvider, waveIn.WaveFormat)
-                loopbackResampler.ResamplerQuality = 60
-
-                ' 3) kick off loopback
-                Try
-                    loopbackCapture.StartRecording()
-                Catch ex As Exception
-                    ' Could be “device in use exclusively”
-                    ShowCustomMessageBox("Cannot capture system audio: Device is in exclusive use. Continuing with mic only.")
-                    loopbackCapture.Dispose()
-                    loopbackCapture = Nothing
-                    loopbackResampler?.Dispose()
-                    loopbackResampler = Nothing
-                    loopbackRawProvider = Nothing
-                End Try
-
-            End If
-
             If STTModel = "google" Then
                 AddHandler waveIn.DataAvailable, AddressOf OnGoogleDataAvailable
             Else
@@ -9486,13 +9860,62 @@ Public Class ThisAddIn
             End If
             waveIn.StartRecording()
 
+            If IsNothing(prevExecState) Then
+                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
+                STT_PreExistingSleepBlocker = False
+            Else
+                STT_PreExistingSleepBlocker = True
+            End If
+
             Return True
 
         End Function
 
-        Private Sub StartGoogleReaderTask()
+        Private Sub StartApiWatchdogTimer()
+            ' Initialize the last response time to now.
+            System.Threading.Interlocked.Exchange(_lastApiResponseTicks, DateTime.UtcNow.Ticks)
 
-            ' 1) Alten Reader abbrechen (wenn aktiv)
+            ' Dispose of any existing timer to prevent orphans.
+            _apiWatchdogTimer?.Dispose()
+
+            ' Create a new timer that will call the CheckApiResponse method every 1000ms (1 sec).
+            _apiWatchdogTimer = New System.Threading.Timer(
+                                        AddressOf CheckApiResponse,
+                                        Nothing,
+                                        TimeSpan.FromSeconds(1),
+                                        TimeSpan.FromSeconds(1)
+                                    )
+        End Sub
+
+        Private Sub StopApiWatchdogTimer()
+            _apiWatchdogTimer?.Dispose()
+            _apiWatchdogTimer = Nothing
+        End Sub
+
+        Private Sub CheckApiResponse(state As Object)
+            ' If we are not capturing, or a recovery is already in progress, do nothing.
+            If Not capturing OrElse recoverySemaphore.CurrentCount = 0 Then
+                Return
+            End If
+
+            ' Atomically read the last response time.
+            Dim lastResponseTime As New DateTime(System.Threading.Interlocked.Read(_lastApiResponseTicks))
+
+            ' Check if the elapsed time has exceeded our timeout.
+            If (DateTime.UtcNow - lastResponseTime).TotalSeconds > API_RESPONSE_TIMEOUT_SECONDS Then
+                ' The API has not responded in time. The stream is likely hung.
+                Debug.WriteLine($"[ApiWatchdog] No API response for >{API_RESPONSE_TIMEOUT_SECONDS}s. Forcing stream recovery.")
+
+                ' Stop the timer to prevent it from re-triggering while we recover.
+                StopApiWatchdogTimer()
+
+                ' Use our existing thread-safe recovery method to restart the stream.
+                ' Then, after recovery, the watchdog will be restarted by the recovery logic itself.
+                System.Threading.Tasks.Task.Run(Async Sub() Await TryRecoverGoogleStreamAsync())
+            End If
+        End Sub
+
+        Private Function StartGoogleReaderTask() As System.Threading.Tasks.Task
             If readerCts IsNot Nothing Then
                 Try
                     readerCts.Cancel()
@@ -9500,84 +9923,213 @@ Public Class ThisAddIn
                 End Try
             End If
 
-            ' 2) Neue CancellationTokenSource für den neuen Reader
             readerCts = New CancellationTokenSource()
 
-            ' 3) Den Google‑Reader neu starten
-            googleReaderTask = System.Threading.Tasks.Task.Run(
-                        Async Function()
-                            Dim token = readerCts.Token
-                            Try
-                                ' Wir holen erst hier den Enumerator, damit er den aktuellen _stream liest
-                                Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(token)
-                                While Await enumerator.MoveNextAsync()
-                                    For Each result In enumerator.Current.Results
-                                        If result.IsFinal Then
-                                            If Me.SpeakerIdent.Checked Then
-                                                Dim lastSpeaker As Integer = 0
-                                                Dim segment As New System.Text.StringBuilder()
-                                                For Each w In result.Alternatives(0).Words
-                                                    If w.SpeakerTag <> lastSpeaker Then
-                                                        If segment.Length > 0 Then
-                                                            Dim prevLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                            ReplaceAndAddLine(prevLine)
-                                                            segment.Clear()
+            Dim newTask = System.Threading.Tasks.Task.Run(
+                                    Async Sub()
+                                        Dim token = readerCts.Token
+                                        Try
+                                            Dim enumerator = _stream.GetResponseStream().GetAsyncEnumerator(token)
+
+                                            While Await enumerator.MoveNextAsync()
+                                                System.Threading.Interlocked.Exchange(_lastApiResponseTicks, DateTime.UtcNow.Ticks)
+
+                                                For Each result In enumerator.Current.Results
+                                                    If result.IsFinal Then
+                                                        ' --- NEW, CORRECTED FINAL RESULT LOGIC ---
+                                                        If result.Alternatives.Count > 0 Then
+                                                            Dim bestAlternative = result.Alternatives(0)
+                                                            Dim finalTranscript As String = bestAlternative.Transcript.Trim()
+                                                            _lastKnownPartialResult = ""
+
+                                                            ' Check if we should ignore this result because it's a duplicate of a
+                                                            ' partial result that was just committed during recovery.
+                                                            If Not String.IsNullOrEmpty(_justCommittedPartialText) AndAlso
+                                                               String.Equals(finalTranscript, _justCommittedPartialText.Trim(), StringComparison.OrdinalIgnoreCase) Then
+
+                                                                ' This is a duplicate. Log it, clear the flag, and do nothing more.
+                                                                Debug.WriteLine($"[ReaderTask] Ignoring duplicate final result: '{finalTranscript}'")
+                                                                _justCommittedPartialText = ""
+
+                                                            Else
+                                                                ' This is a new, valid final result. Clear the "ignore" flag and proceed.
+                                                                _justCommittedPartialText = ""
+
+                                                                ' Now, apply formatting based on diarization settings.
+                                                                If Me.SpeakerIdent.Checked AndAlso bestAlternative.Words.Count > 0 Then
+
+                                                                    Dim currentSegment As New System.Text.StringBuilder()
+                                                                    ' Get the label for the very first word's speaker.
+                                                                    Dim currentSpeakerLabel As String = GetSpeakerLabel(bestAlternative.Words(0).SpeakerTag)
+
+                                                                    For Each wordInfo In bestAlternative.Words
+                                                                        Dim wordSpeakerLabel As String = GetSpeakerLabel(wordInfo.SpeakerTag)
+
+                                                                        If wordSpeakerLabel <> currentSpeakerLabel Then
+                                                                            ' The speaker has changed. Commit the previous speaker's segment.
+                                                                            Dim segmentToCommit As String = $"{currentSpeakerLabel}: {currentSegment.ToString().Trim()}"
+                                                                            Addline(segmentToCommit)
+
+                                                                            ' Start a new segment for the new speaker.
+                                                                            currentSegment.Clear()
+                                                                            currentSpeakerLabel = wordSpeakerLabel
+                                                                        End If
+
+                                                                        ' Append the current word to the segment.
+                                                                        currentSegment.Append(wordInfo.Word & " ")
+                                                                    Next
+
+                                                                    ' After the loop, commit the final segment.
+                                                                    If currentSegment.Length > 0 Then
+                                                                        Dim finalSegmentToCommit As String = $"{currentSpeakerLabel}: {currentSegment.ToString().Trim()}"
+                                                                        Addline(finalSegmentToCommit)
+                                                                    End If
+                                                                Else
+                                                                    ' --- Standard non-diarization logic ---
+                                                                    ' Just use the simple Addline method with the raw transcript.
+                                                                    Addline(finalTranscript)
+                                                                End If
+                                                            End If
                                                         End If
-                                                        lastSpeaker = w.SpeakerTag
+                                                    Else
+                                                        ' --- Interim result logic (remains the same) ---
+                                                        If result.Alternatives.Count > 0 Then
+                                                            Dim partialTranscript = result.Alternatives(0).Transcript
+                                                            PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = partialTranscript)
+                                                            _lastKnownPartialResult = partialTranscript
+                                                        End If
                                                     End If
-                                                    segment.Append(w.Word & " ")
                                                 Next
-                                                If segment.Length > 0 Then
-                                                    Dim finalLine = $"Speaker {lastSpeaker}: {segment.ToString().Trim()}"
-                                                    ReplaceAndAddLine(finalLine)
-                                                End If
+                                            End While
+
+                                            ' --- The rest of the Catch blocks remain the same ---
+                                        Catch ex As OperationCanceledException
+                                            Debug.WriteLine($"[ReaderTask] Gracefully cancelled via OperationCanceledException.")
+                                        Catch rex As RpcException
+                                            If token.IsCancellationRequested OrElse rex.StatusCode = StatusCode.Cancelled Then
+                                                Debug.WriteLine($"[ReaderTask] Gracefully cancelled via RpcException (Status: {rex.StatusCode}).")
                                             Else
-                                                ' Normales Hinzufügen ohne Speaker-Logik
-                                                Addline(result.Alternatives(0).Transcript)
+                                                Debug.WriteLine($"[ReaderTask] Unexpected RpcException (Status: {rex.StatusCode}). Requesting recovery...")
+                                                System.Threading.Tasks.Task.Run(Async Sub() Await TryRecoverGoogleStreamAsync())
                                             End If
-                                        Else
-                                            PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = result.Alternatives(0).Transcript)
-                                        End If
-                                    Next
-                                End While
-
-                            Catch ex As OperationCanceledException
-                                ' normaler Abbruch
-
-                            Catch rex As RpcException _
-                                When rex.Status.StatusCode = StatusCode.DeadlineExceeded _
-                                  OrElse rex.Status.StatusCode = StatusCode.Unavailable
-
-                                Debug.WriteLine($"GoogleReaderTask interrupted ({rex.Status.StatusCode}) – closing Reader…")
-                                ' Kein Reconnect hier, das übernimmt OnGoogleDataAvailable via RecoverGoogleStream
-
-                            Catch ex As Exception
-                                Debug.WriteLine($"GoogleReaderTask unexpected error: {ex}")
-                            End Try
-                        End Function)
-        End Sub
-
-
-        Private Function ConvertAudioToFloat(buffer As Byte()) As Single()
-            ' Each sample = 2 bytes (16-bit), so half as many float samples
-            Dim floatArray As Single() = New Single((buffer.Length \ 2) - 1) {}
-
-            ' Convert raw 16-bit PCM -> -1.0f..+1.0f
-            For i As Integer = 0 To buffer.Length - 2 Step 2
-                Dim sample As Short = BitConverter.ToInt16(buffer, i)
-                floatArray(i \ 2) = sample / 32768.0F
-            Next
-
-            Return floatArray
+                                        Catch ex As Exception
+                                            Debug.WriteLine($"[ReaderTask] UNEXPECTED FATAL ERROR: {ex.ToString()}")
+                                        End Try
+                                    End Sub)
+            Return newTask
         End Function
 
-        Private Sub OnLoopbackDataAvailable(sender As Object, e As WaveInEventArgs)
-            ' Buffer the system audio for later mixing
-            loopbackBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded)
+        Private Function GetSpeakerLabel(speakerTag As Integer) As String
+            ' Check if we've already seen this tag in this session.
+            If _speakerTagToLabelMap.ContainsKey(speakerTag) Then
+                ' Yes, return the consistent label we already assigned.
+                Return _speakerTagToLabelMap(speakerTag)
+            Else
+                ' No, this is a new speaker tag. Assign it a new label.
+                Dim newLabel As String = $"Speaker {_nextSpeakerNumber}"
+                _nextSpeakerNumber += 1
+
+                ' Store the mapping for future use.
+                _speakerTagToLabelMap.Add(speakerTag, newLabel)
+
+                Return newLabel
+            End If
+        End Function
+
+
+
+        Private Async Function TryRecoverGoogleStreamAsync() As System.Threading.Tasks.Task
+
+            ' Check if there is a pending partial result that we need to commit.
+            If Not String.IsNullOrWhiteSpace(_lastKnownPartialResult) Then
+                ' Create a copy to avoid any potential race conditions.
+                Dim partialToCommit As String = _lastKnownPartialResult
+
+                ' Reset the class-level variable immediately.
+                _lastKnownPartialResult = ""
+                _justCommittedPartialText = partialToCommit
+
+                ' Use the existing Addline method to append it to the RichTextBox.
+                ' Addline is already thread-safe as it uses Invoke.
+                Debug.WriteLine($"[TryRecover] Committing lost partial result: '{partialToCommit}'")
+                Addline(partialToCommit)
+            End If
+
+            ' Asynchronously wait to acquire the semaphore. If another thread already has it,
+            ' this thread will wait here without blocking a thread-pool thread.
+            Await recoverySemaphore.WaitAsync()
+            Try
+                ' Now that we have the lock, perform the actual recovery.
+                ' Any other threads calling this method will be waiting on the line above.
+                Debug.WriteLine($"[TryRecover] Acquired semaphore. Starting recovery... ts={DateTime.UtcNow:HH:mm:ss.fff}")
+                Await RecoverGoogleStream()
+                streamingStartTime = DateTime.UtcNow ' Reset the timer *after* successful recovery
+                Me.Invoke(Sub() StartApiWatchdogTimer())
+            Finally
+                ' CRITICAL: Always release the semaphore in a Finally block to prevent deadlocks.
+                recoverySemaphore.Release()
+                Debug.WriteLine($"[TryRecover] Released semaphore. ts={DateTime.UtcNow:HH:mm:ss.fff}")
+            End Try
+        End Function
+
+        Private Sub StartAudioQueueWriter()
+            writerTask = System.Threading.Tasks.Task.Run(
+                                        Async Sub()
+                                            Try
+                                                ' This loop will automatically exit when the queue is completed by
+                                                ' SafeCompleteAndDisposeGoogleStreamAsync.
+                                                For Each chunk As Google.Protobuf.ByteString In audioQueue.GetConsumingEnumerable()
+                                                    Try
+                                                        ' If the stream was disposed during recovery, exit the writer immediately.
+                                                        If _stream Is Nothing Then
+                                                            Debug.WriteLine("[Writer] Stream is null. Exiting task.")
+                                                            Return
+                                                        End If
+
+                                                        ' Send the audio chunk.
+                                                        Await _stream.WriteAsync(New StreamingRecognizeRequest With {.AudioContent = chunk})
+
+                                                    Catch ex As RpcException
+                                                        ' A gRPC error occurred (e.g., the stream was cancelled).
+                                                        ' This is an expected part of the shutdown/recovery cycle.
+                                                        ' We just log it and exit the writer task gracefully.
+                                                        Debug.WriteLine($"[Writer] RpcException (Status: {ex.StatusCode}). Exiting writer task.")
+                                                        Return ' Exit the task.
+
+                                                    Catch ex As NullReferenceException
+                                                        ' This can happen if _stream is set to Nothing by another thread.
+                                                        Debug.WriteLine("[Writer] Stream became null. Exiting writer task.")
+                                                        Return ' Exit the task.
+
+                                                    Catch ex As InvalidOperationException
+                                                        ' This can happen if the stream is used after being closed.
+                                                        Debug.WriteLine($"[Writer] InvalidOperationException (likely closed stream). Exiting writer task.")
+                                                        Return ' Exit the task.
+
+                                                    Catch ex As Exception
+                                                        ' Catch any other unexpected error.
+                                                        Debug.WriteLine($"[Writer] Unhandled exception in write loop: {ex.GetType().Name}. Exiting writer task.")
+                                                        Return ' Exit the task gracefully.
+                                                    End Try
+                                                Next
+
+                                            Catch ex As InvalidOperationException
+                                                ' This exception occurs if GetConsumingEnumerable is called on a collection
+                                                ' that has already been marked as complete and then disposed. This is an
+                                                ' expected and normal part of the recovery cycle.
+                                                Debug.WriteLine("[Writer] Task ending gracefully due to completed or disposed audio queue.")
+
+                                            Catch ex As Exception
+                                                ' A truly unexpected error occurred at the task level.
+                                                Debug.WriteLine($"[Writer] UNEXPECTED FATAL ERROR in writer task: {ex.ToString()}")
+                                            End Try
+                                        End Sub)
         End Sub
 
         Private Async Sub OnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
             If _googleStreamCompleted Then Return
+
+            'Debug.WriteLine($"[OnGoogleDataAvailable] start  ts={DateTime.UtcNow:HH:mm:ss.fff} ring={ringBuffer.Count} queue={audioQueue.Count}")
 
             Dim now = DateTime.UtcNow
             Dim elapsed = (now - streamingStartTime).TotalMilliseconds
@@ -9602,291 +10154,252 @@ Public Class ThisAddIn
                 End If
             End If
 
-            ' ——————— 2) Google-Chunk bauen ———————
             Dim chunk As Google.Protobuf.ByteString =
-        Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+                Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
 
-            ' ——————— 3) Wenn Streaming-Limit erreicht, sofort neu verbinden ———————
+            ' 1) Ins Ring-Buffer schreiben (maximal 50 Chunks)
+            SyncLock ringBuffer
+                ringBuffer.Enqueue(chunk)
+                If ringBuffer.Count > RING_BUFFER_SIZE Then ringBuffer.Dequeue()
+            End SyncLock
+
+            'Debug.WriteLine($"[OnGoogleDataAvailable] afterRing   ts={DateTime.UtcNow:HH:mm:ss.fff} ring={ringBuffer.Count}")
+
+            ' 2) In die Queue schreiben (sofern offen)
+            If Not audioQueue.IsAddingCompleted Then
+                audioQueue.Add(chunk)
+            End If
+
+            'Debug.WriteLine($"[OnGoogleDataAvailable] afterQueue  ts={DateTime.UtcNow:HH:mm:ss.fff} queue={audioQueue.Count}")
+
+            ' 3) Timeout prüfen und global recovern
             If elapsed > STREAMING_LIMIT_MS Then
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = DateTime.UtcNow
+                Debug.WriteLine($"[OnGoogleDataAvailable] Timeout detected. Requesting recovery... ts={DateTime.UtcNow:HH:mm:ss.fff}")
+                ' Fire-and-forget the recovery task so we don't block the audio processing event.
+                System.Threading.Tasks.Task.Run(Async Sub() Await TryRecoverGoogleStreamAsync())
+                ' We now reset the timer *inside* the safe recovery method, not here.
+                streamingStartTime = DateTime.UtcNow ' Resetting here is fine to prevent this from firing again immediately
                 Return
             End If
 
-            ' ——————— 4) NORMAL WRITE mit erweitertem Catch ———————
-            Dim writeFailed As Boolean = False
-            Try
-                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
-            .AudioContent = chunk
-        })
 
-            Catch exRpc As Grpc.Core.RpcException
-                ' Wenn Google wegen abgelaufenem Token oder Unverfügbarkeit zurückweist:
-                If exRpc.Status.StatusCode = Grpc.Core.StatusCode.DeadlineExceeded _
-                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.Unavailable _
-                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.Unauthenticated _
-                   OrElse exRpc.Status.StatusCode = Grpc.Core.StatusCode.PermissionDenied Then
-
-                    writeFailed = True
-                Else
-                    ' Ungewöhnlicher RPC-Status – protokollieren und Recover versuchen
-                    Debug.WriteLine($"Unexpected RpcException in OnGoogleDataAvailable: {exRpc.Status.StatusCode} – {exRpc.Status.Detail}")
-                    writeFailed = True
-                End If
-
-            Catch exIO As System.IO.IOException
-                ' Deckt WinHttpException Error 12019 und ähnliche I/O-Fehler ab
-                writeFailed = True
-
-            Catch exAny As System.Exception
-                ' Alles andere abfangen, damit der Callback nicht abstürzt
-                Debug.WriteLine($"Unexpected exception in OnGoogleDataAvailable: {exAny.Message}")
-                writeFailed = True
-            End Try
-
-            If writeFailed Then
-                ' ─── 5) Führe die komplette Wiederherstellung durch ───
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = DateTime.UtcNow
-            End If
         End Sub
 
 
-        Private Async Sub xxxOnGoogleDataAvailable(sender As Object, e As WaveInEventArgs)
-            If _googleStreamCompleted Then Return
+        Private Async Function RecoverGoogleStream() As System.Threading.Tasks.Task
+            Debug.WriteLine($"[RecoverGoogleStream] Starting...")
 
-            Dim now = DateTime.UtcNow
-            Dim elapsed = (now - streamingStartTime).TotalMilliseconds
+            ' --- 1. SHUTDOWN OLD COMPONENTS ---
+            ' Store the old task before we overwrite the class-level variable.
+            Dim oldReaderTask As System.Threading.Tasks.Task = Me.googleReaderTask
 
-            ' ——————— 1) MIX IN LOOPBACK (if enabled) ———————
-            If MultiSourceEnabled AndAlso loopbackCapture IsNot Nothing AndAlso loopbackResampler IsNot Nothing Then
-                ' prepare buffer
-                Dim mixBuf(e.BytesRecorded - 1) As Byte
-                ' read resampled system audio (same format/length as mic)
-                Dim bytesRead = loopbackResampler.Read(mixBuf, 0, e.BytesRecorded)
-                If bytesRead > 0 Then
-                    For i As Integer = 0 To bytesRead - 1 Step 2
-                        ' convert to Int16
-                        Dim micSample As Integer = BitConverter.ToInt16(e.Buffer, i)
-                        Dim outSample As Integer = BitConverter.ToInt16(mixBuf, i)
-                        Dim summedSample As Integer = micSample + outSample
-
-                        ' clamp
-                        If summedSample > Short.MaxValue Then summedSample = Short.MaxValue
-                        If summedSample < Short.MinValue Then summedSample = Short.MinValue
-
-                        ' write back
-                        Dim ba() As Byte = BitConverter.GetBytes(CShort(summedSample))
-                        e.Buffer(i) = ba(0)
-                        e.Buffer(i + 1) = ba(1)
-                    Next
-                End If
+            ' Cancel the old reader's token source.
+            If readerCts IsNot Nothing Then
+                Try
+                    readerCts.Cancel()
+                    Debug.WriteLine($"[RecoverGoogleStream] Old CancellationTokenSource cancelled.")
+                Catch ex As Exception
+                    ' Ignore
+                End Try
             End If
 
-            ' ——————— 2) BUILD THE GOOGLE CHUNK ———————
-            Dim chunk As Google.Protobuf.ByteString =
-        Google.Protobuf.ByteString.CopyFrom(e.Buffer, 0, e.BytesRecorded)
+            ' Gracefully complete and dispose of the old stream object.
+            ' This will help the old reader task exit cleanly.
+            Await SafeCompleteAndDisposeGoogleStreamAsync(readerCts.Token)
+            Debug.WriteLine($"[RecoverGoogleStream] Old stream disposed.")
 
-            ' ——————— 3) RECONNECT LOGIC ———————
-            If elapsed > STREAMING_LIMIT_MS Then
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = DateTime.UtcNow
-                Return
+            ' Now, explicitly wait for the old reader task to finish.
+            ' This is the KEY to preventing the race condition.
+            If oldReaderTask IsNot Nothing Then
+                Try
+                    Await oldReaderTask
+                    Debug.WriteLine($"[RecoverGoogleStream] Old reader task has completed.")
+                Catch ex As Exception
+                    ' We expect exceptions here (like TaskCanceled), so we just log and continue.
+                    Debug.WriteLine($"[RecoverGoogleStream] Awaiting old reader task threw: {ex.GetType().Name}")
+                End Try
             End If
 
-            ' ——————— 4) NORMAL WRITE ———————
-            Dim shouldRecover As Boolean = False
-            Try
-                Await _stream.WriteAsync(New StreamingRecognizeRequest With {
-            .AudioContent = chunk
-        })
-            Catch ex As RpcException _
-         When ex.Status.StatusCode = StatusCode.DeadlineExceeded _
-           OrElse ex.Status.StatusCode = StatusCode.Unavailable
-                shouldRecover = True
-            End Try
+            ' --- 2. INITIALIZE NEW COMPONENTS ---
 
-            If shouldRecover Then
-                Await RecoverGoogleStream(chunk)
-                streamingStartTime = DateTime.UtcNow
-            End If
-        End Sub
-
-
-        ''' <summary>
-        ''' Wenn ein WriteAsync fehlschlägt (z.B. weil der JWT abgelaufen ist oder WinHttpError), 
-        ''' holt diese Routine einen neuen Token, baut den SpeechClient neu auf und 
-        ''' öffnet eine neue Streaming-Verbindung. Anschließend sendet sie das fehlgeschlagene Chunk 
-        ''' erneut.
-        ''' </summary>
-        Private Async Function RecoverGoogleStream(failedChunk As Google.Protobuf.ByteString) As System.Threading.Tasks.Task
-            Try
-                ' ─── 1) Frischen Token abrufen ───
-                Dim newToken As String
-                If STTSecondAPI Then
-                    newToken = Await GetFreshAccessToken(
-                _context,
-                INI_OAuth2ClientMail_2,
-                INI_OAuth2Scopes_2,
-                INI_APIKey_2,
-                INI_OAuth2Endpoint_2,
-                INI_OAuth2ATExpiry_2,
-                True
-            )
-                Else
-                    newToken = Await GetFreshAccessToken(
-                _context,
-                INI_OAuth2ClientMail,
-                INI_OAuth2Scopes,
-                INI_APIKey,
-                INI_OAuth2Endpoint,
-                INI_OAuth2ATExpiry,
-                False
-            )
-                End If
-
-                ' ─── 2) Den SpeechClient mit neuem Header-Interceptor aufbauen ───
-                Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+            ' This block is mostly the same, creating the new client and stream.
+            Dim newToken As String = Await GetFreshSTTToken(STTSecondAPI)
+            Dim callCreds = Grpc.Core.CallCredentials.FromInterceptor(
             Async Function(contextCall, metadata)
-                ' Dieser Interceptor benutzt explizit den gerade angeforderten newToken
-                metadata.Add("Authorization", $"Bearer {newToken}")
-                Await System.Threading.Tasks.Task.CompletedTask
-            End Function
-        )
-
-                Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
-            Grpc.Core.ChannelCredentials.SecureSsl,
-            callCreds
-        )
-
-                Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
-            .Endpoint = "eu-speech.googleapis.com",
-            .ChannelCredentials = channelCreds
-        }
-                client = builder.Build()
-
-                ' ─── 3) Streaming neu initialisieren ───
-                streamingStartTime = DateTime.UtcNow
-                ResetGoogleStreamFlag()
-                Await InitializeGoogleStream()
-
-                ' ─── 4) Reader-Task neu starten ───
-                StartGoogleReaderTask()
-
-                ' ─── 5) Offset zurücksetzen, damit die Partial-Ersetzungen wieder am richtigen Punkt starten ───
-                Dim offset As Integer = 0
-                Me.Invoke(Sub() offset = RichTextBox1.TextLength)
-                googleTranscriptStart = offset
-
-                ' ─── 6) Fehlgeschlagenes Chunk erneut senden ───
-                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
-            .AudioContent = failedChunk
-        })
-
-            Catch ex As System.Exception
-                ' Im Fehlerfall wenigstens Protokollieren
-                Debug.WriteLine($"Error in RecoverGoogleStream: {ex.Message}")
-            End Try
-        End Function
-
-        Private Async Function xxRecoverGoogleStream(failedChunk As Google.Protobuf.ByteString) As System.Threading.Tasks.Task
-            Try
-                ' ─── 1) GET A FRESH ACCESS TOKEN ───
-                Dim newToken As String
-
-                If STTSecondAPI Then
-                    ' Refresh for API #2
-                    newToken = Await GetFreshAccessToken(
-                _context,
-                INI_OAuth2ClientMail_2,
-                INI_OAuth2Scopes_2,
-                INI_APIKey_2,
-                INI_OAuth2Endpoint_2,
-                INI_OAuth2ATExpiry_2,
-                True)
-                Else
-                    ' Refresh for API #1
-                    newToken = Await GetFreshAccessToken(
-                _context,
-                INI_OAuth2ClientMail,
-                INI_OAuth2Scopes,
-                INI_APIKey,
-                INI_OAuth2Endpoint,
-                INI_OAuth2ATExpiry,
-                False)
-                End If
-
-                ' ─── 2) REBUILD THE CLIENT WITH NEW CALL CREDENTIALS ───
-                Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
-            Async Function(context, metadata)
                 metadata.Add("Authorization", $"Bearer {newToken}")
                 Await System.Threading.Tasks.Task.CompletedTask
             End Function)
+            Dim channelCreds = Grpc.Core.ChannelCredentials.Create(
+            Grpc.Core.ChannelCredentials.SecureSsl, callCreds)
+            Dim builder = New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+                                .Endpoint = STTEndpoint,
+                                .ChannelCredentials = channelCreds
+                            }
+            client = builder.Build()
 
-                Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
-            Grpc.Core.ChannelCredentials.SecureSsl,
-            callCreds)
+            ' Initialize the new stream.
+            ' It's important that the call to InitializeGoogleStream happens *after*
+            ' the old stream and reader are fully dead.
+            ResetGoogleStreamFlag()
+            Await InitializeGoogleStream()
+            Debug.WriteLine($"[RecoverGoogleStream] New stream initialized.")
 
-                Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
-            .Endpoint = "eu-speech.googleapis.com",
+            ' --- 3. START NEW TASKS ---
+
+            ' First, start the writer task. It needs a fresh audioQueue.
+            ' You have a bug in SafeCompleteAndDisposeGoogleStreamAsync where you permanently close the queue.
+            ' Let's fix that too. First, we need a NEW audio queue.
+            audioQueue = New System.Collections.Concurrent.BlockingCollection(Of ByteString)()
+            StartAudioQueueWriter()
+            Debug.WriteLine($"[RecoverGoogleStream] New writer task started.")
+
+            ' Now that everything old is gone, start the new reader task
+            ' and assign it to our class-level variable.
+            Me.googleReaderTask = StartGoogleReaderTask()
+            Debug.WriteLine($"[RecoverGoogleStream] New reader task started.")
+        End Function
+
+
+        Private Async Function xRecoverGoogleStream() As System.Threading.Tasks.Task
+
+            'Debug.WriteLine($"[RecoverGoogleStream] start      ts={DateTime.UtcNow:HH:mm:ss.fff} ring={ringBuffer.Count} queue={audioQueue.Count}")
+
+            Try
+                ' ─── 1) Neuer Token & Client wie gehabt ───
+                Dim newToken As String = Await GetFreshSTTToken(STTSecondAPI)
+                Dim callCreds = Grpc.Core.CallCredentials.FromInterceptor(
+            Async Function(contextCall, metadata)
+                metadata.Add("Authorization", $"Bearer {newToken}")
+                Await System.Threading.Tasks.Task.CompletedTask
+            End Function)
+                Dim channelCreds = Grpc.Core.ChannelCredentials.Create(
+            Grpc.Core.ChannelCredentials.SecureSsl, callCreds)
+                Dim builder = New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+            .Endpoint = STTEndpoint,
             .ChannelCredentials = channelCreds
         }
                 client = builder.Build()
 
-                ' ─── 3) RE-INITIALIZE THE STREAM ───
+                ' ─── 2) Stream neu initialisieren ───
                 streamingStartTime = DateTime.UtcNow
                 ResetGoogleStreamFlag()
-
-                ' Call InitializeGoogleStream on the brand-new client/credentials
                 Await InitializeGoogleStream()
 
-                ' ─── 4) RESTART THE READER TASK ───
-                StartGoogleReaderTask()
+                'Debug.WriteLine($"[RecoverGoogleStream] inited     ts={DateTime.UtcNow:HH:mm:ss.fff}")
 
-                ' ─── 5) RESET THE “googleTranscriptStart” OFFSET ───
+                ' ─── 3) Offset zurücksetzen ───
                 Dim offset As Integer = 0
                 Me.Invoke(Sub() offset = RichTextBox1.TextLength)
                 googleTranscriptStart = offset
 
-                ' ─── 6) RESEND THE FAILED CHUNK ───
-                Await _stream.WriteAsync(New Google.Cloud.Speech.V1.StreamingRecognizeRequest With {
-            .AudioContent = failedChunk
-        })
+                ' ─── 4) Ring-Buffer wieder in die Queue spielen ───
+                SyncLock ringBuffer
+                    For Each oldChunk In ringBuffer
+                        audioQueue.Add(oldChunk)
+                    Next
+                End SyncLock
+
+                'Debug.WriteLine($"[RecoverGoogleStream] requeued   ts={DateTime.UtcNow:HH:mm:ss.fff} ring={ringBuffer.Count} queue={audioQueue.Count}")
+
+                ' ─── 5) Reader neu starten ───
+                StartGoogleReaderTask()
+
+                SyncLock ringBuffer
+                    ringBuffer.Clear()
+                End SyncLock
+
+
+                'Debug.WriteLine($"[RecoverGoogleStream] completed  ts={DateTime.UtcNow:HH:mm:ss.fff}")
+
 
             Catch ex As System.Exception
-                Debug.WriteLine($"Error in RecoverGoogleStream: {ex.Message}")
+                'Debug.WriteLine($"[RecoverGoogleStream] ERROR      ts={DateTime.UtcNow:HH:mm:ss.fff} ex={ex.Message}")
+
             End Try
         End Function
 
 
 
-        Private Async Function SafeCompleteAndDisposeGoogleStreamAsync() As System.Threading.Tasks.Task
+        Private Async Function xxSafeCompleteAndDisposeGoogleStreamAsync(token As CancellationToken) As System.Threading.Tasks.Task
+            ' 1) Beende den Stream sauber
             Try
                 If _stream IsNot Nothing AndAlso Not _googleStreamCompleted Then
-                    ' Einmalig WriteCompleteAsync
                     Await _stream.WriteCompleteAsync()
                     _googleStreamCompleted = True
+                    ' ► KEIN CompleteAdding() hier!
                 End If
-
-                ' Reader‐Task sauber abschließen
-                Await googleReaderTask
-
-            Catch ex As InvalidOperationException
-                ' Sollte nur passieren, wenn WriteCompleteAsync doch nochmal kam => ignorieren
-                Debug.WriteLine($"Google STT SafeComplete ignore second WriteCompleteAsync: {ex.Message}")
-
-            Catch ex As Grpc.Core.RpcException
-                Debug.WriteLine($"Google STT SafeComplete gRPC Error: {ex.Status.StatusCode} – {ex.Status.Detail}")
-
-            Catch ex As Exception
-                Debug.WriteLine($"Google STT SafeComplete unexpected error: {ex.Message}")
-            Finally
-                If _stream IsNot Nothing Then
-                    _stream.Dispose()
-                    _stream = Nothing
-                End If
+            Catch ex As System.Exception
+                Debug.WriteLine($"Error in SafeComplete…: {ex.Message}")
             End Try
+
+            ' 2) Jetzt erst: Queue schließen und auf writerTask warten
+            audioQueue.CompleteAdding()
+            Await writerTask
+
+            ' 3) Finally: Stream-Objekt freigeben
+            If _stream IsNot Nothing Then
+                _stream.Dispose()
+                _stream = Nothing
+            End If
         End Function
+
+        Private Async Function SafeCompleteAndDisposeGoogleStreamAsync(token As CancellationToken) As System.Threading.Tasks.Task
+            ' 1) Beende den Stream sauber
+            Try
+                ' ONLY try to complete the stream if it's still valid AND hasn't been forcibly cancelled.
+                If _stream IsNot Nothing AndAlso Not _googleStreamCompleted AndAlso Not token.IsCancellationRequested Then
+                    Await _stream.WriteCompleteAsync()
+                End If
+            Catch ex As RpcException When ex.StatusCode = StatusCode.Cancelled
+                ' This is an expected exception if the stream was cancelled while we tried to complete it.
+                ' We can safely ignore it and proceed with cleanup.
+                Debug.WriteLine($"[SafeComplete] Ignored expected RpcException (Cancelled).")
+            Catch ex As Exception
+                ' Catch other potential errors but don't let them stop the cleanup process.
+                Debug.WriteLine($"[SafeComplete] Error during WriteCompleteAsync: {ex.Message}")
+            End Try
+
+            _googleStreamCompleted = True
+
+            ' 2) Wait for the writerTask to finish.
+            ' It will finish either because the queue was completed or it hit an exception.
+            If writerTask IsNot Nothing AndAlso Not writerTask.IsCompleted Then
+                Try
+                    ' Don't try to complete the queue if it's already done.
+                    If Not audioQueue.IsAddingCompleted Then
+                        audioQueue.CompleteAdding()
+                    End If
+                    Await writerTask
+                Catch ex As Exception
+                    Debug.WriteLine($"[SafeComplete] Error while awaiting writerTask: {ex.Message}")
+                End Try
+            End If
+
+            ' 3) Finally: Stream-Objekt freigeben
+            ' This is a local method call, not the gRPC object. This is safe.
+            _stream?.Dispose()
+            _stream = Nothing
+        End Function
+
+
+
+        Private Function ConvertAudioToFloat(buffer As Byte()) As Single()
+            ' Each sample = 2 bytes (16-bit), so half as many float samples
+            Dim floatArray As Single() = New Single((buffer.Length \ 2) - 1) {}
+
+            ' Convert raw 16-bit PCM -> -1.0f..+1.0f
+            For i As Integer = 0 To buffer.Length - 2 Step 2
+                Dim sample As Short = BitConverter.ToInt16(buffer, i)
+                floatArray(i \ 2) = sample / 32768.0F
+            Next
+
+            Return floatArray
+        End Function
+
+        Private Sub OnLoopbackDataAvailable(sender As Object, e As WaveInEventArgs)
+            ' Buffer the system audio for later mixing
+            loopbackBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded)
+        End Sub
 
 
         Private Async Sub OnAudioDataAvailable(sender As Object, e As WaveInEventArgs)
@@ -9978,8 +10491,6 @@ Public Class ThisAddIn
 
         End Sub
 
-
-
         Private Async Function ProcessWhisper(samples As Single()) As Threading.Tasks.Task
             Try
                 If STTCanceled Then Return
@@ -10049,6 +10560,7 @@ Public Class ThisAddIn
                 capturing = False
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
+                Me.AudioButton.Enabled = True
                 Me.LoadButton.Enabled = True
                 Me.cultureComboBox.Enabled = True
                 Me.deviceComboBox.Enabled = True
@@ -10102,58 +10614,156 @@ Public Class ThisAddIn
         End Function
 
 
-        Public Async Function GoogleTranscribeAudioFile(filepath As String) As System.Threading.Tasks.Task
-            Try
-                PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = $"{GoogleSTT_Desc} is reading and transcribing your file... (press Esc to abort)")
+        ''' <summary>
+        ''' Teilt eine Audiodatei in <60 s-Slices, ruft RecognizeAsync auf und beendet sich danach selbst.
+        ''' </summary>
+        Public Async Function GoogleChunkedTranscribeAudioFile(filepath As String) _
+        As System.Threading.Tasks.Task
 
-                ' Load raw PCM bytes (16 kHz, 16‑bit, mono) via your existing helper
-                Dim pcmData As Byte() = LoadAudioToPCM(filepath)
+            ' ─── 0) Stelle sicher, dass client initialisiert ist ───
+            If client Is Nothing Then
+                Dim tokenToSend As String = Await GetFreshSTTToken(STTSecondAPI)
+                Dim callCreds As Grpc.Core.CallCredentials = Grpc.Core.CallCredentials.FromInterceptor(
+            Async Function(contextCall, metadata)
+                metadata.Add("Authorization", $"Bearer {tokenToSend}")
+                Await System.Threading.Tasks.Task.CompletedTask
+            End Function
+        )
+                Dim channelCreds As Grpc.Core.ChannelCredentials = Grpc.Core.ChannelCredentials.Create(
+            Grpc.Core.ChannelCredentials.SecureSsl,
+            callCreds
+        )
+                Dim builder As New Google.Cloud.Speech.V1.SpeechClientBuilder() With {
+            .Endpoint = STTEndpoint,
+            .ChannelCredentials = channelCreds
+        }
+                client = builder.Build()
+            End If
 
-                ' Stream in small chunks
-                Const chunkSize As Integer = 4096
-                Dim offset As Integer = 0
+            ' ─── 1) Lade PCM-Daten (16 kHz, mono, 16 Bit) ───
+            Dim pcmData As Byte() = LoadAudioToPCM(filepath)
 
-                STTCanceled = False
+            ' ─── 2) Chunk-Parameter ───
+            Dim bytesPerSec As Integer = 16000 * 2      ' 32 000 B/s
+            Dim sliceLenSec As Integer = 50
+            Dim overlapSec As Integer = 2
+            Dim sliceSize As Integer = sliceLenSec * bytesPerSec
+            Dim overlapSize As Integer = overlapSec * bytesPerSec
+            Dim offset As Integer = 0
 
-                While offset < pcmData.Length AndAlso Not STTCanceled AndAlso capturing
-                    ' Allow user to abort
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
-                        Exit While
+            ' ─── 3) Schleife über alle Slices ───
+            While offset < pcmData.Length AndAlso Not STTCanceled
+                Dim endPos = Math.Min(offset + sliceSize, pcmData.Length)
+                Dim slice(endPos - offset - 1) As Byte
+                Array.Copy(pcmData, offset, slice, 0, endPos - offset)
+
+                ' ─── 4) RecognitionConfig bauen ───
+                Dim config As New Google.Cloud.Speech.V1.RecognitionConfig With {
+            .Encoding = Google.Cloud.Speech.V1.RecognitionConfig.Types.AudioEncoding.Linear16,
+            .SampleRateHertz = 16000,
+            .LanguageCode = GoogleLanguageCode,
+            .EnableAutomaticPunctuation = True,
+            .Model = "latest_long",
+            .UseEnhanced = True
+        }
+                Dim audio As Google.Cloud.Speech.V1.RecognitionAudio =
+            Google.Cloud.Speech.V1.RecognitionAudio.FromBytes(slice)
+
+                ' ─── 5) Sync-API-Call ───
+                Dim response As Google.Cloud.Speech.V1.RecognizeResponse =
+            Await client.RecognizeAsync(config, audio)
+
+                ' ─── 6) Ergebnisse anhängen ───
+                For Each result As Google.Cloud.Speech.V1.SpeechRecognitionResult In response.Results
+                    If result.Alternatives.Count > 0 Then
+                        Addline(result.Alternatives(0).Transcript)
                     End If
+                Next
 
-                    Dim length = Math.Min(chunkSize, pcmData.Length - offset)
-                    Dim chunk = Google.Protobuf.ByteString.CopyFrom(pcmData, offset, length)
-                    Await _stream.WriteAsync(New StreamingRecognizeRequest With {.AudioContent = chunk})
-                    offset += length
-                End While
-
-                ' If we exited because of cancellation, the StopButton_Click Task.Run
-                ' will take care of the real StopRecording and UI cleanup.
-
-                ' If we ran to completion without cancellation, we can:
-                If Not STTCanceled Then
-                    ' cleanly finish the stream here
-                    Await SafeCompleteAndDisposeGoogleStreamAsync()
-
-                    ' then re‑enable UI on the UI thread
-                    Me.Invoke(Sub()
-                                  StartButton.Enabled = True
-                                  StopButton.Enabled = False
-                                  LoadButton.Enabled = True
-                                  cultureComboBox.Enabled = True
-                                  deviceComboBox.Enabled = True
-                                  SpeakerIdent.Enabled = True
-                                  SpeakerDistance.Enabled = True
-                                  PartialTextLabel.Text = String.Empty
-                                  capturing = False
-                              End Sub)
-
-                    ShowCustomMessageBox("The transcription of your file is complete.")
+                ' ─── 7) Wenn das letzte Slice war, Abbruch ───
+                If endPos >= pcmData.Length Then
+                    Exit While
                 End If
 
-            Catch ex As System.Exception
-                Debug.WriteLine($"Error in GoogleTranscribeAudioFile: {ex.Message}")
-            End Try
+                ' ansonsten Offset mit Überlappung weiter
+                offset = endPos - overlapSize
+                If offset < 0 Then offset = 0
+            End While
+
+            ' ─── 8) Abschlussmeldung ───
+            ShowCustomMessageBox("Chunked transcription complete.", $"{AN} Transcriptor")
+        End Function
+
+
+
+        ''' <summary>
+        ''' Transcribe a local file via StreamingRecognize by feeding the existing
+        ''' audioQueue → writerTask → readerTask pipeline, then cleanly shutting down.
+        ''' </summary>
+        Public Async Function GoogleFileStreamTranscription(filepath As String) As System.Threading.Tasks.Task
+            ' 1) UI-Status
+            PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = $"{GoogleSTT_Desc} streaming file…")
+
+            ' 2) Initialisiere den Stream und Reader
+            readerCts = New CancellationTokenSource()
+            Await StartGoogleSTT()                             ' öffnet _stream & schreibt Config
+            googleTranscriptStart = RichTextBox1.TextLength
+            googleReaderTask = StartGoogleReaderTask()         ' startet das Lesen der Antworten
+
+            ' 3) Queue & Writer zurücksetzen
+            audioQueue = New BlockingCollection(Of Google.Protobuf.ByteString)()
+            StartAudioQueueWriter()                            ' schreibt später aus audioQueue in _stream
+
+            ' 4) PCM-Daten laden
+            Dim pcmFull As Byte() = LoadAudioToPCM(filepath)
+
+            ' 5) RIFF-Header entfernen, falls WAV
+            Dim pcmData = If(
+        pcmFull.Length > 44 AndAlso
+        System.Text.Encoding.ASCII.GetString(pcmFull, 0, 4) = "RIFF",
+        pcmFull.Skip(44).ToArray(),
+        pcmFull
+    )
+
+            ' 6) In file-Tempo (16 kHz) in die Queue legen
+            Const chunkSize As Integer = 4096
+            Dim bytesPerSec As Integer = 16000 * 2  ' 16 kHz × 16 Bit Mono = 32 000 B/s
+            Dim pos As Integer = 0
+
+            While pos < pcmData.Length AndAlso Not STTCanceled
+                Dim len = Math.Min(chunkSize, pcmData.Length - pos)
+                Dim chunk = Google.Protobuf.ByteString.CopyFrom(pcmData, pos, len)
+                audioQueue.Add(chunk)
+
+                ' → hier wird das Tempo gedrosselt:
+                Dim delayMs = CInt(1000.0 * len / bytesPerSec)
+                Await System.Threading.Tasks.Task.Delay(delayMs)
+
+                pos += len
+            End While
+
+            ' 7) Queue schließen → Writer weiß, dass kein Nachschub mehr kommt
+            audioQueue.CompleteAdding()
+
+            ' 8) Stream sauber beenden & auf readerTask warten
+            Await SafeCompleteAndDisposeGoogleStreamAsync(readerCts.Token)
+            Await googleReaderTask
+
+            ' 9) Cleanup & UI wieder freigeben
+            StopApiWatchdogTimer()
+            PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "")
+            ShowCustomMessageBox("Streaming transcription complete.", $"{AN} Transcriptor")
+            Me.Invoke(Sub()
+                          capturing = False
+                          StartButton.Enabled = True
+                          StopButton.Enabled = False
+                          LoadButton.Enabled = True
+                          AudioButton.Enabled = True
+                          cultureComboBox.Enabled = True
+                          deviceComboBox.Enabled = True
+                          SpeakerIdent.Enabled = True
+                          SpeakerDistance.Enabled = True
+                      End Sub)
         End Function
 
 
@@ -10234,6 +10844,7 @@ Public Class ThisAddIn
                 Me.StartButton.Enabled = True
                 Me.StopButton.Enabled = False
                 Me.LoadButton.Enabled = True
+                Me.AudioButton.Enabled = True
                 Me.cultureComboBox.Enabled = True
                 Me.deviceComboBox.Enabled = True
                 Me.SpeakerIdent.Enabled = True
@@ -10423,24 +11034,28 @@ Public Class ThisAddIn
         End Function
 
 
-        Private Sub Addline(completedline As String)
 
+        Private Sub Addline(completedline As String)
             completedline = completedline.Trim()
 
             SyncLock finalText
                 finalText.AppendLine(completedline)
             End SyncLock
 
+            ' This block is now deadlock-safe because it only writes to the UI.
             RichTextBox1.Invoke(Sub()
-                                    RichTextBox1.AppendText(completedline & vbCrLf)
+                                    ' Clear the partial text label
                                     PartialTextLabel.Text = ""
-                                    If String.IsNullOrWhiteSpace(RichTextBox1.SelectedText) Then
-                                        RichTextBox1.SelectionStart = RichTextBox1.Text.Length
-                                        RichTextBox1.ScrollToCaret()
-                                    End If
-                                End Sub)
 
+                                    ' Append the new completed line. AppendText is generally a safe "write" operation.
+                                    RichTextBox1.AppendText(completedline & vbCrLf)
+
+                                    RichTextBox1.SelectionStart = RichTextBox1.Text.Length
+                                    RichTextBox1.ScrollToCaret()
+                                    If STTModel = "google" Then googleTranscriptStart = RichTextBox1.TextLength
+                                End Sub)
         End Sub
+
 
         Private Sub ReplaceAndAddLine(fullTranscript As String)
             RichTextBox1.Invoke(Sub()
@@ -10451,6 +11066,7 @@ Public Class ThisAddIn
                                     ' 3) reset the caret to the end
                                     RichTextBox1.SelectionStart = RichTextBox1.Text.Length
                                     RichTextBox1.ScrollToCaret()
+                                    If STTModel = "google" Then googleTranscriptStart = RichTextBox1.TextLength
                                 End Sub)
         End Sub
 
@@ -10624,18 +11240,223 @@ Public Class ThisAddIn
     End Sub
 
 
+    ' Text-to-Speech Engine 
+
+    Private Shared TTS_PreExistingSleepBlocker As Boolean = False
+
+    Public Enum TTSEngine
+        Google = 0
+        OpenAI = 1
+    End Enum
+
+    Public Shared TTS_SelectedEngine As TTSEngine = TTSEngine.Google
+
+    Public Sub DetectTTSEngines()
+        ' — split auth endpoints —
+
+        Dim auth1 As String = ThisAddIn.INI_Endpoint
+        Dim auth2 As String = ThisAddIn.INI_Endpoint_2
+
+        ' — split TTS endpoints —
+        Dim ttsEps = If(String.IsNullOrEmpty(ThisAddIn.INI_TTSEndpoint),
+                     Array.Empty(Of String)(),
+                     INI_TTSEndpoint.Split("¦"c))
+        Dim tts1 As String = If(ttsEps.Length > 0, ttsEps(0), "")
+        Dim tts2 As String = If(ttsEps.Length > 1, ttsEps(1), "")
+
+        ' reset
+        TTS_googleAvailable = False : TTS_googleSecondary = False
+        TTS_openAIAvailable = False : TTS_openAISecondary = False
+        TTS_GoogleEndpoint = "" : TTS_OpenAIEndpoint = ""
+
+        ' — Google (needs OAuth2 flags) —
+        If auth1.Contains(GoogleIdentifier) AndAlso ThisAddIn.INI_OAuth2 Then
+            TTS_googleAvailable = True
+            TTS_googleSecondary = False
+        End If
+        If auth2.Contains(GoogleIdentifier) AndAlso ThisAddIn.INI_OAuth2_2 Then
+            TTS_googleAvailable = True
+            TTS_googleSecondary = True
+        End If
+
+        ' — OpenAI (no OAuth2) —
+        If auth1.Contains(OpenAIIdentifier) Then
+            TTS_openAIAvailable = True
+            TTS_openAISecondary = False
+        End If
+        If auth2.Contains(OpenAIIdentifier) Then
+            TTS_openAIAvailable = True
+            TTS_openAISecondary = True
+        End If
+
+        ' — assign TTS URIs based on identifier match —
+        If tts1.Contains(GoogleIdentifier) Then TTS_GoogleEndpoint = tts1
+        If tts2.Contains(GoogleIdentifier) Then TTS_GoogleEndpoint = tts2
+
+        If tts1.Contains(OpenAIIdentifier) Then TTS_OpenAIEndpoint = tts1
+        If tts2.Contains(OpenAIIdentifier) Then TTS_OpenAIEndpoint = tts2
+
+        ' if neither engine auth-configured, bail early
+        If Not TTS_googleAvailable AndAlso Not TTS_openAIAvailable Then
+            Return
+        End If
+    End Sub
+
+    Private Shared Function UseSecondaryFor(engine As TTSEngine) As Boolean
+        If engine = TTSEngine.Google Then
+            Return TTS_googleSecondary
+        Else
+            Return TTS_openAISecondary
+        End If
+    End Function
+
+
+    ' Token-Cache für TTS
+    Private Shared ttsAccessToken1 As String = String.Empty
+    Private Shared ttsTokenExpiry1 As DateTime = DateTime.MinValue
+    Private Shared ttsAccessToken2 As String = String.Empty
+    Private Shared ttsTokenExpiry2 As DateTime = DateTime.MinValue
+
+    Private Shared Async Function GetFreshTTSToken(useSecond As Boolean) _
+    As System.Threading.Tasks.Task(Of String)
+
+        Try
+            Dim token As String
+            Dim expiry As DateTime
+
+            If useSecond Then
+                token = ttsAccessToken2
+                expiry = ttsTokenExpiry2
+            Else
+                token = ttsAccessToken1
+                expiry = ttsTokenExpiry1
+            End If
+
+            ' Wenn kein Token oder abgelaufen, neuen holen
+            If String.IsNullOrEmpty(token) OrElse DateTime.UtcNow >= expiry Then
+                ' Parameter je nach gewählter API
+                Dim clientEmail = If(useSecond, INI_OAuth2ClientMail_2, INI_OAuth2ClientMail)
+                Dim scopes = If(useSecond, INI_OAuth2Scopes_2, INI_OAuth2Scopes)
+                Dim rawKey = If(useSecond, INI_APIKey_2, INI_APIKey)
+                Dim authServer = If(useSecond, INI_OAuth2Endpoint_2, INI_OAuth2Endpoint)
+                Dim life = If(useSecond, INI_OAuth2ATExpiry_2, INI_OAuth2ATExpiry)
+
+                ' GoogleOAuthHelper konfigurieren
+                GoogleOAuthHelper.client_email = clientEmail
+                GoogleOAuthHelper.private_key = TranscriptionForm.FormatPrivateKey(rawKey)
+                GoogleOAuthHelper.scopes = scopes
+                GoogleOAuthHelper.token_uri = authServer
+                GoogleOAuthHelper.token_life = life
+
+                ' neuen Token holen
+                Dim newToken As String = Await GoogleOAuthHelper.GetAccessToken()
+                Dim newExpiry = DateTime.UtcNow.AddSeconds(life - 300)
+
+                If useSecond Then
+                    ttsAccessToken2 = newToken
+                    ttsTokenExpiry2 = newExpiry
+                Else
+                    ttsAccessToken1 = newToken
+                    ttsTokenExpiry1 = newExpiry
+                End If
+
+                token = newToken
+            End If
+
+            Return token
+
+        Catch ex As System.Exception
+            System.Windows.Forms.MessageBox.Show(
+            $"Error fetching TTS token: {ex.Message}",
+            "TTS Error",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+            Return String.Empty
+        End Try
+    End Function
+
     Public Shared cts As New CancellationTokenSource()
 
-    Public Shared Async Function GenerateAudioFromText(input As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional nossml As Boolean = False, Optional Pitch As Double = 0, Optional SpeakingRate As Double = 1, Optional CurrentPara As String = "") As Task(Of Byte())
+    Private Shared Async Function GenerateOpenAITTSAsync(
+        input As String,
+        languageCode As String,
+        voiceName As String,
+        pitch As Double,
+        speakingRate As Double
+    ) As Task(Of Byte())
+
         Try
+
+            System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
+
+            Dim apiKey = If(TTS_openAISecondary, DecodedAPI_2, DecodedAPI)
+
+            Debug.WriteLine($"[TTS] OpenAI endpoint = '{TTS_OpenAIEndpoint}'")
+            Debug.WriteLine($"[TTS] OpenAI API Key = '{apiKey}'")
+
+            Using client As New System.Net.Http.HttpClient()
+                client.DefaultRequestHeaders.Authorization =
+                New Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey)
+
+                ' build JSON
+                Dim j = New JObject From {
+                {"model", TTS_OpenAI_Model},
+                {"input", input},
+                {"voice", voiceName},
+                {"response_format", "mp3"},
+                {"instructions", ""}
+            }
+
+                Dim content = New StringContent(j.ToString(), Encoding.UTF8, "application/json")
+
+                ' POST to the detected OpenAI endpoint
+                Dim resp = Await client.PostAsync(TTS_OpenAIEndpoint, content).ConfigureAwait(False)
+                If resp.IsSuccessStatusCode Then
+                    Return Await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(False)
+                Else
+                    Dim err = Await resp.Content.ReadAsStringAsync().ConfigureAwait(False)
+                    Throw New System.Exception($"OpenAI TTS Error {resp.StatusCode}: {err}")
+                End If
+            End Using
+        Catch ex As Exception
+            MessageBox.Show($"Error in GenerateOpenAITTSAsync: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+    End Function
+
+
+
+    Public Shared Async Function GenerateAudioFromText(input As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional nossml As Boolean = False, Optional Pitch As Double = 0, Optional SpeakingRate As Double = 1, Optional CurrentPara As String = "") As Task(Of Byte())
+
+        Try
+
+            If IsNothing(prevExecState) Then
+                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
+                TTS_PreExistingSleepBlocker = False
+            Else
+                TTS_PreExistingSleepBlocker = True
+            End If
+
+            Dim eng = TTS_SelectedEngine
+
+            If eng = TTSEngine.OpenAI Then
+                ' strip off “ — Beschreibung” if present
+                Dim rawVoice = voiceName.Split(" "c)(0)
+                Return Await GenerateOpenAITTSAsync(input,
+                                       languageCode,
+                                       rawVoice,
+                                       Pitch,
+                                       SpeakingRate)
+            End If
+
             Using httpClient As New HttpClient()
 
-                If TTSSecondAPI Then
-                    DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
-                Else
-                    DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
+                Dim AccessToken As String = Await GetFreshTTSToken(UseSecondaryFor(TTSEngine.Google))
+                If String.IsNullOrEmpty(AccessToken) Then
+                    ShowCustomMessageBox("Error generating audio - authentication failed (no token).")
+                    Return Nothing
                 End If
-                Dim AccessToken As String = If(TTSSecondAPI, DecodedAPI_2, DecodedAPI)
+
+
                 If String.IsNullOrEmpty(AccessToken) Then
                     ShowCustomMessageBox("Error generating audio - authentication failed (no token).")
                     Return Nothing
@@ -10697,7 +11518,7 @@ Public Class ThisAddIn
                         t.Start()
                     End If
 
-                    Dim response As HttpResponseMessage = Await httpClient.PostAsync(INI_TTSEndpoint & "text:synthesize", content, cts.Token).ConfigureAwait(False)
+                    Dim response As HttpResponseMessage = Await httpClient.PostAsync(TTS_GoogleEndpoint & "text:synthesize", content, cts.Token).ConfigureAwait(False)
 
                     ' Error Handling: Check if API call failed
                     If response Is Nothing Then
@@ -10738,315 +11559,359 @@ Public Class ThisAddIn
         Catch ex As Exception
             MessageBox.Show($"Error in GenerateAudioFromText: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return Nothing
-        End Try
-    End Function
-
-
-    Public Function ParseTextToConversation(text As String) As List(Of Tuple(Of String, String))
-        Dim conversation As New List(Of Tuple(Of String, String))
-        Dim currentSpeaker As String = ""
-        Dim currentText As String = ""
-
-        Dim paragraphs As String() = text.Split({vbCrLf, vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
-
-        For Each para As String In paragraphs
-            Dim trimmedText As String = para.Trim()
-            If String.IsNullOrEmpty(trimmedText) Then Continue For
-
-            ' Check if the paragraph starts with a speaker tag
-            Dim newSpeaker As String = ""
-            If hostTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
-                newSpeaker = "H"
-                trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
-            ElseIf guestTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
-                newSpeaker = "G"
-                trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
-            End If
-
-            ' If a new speaker is detected, store the previous entry and start a new one
-            If newSpeaker <> "" Then
-                If Not String.IsNullOrEmpty(currentSpeaker) Then
-                    conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
-                End If
-                currentSpeaker = newSpeaker
-                currentText = trimmedText
+        Finally
+            If IsNothing(prevExecState) Then
+                SetThreadExecutionState(ES_CONTINUOUS)
             Else
-                ' Continue the current speaker's dialogue
-                If Not String.IsNullOrEmpty(currentSpeaker) Then
-                    currentText &= " " & trimmedText
+                If Not TTS_PreExistingSleepBlocker Then
+                    SetThreadExecutionState(prevExecState)
+                    prevExecState = Nothing
                 End If
             End If
-        Next
+        End Try
 
-        ' Add the last entry
-        If Not String.IsNullOrEmpty(currentSpeaker) Then
-            conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
-        End If
-
-        Return conversation
     End Function
 
 
-    Async Sub GenerateAndPlayPodcastAudio(conversation As List(Of Tuple(Of String, String)), filepath As String, languagecode As String, hostVoice As String, guestVoice As String, pitch As Double, speakingrate As Double, nossml As Boolean)
+        Public Function ParseTextToConversation(text As String) As List(Of Tuple(Of String, String))
+            Dim conversation As New List(Of Tuple(Of String, String))
+            Dim currentSpeaker As String = ""
+            Dim currentText As String = ""
+
+            Dim paragraphs As String() = text.Split({vbCrLf, vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+
+            For Each para As String In paragraphs
+                Dim trimmedText As String = para.Trim()
+                If String.IsNullOrEmpty(trimmedText) Then Continue For
+
+                ' Check if the paragraph starts with a speaker tag
+                Dim newSpeaker As String = ""
+                If hostTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
+                    newSpeaker = "H"
+                    trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
+                ElseIf guestTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
+                    newSpeaker = "G"
+                    trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
+                End If
+
+                ' If a new speaker is detected, store the previous entry and start a new one
+                If newSpeaker <> "" Then
+                    If Not String.IsNullOrEmpty(currentSpeaker) Then
+                        conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
+                    End If
+                    currentSpeaker = newSpeaker
+                    currentText = trimmedText
+                Else
+                    ' Continue the current speaker's dialogue
+                    If Not String.IsNullOrEmpty(currentSpeaker) Then
+                        currentText &= " " & trimmedText
+                    End If
+                End If
+            Next
+
+            ' Add the last entry
+            If Not String.IsNullOrEmpty(currentSpeaker) Then
+                conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
+            End If
+
+            Return conversation
+        End Function
+
+
+    Async Sub GenerateAndPlayPodcastAudio(
+        conversation As List(Of Tuple(Of String, String)),
+        filepath As String,
+        languagecode As String,
+        hostVoice As String,
+        guestVoice As String,
+        pitch As Double,
+        speakingrate As Double,
+        nossml As Boolean
+    )
+
         Try
+
+            If IsNothing(prevExecState) Then
+                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
+                TTS_PreExistingSleepBlocker = False
+            Else
+                TTS_PreExistingSleepBlocker = True
+            End If
+
             Dim outputFiles As New List(Of String)
 
-            If String.IsNullOrWhiteSpace(filepath) Then filepath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
+            ' ensure a valid output path
+            If String.IsNullOrWhiteSpace(filepath) Then
+                filepath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
+            End If
 
-            If languagecode = "" Then languagecode = "en-US"
-            If hostVoice = "" Then hostVoice = "en-US-Studio-O"
-            If guestVoice = "" Then guestVoice = "en-US-Casual-K"
+            ' defaults
+            If String.IsNullOrEmpty(languagecode) Then languagecode = "en-US"
+            If String.IsNullOrEmpty(hostVoice) Then hostVoice = "en-US-Studio-O"
+            If String.IsNullOrEmpty(guestVoice) Then guestVoice = "en-US-Casual-K"
 
             Dim Exited As Boolean = False
-
+            Dim eng = TTS_SelectedEngine
 
             Using httpClient As New HttpClient()
-                If TTSSecondAPI Then
-                    DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
+                ' — set Authorization header once, based on engine —
+                If eng = TTSEngine.Google Then
+                    Debug.WriteLine($"[TTS] Using Google TTS engine with endpoint '{TTS_GoogleEndpoint}'")
+                    ' Google: fetch OAuth token
+                    Dim token = Await GetFreshTTSToken(TTS_googleSecondary)
+                    If String.IsNullOrEmpty(token) Then
+                        ShowCustomMessageBox("Error generating audio - authentication failed (no token).")
+                        Return
+                    End If
+                    httpClient.DefaultRequestHeaders.Authorization =
+                    New Net.Http.Headers.AuthenticationHeaderValue("Bearer", token)
                 Else
-                    DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
-                End If
-                Dim AccessToken As String = If(TTSSecondAPI, DecodedAPI_2, DecodedAPI)
-                If String.IsNullOrEmpty(AccessToken) Then
-                    ShowCustomMessageBox("Error generating audio - authentication failed (no token).")
-                    Return
+                    Debug.WriteLine($"[TTS] Using OpenAI TTS engine with endpoint '{TTS_OpenAIEndpoint}'")
+                    ' OpenAI: use API key
+                    Dim key = If(TTS_openAISecondary, INI_APIKey_2, INI_APIKey)
+                    httpClient.DefaultRequestHeaders.Authorization =
+                    New Net.Http.Headers.AuthenticationHeaderValue("Bearer", key)
                 End If
 
-                httpClient.DefaultRequestHeaders.Authorization = New Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken)
-
+                ' start “running in background” message
                 Dim t As New Thread(Sub()
-                                        ShowCustomMessageBox("Audio generation has started and runs in the background. Press 'Esc' to abort.).", "", 3, "", True)
+                                        ShowCustomMessageBox(
+                                        "Audio generation has started and runs in the background. Press 'Esc' to abort.",
+                                        "", 3, "", True)
                                     End Sub)
                 t.SetApartmentState(ApartmentState.STA)
                 t.Start()
 
-                ' Process each speaker separately
-                For i As Integer = 0 To conversation.Count - 1
+                ' process each speaker snippet
+                For i = 0 To conversation.Count - 1
 
-                    System.Windows.Forms.Application.DoEvents()
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
-                        Exited = True
-                        Exit For
-                    End If
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
-                        Exited = True
-                        Exit For
-                    End If
+                    If (GetAsyncKeyState(Keys.Escape) And &H8000) <> 0 Then Exited = True : Exit For
+                    If (GetAsyncKeyState(Keys.Escape) And 1) <> 0 Then Exited = True : Exit For
 
-                    Dim speaker As String = conversation(i).Item1
-                    Dim text As String = conversation(i).Item2
+                    Dim speaker = conversation(i).Item1
+                    Dim text = conversation(i).Item2
+                    Dim voice = If(speaker = "H", hostVoice, guestVoice)
 
-                    ' Select voice based on speaker
-                    Dim voiceName As String = If(speaker = "H", hostVoice, guestVoice)
-
-                    Dim textlabel As String = "text"
-                    Dim ssmlPattern As String = "<[^>]+>"
-
-                    If nossml Then
-                        text = Regex.Replace(text, ssmlPattern, String.Empty)
-                    Else
-                        If Regex.IsMatch(text, ssmlPattern) AndAlso Not text.Trim().StartsWith("<speak>") Then
-                            If Not text.Trim().StartsWith("<speak>") Then
-                                text = "<speak>" & text & "</speak>"
-                            End If
+                    ' handle SSML stripping/wrapping
+                    Dim textlabel = "text"
+                    If Not nossml Then
+                        If Regex.IsMatch(text, "<[^>]+>") AndAlso Not text.Trim().StartsWith("<speak>") Then
+                            text = $"<speak>{text}</speak>"
                             textlabel = "ssml"
                         End If
+                    Else
+                        text = Regex.Replace(text, "<[^>]+>", "")
                     End If
 
-                    ' Create request
-                    Dim requestBody As New JObject From {
-                    {"input", New JObject From {{$"{textlabel}", text}}},
-                    {"voice", New JObject From {
-                        {"languageCode", languagecode},
-                        {"name", voiceName}
-                    }},
-                    {"audioConfig", New JObject From {
-                        {"audioEncoding", "MP3"},
-                        {"pitch", pitch},
-                        {"speakingRate", speakingrate},
-                        {"effectsProfileId", New JArray("small-bluetooth-speaker-class-device")}
-                    }}
-                }
+                    Dim audioBytes As Byte()
 
+                    If eng = TTSEngine.Google Then
+                        ' — Google path —
+                        Dim requestBody = New JObject From {
+                        {"input", New JObject From {{textlabel, text}}},
+                        {"voice", New JObject From {
+                            {"languageCode", languagecode},
+                            {"name", voice}
+                        }},
+                        {"audioConfig", New JObject From {
+                            {"audioEncoding", "MP3"},
+                            {"pitch", pitch},
+                            {"speakingRate", speakingrate},
+                            {"effectsProfileId", New JArray("small-bluetooth-speaker-class-device")}
+                        }}
+                    }
 
-                    Dim jsonPayload As String = requestBody.ToString()
-                    Dim content As New StringContent(jsonPayload, Encoding.UTF8, "application/json")
+                        Dim content = New StringContent(requestBody.ToString(), Encoding.UTF8, "application/json")
+                        Dim resp = Await httpClient.PostAsync(TTS_GoogleEndpoint & "text:synthesize", content)
+                        Dim respStr = Await resp.Content.ReadAsStringAsync()
+                        Dim respJson = JObject.Parse(respStr)
 
-                    Dim response As HttpResponseMessage = Await httpClient.PostAsync(INI_TTSEndpoint & "text:synthesize", content)
-                    Dim responseString As String = Await response.Content.ReadAsStringAsync()
-                    Dim responseJson As JObject = JObject.Parse(responseString)
+                        If respJson.ContainsKey("audioContent") Then
+                            audioBytes = Convert.FromBase64String(respJson("audioContent").ToString())
+                        Else
+                            ShowCustomMessageBox("Error: no audioContent in Google response.")
+                            Continue For
+                        End If
 
-                    If responseJson.ContainsKey("audioContent") Then
-                        Dim audioBase64 As String = responseJson("audioContent").ToString()
-                        Dim audioBytes As Byte() = System.Convert.FromBase64String(audioBase64)
-
-                        ' Save each audio snippet separately
-                        Dim tempFile As String = Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_podcast_temp_{i}.mp3")
-                        File.WriteAllBytes(tempFile, audioBytes)
-                        outputFiles.Add(tempFile)
+                    Else
+                        ' — OpenAI path —
+                        ' strip off any “ — Beschreibung” from the combo text
+                        Dim rawVoice = voice.Split(" "c)(0)
+                        audioBytes = Await GenerateOpenAITTSAsync(text, languagecode, rawVoice, pitch, speakingrate)
                     End If
 
-                    Await System.Threading.Tasks.Task.Delay(1000) ' Delay to not overhwelm the API
+                    Debug.WriteLine($"Generated audio of {audioBytes.Length} for speaker {speaker} ({voice}) with text length {text.Length} characters.")
 
+                    ' save snippet
+                    Dim tempFile = Path.Combine(Path.GetTempPath(), $"{AN2}_podcast_temp_{i}.mp3")
+                    File.WriteAllBytes(tempFile, audioBytes)
+                    outputFiles.Add(tempFile)
+
+                    ' throttle
+                    Await System.Threading.Tasks.Task.Delay(1000)
                 Next
 
-                If Not Exited Then
-                    ' Merge all audio files into one
-                    MergeAudioFiles(outputFiles, filepath)
-                End If
-                ' Cleanup temp files
-                For Each file In outputFiles
-                    System.IO.File.Delete(file)
-                Next
+                ' merge & cleanup
+                If Not Exited Then MergeAudioFiles(outputFiles, filepath)
+                For Each f In outputFiles : File.Delete(f) : Next
             End Using
+
             If Exited Then
                 ShowCustomMessageBox("Multi-speaker audio generation aborted.")
-                Return
             Else
-                Try
-                    Dim Result As Integer = ShowCustomYesNoBox($"Your multi-speaker audio sequence has been generated ('{filepath}') and is ready to be played. Play it?", "Yes", "No (file remains available)")
+                If ShowCustomYesNoBox(
+                    $"Your multi-speaker audio sequence has been generated ('{filepath}') and is ready to be played. Play it?",
+                    "Yes", "No (file remains available)") = 1 Then
+                    PlayAudio(filepath)
+                End If
+            End If
+
+        Catch ex As Exception
+            Debug.WriteLine($"Error generating podcast audio: {ex.Message}")
+        Finally
+            If IsNothing(prevExecState) Then
+                SetThreadExecutionState(ES_CONTINUOUS)
+            Else
+                If Not TTS_PreExistingSleepBlocker Then
+                    SetThreadExecutionState(prevExecState)
+                    prevExecState = Nothing
+                End If
+            End If
+        End Try
+    End Sub
+
+
+    Sub MergeAudioFiles(inputFiles As List(Of String), outputFile As String)
+            Try
+                Using outputStream As New FileStream(outputFile, FileMode.Create)
+                    For Each file In inputFiles
+                        Dim mp3Bytes As Byte() = System.IO.File.ReadAllBytes(file)
+                        outputStream.Write(mp3Bytes, 0, mp3Bytes.Length)
+                    Next
+                End Using
+                Console.WriteLine("Podcast audio merged successfully!")
+            Catch ex As Exception
+                Debug.WriteLine($"Error merging audio files: {ex.Message}")
+            End Try
+        End Sub
+
+        ' Function to save audio to a file
+        Public Shared Sub SaveAudioToFile(audioData As Byte(), filePath As String)
+            Try
+                If audioData IsNot Nothing AndAlso audioData.Length > 0 Then
+                    File.WriteAllBytes(filePath, audioData)
+                    Debug.WriteLine($"Audio file saved: {filePath}")
+                Else
+                    Debug.WriteLine("No audio received.")
+                End If
+            Catch ex As Exception
+                Debug.WriteLine($"Error saving file: {ex.Message}")
+            End Try
+        End Sub
+
+        ' Function to play the generated MP3 audio using NAudio
+        Public Shared Sub PlayAudio(filePath As String)
+
+
+            Dim splash As New SplashScreen($"Playing MP3... press 'Esc' to abort")
+            If File.Exists(filePath) Then
+                splash.Show()
+                splash.Refresh()
+            End If
+
+            Try
+
+                If File.Exists(filePath) Then
+
+                    Using mp3Reader As New Mp3FileReader(filePath)
+                        Using waveOut As New WaveOutEvent()
+                            waveOut.Init(mp3Reader)
+                            waveOut.Play()
+
+                            ' Keep playing until the audio ends
+                            While waveOut.PlaybackState = PlaybackState.Playing
+                                Thread.Sleep(100)
+                                System.Windows.Forms.Application.DoEvents()
+                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
+                                    Exit While
+                                End If
+                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
+                                    Exit While
+                                End If
+                            End While
+
+                            ' Stop playback
+                            waveOut.Stop()
+                        End Using ' Automatically disposes waveOut
+                    End Using ' Automatically disposes mp3Reader
+
+                    splash.Close()
+
+                Else
+                    splash.Close()
+                    ShowCustomMessageBox("Audio file not found.")
+                End If
+            Catch ex As Exception
+                splash.Close()
+                ShowCustomMessageBox($"Error playing audio: {ex.Message}")
+            End Try
+        End Sub
+
+        Shared Async Sub GenerateAndPlayAudio(textToSpeak As String, filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
+
+            Dim Temporary As Boolean = (filepath = "")
+
+            Dim audioBytes As Byte() = Await System.Threading.Tasks.Task.Run(Function() GenerateAudioFromText(textToSpeak, languageCode, voiceName).Result)
+
+            Try
+                If audioBytes IsNot Nothing Then
+                    If Temporary Then
+                        filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
+                    End If
+                    SaveAudioToFile(audioBytes, filepath)
+                    Dim Result As Integer = 1
+                    If Len(textToSpeak) > TTSLargeText Then
+                        Result = ShowCustomYesNoBox("Your audio sequence has been generated " & If(Temporary, "", $"('{filepath}') ") & "and is ready to be played. Play it?", "Yes", If(Temporary, "No", "No (file remains available)"))
+                    End If
                     If Result = 1 Then
                         PlayAudio(filepath)
                     End If
-                Catch ex As System.Exception
-
-                End Try
-            End If
-            Return
-        Catch ex As Exception
-            Debug.WriteLine($"Error generating podcast audio: {ex.Message}")
-            Return
-        End Try
-    End Sub
-
-    Sub MergeAudioFiles(inputFiles As List(Of String), outputFile As String)
-        Try
-            Using outputStream As New FileStream(outputFile, FileMode.Create)
-                For Each file In inputFiles
-                    Dim mp3Bytes As Byte() = System.IO.File.ReadAllBytes(file)
-                    outputStream.Write(mp3Bytes, 0, mp3Bytes.Length)
-                Next
-            End Using
-            Console.WriteLine("Podcast audio merged successfully!")
-        Catch ex As Exception
-            Debug.WriteLine($"Error merging audio files: {ex.Message}")
-        End Try
-    End Sub
-
-    ' Function to save audio to a file
-    Public Shared Sub SaveAudioToFile(audioData As Byte(), filePath As String)
-        Try
-            If audioData IsNot Nothing AndAlso audioData.Length > 0 Then
-                File.WriteAllBytes(filePath, audioData)
-                Debug.WriteLine($"Audio file saved: {filePath}")
-            Else
-                Debug.WriteLine("No audio received.")
-            End If
-        Catch ex As Exception
-            Debug.WriteLine($"Error saving file: {ex.Message}")
-        End Try
-    End Sub
-
-    ' Function to play the generated MP3 audio using NAudio
-    Public Shared Sub PlayAudio(filePath As String)
-
-
-        Dim splash As New SplashScreen($"Playing MP3... press 'Esc' to abort")
-        If File.Exists(filePath) Then
-            splash.Show()
-            splash.Refresh()
-        End If
-
-        Try
-
-            If File.Exists(filePath) Then
-
-                Using mp3Reader As New Mp3FileReader(filePath)
-                    Using waveOut As New WaveOutEvent()
-                        waveOut.Init(mp3Reader)
-                        waveOut.Play()
-
-                        ' Keep playing until the audio ends
-                        While waveOut.PlaybackState = PlaybackState.Playing
-                            Thread.Sleep(100)
-                            System.Windows.Forms.Application.DoEvents()
-                            If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
-                                Exit While
-                            End If
-                            If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
-                                Exit While
-                            End If
-                        End While
-
-                        ' Stop playback
-                        waveOut.Stop()
-                    End Using ' Automatically disposes waveOut
-                End Using ' Automatically disposes mp3Reader
-
-                splash.Close()
-
-            Else
-                splash.Close()
-                ShowCustomMessageBox("Audio file not found.")
-            End If
-        Catch ex As Exception
-            splash.Close()
-            ShowCustomMessageBox($"Error playing audio: {ex.Message}")
-        End Try
-    End Sub
-
-    Shared Async Sub GenerateAndPlayAudio(textToSpeak As String, filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
-
-        Dim Temporary As Boolean = (filepath = "")
-
-        Dim audioBytes As Byte() = Await System.Threading.Tasks.Task.Run(Function() GenerateAudioFromText(textToSpeak, languageCode, voiceName).Result)
-
-        Try
-            If audioBytes IsNot Nothing Then
-                If Temporary Then
-                    filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
+                    If Temporary Then
+                        System.IO.File.Delete(filepath)
+                    End If
                 End If
-                SaveAudioToFile(audioBytes, filepath)
-                Dim Result As Integer = 1
-                If Len(textToSpeak) > TTSLargeText Then
-                    Result = ShowCustomYesNoBox("Your audio sequence has been generated " & If(Temporary, "", $"('{filepath}') ") & "and is ready to be played. Play it?", "Yes", If(Temporary, "No", "No (file remains available)"))
-                End If
-                If Result = 1 Then
-                    PlayAudio(filepath)
-                End If
-                If Temporary Then
-                    System.IO.File.Delete(filepath)
-                End If
-            End If
-        Catch ex As System.Exception
+            Catch ex As System.Exception
 
-        End Try
-    End Sub
+            End Try
+        End Sub
 
 
-    Public Sub ReadPodcast(Text As String)
+        Public Sub ReadPodcast(Text As String)
 
-        Dim NoSSML As Boolean = My.Settings.NoSSML
-        Dim Pitch As Double = My.Settings.Pitch
-        Dim SpeakingRate As Double = My.Settings.Speakingrate
+            Dim NoSSML As Boolean = My.Settings.NoSSML
+            Dim Pitch As Double = My.Settings.Pitch
+            Dim SpeakingRate As Double = My.Settings.Speakingrate
 
-        ' Create an array of InputParameter objects.
-        Dim params() As SLib.InputParameter = {
+            ' Create an array of InputParameter objects.
+            Dim params() As SLib.InputParameter = {
                     New SLib.InputParameter("Pitch", Pitch),
                     New SLib.InputParameter("Speaking Rate", SpeakingRate),
                     New SLib.InputParameter("No SSML", NoSSML)
                     }
 
-        Dim conversation As List(Of Tuple(Of String, String)) = ParseTextToConversation(Text)
-        Dim hasHost As Boolean = conversation.Any(Function(t) t.Item1 = "H")
-        Dim hasGuest As Boolean = conversation.Any(Function(t) t.Item1 = "G")
+            Dim conversation As List(Of Tuple(Of String, String)) = ParseTextToConversation(Text)
+            Dim hasHost As Boolean = conversation.Any(Function(t) t.Item1 = "H")
+            Dim hasGuest As Boolean = conversation.Any(Function(t) t.Item1 = "G")
 
-        If hasHost AndAlso hasGuest Then
-            Using frm As New TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", True)
+            If hasHost AndAlso hasGuest Then
+            Using frm As New TTSSelectionForm("Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Text-to-Speech - Select Voices", True) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", True)
                 If frm.ShowDialog() = DialogResult.OK Then
                     Dim selectedVoices As List(Of String) = frm.SelectedVoices
                     Dim selectedLanguage As String = frm.SelectedLanguage
                     Dim outputPath As String = frm.SelectedOutputPath
+
+                    Debug.WriteLine("Voices=" & selectedVoices(0))
+                    Debug.WriteLine("TTS_SelectedEngine=" & TTS_SelectedEngine)
 
                     ' Call the procedure (the parameters are passed ByRef).
                     If ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your podcast audio file:", $"Create Podcast Audio", params) Then
@@ -11066,46 +11931,46 @@ Public Class ThisAddIn
                 End If
             End Using
         Else
-            ' Missing either Host or Guest
-            ShowCustomMessageBox($"No conversation was found. Use '{hostTags(0)}' and '{guestTags(0)}' to dedicate content to the host and guest.")
-        End If
-
-    End Sub
-
-
-    Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
-
-        Dim CurrentPara As String = ""
-
-        Try
-
-            Dim Temporary As Boolean = (filepath = "")
-            Dim Alternate As Boolean = True
-
-            If Temporary Then
-                filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
+                ' Missing either Host or Guest
+                ShowCustomMessageBox($"No conversation was found. Use '{hostTags(0)}' and '{guestTags(0)}' to dedicate content to the host and guest.")
             End If
 
-            If voiceNameAlt = "" Then Alternate = False
+        End Sub
 
-            ' Get the current Word selection.
-            Dim app As Word.Application = Globals.ThisAddIn.Application
-            Dim selection As Selection = app.Selection
-            If selection Is Nothing OrElse selection.Paragraphs.Count = 0 Then
-                ShowCustomMessageBox("No text selected.")
-                Return
-            End If
 
-            Dim NoSSML As Boolean = My.Settings.NoSSML
-            Dim Pitch As Double = My.Settings.Pitch
-            Dim SpeakingRate As Double = My.Settings.Speakingrate
-            Dim ReadTitleNumbers As Boolean = False
-            Dim CleanText As Boolean = False
-            Dim CleanTextPrompt As String = My.Settings.CleanTextPrompt
-            If String.IsNullOrWhiteSpace(CleanTextPrompt) Then CleanTextPrompt = SP_CleanTextPrompt
+        Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
 
-            ' Create an array of InputParameter objects.
-            Dim params() As SLib.InputParameter = {
+            Dim CurrentPara As String = ""
+
+            Try
+
+                Dim Temporary As Boolean = (filepath = "")
+                Dim Alternate As Boolean = True
+
+                If Temporary Then
+                    filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
+                End If
+
+                If voiceNameAlt = "" Then Alternate = False
+
+                ' Get the current Word selection.
+                Dim app As Word.Application = Globals.ThisAddIn.Application
+                Dim selection As Selection = app.Selection
+                If selection Is Nothing OrElse selection.Paragraphs.Count = 0 Then
+                    ShowCustomMessageBox("No text selected.")
+                    Return
+                End If
+
+                Dim NoSSML As Boolean = My.Settings.NoSSML
+                Dim Pitch As Double = My.Settings.Pitch
+                Dim SpeakingRate As Double = My.Settings.Speakingrate
+                Dim ReadTitleNumbers As Boolean = False
+                Dim CleanText As Boolean = False
+                Dim CleanTextPrompt As String = My.Settings.CleanTextPrompt
+                If String.IsNullOrWhiteSpace(CleanTextPrompt) Then CleanTextPrompt = SP_CleanTextPrompt
+
+                ' Create an array of InputParameter objects.
+                Dim params() As SLib.InputParameter = {
                     New SLib.InputParameter("Pitch", Pitch),
                     New SLib.InputParameter("Speaking Rate", SpeakingRate),
                     New SLib.InputParameter("No SSML", NoSSML),
@@ -11113,270 +11978,270 @@ Public Class ThisAddIn
                     New SLib.InputParameter("Clean text", CleanText)
                     }
 
-            ' Call the procedure (the parameters are passed ByRef).
-            If Not ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your audio file based on your text:", $"Create Audio", params) Then Return
+                ' Call the procedure (the parameters are passed ByRef).
+                If Not ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your audio file based on your text:", $"Create Audio", params) Then Return
 
-            Pitch = CDbl(params(0).Value)
-            SpeakingRate = CDbl(params(1).Value)
-            NoSSML = CBool(params(2).Value)
-            ReadTitleNumbers = CBool(params(3).Value)
-            CleanText = CBool(params(4).Value)
+                Pitch = CDbl(params(0).Value)
+                SpeakingRate = CDbl(params(1).Value)
+                NoSSML = CBool(params(2).Value)
+                ReadTitleNumbers = CBool(params(3).Value)
+                CleanText = CBool(params(4).Value)
 
-            My.Settings.NoSSML = NoSSML
-            My.Settings.Pitch = Pitch
-            My.Settings.Speakingrate = SpeakingRate
-            My.Settings.Save()
+                My.Settings.NoSSML = NoSSML
+                My.Settings.Pitch = Pitch
+                My.Settings.Speakingrate = SpeakingRate
+                My.Settings.Save()
 
-            If CleanText Then
-                CleanTextPrompt = ShowCustomInputBox("Please enter the prompt to 'clean' the text with (each paragraph will be submitted to this prompt)", "Create Audio", False, CleanTextPrompt).Trim()
-                If CleanTextPrompt = "ESC" Then Return
-                If CleanTextPrompt = "" Then
-                    CleanText = False
-                Else
-                    My.Settings.CleanTextPrompt = CleanTextPrompt
-                    My.Settings.Save()
+                If CleanText Then
+                    CleanTextPrompt = ShowCustomInputBox("Please enter the prompt to 'clean' the text with (each paragraph will be submitted to this prompt)", "Create Audio", False, CleanTextPrompt).Trim()
+                    If CleanTextPrompt = "ESC" Then Return
+                    If CleanTextPrompt = "" Then
+                        CleanText = False
+                    Else
+                        My.Settings.CleanTextPrompt = CleanTextPrompt
+                        My.Settings.Save()
+                    End If
                 End If
-            End If
 
-            Dim totalParagraphs As Integer = selection.Paragraphs.Count
-            Dim tempFiles As New List(Of String)
-            Dim paragraphIndex As Integer = 0
-            Dim sentenceEndPunctuation As String() = {".", "!", "?", ";", ":", ",", ")", "]", "}"}
-            Dim bracketedTextPattern As String = "^\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$"
+                Dim totalParagraphs As Integer = selection.Paragraphs.Count
+                Dim tempFiles As New List(Of String)
+                Dim paragraphIndex As Integer = 0
+                Dim sentenceEndPunctuation As String() = {".", "!", "?", ";", ":", ",", ")", "]", "}"}
+                Dim bracketedTextPattern As String = "^\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$"
 
-            Dim voiceName1 As String = voiceName
-            Dim voiceName2 As String = voiceNameAlt
-            Dim currentVoiceName As String = voiceName1
-            Dim firstTitleEncountered As Boolean = False
-            Dim LastTextWasTitle As Boolean = False
+                Dim voiceName1 As String = voiceName
+                Dim voiceName2 As String = voiceNameAlt
+                Dim currentVoiceName As String = voiceName1
+                Dim firstTitleEncountered As Boolean = False
+                Dim LastTextWasTitle As Boolean = False
 
-            ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
-            ProgressBarModule.CancelOperation = False
+                ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
+                ProgressBarModule.CancelOperation = False
 
-            ' Process each paragraph in the selection.
-            For Each para As Paragraph In selection.Paragraphs
-                ' Allow the user to abort by pressing Escape.
-                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Or (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Or ProgressBarModule.CancelOperation Then
-                    For Each file In tempFiles
-                        Try
-                            If IO.File.Exists(file) Then IO.File.Delete(file)
-                        Catch ex As Exception
-                            Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
-                        End Try
-                    Next
-                    ShowCustomMessageBox("Audio generation aborted by user.")
-                    ProgressBarModule.CancelOperation = True
+                ' Process each paragraph in the selection.
+                For Each para As Paragraph In selection.Paragraphs
+                    ' Allow the user to abort by pressing Escape.
+                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Or (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Or ProgressBarModule.CancelOperation Then
+                        For Each file In tempFiles
+                            Try
+                                If IO.File.Exists(file) Then IO.File.Delete(file)
+                            Catch ex As Exception
+                                Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
+                            End Try
+                        Next
+                        ShowCustomMessageBox("Audio generation aborted by user.")
+                        ProgressBarModule.CancelOperation = True
+                        Return
+                    End If
+
+                    ' Get the trimmed paragraph text.
+                    Dim paraText As String
+
+                    ' Check if the paragraph has numbering
+                    If Not String.IsNullOrEmpty(para.Range.ListFormat.ListString) And ReadTitleNumbers Then
+                        ' Include the numbering before the paragraph text
+                        paraText = para.Range.ListFormat.ListString.Trim(".") & vbCrLf & para.Range.Text.Trim()
+                    Else
+                        ' No numbering, just take the paragraph text
+                        paraText = para.Range.Text.Trim()
+                    End If
+
+
+                    ' Skip paragraphs that are empty...
+                    If String.IsNullOrWhiteSpace(paraText) Or Regex.IsMatch(paraText, bracketedTextPattern) Then Continue For
+                    ' ...or that contain only numbers or control characters.
+                    If Regex.IsMatch(paraText, "^[\d\p{C}\s]+$") Then Continue For
+
+                    Dim lastChar As String = paraText.Substring(paraText.Length - 1)
+
+                    ' Check if the last character is one of the defined punctuation marks
+                    If Not sentenceEndPunctuation.Contains(lastChar) Then
+                        ' Append a period
+                        paraText = paraText & "."
+                    End If
+
+                    ' Determine if this paragraph is part of a bullet list.
+                    Dim isBullet As Boolean = False
+                    If para.Range.ListFormat IsNot Nothing AndAlso para.Range.ListFormat.ListType <> WdListType.wdListNoNumbering Then
+                        isBullet = True
+                    End If
+
+                    ' Determine if the paragraph “looks like” a title.
+                    Dim isTitle As Boolean = False
+                    Dim styleName As String = ""
+                    Try
+                        styleName = para.Range.Style.NameLocal.ToString().ToLower()
+                    Catch ex As Exception
+                        Debug.WriteLine("Error retrieving style: " & ex.Message)
+                    End Try
+                    If styleName.Contains("heading") Then
+                        isTitle = True
+                    Else
+                        Dim lineCount As Long = para.Range.ComputeStatistics(WdStatistic.wdStatisticLines)
+                        If lineCount <= 2 Then
+                            isTitle = True
+                        End If
+                        If Not paraText.EndsWith(".") Then
+                            isTitle = True
+                        End If
+                    End If
+
+                    Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
+                    Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
+                    CurrentPara = Left(paraText, 400) & "..."
+
+                    If isTitle AndAlso Alternate Then
+                        If Not firstTitleEncountered Then
+                            firstTitleEncountered = True
+                            ' For the very first title, keep the current voice unchanged.
+                        Else
+                            If Not LastTextWasTitle Then
+                                ' Switch the voice if the last paragraph was not a title.
+                                Debug.WriteLine("Switching ...")
+                                If currentVoiceName = voiceName1 Then
+                                    currentVoiceName = voiceName2
+                                Else
+                                    currentVoiceName = voiceName1
+                                End If
+                            End If
+                        End If
+                        LastTextWasTitle = True
+                    Else
+                        LastTextWasTitle = False
+                    End If
+
+                    ' Set the maximum value if you know the total number of steps.
+                    GlobalProgressMax = totalParagraphs
+
+                    ' Update the current progress value and status label.
+                    GlobalProgressValue = paragraphIndex + 1
+                    GlobalProgressLabel = $"Paragraph {paragraphIndex + 1} of {totalParagraphs} (some may be skipped)"
+
+                    ' For bullet lists, insert a short pause BEFORE the paragraph.
+                    If isBullet Then
+                        Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.1)
+                        If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
+                    End If
+
+                    If CleanText Then
+                        ' Remove any unwanted characters from the paragraph text.
+                        paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", 0, False, True)
+                        paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
+                        CurrentPara = Left(CurrentPara, 100) & $"... [cleaned: {Left(paraText, 400)}...]"
+                        Debug.WriteLine("Cleaned Para = " & paraText & vbCrLf & vbCrLf)
+                    End If
+
+                    ' Generate the audio for the paragraph via your TTS API.
+                    Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate, CurrentPara)
+
+                    CurrentPara = ""
+
+                    If paragraphAudioBytes IsNot Nothing Then
+                        Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
+                        File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
+                        tempFiles.Add(tempParaFile)
+                    Else
+                        ' If audio generation failed, skip this paragraph.
+                        Continue For
+                    End If
+
+                    ' For bullet lists, insert a short pause AFTER the paragraph.
+                    If isBullet Then
+                        Dim silenceFileAfterBullet As String = Await GenerateSilenceAudioFileAsync(0.3)
+                        If Not String.IsNullOrEmpty(silenceFileAfterBullet) Then tempFiles.Add(silenceFileAfterBullet)
+                    End If
+
+                ' After each paragraph, add an extra pause:
+                ' • Use a medium pause (0.7 sec) for titles.
+                ' • Otherwise use a short pause (0.3 sec).
+                If isTitle Then
+                    Dim silenceFileTitle As String = Await GenerateSilenceAudioFileAsync(0.7)
+                    If Not String.IsNullOrEmpty(silenceFileTitle) Then tempFiles.Add(silenceFileTitle)
+                    Else
+                    Dim silenceFileRegular As String = Await GenerateSilenceAudioFileAsync(0.3)
+                    If Not String.IsNullOrEmpty(silenceFileRegular) Then tempFiles.Add(silenceFileRegular)
+                    End If
+
+                    Await System.Threading.Tasks.Task.Delay(1000) ' Delay to not overhwelm the API
+
+                    paragraphIndex += 1
+                Next
+
+                ' If no valid paragraphs were found, notify the user.
+                If tempFiles.Count = 0 Then
+                    ShowCustomMessageBox("No valid paragraphs found For audio generation; skipping empty ones And {...}, [...] And (...).")
                     Return
                 End If
 
-                ' Get the trimmed paragraph text.
-                Dim paraText As String
-
-                ' Check if the paragraph has numbering
-                If Not String.IsNullOrEmpty(para.Range.ListFormat.ListString) And ReadTitleNumbers Then
-                    ' Include the numbering before the paragraph text
-                    paraText = para.Range.ListFormat.ListString.Trim(".") & vbCrLf & para.Range.Text.Trim()
-                Else
-                    ' No numbering, just take the paragraph text
-                    paraText = para.Range.Text.Trim()
+                If Not ProgressBarModule.CancelOperation Then
+                    ' Merge all the temporary audio files into one final file.
+                    MergeAudioFiles(tempFiles, filepath)
                 End If
 
+                ' Cleanup temporary files.
+                For Each file In tempFiles
+                    Try
+                        If IO.File.Exists(file) Then IO.File.Delete(file)
+                    Catch ex As Exception
+                        Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
+                    End Try
+                Next
 
-                ' Skip paragraphs that are empty...
-                If String.IsNullOrWhiteSpace(paraText) Or Regex.IsMatch(paraText, bracketedTextPattern) Then Continue For
-                ' ...or that contain only numbers or control characters.
-                If Regex.IsMatch(paraText, "^[\d\p{C}\s]+$") Then Continue For
-
-                Dim lastChar As String = paraText.Substring(paraText.Length - 1)
-
-                ' Check if the last character is one of the defined punctuation marks
-                If Not sentenceEndPunctuation.Contains(lastChar) Then
-                    ' Append a period
-                    paraText = paraText & "."
-                End If
-
-                ' Determine if this paragraph is part of a bullet list.
-                Dim isBullet As Boolean = False
-                If para.Range.ListFormat IsNot Nothing AndAlso para.Range.ListFormat.ListType <> WdListType.wdListNoNumbering Then
-                    isBullet = True
-                End If
-
-                ' Determine if the paragraph “looks like” a title.
-                Dim isTitle As Boolean = False
-                Dim styleName As String = ""
-                Try
-                    styleName = para.Range.Style.NameLocal.ToString().ToLower()
-                Catch ex As Exception
-                    Debug.WriteLine("Error retrieving style: " & ex.Message)
-                End Try
-                If styleName.Contains("heading") Then
-                    isTitle = True
-                Else
-                    Dim lineCount As Long = para.Range.ComputeStatistics(WdStatistic.wdStatisticLines)
-                    If lineCount <= 2 Then
-                        isTitle = True
+                If Not ProgressBarModule.CancelOperation Then
+                    ProgressBarModule.CancelOperation = True
+                    ' Play the merged audio file.
+                    PlayAudio(filepath)
+                    If Temporary Then
+                        System.IO.File.Delete(filepath)
                     End If
-                    If Not paraText.EndsWith(".") Then
-                        isTitle = True
-                    End If
-                End If
-
-                Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
-                Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
-                CurrentPara = Left(paraText, 400) & "..."
-
-                If isTitle And Alternate Then
-                    If Not firstTitleEncountered Then
-                        firstTitleEncountered = True
-                        ' For the very first title, keep the current voice unchanged.
-                    Else
-                        If Not LastTextWasTitle Then
-                            ' Switch the voice if the last paragraph was not a title.
-                            Debug.WriteLine("Switching ...")
-                            If currentVoiceName = voiceName1 Then
-                                currentVoiceName = voiceName2
-                            Else
-                                currentVoiceName = voiceName1
-                            End If
-                        End If
-                    End If
-                    LastTextWasTitle = True
                 Else
-                    LastTextWasTitle = False
+                    ProgressBarModule.CancelOperation = True
+                    ShowCustomMessageBox("Audio generation aborted by user.")
                 End If
 
-                ' Set the maximum value if you know the total number of steps.
-                GlobalProgressMax = totalParagraphs
+            Catch ex As Exception
+                ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}{If(String.IsNullOrEmpty(CurrentPara), "", "; Text: " & CurrentPara) & " [in clipboard]"}).")
+                If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(ex.Message & vbCrLf & vbCrLf & CurrentPara)
+            End Try
+        End Sub
 
-                ' Update the current progress value and status label.
-                GlobalProgressValue = paragraphIndex + 1
-                GlobalProgressLabel = $"Paragraph {paragraphIndex + 1} of {totalParagraphs} (some may be skipped)"
+        Private Async Function GenerateSilenceAudioFileAsync(durationSeconds As Double) As Task(Of String)
+            Return Await System.Threading.Tasks.Task.Run(Function() GenerateSilenceAudioFile(durationSeconds))
+        End Function
 
-                ' For bullet lists, insert a short pause BEFORE the paragraph.
-                If isBullet Then
-                    Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.1)
-                    If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
-                End If
+        ' Synchronous helper that creates a buffer of silence and encodes it to MP3.
+        Private Function GenerateSilenceAudioFile(durationSeconds As Double) As String
+            Try
+                ' Set audio format parameters.
+                Dim sampleRate As Integer = 24000       ' Adjust as needed to match your TTS output.
+                Dim channels As Integer = 1
+                Dim bitsPerSample As Integer = 16
+                Dim blockAlign As Integer = channels * (bitsPerSample \ 8)
+                Dim totalSamples As Integer = CInt(sampleRate * durationSeconds)
+                Dim totalBytes As Integer = totalSamples * blockAlign
 
-                If CleanText Then
-                    ' Remove any unwanted characters from the paragraph text.
-                    paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", 0, False, True)
-                    paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
-                    CurrentPara = Left(CurrentPara, 100) & $"... [cleaned: {Left(paraText, 400)}...]"
-                    Debug.WriteLine("Cleaned Para = " & paraText & vbCrLf & vbCrLf)
-                End If
+                ' Create a buffer filled with zeros (silence).
+                Dim silenceBytes(totalBytes - 1) As Byte
+                ' (The array is automatically initialized to zeros.)
 
-                ' Generate the audio for the paragraph via your TTS API.
-                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate, CurrentPara)
+                ' Generate a temporary file name.
+                Dim tempFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
 
-                CurrentPara = ""
-
-                If paragraphAudioBytes IsNot Nothing Then
-                    Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
-                    File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
-                    tempFiles.Add(tempParaFile)
-                Else
-                    ' If audio generation failed, skip this paragraph.
-                    Continue For
-                End If
-
-                ' For bullet lists, insert a short pause AFTER the paragraph.
-                If isBullet Then
-                    Dim silenceFileAfterBullet As String = Await GenerateSilenceAudioFileAsync(0.3)
-                    If Not String.IsNullOrEmpty(silenceFileAfterBullet) Then tempFiles.Add(silenceFileAfterBullet)
-                End If
-
-                ' After each paragraph, add an extra pause:
-                ' • Use a medium pause (1.0 sec) for titles.
-                ' • Otherwise use a short pause (0.5 sec).
-                If isTitle Then
-                    Dim silenceFileTitle As String = Await GenerateSilenceAudioFileAsync(1.0)
-                    If Not String.IsNullOrEmpty(silenceFileTitle) Then tempFiles.Add(silenceFileTitle)
-                Else
-                    Dim silenceFileRegular As String = Await GenerateSilenceAudioFileAsync(0.5)
-                    If Not String.IsNullOrEmpty(silenceFileRegular) Then tempFiles.Add(silenceFileRegular)
-                End If
-
-                Await System.Threading.Tasks.Task.Delay(1000) ' Delay to not overhwelm the API
-
-                paragraphIndex += 1
-            Next
-
-            ' If no valid paragraphs were found, notify the user.
-            If tempFiles.Count = 0 Then
-                ShowCustomMessageBox("No valid paragraphs found For audio generation; skipping empty ones And {...}, [...] And (...).")
-                Return
-            End If
-
-            If Not ProgressBarModule.CancelOperation Then
-                ' Merge all the temporary audio files into one final file.
-                MergeAudioFiles(tempFiles, filepath)
-            End If
-
-            ' Cleanup temporary files.
-            For Each file In tempFiles
-                Try
-                    If IO.File.Exists(file) Then IO.File.Delete(file)
-                Catch ex As Exception
-                    Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
-                End Try
-            Next
-
-            If Not ProgressBarModule.CancelOperation Then
-                ProgressBarModule.CancelOperation = True
-                ' Play the merged audio file.
-                PlayAudio(filepath)
-                If Temporary Then
-                    System.IO.File.Delete(filepath)
-                End If
-            Else
-                ProgressBarModule.CancelOperation = True
-                ShowCustomMessageBox("Audio generation aborted by user.")
-            End If
-
-        Catch ex As Exception
-            ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}{If(String.IsNullOrEmpty(CurrentPara), "", "; Text: " & CurrentPara) & " [in clipboard]"}).")
-            If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(ex.Message & vbCrLf & vbCrLf & CurrentPara)
-        End Try
-    End Sub
-
-    Private Async Function GenerateSilenceAudioFileAsync(durationSeconds As Double) As Task(Of String)
-        Return Await System.Threading.Tasks.Task.Run(Function() GenerateSilenceAudioFile(durationSeconds))
-    End Function
-
-    ' Synchronous helper that creates a buffer of silence and encodes it to MP3.
-    Private Function GenerateSilenceAudioFile(durationSeconds As Double) As String
-        Try
-            ' Set audio format parameters.
-            Dim sampleRate As Integer = 24000       ' Adjust as needed to match your TTS output.
-            Dim channels As Integer = 1
-            Dim bitsPerSample As Integer = 16
-            Dim blockAlign As Integer = channels * (bitsPerSample \ 8)
-            Dim totalSamples As Integer = CInt(sampleRate * durationSeconds)
-            Dim totalBytes As Integer = totalSamples * blockAlign
-
-            ' Create a buffer filled with zeros (silence).
-            Dim silenceBytes(totalBytes - 1) As Byte
-            ' (The array is automatically initialized to zeros.)
-
-            ' Generate a temporary file name.
-            Dim tempFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
-
-            ' Wrap the silence buffer in a MemoryStream and then a RawSourceWaveStream.
-            Using ms As New MemoryStream(silenceBytes)
-                Dim waveFormat As New WaveFormat(sampleRate, bitsPerSample, channels)
-                Using waveStream As New RawSourceWaveStream(ms, waveFormat)
-                    ' Encode the silence to MP3.
-                    MediaFoundationEncoder.EncodeToMp3(waveStream, tempFile)
+                ' Wrap the silence buffer in a MemoryStream and then a RawSourceWaveStream.
+                Using ms As New MemoryStream(silenceBytes)
+                    Dim waveFormat As New WaveFormat(sampleRate, bitsPerSample, channels)
+                    Using waveStream As New RawSourceWaveStream(ms, waveFormat)
+                        ' Encode the silence to MP3.
+                        MediaFoundationEncoder.EncodeToMp3(waveStream, tempFile)
+                    End Using
                 End Using
-            End Using
 
-            Return tempFile
-        Catch ex As Exception
-            Debug.WriteLine($"Error generating silence audio: {ex.Message}")
-            Return Nothing
-        End Try
-    End Function
+                Return tempFile
+            Catch ex As Exception
+                Debug.WriteLine($"Error generating silence audio: {ex.Message}")
+                Return Nothing
+            End Try
+        End Function
 
 
     Public Class TTSSelectionForm
@@ -11384,6 +12249,10 @@ Public Class ThisAddIn
 
         ' -- Controls --
         Private lblIntro As Label
+
+        ' engine selector combo:
+        Private cmbEngine As Forms.ComboBox
+
 
         ' --- Set 1 Controls ---
         Private lblSet1 As Label
@@ -11437,12 +12306,12 @@ Public Class ThisAddIn
         Private voiceCache As New Dictionary(Of String, List(Of GoogleVoice))()
 
         ' --- Dependencies / external references for Auth, etc. ---
-        Private _context As ISharedContext ' or your actual type
-        Private INI_OAuth2ClientMail As String
-        Private INI_OAuth2Scopes As String
-        Private INI_APIKey As String
-        Private INI_OAuth2Endpoint As String
-        Private INI_OAuth2ATExpiry As Long
+        'Private _context As ISharedContext ' or your actual type
+        'Private INI_OAuth2ClientMail As String
+        'Private INI_OAuth2Scopes As String
+        'Private INI_APIKey As String
+        'Private INI_OAuth2Endpoint As String
+        'Private INI_OAuth2ATExpiry As Long
 
         ' --- New parameters/fields for the amended form ---
         Private _twoVoicesRequired As Boolean
@@ -11464,23 +12333,24 @@ Public Class ThisAddIn
         Public Property SelectedLanguage As String = ""
 
 
-        Public Sub New(context As ISharedContext,
-               clientMail As String,
-               scopes As String,
-               apiKey As String,
-               oauth2Endpoint As String,
-               oauth2Expiry As Long,
-               topLabelText As String,
+        Public Sub New(topLabelText As String,
                formTitle As String,
                twoVoicesRequired As Boolean)
 
+            'context As ISharedContext,
+            'clientMail As String,
+            'scopes As String,
+            'apiKey As String,
+            'oauth2Endpoint As String,
+            'oauth2Expiry As Long,
+
             ' Assign external parameters
-            _context = context
-            INI_OAuth2ClientMail = clientMail
-            INI_OAuth2Scopes = scopes
-            INI_APIKey = apiKey
-            INI_OAuth2Endpoint = oauth2Endpoint
-            INI_OAuth2ATExpiry = oauth2Expiry
+            '_context = context
+            'INI_OAuth2ClientMail = clientMail
+            'INI_OAuth2Scopes = scopes
+            'INI_APIKey = apiKey
+            'INI_OAuth2Endpoint = oauth2Endpoint
+            'INI_OAuth2ATExpiry = oauth2Expiry
 
             ' Store our extra parameters
             _topLabelText = topLabelText
@@ -11497,7 +12367,7 @@ Public Class ThisAddIn
             Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
             Me.AutoSize = False
             Me.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-            Me.MinimumSize = New System.Drawing.Size(810, 450)
+            Me.MinimumSize = New System.Drawing.Size(810, 480)
             Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
             Me.MaximizeBox = True
 
@@ -11507,6 +12377,16 @@ Public Class ThisAddIn
             Me.ResumeLayout()
 
             AddHandlers()
+
+            Dim saved = My.Settings.TTSProvider
+            If saved = "OpenAI" AndAlso TTS_openAIAvailable Then
+                cmbEngine.SelectedItem = "OpenAI"
+            ElseIf saved = "Google" AndAlso TTS_googleAvailable Then
+                cmbEngine.SelectedItem = "Google"
+            Else
+                ' fall back to whichever is first in the list
+                cmbEngine.SelectedIndex = 0
+            End If
 
             PopulateLanguageComboBoxes()
             LoadSettingsAndVoices()
@@ -11526,6 +12406,21 @@ Public Class ThisAddIn
         .AutoSize = True,
         .MaximumSize = New System.Drawing.Size(700, 0)
     }
+
+            ' --- Engine selector ---
+            cmbEngine = New System.Windows.Forms.ComboBox() With {
+    .Font = Me.Font,
+    .DropDownStyle = ComboBoxStyle.DropDownList,
+    .Width = 150,
+    .Margin = New System.Windows.Forms.Padding(0, -4, 0, 10)
+}
+            cmbEngine.Items.Clear()
+            If TTS_googleAvailable Then cmbEngine.Items.Add("Google")
+            If TTS_openAIAvailable Then cmbEngine.Items.Add("OpenAI")
+            ' default to first available
+            cmbEngine.SelectedIndex = 0
+            AddHandler cmbEngine.SelectedIndexChanged, AddressOf EngineChanged
+
 
             ' --- Voice Set 1 ---
             lblSet1 = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Your default voice set 1:", .AutoSize = True}
@@ -11655,18 +12550,20 @@ Public Class ThisAddIn
 
         Private Sub LayoutControls()
 
-            ' Root: 2 cols, 8 rows, bottom padding = 20px
+            Me.Controls.Clear()
+
+            ' Root: 2 cols, 9 rows, bottom padding = 20px
             Dim root As New System.Windows.Forms.TableLayoutPanel() With {
                       .Dock = System.Windows.Forms.DockStyle.Fill,
                       .AutoSize = True,
                       .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
                       .ColumnCount = 2,
-                      .RowCount = 8,
+                      .RowCount = 9,
                       .Padding = New System.Windows.Forms.Padding(10, 10, 10, 20)
                     }
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
             root.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
-            For i = 0 To 6
+            For i = 0 To 8
                 root.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
             Next
 
@@ -11674,9 +12571,19 @@ Public Class ThisAddIn
             root.Controls.Add(lblIntro, 0, 0)
             root.SetColumnSpan(lblIntro, 2)
 
+            ' Row1: Provider
+            root.RowStyles.Insert(1, New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            root.Controls.Add(New Label() With {
+                    .Font = Me.Font,
+                    .Text = "Text-to-Speech Provider:",
+                    .AutoSize = True
+                }, 0, 1)
+            root.Controls.Add(cmbEngine, 1, 1)
+
+
             ' Row1: Headings
-            root.Controls.Add(lblSet1, 0, 1)
-            root.Controls.Add(lblSet2, 1, 1)
+            root.Controls.Add(lblSet1, 0, 2)
+            root.Controls.Add(lblSet2, 1, 2)
 
             ' Row2: Language (+ two‑voice radio)
             Dim fl2a As New System.Windows.Forms.FlowLayoutPanel() With {
@@ -11685,7 +12592,7 @@ Public Class ThisAddIn
     }
             If _twoVoicesRequired Then fl2a.Controls.Add(rdoVoice1A)
             fl2a.Controls.Add(cmbLanguage1)
-            root.Controls.Add(fl2a, 0, 2)
+            root.Controls.Add(fl2a, 0, 3)
 
             Dim fl2b As New System.Windows.Forms.FlowLayoutPanel() With {
       .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
@@ -11693,7 +12600,7 @@ Public Class ThisAddIn
     }
             If _twoVoicesRequired Then fl2b.Controls.Add(rdoVoice2A)
             fl2b.Controls.Add(cmbLanguage2)
-            root.Controls.Add(fl2b, 1, 2)
+            root.Controls.Add(fl2b, 1, 3)
 
             ' Row3: Voice1A + play + single‑voice radio or indent if two‑voice mode
             Dim fl3a As New System.Windows.Forms.FlowLayoutPanel() With {
@@ -11710,7 +12617,7 @@ Public Class ThisAddIn
             End If
             fl3a.Controls.Add(cmbVoice1A)
             fl3a.Controls.Add(btnPlay1A)
-            root.Controls.Add(fl3a, 0, 3)
+            root.Controls.Add(fl3a, 0, 4)
 
             Dim fl3b As New System.Windows.Forms.FlowLayoutPanel() With {
       .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
@@ -11725,7 +12632,7 @@ Public Class ThisAddIn
             End If
             fl3b.Controls.Add(cmbVoice2A)
             fl3b.Controls.Add(btnPlay2A)
-            root.Controls.Add(fl3b, 1, 3)
+            root.Controls.Add(fl3b, 1, 4)
 
             ' Row4: Voice1B + play (same indent logic)
             Dim fl4a As New System.Windows.Forms.FlowLayoutPanel() With {
@@ -11741,7 +12648,7 @@ Public Class ThisAddIn
             End If
             fl4a.Controls.Add(cmbVoice1B)
             fl4a.Controls.Add(btnPlay1B)
-            root.Controls.Add(fl4a, 0, 4)
+            root.Controls.Add(fl4a, 0, 5)
 
             Dim fl4b As New System.Windows.Forms.FlowLayoutPanel() With {
       .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
@@ -11756,7 +12663,7 @@ Public Class ThisAddIn
             End If
             fl4b.Controls.Add(cmbVoice2B)
             fl4b.Controls.Add(btnPlay2B)
-            root.Controls.Add(fl4b, 1, 4)
+            root.Controls.Add(fl4b, 1, 5)
 
             ' Row5: Sample text (2‑col table for vertical centering)
             Dim tbl5 As New System.Windows.Forms.TableLayoutPanel() With {
@@ -11772,7 +12679,7 @@ Public Class ThisAddIn
             txtSampleText.Dock = System.Windows.Forms.DockStyle.Fill
             tbl5.Controls.Add(lblSampleText, 0, 0)
             tbl5.Controls.Add(txtSampleText, 1, 0)
-            root.Controls.Add(tbl5, 0, 5)
+            root.Controls.Add(tbl5, 0, 6)
             root.SetColumnSpan(tbl5, 2)
 
             ' Row6: Output path (3‑col table)
@@ -11792,7 +12699,7 @@ Public Class ThisAddIn
             tbl6.Controls.Add(lblOutputPath, 0, 0)
             tbl6.Controls.Add(txtOutputPath, 1, 0)
             tbl6.Controls.Add(chkTemporary, 2, 0)
-            root.Controls.Add(tbl6, 0, 6)
+            root.Controls.Add(tbl6, 0, 7)
             root.SetColumnSpan(tbl6, 2)
 
             Dim pnlButtons As New System.Windows.Forms.FlowLayoutPanel() With {
@@ -11809,7 +12716,20 @@ Public Class ThisAddIn
             Me.Controls.Add(pnlButtons)
             Me.Controls.Add(root)
 
+        End Sub
 
+        Private Sub EngineChanged(sender As Object, e As EventArgs)
+            ' set our global
+            TTS_SelectedEngine = If(cmbEngine.SelectedItem.ToString() = "OpenAI",
+                             TTSEngine.OpenAI,
+                             TTSEngine.Google)
+
+            My.Settings.TTSProvider = cmbEngine.SelectedItem.ToString()
+            My.Settings.Save()
+
+            ' rebuild the combos
+            PopulateLanguageComboBoxes()
+            LoadSettingsAndVoices()
         End Sub
 
         Private Sub AddHandlers()
@@ -11826,18 +12746,63 @@ Public Class ThisAddIn
             AddHandler btnDesktop.Click, AddressOf btnDesktop_Click
         End Sub
 
-        Private Async Sub PopulateLanguageComboBoxes()
-
-            ' Populate combos
+        Private Sub PopulateLanguageComboBoxes()
             cmbLanguage1.Items.Clear()
             cmbLanguage2.Items.Clear()
 
-            For Each lang In GoogleTTSsupportedLanguages
-                cmbLanguage1.Items.Add(lang)
-                cmbLanguage2.Items.Add(lang)
-            Next
+            If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                cmbLanguage1.Items.AddRange(OpenAILanguages)
+                cmbLanguage2.Items.AddRange(OpenAILanguages)
+            Else
+                For Each lang In GoogleTTSsupportedLanguages
+                    cmbLanguage1.Items.Add(lang)
+                    cmbLanguage2.Items.Add(lang)
+                Next
+            End If
+
+            If cmbLanguage1.Items.Count > 0 Then cmbLanguage1.SelectedIndex = 0
+            If cmbLanguage2.Items.Count > 0 Then cmbLanguage2.SelectedIndex = 0
         End Sub
+
+
         Private Async Sub LoadSettingsAndVoices()
+            RemoveHandler cmbLanguage1.SelectedIndexChanged, AddressOf cmbLanguage1_SelectedIndexChanged
+            RemoveHandler cmbLanguage2.SelectedIndexChanged, AddressOf cmbLanguage2_SelectedIndexChanged
+
+            ' restore last‐used languages
+            cmbLanguage1.SelectedItem = My.Settings.TTS1languagecode
+            cmbLanguage2.SelectedItem = My.Settings.TTS2languagecode
+
+            Dim tasks As New List(Of System.Threading.Tasks.Task)
+
+            If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                ' immediate, sync fill of voices
+                PopulateOpenAIVoices(cmbLanguage1.Text, cmbVoice1A, cmbVoice1B)
+                PopulateOpenAIVoices(cmbLanguage2.Text, cmbVoice2A, cmbVoice2B)
+            Else
+                ' Google: async fetch
+                If Not String.IsNullOrEmpty(cmbLanguage1.Text) Then
+                    tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage1.Text, cmbVoice1A, cmbVoice1B))
+                End If
+                If Not String.IsNullOrEmpty(cmbLanguage2.Text) Then
+                    tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage2.Text, cmbVoice2A, cmbVoice2B))
+                End If
+            End If
+
+            If tasks.Count > 0 Then Await System.Threading.Tasks.Task.WhenAll(tasks)
+
+            ' restore last‐used voice selections
+            cmbVoice1A.SelectedItem = My.Settings.TTS1voiceA
+            cmbVoice1B.SelectedItem = My.Settings.TTS1voiceB
+            cmbVoice2A.SelectedItem = My.Settings.TTS2voiceA
+            cmbVoice2B.SelectedItem = My.Settings.TTS2voiceB
+
+            AddHandler cmbLanguage1.SelectedIndexChanged, AddressOf cmbLanguage1_SelectedIndexChanged
+            AddHandler cmbLanguage2.SelectedIndexChanged, AddressOf cmbLanguage2_SelectedIndexChanged
+        End Sub
+
+
+        Private Async Sub xxxLoadSettingsAndVoices()
             RemoveHandler cmbLanguage1.SelectedIndexChanged, AddressOf cmbLanguage1_SelectedIndexChanged
             RemoveHandler cmbLanguage2.SelectedIndexChanged, AddressOf cmbLanguage2_SelectedIndexChanged
 
@@ -11845,15 +12810,19 @@ Public Class ThisAddIn
             cmbLanguage2.SelectedItem = If(IsNothing(My.Settings.TTS2languagecode), "", My.Settings.TTS2languagecode)
 
             Dim tasks As New List(Of System.Threading.Tasks.Task)
+            If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                ' OpenAI: no async fetch needed
+                PopulateOpenAIVoices(cmbLanguage1.Text, cmbVoice1A, cmbVoice1B)
+                PopulateOpenAIVoices(cmbLanguage2.Text, cmbVoice2A, cmbVoice2B)
+            Else
+                If Not IsNothing(cmbLanguage1.SelectedItem) AndAlso cmbLanguage1.Text <> "" Then
+                    tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage1.SelectedItem.ToString(), cmbVoice1A, cmbVoice1B))
+                End If
 
-            If Not IsNothing(cmbLanguage1.SelectedItem) AndAlso cmbLanguage1.Text <> "" Then
-                tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage1.SelectedItem.ToString(), cmbVoice1A, cmbVoice1B))
+                If Not IsNothing(cmbLanguage2.SelectedItem) AndAlso cmbLanguage2.Text <> "" Then
+                    tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage2.SelectedItem.ToString(), cmbVoice2A, cmbVoice2B))
+                End If
             End If
-
-            If Not IsNothing(cmbLanguage2.SelectedItem) AndAlso cmbLanguage2.Text <> "" Then
-                tasks.Add(LoadVoicesIntoComboBoxesAsync(cmbLanguage2.SelectedItem.ToString(), cmbVoice2A, cmbVoice2B))
-            End If
-
             If tasks.Count > 0 Then
                 Await System.Threading.Tasks.Task.WhenAll(tasks)
             End If
@@ -11875,19 +12844,57 @@ Public Class ThisAddIn
         End Sub
 
 
+        Private Sub PopulateOpenAIVoices(lang As String,
+                                 comboA As Forms.ComboBox,
+                                 comboB As Forms.ComboBox)
+            comboA.Items.Clear() : comboB.Items.Clear()
+            For Each v In OpenAIVoices
+                Dim disp = $"{v} — {OpenAIDescriptions(v)}"
+                comboA.Items.Add(disp)
+                comboB.Items.Add(disp)
+            Next
+            If comboA.Items.Count > 0 Then comboA.SelectedIndex = 0
+            If comboB.Items.Count > 0 Then comboB.SelectedIndex = 0
+        End Sub
+
         Private Async Sub cmbLanguage1_SelectedIndexChanged(sender As Object, e As EventArgs)
+            Dim lang = TryCast(cmbLanguage1.SelectedItem, String)
+            If String.IsNullOrEmpty(lang) Then Return
+
+            If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                PopulateOpenAIVoices(lang, cmbVoice1A, cmbVoice1B)
+            Else
+                Await LoadVoicesIntoComboBoxesAsync(lang, cmbVoice1A, cmbVoice1B)
+            End If
+        End Sub
+
+        Private Async Sub cmbLanguage2_SelectedIndexChanged(sender As Object, e As EventArgs)
+            Dim lang = TryCast(cmbLanguage2.SelectedItem, String)
+            If String.IsNullOrEmpty(lang) Then Return
+
+            If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                PopulateOpenAIVoices(lang, cmbVoice2A, cmbVoice2B)
+            Else
+                Await LoadVoicesIntoComboBoxesAsync(lang, cmbVoice2A, cmbVoice2B)
+            End If
+        End Sub
+
+
+
+        Private Async Sub xxcmbLanguage1_SelectedIndexChanged(sender As Object, e As EventArgs)
             Dim selectedLang As String = TryCast(cmbLanguage1.SelectedItem, String)
             If Not String.IsNullOrEmpty(selectedLang) Then
                 Await LoadVoicesIntoComboBoxesAsync(selectedLang, cmbVoice1A, cmbVoice1B)
             End If
         End Sub
 
-        Private Async Sub cmbLanguage2_SelectedIndexChanged(sender As Object, e As EventArgs)
+        Private Async Sub xxcmbLanguage2_SelectedIndexChanged(sender As Object, e As EventArgs)
             Dim selectedLang As String = TryCast(cmbLanguage2.SelectedItem, String)
             If Not String.IsNullOrEmpty(selectedLang) Then
                 Await LoadVoicesIntoComboBoxesAsync(selectedLang, cmbVoice2A, cmbVoice2B)
             End If
         End Sub
+
 
         Private Async Function LoadVoicesIntoComboBoxesAsync(languageCode As String,
                                                            comboA As Forms.ComboBox,
@@ -11912,19 +12919,14 @@ Public Class ThisAddIn
                 Return voiceCache(languageCode)
             End If
 
-            If TTSSecondAPI Then
-                DecodedAPI_2 = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail_2, INI_OAuth2Scopes_2, INI_APIKey_2, INI_OAuth2Endpoint_2, INI_OAuth2ATExpiry_2, True)
-            Else
-                DecodedAPI = Await GetFreshAccessToken(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, False)
-            End If
-            Dim AccessToken As String = If(TTSSecondAPI, DecodedAPI_2, DecodedAPI)
+            Dim AccessToken As String = Await GetFreshTTSToken(UseSecondaryFor(TTSEngine.Google))
             If String.IsNullOrEmpty(AccessToken) Then
                 ShowCustomMessageBox("Error accessing Google API - authentication failed (no token).")
                 Return Nothing
             End If
 
             ' Build request
-            Dim url As String = INI_TTSEndpoint & "voices?languageCode=" & languageCode
+            Dim url As String = TTS_GoogleEndpoint & "voices?languageCode=" & languageCode
             Using httpClient As New HttpClient()
                 httpClient.DefaultRequestHeaders.Authorization = New Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken)
 
@@ -11974,6 +12976,10 @@ Public Class ThisAddIn
                     Return
                 End If
                 voiceName = voiceName.Replace(" (male)", "").Replace(" (female)", "")
+                If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                    ' remove “ — Beschreibung”
+                    voiceName = voiceName.Split(" "c)(0)
+                End If
                 Await Threading.Tasks.Task.Run(Sub()
                                                    GenerateAndPlayAudio(sampleText, "", lang, voiceName)
                                                End Sub)
@@ -11985,6 +12991,13 @@ Public Class ThisAddIn
         ' --- OK / Cancel / Desktop event handlers ---
         Private Sub btnOK_Click(sender As Object, e As EventArgs)
 
+            TTS_SelectedEngine = If(cmbEngine.SelectedItem.ToString() = "OpenAI",
+                         TTSEngine.OpenAI,
+                         TTSEngine.Google)
+
+            My.Settings.TTSProvider = cmbEngine.SelectedItem.ToString()
+            My.Settings.Save()
+
             Dim NotAllSelected As Boolean = False
 
             ' Determine which voice(s) were selected based on radio buttons
@@ -11994,28 +13007,53 @@ Public Class ThisAddIn
 
                 If rdoVoice1A.Checked Then
                     If cmbVoice1A.SelectedItem IsNot Nothing AndAlso cmbVoice1A.SelectedItem.ToString() <> "" Then
-                        SelectedVoices.Add(cmbVoice1A.SelectedItem.ToString())
+                        Dim sel As String = cmbVoice1A.SelectedItem.ToString()
+                        If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                            ' drop the “ — Beschreibung” part
+                            sel = sel.Split(" "c)(0)
+                        End If
+                        SelectedVoices.Add(sel)
                         SelectedLanguage = cmbLanguage1.SelectedItem.ToString()
                     Else
                         NotAllSelected = True
                     End If
                 ElseIf rdoVoice1B.Checked Then
                     If cmbVoice1B.SelectedItem IsNot Nothing AndAlso cmbVoice1B.SelectedItem.ToString() <> "" Then
-                        SelectedVoices.Add(cmbVoice1B.SelectedItem.ToString())
+
+                        Dim sel As String = cmbVoice1B.SelectedItem.ToString()
+                        If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                            ' drop the “ — Beschreibung” part
+                            sel = sel.Split(" "c)(0)
+                        End If
+                        SelectedVoices.Add(sel)
+
                         SelectedLanguage = cmbLanguage1.SelectedItem.ToString()
                     Else
                         NotAllSelected = True
                     End If
                 ElseIf rdoVoice2A.Checked Then
                     If cmbVoice2A.SelectedItem IsNot Nothing AndAlso cmbVoice2A.SelectedItem.ToString() <> "" Then
-                        SelectedVoices.Add(cmbVoice2A.SelectedItem.ToString())
+
+                        Dim sel As String = cmbVoice2A.SelectedItem.ToString()
+                        If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                            ' drop the “ — Beschreibung” part
+                            sel = sel.Split(" "c)(0)
+                        End If
+                        SelectedVoices.Add(sel)
+
                         SelectedLanguage = cmbLanguage2.SelectedItem.ToString()
                     Else
                         NotAllSelected = True
                     End If
                 ElseIf rdoVoice2B.Checked Then
                     If cmbVoice2B.SelectedItem IsNot Nothing AndAlso cmbVoice2B.SelectedItem.ToString() <> "" Then
-                        SelectedVoices.Add(cmbVoice2B.SelectedItem.ToString())
+                        Dim sel As String = cmbVoice2B.SelectedItem.ToString()
+                        If TTS_SelectedEngine = TTSEngine.OpenAI Then
+                            ' drop the “ — Beschreibung” part
+                            sel = sel.Split(" "c)(0)
+                        End If
+                        SelectedVoices.Add(sel)
+
                         SelectedLanguage = cmbLanguage2.SelectedItem.ToString()
                     Else
                         NotAllSelected = True
@@ -12053,7 +13091,7 @@ Public Class ThisAddIn
             End If
 
             If NotAllSelected Then
-                ShowCustomMessageBox("Please complete your voice selection (or 'Cancel').")
+                ShowCustomMessageBox("Please complete your voice selection (Or 'Cancel').")
                 Return
             End If
 
@@ -12166,3 +13204,4 @@ Public Class ThisAddIn
 
 
 End Class
+

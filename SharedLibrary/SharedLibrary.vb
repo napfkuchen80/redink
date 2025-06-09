@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.6.2025
+' 9.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -21,6 +21,7 @@
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
+Imports System.ComponentModel
 Imports System.Deployment.Application
 Imports System.Drawing
 Imports System.Drawing.Imaging
@@ -46,6 +47,7 @@ Imports Microsoft.Office.Interop
 Imports Microsoft.Office.Interop.Word
 Imports Microsoft.Office.Tools
 Imports Microsoft.Win32
+Imports NAudio.Utils
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 Imports Org.BouncyCastle.Crypto
@@ -127,6 +129,7 @@ Namespace SharedLibrary
             Property INI_KeepFormat1 As Boolean
             Property INI_KeepFormat2 As Boolean
             Property INI_KeepFormatCap As Integer
+            Property INI_MarkdownConvert As Boolean
             Property INI_KeepParaFormatInline As Boolean
             Property INI_ReplaceText1 As Boolean
             Property INI_ReplaceText2 As Boolean
@@ -162,6 +165,7 @@ Namespace SharedLibrary
             Property SP_NoFillers As String
             Property SP_Podcast As String
             Property SP_Shorten As String
+            Property SP_InsertClipboard As String
             Property SP_Summarize As String
             Property SP_MailReply As String
             Property SP_MailSumup As String
@@ -293,6 +297,7 @@ Namespace SharedLibrary
         Public Property INI_UsageRestrictions As String Implements ISharedContext.INI_UsageRestrictions
         Public Property INI_Language1 As String Implements ISharedContext.INI_Language1
         Public Property INI_Language2 As String Implements ISharedContext.INI_Language2
+        Public Property INI_MarkdownConvert As Boolean Implements ISharedContext.INI_MarkdownConvert
         Public Property INI_KeepFormat1 As Boolean Implements ISharedContext.INI_KeepFormat1
         Public Property INI_KeepFormat2 As Boolean Implements ISharedContext.INI_KeepFormat2
         Public Property INI_KeepFormatCap As Integer Implements ISharedContext.INI_KeepFormatCap
@@ -328,6 +333,7 @@ Namespace SharedLibrary
         Public Property SP_NoFillers As String Implements ISharedContext.SP_NoFillers
         Public Property SP_Podcast As String Implements ISharedContext.SP_Podcast
         Public Property SP_Shorten As String Implements ISharedContext.SP_Shorten
+        Public Property SP_InsertClipboard As String Implements ISharedContext.SP_InsertClipboard
         Public Property SP_Summarize As String Implements ISharedContext.SP_Summarize
         Public Property SP_MailReply As String Implements ISharedContext.SP_MailReply
         Public Property SP_MailSumup As String Implements ISharedContext.SP_MailSumup
@@ -419,17 +425,6 @@ Namespace SharedLibrary
         End Sub
     End Class
 
-    Public Class xxInputParameter
-        Public Property Name As String
-        Public Property Value As Object
-        ' We use this property to keep track of the dynamically created control.
-        Public Property InputControl As Control
-
-        Public Sub New(ByVal name As String, ByVal value As Object)
-            Me.Name = name
-            Me.Value = value
-        End Sub
-    End Class
 
     Module WinAPI
         <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
@@ -549,8 +544,8 @@ Namespace SharedLibrary
         Private Const Int_CodeBasis As String = ""
         Public Const alloweddomains As String = ""
 
-        Public Const AN As String = "Red Ink" ' 
-        Public Const AN2 As String = "redink" ' 
+        Public Const AN As String = "Red Ink"
+        Public Const AN2 As String = "redink"
         Public Const AN3 As String = "Red Ink" ' Name used for Visual Studio Project 
         Public Const AN4 As String = "https://vischer.com/redink"  ' Name of sub-directory on Website of vischer.com/...  
         Public Const AN5 As String = "Red%20Ink"  ' Name of sub-directory on Website of vischer.com/...  
@@ -579,6 +574,8 @@ Namespace SharedLibrary
         Public Const AnonPlaceholder = "redacted"
         Public Const AnonPrefix = "<"
         Public Const AnonSuffix = ">"
+
+        Public Const Default_PaneWidth = 580
 
         Public Delegate Sub IntelligentMergeCallback(selectedText As String)
 
@@ -638,6 +635,7 @@ Namespace SharedLibrary
         Const Default_SP_Correct As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to only correct spelling, missing words, clearly unnecessary words, strange or archaic language and poor style. When doing so, do not significantly change the length of the text. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. {INI_PreCorrection}"
         Const Default_SP_Improve As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be much more concise, to the point, better structured and easier to understand and in better, professional style. Change passive voice to active voice, where this makes sense. Remove rendundancies and filler words, except where this is necessary for easy reading and style. When doing so, do not significantly change the length of the text. Also, do not change the overall meaning, tone or content of the text. {INI_PreCorrection}"
         Const Default_SP_Shorten As String = "You are a legal professional and editor with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Shorten the text that is provided to you, in its original language,  and is marked as 'Texttoprocess'. Shorten it as much as necessary to ensure that the output generated by you has {ShortenLength} words. In a first step try to remove redundancies, and if this is not sufficient to fulfill the instruction, then remove less important information or combine information. However, preserve the original tone, the original message of the texttoprocess (but not the <texttoprocesstag>) and any material information. {INI_PreCorrection}"
+        Const Default_SP_InsertClipboard As String = "You will receive a binary object. Convert any text contained therein into text and provide it, with no additional information, but in a meaningful way to process it in writing a text. If there is cut-off text left, right, at the top or bottom that cannot be reasonably use when writing a text, then ignore it. You can use Markdown to keep the original formatting or tables. \n\n ONLY if the object contains no meaningful text that can be inserted, but a video or image, then describe what you see. If the object contains voice, then transcribe the voice, if possible with speaker identification/diarization and emotions, and if it is a video, describe what you see in the video. {INI_PreCorrection}"
         Const Default_SP_Summarize As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Create a very short summary of the that is provided to you, in its original language, and is marked as 'Texttoprocess'. Ensure that your output has {SummaryLength} words. Use the same language style as in the original text, but do not add any information or other thoughts to it. {INI_PreCorrection}"
         Const Default_SP_FreestyleText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command and the text provided to you and marked as 'texttoprocess'. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
@@ -779,7 +777,7 @@ Namespace SharedLibrary
         End Sub
 
         Public Shared Sub RestoreClipboard()
-            If clipboardData Is Nothing Then Exit Sub
+            If clipboardData Is Nothing Then Return
 
             If TypeOf clipboardData Is String Then
                 Clipboard.SetText(CStr(clipboardData))
@@ -1371,7 +1369,7 @@ Namespace SharedLibrary
                                     mimeType = mresult.MimeType.Trim()
                                     encodedData = mresult.EncodedData.Trim()
                                 Else
-                                    Throw New System.Exception("Clipboard enthält keine Dateien.")
+                                    Throw New System.Exception("Clipboard does not contain any data.")
                                 End If
 
                                 ' 2. Bitmap
@@ -1487,7 +1485,7 @@ Namespace SharedLibrary
                                     mimeType = "application/octet-stream"
                                     encodedData = System.Convert.ToBase64String(bytes)
                                 Else
-                                    Throw New System.Exception("Keine unterstützten Daten im Clipboard gefunden.")
+                                    Throw New System.Exception("No supported data found in the clipboard.")
                                 End If
                             End If
 
@@ -1534,7 +1532,7 @@ Namespace SharedLibrary
 
                             Dim maxRetries As Integer = 3
                             Dim delayIntervals As Integer() = {5000, 10000, 30000} ' delays in milliseconds
-                            Dim responseText As String
+                            Dim responseText As String = ""
 
                             For attempt As Integer = 0 To maxRetries
                                 ' On retries, wait the specified delay before sending a new request.
@@ -1749,375 +1747,11 @@ Namespace SharedLibrary
                 ' System.Guid aus dem Namespace System
                 Return System.Guid.NewGuid().ToString("N")
             Catch ex As System.Exception
+                ' Handle error silently
             End Try
         End Function
 
-        Public Shared Async Function oldLLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional FileObject As String = "") As Task(Of String)
 
-            Dim splash As New SplashScreen("Waiting for the LLM to respond...")
-
-            If Not Hidesplash Then
-                splash.Show()
-                splash.Refresh()
-            End If
-
-            Try
-
-                ' Configure TLS
-                If (System.Net.ServicePointManager.SecurityProtocol And System.Net.SecurityProtocolType.Tls12) = 0 Then
-                    System.Net.ServicePointManager.SecurityProtocol = System.Net.ServicePointManager.SecurityProtocol Or System.Net.SecurityProtocolType.Tls12
-                End If
-                System.Net.ServicePointManager.DefaultConnectionLimit = 100 ' Adjust based on expected load
-
-                ' Initialize API variables
-                Dim Endpoint As String
-                Dim HeaderA As String
-                Dim HeaderB As String
-                Dim APICall As String
-                Dim TemperatureValue As String
-                Dim ModelValue As String
-                Dim TimeoutValue As Long
-                Dim ResponseKey As String
-                Dim DoubleS As Boolean
-
-                If UseSecondAPI Then
-
-                    If context.INI_OAuth2_2 Then
-                        context.DecodedAPI_2 = Await GetFreshAccessToken(context, context.INI_OAuth2ClientMail_2, context.INI_OAuth2Scopes_2, context.INI_APIKey_2, context.INI_OAuth2Endpoint_2, context.INI_OAuth2ATExpiry_2, True)
-                        If context.DecodedAPI_2 = "" Then Exit Function
-                    End If
-
-                Else
-                    If context.INI_OAuth2 Then
-                        context.DecodedAPI = Await GetFreshAccessToken(context, context.INI_OAuth2ClientMail, context.INI_OAuth2Scopes, context.INI_APIKey, context.INI_OAuth2Endpoint, context.INI_OAuth2ATExpiry, False)
-                        If context.DecodedAPI = "" Then Exit Function
-                    End If
-                End If
-
-                If UseSecondAPI Then
-
-                    Endpoint = Replace(Replace(context.INI_Endpoint_2, "{model}", context.INI_Model_2), "{apikey}", context.DecodedAPI_2)
-                    HeaderA = Replace(Replace(context.INI_HeaderA_2, "{model}", context.INI_Model_2), "{apikey}", context.DecodedAPI_2)
-                    HeaderB = Replace(Replace(context.INI_HeaderB_2, "{model}", context.INI_Model_2), "{apikey}", context.DecodedAPI_2)
-                    APICall = context.INI_APICall_2
-                    ResponseKey = context.INI_Response_2
-                    DoubleS = context.INI_DoubleS
-
-                    TemperatureValue = If(String.IsNullOrEmpty(Temperature) OrElse Temperature = "Default", context.INI_Temperature_2, Temperature)
-                    ModelValue = If(String.IsNullOrEmpty(Model) OrElse Model = "Default", context.INI_Model_2, Model)
-                    TimeoutValue = If(Timeout = 0, context.INI_Timeout_2, Timeout)
-                Else
-
-                    Endpoint = Replace(Replace(context.INI_Endpoint, "{model}", context.INI_Model), "{apikey}", context.DecodedAPI)
-                    HeaderA = Replace(Replace(context.INI_HeaderA, "{model}", context.INI_Model), "{apikey}", context.DecodedAPI)
-                    HeaderB = Replace(Replace(context.INI_HeaderB, "{model}", context.INI_Model), "{apikey}", context.DecodedAPI)
-                    APICall = context.INI_APICall
-                    ResponseKey = context.INI_Response
-                    DoubleS = context.INI_DoubleS
-                    TemperatureValue = If(String.IsNullOrEmpty(Temperature) OrElse Temperature = "Default", context.INI_Temperature, Temperature)
-                    ModelValue = If(String.IsNullOrEmpty(Model) OrElse Model = "Default", context.INI_Model, Model)
-                    TimeoutValue = If(Timeout = 0, context.INI_Timeout, Timeout)
-                End If
-
-                ' Replace placeholders in the request body
-                Dim requestBody As String = APICall
-                requestBody = requestBody.Replace("{model}", ModelValue)
-                requestBody = requestBody.Replace("{promptsystem}", CleanString(promptSystem))
-                requestBody = requestBody.Replace("{promptuser}", CleanString(promptUser))
-                requestBody = requestBody.Replace("{userinstruction}", CleanString(AddUserPrompt))
-                requestBody = requestBody.Replace("{temperature}", TemperatureValue)
-
-                If Not String.IsNullOrWhiteSpace(If(UseSecondAPI, context.INI_APICall_Object_2, context.INI_APICall_Object)) AndAlso Not String.IsNullOrWhiteSpace(FileObject) Then
-                    If UseSecondAPI Then
-                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object_2)
-                    Else
-                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object)
-                    End If
-
-
-
-                    Try
-                        Dim mimeType As String
-                        Dim encodedData As String
-
-                        If FileObject = "clipboard" Then
-                            Dim dataObj As IDataObject = Clipboard.GetDataObject()
-                            Dim formats() As String = dataObj.GetFormats()
-
-                            ' 1. Dateien im Clipboard?
-                            If dataObj.GetDataPresent(DataFormats.FileDrop) Then
-                                Dim files = CType(dataObj.GetData(DataFormats.FileDrop), String())
-                                If files.Length > 0 Then
-                                    ' Alle Dateitypen (inkl. PDF, Office, Video, Audio, Archive) mit MimeHelper
-                                    Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(files(0))
-                                    mimeType = mresult.MimeType.Trim()
-                                    encodedData = mresult.EncodedData.Trim()
-                                Else
-                                    Throw New System.Exception("Clipboard enthält keine Dateien.")
-                                End If
-
-                                ' 2. Bitmap
-                            ElseIf dataObj.GetDataPresent(DataFormats.Bitmap) Then
-                                Dim img As Image = Clipboard.GetImage()
-                                Using ms As New MemoryStream()
-                                    img.Save(ms, ImageFormat.Png)
-                                    mimeType = "image/png"
-                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
-                                End Using
-
-                                ' 3. DIB (Device-Independent Bitmap)
-                            ElseIf dataObj.GetDataPresent(DataFormats.Dib) Then
-                                Dim dibObj = dataObj.GetData(DataFormats.Dib)
-                                Using MS As New MemoryStream(CType(dibObj, Byte()))
-                                    Using bmp As New Bitmap(MS)
-                                        Using out As New MemoryStream()
-                                            bmp.Save(out, ImageFormat.Png)
-                                            mimeType = "image/png"
-                                            encodedData = System.Convert.ToBase64String(out.ToArray())
-                                        End Using
-                                    End Using
-                                End Using
-
-                                ' 4. Enhanced Metafile
-                            ElseIf dataObj.GetDataPresent(DataFormats.EnhancedMetafile) Then
-                                Dim emfHandle = CType(dataObj.GetData(DataFormats.EnhancedMetafile), IntPtr)
-                                Using emf As New Metafile(emfHandle, True)
-                                    Using bmp As New Bitmap(emf.Width, emf.Height)
-                                        Using g = Graphics.FromImage(bmp)
-                                            g.DrawImage(emf, 0, 0)
-                                            Using out As New MemoryStream()
-                                                bmp.Save(out, ImageFormat.Png)
-                                                mimeType = "image/png"
-                                                encodedData = System.Convert.ToBase64String(out.ToArray())
-                                            End Using
-                                        End Using
-                                    End Using
-                                End Using
-
-                                ' 5. Audio (WAV)
-                            ElseIf dataObj.GetDataPresent(DataFormats.WaveAudio) Then
-                                Dim audioStream As Stream = CType(dataObj.GetData(DataFormats.WaveAudio), Stream)
-                                Using ms As New MemoryStream()
-                                    audioStream.CopyTo(ms)
-                                    mimeType = "audio/wav"
-                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
-                                End Using
-
-                                ' 6. HTML
-                            ElseIf dataObj.GetDataPresent(DataFormats.Html) Then
-                                Dim html As String = CType(dataObj.GetData(DataFormats.Html), String)
-                                mimeType = "text/html"
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(html))
-
-                                ' 7. RTF
-                            ElseIf dataObj.GetDataPresent(DataFormats.Rtf) Then
-                                Dim rtf As String = CType(dataObj.GetData(DataFormats.Rtf), String)
-                                mimeType = "application/rtf"
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(rtf))
-
-                                ' 8. Text / JSON / XML / CSV
-                            ElseIf dataObj.GetDataPresent(DataFormats.UnicodeText) OrElse dataObj.GetDataPresent(DataFormats.Text) Then
-                                Dim textData As String = Clipboard.GetText()
-                                Dim trimmed = textData.Trim()
-                                If (trimmed.StartsWith("{") AndAlso trimmed.EndsWith("}")) OrElse
-               (trimmed.StartsWith("[") AndAlso trimmed.EndsWith("]")) Then
-                                    mimeType = "application/json"
-                                ElseIf trimmed.StartsWith("<") AndAlso trimmed.Contains(">") Then
-                                    mimeType = "application/xml"
-                                ElseIf trimmed.Contains(","c) AndAlso trimmed.Contains(vbCr) Then
-                                    mimeType = "text/csv"
-                                Else
-                                    mimeType = "text/plain"
-                                End If
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(textData))
-
-                                ' 9. Sonstige Formate (Audio MP3, Video MP4, etc.) oder generisches Objekt
-                            Else
-                                ' Entferne bereits behandelte Formate
-                                Dim handled = New String() {
-                                                            DataFormats.FileDrop,
-                                                            DataFormats.Bitmap,
-                                                            DataFormats.Dib,
-                                                            DataFormats.EnhancedMetafile,
-                                                            DataFormats.WaveAudio,
-                                                            DataFormats.Html,
-                                                            DataFormats.Rtf,
-                                                            DataFormats.UnicodeText,
-                                                            DataFormats.Text
-                                                        }
-                                Dim remaining = formats.Where(Function(f) Not handled.Contains(f)).ToArray()
-                                If remaining.Length > 0 Then
-                                    Dim raw As Object = dataObj.GetData(remaining(0))
-                                    Dim bytes() As Byte = Nothing
-
-                                    If TypeOf raw Is Byte() Then
-                                        bytes = CType(raw, Byte())
-                                    ElseIf TypeOf raw Is Stream Then
-                                        Using ms As New MemoryStream()
-                                            CType(raw, Stream).CopyTo(ms)
-                                            bytes = ms.ToArray()
-                                        End Using
-                                    Else
-                                        ' Versuche Serialization
-                                        Using ms As New MemoryStream()
-                                            Dim bf = New Runtime.Serialization.Formatters.Binary.BinaryFormatter()
-                                            bf.Serialize(ms, raw)
-                                            bytes = ms.ToArray()
-                                        End Using
-                                    End If
-
-                                    mimeType = "application/octet-stream"
-                                    encodedData = System.Convert.ToBase64String(bytes)
-                                Else
-                                    Throw New System.Exception("Keine unterstützten Daten im Clipboard gefunden.")
-                                End If
-                            End If
-
-                        Else
-                            ' Standard-Fall: Datei per MimeHelper
-                            Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
-                            mimeType = mresult.MimeType.Trim()
-                            encodedData = mresult.EncodedData.Trim()
-                        End If
-
-                        requestBody = requestBody.Replace("{mimetype}", mimeType)
-                        requestBody = requestBody.Replace("{encodeddata}", encodedData)
-
-                    Catch ex As System.Exception
-                        ShowCustomMessageBox($"Error encoding '{FileObject}': {ex.Message}")
-                        Return ""
-                    End Try
-
-                End If
-
-                requestBody = requestBody.Replace("{objectcall}", "")
-
-                Dim Returnvalue As String = ""
-
-                ' Configure HttpClient with timeout
-                Using handler As New System.Net.Http.HttpClientHandler()
-                    handler.UseProxy = True
-                    handler.Proxy = System.Net.WebRequest.DefaultWebProxy
-                    handler.Proxy.Credentials = System.Net.CredentialCache.DefaultCredentials
-                    Using client As New System.Net.Http.HttpClient(handler)
-                        client.Timeout = TimeSpan.FromMilliseconds(TimeoutValue)
-
-                        ' Add headers
-                        If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                            client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
-                        End If
-
-                        If context.INI_APIDebug Then
-                            Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
-                        End If
-
-                        ' Send the request
-                        Try
-
-                            Dim maxRetries As Integer = 3
-                            Dim delayIntervals As Integer() = {5000, 10000, 30000} ' delays in milliseconds
-                            Dim responseText As String
-
-                            For attempt As Integer = 0 To maxRetries
-                                ' On retries, wait the specified delay before sending a new request.
-                                If attempt > 0 Then
-                                    If Not Hidesplash Then
-                                        splash.UpdateMessage("Slowing down ...")
-                                    End If
-                                    Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1))
-                                End If
-
-                                Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-                                Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
-
-                                If response.IsSuccessStatusCode Then
-                                    ' Read and return the response if the call succeeded.
-                                    responseText = Await response.Content.ReadAsStringAsync()
-                                    Exit For
-
-                                ElseIf response.StatusCode = 429 Then
-                                    ' If we received a 429 error and haven't exhausted our retries, loop to retry.
-                                    If attempt = maxRetries Then
-                                        ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).")
-                                        Return ""
-                                    End If
-                                    ' Otherwise, continue the loop to retry the request.
-                                    Continue For
-                                Else
-                                    ' For other HTTP errors, read the error content and show the message as before.
-                                    Dim errorContent As String = Await response.Content.ReadAsStringAsync()
-                                    ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: {errorContent}")
-                                    Return ""
-                                End If
-                            Next
-
-                            If Not Hidesplash Then
-                                splash.UpdateMessage("Waiting for the LLM to respond...")
-                            End If
-
-                            If context.INI_APIDebug Then
-                                Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
-                            End If
-
-                            ' Process the response
-
-                            Dim root As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(responseText)
-
-                            Select Case root.Type
-                                Case Newtonsoft.Json.Linq.JTokenType.Object
-                                    ' It's an object – you can do what you were doing before:
-                                    Dim jsonObject As Newtonsoft.Json.Linq.JObject = CType(root, Newtonsoft.Json.Linq.JObject)
-
-                                    Returnvalue = HandleObject(jsonObject, ResponseKey, responseText)
-
-                                Case Newtonsoft.Json.Linq.JTokenType.Array
-                                    ' It's an array – loop each element
-                                    Dim jsonArray As Newtonsoft.Json.Linq.JArray = CType(root, Newtonsoft.Json.Linq.JArray)
-
-                                    For Each item As Newtonsoft.Json.Linq.JToken In jsonArray
-                                        If item.Type = Newtonsoft.Json.Linq.JTokenType.Object Then
-                                            Dim obj As Newtonsoft.Json.Linq.JObject = CType(item, Newtonsoft.Json.Linq.JObject)
-
-                                            ' handle each object separately…
-                                            Returnvalue = Returnvalue & HandleObject(obj, ResponseKey, responseText)
-                                        End If
-                                    Next
-
-                                Case Else
-                                    ' maybe it's a string, number, boolean… handle or error out
-                                    ShowCustomMessageBox($"Unexpected JSON root type: {root.Type} ({responseText})")
-                            End Select
-
-
-                        Catch ex As System.Net.Http.HttpRequestException
-                            ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
-                        Catch ex As TaskCanceledException
-                            ShowCustomMessageBox($"The request to the LLM timed out. Please try again or increase the timeout setting.")
-                        Catch ex As System.Exception
-                            ShowCustomMessageBox($"The response from the LLM resulted in an error: {ex.Message}")
-                        End Try
-                    End Using ' Dispose HttpClient
-                End Using ' Dispose HttpClientHandler
-
-                If DoubleS Then
-                    Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
-                End If
-                If context.INI_Clean Then
-                    Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
-                    Returnvalue = RemoveHiddenMarkers(Returnvalue)
-                End If
-
-                Return Returnvalue
-
-            Catch ex As System.Exception
-                ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}")
-                Return ""
-            Finally
-                If Not Hidesplash Then
-                    splash.Close()
-                End If
-            End Try
-        End Function
 
         Private Shared Function HandleObject(jsonObject As Newtonsoft.Json.Linq.JObject, ResponseKey As String, ResponseText As String) As String
 
@@ -2824,7 +2458,7 @@ Namespace SharedLibrary
 
         Public Shared Sub InitializeConfig(ByRef context As ISharedContext, FirstTime As Boolean, Reload As Boolean)
 
-            If context.INIloaded And Not Reload Then Exit Sub
+            If context.INIloaded AndAlso Not Reload Then Return
 
             context.GPTSetupError = True
 
@@ -2843,7 +2477,7 @@ Namespace SharedLibrary
                 DefaultPath = GetDefaultINIPath(context.RDV)
                 DefaultPath2 = GetDefaultINIPath("Word")
 
-                If Not String.IsNullOrWhiteSpace(RegFilePath) And RegPath_IniPrio Then
+                If Not String.IsNullOrWhiteSpace(RegFilePath) AndAlso RegPath_IniPrio Then
                     IniFilePath = System.IO.Path.Combine(ExpandEnvironmentVariables(RegFilePath), $"{AN2}.ini")
                 ElseIf System.IO.File.Exists(DefaultPath) Then
                     IniFilePath = DefaultPath
@@ -2865,22 +2499,22 @@ Namespace SharedLibrary
                             frm.ShowDialog()
                         End Using
                         IniFilePath = DefaultPath
-                        If context.InitialConfigFailed And Not System.IO.File.Exists(IniFilePath) Then
+                        If context.InitialConfigFailed AndAlso Not System.IO.File.Exists(IniFilePath) Then
                             ShowCustomMessageBox($"You have aborted the setup wizard and no configuration file has been found ('{IniFilePath}'). You will have to retry or configure it manually to use {AN}, even if you see the menus (they will disappear once {AN} has been de-installed or de-activated).")
-                            Exit Sub
+                            Return
                         End If
                         If Not System.IO.File.Exists(IniFilePath) Then
                             ShowCustomMessageBox($"The configuration file is (still) not found ('{IniFilePath}'). There may be an error in the setup assistant. Please configure the configuration file manually.")
-                            Exit Sub
+                            Return
                         End If
                     Else
                         ShowCustomMessageBox($"The configuration file has not been found ('{IniFilePath}').")
-                        Exit Sub
+                        Return
                     End If
                 End If
 
                 Dim iniContent As String = ""
-                Dim configDict As New Dictionary(Of String, String)
+                Dim configDict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
 
                 ' Read and parse the .ini file
                 iniContent = System.IO.File.ReadAllText(IniFilePath)
@@ -2919,6 +2553,7 @@ Namespace SharedLibrary
                 context.SP_NoFillers = If(configDict.ContainsKey("SP_NoFillers"), configDict("SP_NoFillers"), Default_SP_NoFillers)
                 context.SP_Podcast = If(configDict.ContainsKey("SP_Podcast"), configDict("SP_Podcast"), Default_SP_Podcast)
                 context.SP_Shorten = If(configDict.ContainsKey("SP_Shorten"), configDict("SP_Shorten"), Default_SP_Shorten)
+                context.SP_InsertClipboard = If(configDict.ContainsKey("SP_InsertClipboard"), configDict("SP_InsertClipboard"), Default_SP_InsertClipboard)
                 context.SP_Summarize = If(configDict.ContainsKey("SP_Summarize"), configDict("SP_Summarize"), Default_SP_Summarize)
                 context.SP_FreestyleText = If(configDict.ContainsKey("SP_FreestyleText"), configDict("SP_FreestyleText"), Default_SP_FreestyleText)
                 context.SP_FreestyleNoText = If(configDict.ContainsKey("SP_FreestyleNoText"), configDict("SP_FreestyleNoText"), Default_SP_FreestyleNoText)
@@ -2969,6 +2604,7 @@ Namespace SharedLibrary
                 context.INI_KeepFormat1 = ParseBoolean(configDict, "KeepFormat1")
                 context.INI_ReplaceText1 = ParseBoolean(configDict, "ReplaceText1", True)
                 context.INI_KeepFormat2 = ParseBoolean(configDict, "KeepFormat2")
+                context.INI_MarkdownConvert = ParseBoolean(configDict, "MarkdownConvert", True)
                 context.INI_KeepParaFormatInline = ParseBoolean(configDict, "KeepParaFormatInline")
                 context.INI_ReplaceText2 = ParseBoolean(configDict, "ReplaceText2")
                 context.INI_DoMarkupOutlook = ParseBoolean(configDict, "DoMarkupOutlook", True)
@@ -3066,7 +2702,7 @@ Namespace SharedLibrary
                     End If
                 End If
 
-                If context.INI_APIEncrypted Or context.INI_APIEncrypted_2 Then
+                If context.INI_APIEncrypted OrElse context.INI_APIEncrypted_2 Then
                     If IsEmptyOrBlank(Int_CodeBasis) Then
                         context.Codebasis = GetFromRegistry(RegPath_Base, RegPath_CodeBasis, False)
                     Else
@@ -3085,11 +2721,11 @@ Namespace SharedLibrary
 
                 If Now > LicensedTill Then
                     ShowCustomMessageBox($"Your configured license for {AN} for {context.RDV} has expired. Please renew and configure the license to continue using {AN}.")
-                    Exit Sub
+                    Return
                 End If
 
                 If INIValuesMissing(context) Then
-                    Exit Sub
+                    Return
                 End If
 
                 ' Additional configurations for OAuth2
@@ -3109,13 +2745,13 @@ Namespace SharedLibrary
                     context.INI_APIKey = Trim(Replace(RealAPIKey(context.INI_APIKey, False, True, context), "\n", ""))
                     If String.IsNullOrWhiteSpace(context.INI_APIKey) Then
                         ShowCustomMessageBox("Internal error: Could not determine private key (likely a decryption error).")
-                        Exit Sub
+                        Return
                     End If
                 Else
                     context.DecodedAPI = RealAPIKey(context.INI_APIKey, False, False, context)
                     If String.IsNullOrWhiteSpace(context.DecodedAPI) Then
                         ShowCustomMessageBox("Internal error: Could not determine API key (likely a decryption error).")
-                        Exit Sub
+                        Return
                     End If
                 End If
 
@@ -3125,13 +2761,13 @@ Namespace SharedLibrary
                         context.INI_APIKey_2 = Trim(Replace(RealAPIKey(context.INI_APIKey_2, True, True, context), "\n", ""))
                         If String.IsNullOrWhiteSpace(context.INI_APIKey_2) Then
                             ShowCustomMessageBox("Internal error: Could not determine private key (likely a decryption error).")
-                            Exit Sub
+                            Return
                         End If
                     Else
                         context.DecodedAPI_2 = RealAPIKey(context.INI_APIKey_2, True, False, context)
                         If String.IsNullOrWhiteSpace(context.DecodedAPI_2) Then
                             MessageBox.Show("Internal error: Could not determine API key for second API (likely a decryption error).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                            Exit Sub
+                            Return
                         End If
                     End If
                 End If
@@ -3158,7 +2794,7 @@ Namespace SharedLibrary
         Public Shared Function SignJWT(jwtUnsigned As String, privateKeyPem As String) As String
             Try
 
-                Dim privateKey As AsymmetricCipherKeyPair
+                'Dim privateKey As AsymmetricCipherKeyPair
                 If Left(privateKeyPem, 3) <> "---" Then
                     privateKeyPem = "-----BEGIN PRIVATE KEY-----" & vbLf & ConvertToPemFormat(privateKeyPem) & vbLf & "-----END PRIVATE KEY-----"
                 End If
@@ -3253,7 +2889,7 @@ Namespace SharedLibrary
                     If context.INI_OAuth2ATExpiry_2 < 0 Then missingSettings.Add("OAuth2ATExpiry_2", "OAuth2ATExpiry (Model 2)")
                 End If
 
-                If context.INI_ISearch And context.RDV.Substring(0, 4) = "Word" Then
+                If context.INI_ISearch AndAlso context.RDV.Substring(0, 4) = "Word" Then
                     If String.IsNullOrEmpty(context.INI_ISearch_URL) Then missingSettings.Add("ISearch_URL", "Search URL")
                     If String.IsNullOrEmpty(context.INI_ISearch_ResponseMask1) Then missingSettings.Add("ISearch_ResponseMask1", "Response Mask 1")
                     If String.IsNullOrEmpty(context.INI_ISearch_ResponseMask2) Then missingSettings.Add("ISearch_ResponseMask2", "Response Mask 2")
@@ -3262,14 +2898,14 @@ Namespace SharedLibrary
                     If context.INI_ISearch_Results = 0 Then missingSettings.Add("ISearch_Results", "ISearch_Results")
                 End If
 
-                If context.INI_Lib And context.RDV.Substring(0, 4) = "Word" Then
+                If context.INI_Lib AndAlso context.RDV.Substring(0, 4) = "Word" Then
                     If String.IsNullOrEmpty(context.INI_Lib_File) Then missingSettings.Add("Lib_File", "Lib_File")
                     If String.IsNullOrEmpty(context.INI_Lib_Find_SP) Then missingSettings.Add("Lib_Find_SP", "Lib_Find_SP")
                     If String.IsNullOrEmpty(context.INI_Lib_Apply_SP) Then missingSettings.Add("Lib_Apply_SP", "Lib_Apply_SP")
                     If String.IsNullOrEmpty(context.INI_Lib_Apply_SP_Markup) Then missingSettings.Add("Lib_Apply_SP_Markup", "Lib_Apply_SP_Markup")
                 End If
 
-                If context.INI_APIEncrypted Or context.INI_APIEncrypted_2 Then
+                If context.INI_APIEncrypted OrElse context.INI_APIEncrypted_2 Then
                     If String.IsNullOrEmpty(context.Codebasis) Then missingSettings.Add("Codebasis", "CodeBasis (for decryption)")
                 End If
 
@@ -3424,7 +3060,7 @@ Namespace SharedLibrary
                     Return models
                 End If
 
-                Dim currentDict As New Dictionary(Of String, String)()
+                Dim currentDict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
                 Dim Description As String = ""
                 For Each line In File.ReadAllLines(iniFilePath)
                     Dim trimmedLine As String = line.Trim()
@@ -3482,7 +3118,7 @@ Namespace SharedLibrary
 
                 Dim selector As New ModelSelectorForm(iniFilePath, context, Title, Listtype, OptionText, UseCase)
                 If selector.ShowDialog() = DialogResult.OK Then
-                    If selector.UseDefault And UseCase = 1 Then
+                    If selector.UseDefault AndAlso UseCase = 1 Then
                         RestoreDefaults(context, originalConfig)
                     ElseIf selector.SelectedModel IsNot Nothing Then
                         ApplyModelConfig(context, selector.SelectedModel)
@@ -4036,7 +3672,7 @@ Namespace SharedLibrary
         .AutoSize = True,
         .AutoSizeMode = AutoSizeMode.GrowAndShrink,
         .Padding = New Padding(20),
-        .MaximumSize = New Size(640, 0)   ' Limit total width
+        .MaximumSize = New Size(640 + 100, 0)   ' Limit total width
     }
 
             ' Prompt label
@@ -4044,7 +3680,7 @@ Namespace SharedLibrary
         .Text = prompt,
         .Font = standardFont,
         .AutoSize = True,
-        .MaximumSize = New Size(600, 0)   ' Wrap at 600px
+        .MaximumSize = New Size(600 + 100, 0)   ' Wrap at 600px
     }
             mainFlow.Controls.Add(promptLabel)
 
@@ -4054,7 +3690,7 @@ Namespace SharedLibrary
         .Multiline = Not SimpleInput,
         .WordWrap = True,
         .ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical),
-        .Width = 600,
+        .Width = 600 + 100,
         .Text = DefaultValue
     }
             If SimpleInput Then
@@ -4172,180 +3808,6 @@ Namespace SharedLibrary
                 Return inputTextBox.Text
             Else
                 Return If(Not SimpleInput, "ESC", "")
-            End If
-        End Function
-
-
-
-
-        Public Shared Function xxxShowCustomInputBox(prompt As String, title As String, SimpleInput As Boolean, Optional DefaultValue As String = "", Optional CtrlP As String = "") As String
-
-            Dim inputForm As New Form()
-            inputForm.Opacity = 0
-            Dim promptLabel As New System.Windows.Forms.Label()
-            Dim inputTextBox As New TextBox()
-            Dim okButton As New Button()
-            Dim cancelButton As New Button()
-
-            ' Form attributes
-            inputForm.Text = title
-            inputForm.FormBorderStyle = FormBorderStyle.FixedDialog
-            inputForm.StartPosition = FormStartPosition.CenterScreen
-            inputForm.MaximizeBox = False
-            inputForm.MinimizeBox = False
-            inputForm.ShowInTaskbar = False
-            inputForm.TopMost = True
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            inputForm.Font = standardFont
-
-            ' Prompt label
-            promptLabel.Text = prompt
-            promptLabel.Font = standardFont
-            promptLabel.AutoSize = True
-            promptLabel.MaximumSize = New Size(600, 0) ' Increased maximum width for text wrapping
-            promptLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the prompt
-            inputForm.Controls.Add(promptLabel)
-
-            ' Input TextBox
-            Dim textBoxHeight As Integer = If(SimpleInput, 25, 150)
-            inputTextBox.Multiline = Not SimpleInput
-            inputTextBox.WordWrap = True
-            inputTextBox.ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical)
-            inputTextBox.Location = New System.Drawing.Point(20, promptLabel.Bottom + 20) ' Margin below the prompt
-            inputTextBox.Width = 595
-            inputTextBox.Height = textBoxHeight
-            inputTextBox.Text = DefaultValue ' Set default value if provided
-            inputForm.Controls.Add(inputTextBox)
-
-            ' KeyDown handlers for Enter, Escape, and Ctrl+P insertion
-            If SimpleInput Then
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-            Else
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Escape Then
-                                                         inputForm.DialogResult = DialogResult.Cancel
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-            End If
-
-            ' Insert CtrlP text when user presses Ctrl+P, if provided
-            If Not String.IsNullOrEmpty(CtrlP) Then
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.P AndAlso e.Modifiers = Keys.Control Then
-                                                         Dim selectionStart As Integer = inputTextBox.SelectionStart
-                                                         inputTextBox.Text = inputTextBox.Text.Insert(selectionStart, CtrlP)
-                                                         inputTextBox.SelectionStart = selectionStart + CtrlP.Length
-                                                         e.SuppressKeyPress = True ' Prevent the ding sound
-                                                     End If
-                                                 End Sub
-            End If
-
-            ' Buttons
-            okButton.Text = "OK"
-            cancelButton.Text = "Cancel"
-
-            ' Measure and adjust button sizes based on font
-            Dim okButtonSize As Size = TextRenderer.MeasureText(okButton.Text, standardFont)
-            Dim cancelButtonSize As Size = TextRenderer.MeasureText(cancelButton.Text, standardFont)
-            Dim buttonWidth As Integer = Math.Max(okButtonSize.Width, cancelButtonSize.Width) + 20
-            Dim buttonHeight As Integer = Math.Max(okButtonSize.Height, cancelButtonSize.Height) + 10
-            okButton.Size = New Size(buttonWidth, buttonHeight)
-            cancelButton.Size = New Size(buttonWidth, buttonHeight)
-
-            ' Button positions
-            okButton.Location = New System.Drawing.Point(20, inputTextBox.Bottom + 20) ' Margin below the input box
-            cancelButton.Location = New System.Drawing.Point(okButton.Right + 10, inputTextBox.Bottom + 20) ' Margin between buttons
-            inputForm.Controls.Add(okButton)
-            inputForm.Controls.Add(cancelButton)
-
-            ' Button click handlers
-            AddHandler okButton.Click, Sub(sender, e)
-                                           inputForm.DialogResult = DialogResult.OK
-                                           inputForm.Close()
-                                       End Sub
-            AddHandler cancelButton.Click, Sub(sender, e)
-                                               inputForm.DialogResult = DialogResult.Cancel
-                                               inputForm.Close()
-                                           End Sub
-
-            ' Adjust form size dynamically
-            Dim formWidth As Integer = Math.Max(500, Math.Max(promptLabel.Width + 40, inputTextBox.Width + 40)) ' Adjusted width for the form
-            Dim formHeight As Integer = cancelButton.Bottom + 30
-            inputForm.ClientSize = New Size(formWidth, formHeight)
-
-            ' Show dialog
-            inputForm.TopMost = True
-            inputForm.BringToFront()
-            inputForm.Focus()
-
-            Dim Result As DialogResult
-
-            If title.Contains("Browser") Then
-                Dim outlookApp As Object = CreateObject("Outlook.Application")
-
-                If outlookApp IsNot Nothing Then
-                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
-                "ActiveExplorer",
-                Reflection.BindingFlags.GetProperty,
-                Nothing,
-                outlookApp,
-                Nothing
-            )
-                    If explorer IsNot Nothing Then
-                        ' WindowState = 1 => Normal window (OlWindowState.olNormalWindow)
-                        explorer.GetType().InvokeMember(
-                    "WindowState",
-                    Reflection.BindingFlags.SetProperty,
-                    Nothing,
-                    explorer,
-                    New Object() {1}
-                )
-                        explorer.GetType().InvokeMember(
-                    "Activate",
-                    Reflection.BindingFlags.InvokeMethod,
-                    Nothing,
-                    explorer,
-                    Nothing
-                )
-                    End If
-                End If
-                inputForm.Opacity = 1
-                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing) ' or however you get it
-                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
-            Else
-                inputForm.Opacity = 1
-                Result = inputForm.ShowDialog()
-            End If
-
-            If Result = DialogResult.OK Then
-                Return inputTextBox.Text
-            Else
-                If Not SimpleInput Then
-                    Return "ESC"
-                Else
-                    Return ""
-                End If
             End If
         End Function
 
@@ -4617,310 +4079,6 @@ Namespace SharedLibrary
         End Sub
 
 
-
-        Public Shared Function xxxShowCustomYesNoBox(ByVal bodyText As String, ByVal button1Text As String, ByVal button2Text As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = "") As Integer
-            Dim messageForm As New Form()
-            messageForm.Opacity = 0
-            Dim bodyLabel As New System.Windows.Forms.Label()
-            Dim button1 As New Button()
-            Dim button2 As New Button()
-            Dim countdownLabel As New System.Windows.Forms.Label()
-            Dim truncatedLabel As New System.Windows.Forms.Label()
-            Dim Truncated As Boolean = False
-
-            If Len(bodyText) > 10000 Then
-                bodyText = Left(bodyText, 10000)
-                Truncated = True
-            End If
-
-            ' Form attributes
-            messageForm.Text = header
-            messageForm.FormBorderStyle = FormBorderStyle.FixedDialog
-            messageForm.StartPosition = FormStartPosition.CenterScreen
-            messageForm.MaximizeBox = False
-            messageForm.MinimizeBox = False
-            messageForm.ShowInTaskbar = False
-            messageForm.TopMost = True
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            messageForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            messageForm.Font = standardFont
-
-            ' Body Label
-            bodyLabel.Text = bodyText
-            bodyLabel.Font = standardFont
-
-            Dim maxLabelWidth As Integer = 450 ' Maximum width for the label
-            Dim maxScreenHeight As Integer = Screen.PrimaryScreen.WorkingArea.Height - 100
-
-            ' Measure text size considering maximum width and word wrap
-            bodyLabel.MaximumSize = New Size(maxLabelWidth, maxScreenHeight \ 2)
-            bodyLabel.AutoSize = True
-
-            ' Calculate required width for the form based on the label's rendered size
-            Dim textSize As Size = TextRenderer.MeasureText(bodyText, standardFont, New Size(maxLabelWidth, Integer.MaxValue), TextFormatFlags.WordBreak)
-            Dim requiredWidth As Integer = Math.Min(textSize.Width, maxLabelWidth)
-
-            ' Adjust label size for word wrap
-            bodyLabel.Size = New Size(requiredWidth, textSize.Height)
-            bodyLabel.Location = New System.Drawing.Point(20, 20) ' Add margin
-            messageForm.Controls.Add(bodyLabel)
-
-            ' Adjust form width to fit the label and buttons
-            Dim formWidth As Integer = Math.Max(requiredWidth + 40, button1.Width + button2.Width + 60) ' Include margin and button widths
-            messageForm.ClientSize = New Size(formWidth, messageForm.ClientSize.Height)
-
-
-            ' Button1
-            button1.Text = button1Text
-            Dim button1Size As Size = TextRenderer.MeasureText(button1.Text, standardFont)
-            button1.Size = New Size(button1Size.Width + 20, button1Size.Height + 10)
-            button1.Location = New System.Drawing.Point(20, bodyLabel.Bottom + 20)
-            messageForm.Controls.Add(button1)
-
-            ' Button2
-            button2.Text = button2Text
-            Dim button2Size As Size = TextRenderer.MeasureText(button2.Text, standardFont)
-            button2.Size = New Size(button2Size.Width + 20, button2Size.Height + 10)
-            button2.Location = New System.Drawing.Point(button1.Right + 10, bodyLabel.Bottom + 20)
-            messageForm.Controls.Add(button2)
-
-            If Truncated Then
-                truncatedLabel.Text = "(text has been truncated)"
-                truncatedLabel.Font = standardFont
-                truncatedLabel.AutoSize = True
-                truncatedLabel.Location = New System.Drawing.Point(bodyLabel.Right - TextRenderer.MeasureText(truncatedLabel.Text, standardFont).Width, bodyLabel.Bottom + 20)
-                messageForm.Controls.Add(truncatedLabel)
-            End If
-
-            ' Countdown Label
-            countdownLabel.Font = standardFont
-            countdownLabel.Text = $"(closes in 0 seconds{Defaulttext})"
-            countdownLabel.AutoSize = True
-            countdownLabel.Location = New System.Drawing.Point(button2.Right + 10, bodyLabel.Bottom + 25)
-            messageForm.Controls.Add(countdownLabel)
-
-            ' Adjust the height of the form dynamically
-            Dim totalHeight As Integer = bodyLabel.Bottom + 20 ' Start with the bottom of the body label plus margin
-
-            ' Include buttons and any additional controls
-            Dim buttonsBottom As Integer = Math.Max(button1.Bottom, button2.Bottom)
-            totalHeight = Math.Max(totalHeight, buttonsBottom + 20)
-
-            ' Include truncated label or countdown label if present
-            If Truncated Then
-                totalHeight = Math.Max(totalHeight, truncatedLabel.Bottom + 20)
-            End If
-
-            If autoCloseSeconds.HasValue Then
-                totalHeight = Math.Max(totalHeight, countdownLabel.Bottom + 20)
-            End If
-
-            ' Set the form height
-            totalHeight = Math.Min(totalHeight, maxScreenHeight) ' Ensure it doesn't exceed the screen's max height
-            messageForm.ClientSize = New Size(Math.Max(countdownLabel.Right + 20, bodyLabel.Right + 20), totalHeight)
-
-            ' Result variable
-            Dim result As Integer = 0
-
-            ' Button click handlers
-            AddHandler button1.Click, Sub(sender, e)
-                                          result = 1
-                                          messageForm.Close()
-                                      End Sub
-            AddHandler button2.Click, Sub(sender, e)
-                                          result = 2
-                                          messageForm.Close()
-                                      End Sub
-
-            ' Timer for auto-close functionality
-            If autoCloseSeconds.HasValue Then
-                Dim remainingTime As Integer = autoCloseSeconds.Value
-                countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-
-                ' Ensure the form handle is created.
-                Dim dummyHandle = messageForm.Handle
-
-                Dim timer As New System.Timers.Timer(1000) ' 1 second interval
-                timer.AutoReset = True
-                AddHandler timer.Elapsed, Sub(sender As Object, e As System.Timers.ElapsedEventArgs)
-                                              messageForm.BeginInvoke(Sub()
-                                                                          remainingTime -= 1
-                                                                          If remainingTime > 0 Then
-                                                                              countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-                                                                          Else
-                                                                              timer.Stop()
-                                                                              result = 3
-                                                                              messageForm.Close()
-                                                                          End If
-                                                                      End Sub)
-                                          End Sub
-                timer.Start()
-                messageForm.Opacity = 1
-                messageForm.ShowDialog()
-            Else
-                countdownLabel.Text = ""
-                messageForm.Opacity = 1
-                messageForm.ShowDialog()
-            End If
-
-
-            Return result
-        End Function
-
-        Public Shared Sub xxxxShowCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile", Optional SeparateThread As Boolean = False)
-            Dim messageForm As New Form()
-            messageForm.Opacity = 0
-            Dim bodyLabel As New System.Windows.Forms.Label()
-            Dim okButton As New Button()
-            Dim countdownLabel As New System.Windows.Forms.Label()
-            Dim truncatedLabel As New System.Windows.Forms.Label()
-            Dim Truncated As Boolean = False
-
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-
-            If Len(bodyText) > 15000 Then
-                bodyText = Left(bodyText, 15000) + "(...)"
-                Truncated = True
-            End If
-
-            ' Form attributes
-            messageForm.Text = header
-            messageForm.FormBorderStyle = FormBorderStyle.FixedDialog
-            messageForm.StartPosition = FormStartPosition.CenterScreen
-            messageForm.MaximizeBox = False
-            messageForm.MinimizeBox = False
-            messageForm.ShowInTaskbar = False
-            messageForm.TopMost = True
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            messageForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            messageForm.Font = standardFont
-
-            ' Body Label
-            bodyLabel.Text = bodyText
-            bodyLabel.Font = standardFont
-            bodyLabel.AutoSize = True
-
-            ' Calculate label width and decide layout
-            Dim maxLabelWidth As Integer = 450
-            Dim maxScreenWidth As Integer = Screen.PrimaryScreen.WorkingArea.Width - 100
-            Dim maxScreenHeight As Integer = Screen.PrimaryScreen.WorkingArea.Height - 100
-
-            bodyLabel.MaximumSize = New Size(maxLabelWidth, maxScreenHeight / 2)
-            Dim MaxConsiderSize As New Size(maxLabelWidth, Integer.MaxValue)
-
-            If TextRenderer.MeasureText(bodyText, standardFont, MaxConsiderSize).Width <= maxLabelWidth And Not TextRenderer.MeasureText(bodyText, standardFont, MaxConsiderSize, TextFormatFlags.WordBreak).Height > ((maxLabelWidth / 16) * 9) Then
-                ' Single line, set label width to fit content
-                bodyLabel.MaximumSize = New Size(maxLabelWidth, Integer.MaxValue)
-            Else
-                ' Multi-line, set label width to maxLabelWidth and adjust height
-                bodyLabel.MaximumSize = New Size(maxLabelWidth, Integer.MaxValue)
-
-                If TextRenderer.MeasureText(bodyText, standardFont, MaxConsiderSize, TextFormatFlags.WordBreak).Height > (maxScreenHeight \ 2) Then
-
-                    ' Recalculate maxLabelWidth for 16:9, ensuring it fits within the screen width
-                    Dim proposedWidth As Integer = (maxScreenHeight \ 2) * 16 \ 9
-                    If proposedWidth > maxScreenWidth Then
-                        proposedWidth = maxScreenWidth
-                    End If
-
-                    bodyLabel.MaximumSize = New Size(proposedWidth, maxScreenHeight \ 2)
-                    MaxConsiderSize = New Size(proposedWidth, Integer.MaxValue)
-
-                    If TextRenderer.MeasureText(bodyText, standardFont, MaxConsiderSize, TextFormatFlags.WordBreak).Height > (maxScreenHeight \ 2) Then
-                        Truncated = True
-                    End If
-                End If
-            End If
-            bodyLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the label
-            bodyLabel.AutoEllipsis = True
-            messageForm.Controls.Add(bodyLabel)
-
-            ' OK Button
-            okButton.Text = "OK"
-
-            ' Measure and adjust button size based on font
-            Dim okButtonSize As Size = TextRenderer.MeasureText(okButton.Text, standardFont)
-            okButton.Size = New Size(okButtonSize.Width + 20, okButtonSize.Height + 10)
-
-            ' Button position aligned to the left
-            okButton.Location = New System.Drawing.Point(20, bodyLabel.Bottom + 20) ' Align to the left below text
-            messageForm.Controls.Add(okButton)
-
-            ' Countdown Label
-            countdownLabel.Font = standardFont
-            countdownLabel.AutoSize = True
-            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, bodyLabel.Bottom + 25) ' Positioned to the right of the OK button
-            messageForm.Controls.Add(countdownLabel)
-
-            ' Button click handler
-            Dim userClicked As Boolean = False
-            AddHandler okButton.Click, Sub(sender, e)
-                                           userClicked = True
-                                           messageForm.Close()
-                                       End Sub
-
-            ' Adjust form size dynamically based on label size
-            Dim formHeight As Integer = bodyLabel.Bottom + okButton.Height + 50
-            Dim formWidth As Integer = Math.Max(bodyLabel.Width + 40, okButton.Right + 20 + TextRenderer.MeasureText("(closes in 99 seconds{defaulttext})", standardFont).Width)
-            'Dim formWidth As Integer = Math.Min(bodyLabel.Width + 40, maxScreenWidth)
-            formWidth = Math.Min(formWidth, maxScreenWidth)
-
-            If formHeight > maxScreenHeight Then
-                formHeight = maxScreenHeight
-            End If
-
-            messageForm.ClientSize = New Size(formWidth, formHeight)
-
-            ' Recalculate button position based on adjusted form size
-            okButton.Location = New System.Drawing.Point(20, bodyLabel.Bottom + 20)
-            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, bodyLabel.Bottom + 25)
-
-            ' Timer for auto-close functionality
-            If autoCloseSeconds.HasValue Then
-                Dim remainingTime As Integer = autoCloseSeconds.Value
-                countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-
-                Dim timer As New System.Windows.Forms.Timer()
-                timer.Interval = 1000 ' Tick every second
-                AddHandler timer.Tick, Sub(sender, e)
-                                           remainingTime -= 1
-                                           If remainingTime > 0 Then
-                                               countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-                                           Else
-                                               timer.Stop()
-                                               If Not userClicked Then
-                                                   messageForm.Close()
-                                               End If
-                                           End If
-                                       End Sub
-                timer.Start()
-
-                ' Show the message box non-modally if timer is used
-                messageForm.Opacity = 1
-                If SeparateThread Then
-                    messageForm.ShowDialog()
-                Else
-                    messageForm.Show()
-                    System.Windows.Forms.Application.DoEvents()
-                End If
-            Else
-                ' Show the message box modally if no timer is used
-                messageForm.Opacity = 1
-                messageForm.ShowDialog()
-            End If
-        End Sub
-
-
         Public Class ProgressForm
             Inherits System.Windows.Forms.Form
 
@@ -5174,113 +4332,6 @@ Namespace SharedLibrary
         End Class
 
 
-        Public Class OldProgressForm
-            Inherits Form
-
-            Private WithEvents progressBar As ProgressBar
-            Private WithEvents lblHeader As System.Windows.Forms.Label
-            Private WithEvents lblStatus As System.Windows.Forms.Label
-            Private WithEvents btnCancel As Button
-            Private WithEvents uiTimer As System.Windows.Forms.Timer
-
-            ' Constructor receives the header text and the initial status text.
-            Public Sub New(headerText As String, initialLabel As String)
-                ' Set form properties.
-                Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-                Me.Text = headerText
-                Me.Width = 400
-                Me.Height = 220
-                Me.FormBorderStyle = FormBorderStyle.FixedDialog
-                Me.StartPosition = FormStartPosition.CenterScreen
-                Me.MaximizeBox = False
-                Me.MinimizeBox = False
-                Me.ShowInTaskbar = False
-                Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-                Me.Icon = Icon.FromHandle(bmp.GetHicon())
-
-                ' Create and add header label.
-                lblHeader = New System.Windows.Forms.Label()
-                lblHeader.Text = "Progress ..."
-                lblHeader.AutoSize = True
-                lblHeader.Top = 10
-                lblHeader.Left = 10
-                lblHeader.Font = standardFont
-                Me.Controls.Add(lblHeader)
-
-                ' Create and add progress bar.
-                progressBar = New ProgressBar()
-                progressBar.Minimum = 0
-                progressBar.Maximum = ProgressBarModule.GlobalProgressMax
-                progressBar.Width = 360
-                progressBar.Height = 25
-                progressBar.Top = 40
-                progressBar.Left = 10
-                Me.Controls.Add(progressBar)
-
-                ' Create and add status label.
-                lblStatus = New System.Windows.Forms.Label()
-                lblStatus.Text = initialLabel
-                lblStatus.AutoSize = True
-                lblStatus.Top = 75
-                lblStatus.Left = 10
-                lblStatus.Width = 360
-                lblStatus.Font = standardFont
-                Me.Controls.Add(lblStatus)
-
-                ' Create and add Cancel button.
-                btnCancel = New Button()
-                btnCancel.Text = "Cancel"
-                btnCancel.Top = 120
-                btnCancel.Left = 10
-                btnCancel.Font = standardFont
-                btnCancel.Visible = True
-                btnCancel.AutoSize = True
-                AddHandler btnCancel.Click, AddressOf btnCancel_Click
-                Me.Controls.Add(btnCancel)
-
-
-                ' Create a timer to update the UI controls based on global variables.
-                uiTimer = New System.Windows.Forms.Timer()
-                uiTimer.Interval = 250 ' Update every 250 ms.
-                AddHandler uiTimer.Tick, AddressOf Timer_Tick
-                uiTimer.Start()
-            End Sub
-
-            ' Timer tick event updates the progress bar and status label.
-            Private Sub Timer_Tick(sender As Object, e As EventArgs)
-                Try
-                    ' Update the progress bar maximum and value.
-                    progressBar.Maximum = ProgressBarModule.GlobalProgressMax
-                    progressBar.Value = Math.Min(ProgressBarModule.GlobalProgressValue, progressBar.Maximum)
-
-                    ' Update the status text.
-                    lblStatus.Text = ProgressBarModule.GlobalProgressLabel
-
-                    ' If the cancel flag is set, close the form with a Cancel result.
-                    If ProgressBarModule.CancelOperation Then
-                        Me.DialogResult = DialogResult.Cancel
-                        Me.Close()
-                    End If
-                Catch ex As Exception
-                    ' It is possible to get an exception if the form is closing.
-                    Debug.WriteLine("Timer error: " & ex.Message)
-                End Try
-            End Sub
-
-            ' When the Cancel button is clicked, set the global cancel flag.
-            Private Sub btnCancel_Click(sender As Object, e As EventArgs)
-                ProgressBarModule.CancelOperation = True
-            End Sub
-
-            ' Stop the timer when the form is closed.
-            Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
-                uiTimer.Stop()
-                ProgressBarModule.CancelOperation = True
-                MyBase.OnFormClosed(e)
-            End Sub
-        End Class
-
-
         Public Shared Sub ShowRTFCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile")
 
             Dim RTFMessageForm As New System.Windows.Forms.Form()
@@ -5526,238 +4577,6 @@ Namespace SharedLibrary
         End Sub
 
 
-
-        Public Shared Sub xxxxShowRTFCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional autoCloseSeconds As Integer? = Nothing, Optional Defaulttext As String = " - execution continues meanwhile")
-
-            Dim RTFMessageForm As New Form()
-            Dim bodyLabel As New System.Windows.Forms.RichTextBox()
-            Dim okButton As New Button()
-            Dim countdownLabel As New System.Windows.Forms.Label()
-            Dim truncatedLabel As New System.Windows.Forms.Label()
-            Dim Truncated As Boolean = False
-
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-
-            ' Form attributes
-            RTFMessageForm.Opacity = 0
-            RTFMessageForm.Text = header
-            RTFMessageForm.FormBorderStyle = FormBorderStyle.Sizable ' Allow resizing
-            RTFMessageForm.StartPosition = FormStartPosition.CenterScreen
-            RTFMessageForm.MaximizeBox = True
-            RTFMessageForm.MinimizeBox = True
-            RTFMessageForm.ShowInTaskbar = False
-            RTFMessageForm.TopMost = True
-            RTFMessageForm.KeyPreview = True ' Enable form-level key event handling
-
-            ' Set minimum size to prevent controls from being cut off
-            RTFMessageForm.MinimumSize = New Size(650, 335) ' Adjust based on your needs
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            RTFMessageForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-
-            ' Body Label (now being a RTF box)
-            bodyLabel.ReadOnly = True ' Make it behave like a label
-            bodyLabel.BorderStyle = BorderStyle.None ' Remove borders for a clean look
-            bodyLabel.BackColor = RTFMessageForm.BackColor ' Match the form's background color
-            bodyLabel.TabStop = False ' Disable tab focus
-            bodyLabel.Clear()
-            bodyLabel.Rtf = bodyText
-            bodyLabel.Width = 600
-            bodyLabel.Height = 200
-            bodyLabel.Location = New System.Drawing.Point(20, 20) ' Margin around the label
-            bodyLabel.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom ' Enable resizing
-
-            RTFMessageForm.Controls.Add(bodyLabel)
-
-            ' OK Button
-            okButton.Text = "OK"
-            Dim okButtonSize As Size = TextRenderer.MeasureText(okButton.Text, standardFont)
-            okButton.AutoSize = True
-            'okButton.Size = New Size(okButtonSize.Width + 40, okButtonSize.Height + 20) ' Make the button larger
-            okButton.Location = New System.Drawing.Point(20, RTFMessageForm.ClientSize.Height - okButton.Height - 20) ' Adjust to the bottom left corner
-            okButton.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left ' Keep position fixed at the bottom left
-            RTFMessageForm.Controls.Add(okButton)
-
-            ' Countdown Label
-            countdownLabel.Font = standardFont
-            countdownLabel.AutoSize = True
-            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, RTFMessageForm.ClientSize.Height - okButton.Height - 15) ' Positioned to the right of the OK button
-            countdownLabel.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left ' Keep position fixed
-            RTFMessageForm.Controls.Add(countdownLabel)
-
-
-            ' Button click handler
-            Dim userClicked As Boolean = False
-            AddHandler okButton.Click, Sub(sender, e)
-                                           userClicked = True
-                                           RTFMessageForm.Close()
-                                           RTFMessageForm = Nothing
-                                       End Sub
-            AddHandler RTFMessageForm.KeyDown, Sub(sender, e)
-                                                   If e.KeyCode = Keys.Escape Then
-                                                       userClicked = True
-                                                       RTFMessageForm.Close()
-                                                       RTFMessageForm = Nothing
-                                                       e.SuppressKeyPress = True ' Prevent the ding sound
-                                                   End If
-                                               End Sub
-            AddHandler RTFMessageForm.Shown, Sub(sender, e)
-                                                 RTFMessageForm.Activate()
-                                             End Sub
-
-
-            ' Adjust initial form size dynamically
-            Dim formWidth As Integer = Math.Max(650, bodyLabel.Width + 40)
-            Dim formHeight As Integer = Math.Max(335, bodyLabel.Height + okButton.Height + 80)
-
-            ' Adjust control positions after setting form size
-            okButton.Location = New System.Drawing.Point(20, RTFMessageForm.ClientSize.Height - okButton.Height - 20)
-            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, okButton.Top)
-
-            RTFMessageForm.ClientSize = New Size(formWidth, formHeight)
-
-            ' Recalculate button position based on adjusted form size
-            okButton.Location = New System.Drawing.Point(20, bodyLabel.Bottom + 20)
-            countdownLabel.Location = New System.Drawing.Point(okButton.Right + 10, bodyLabel.Bottom + 25)
-
-            ' Timer for auto-close functionality
-
-            If autoCloseSeconds.HasValue AndAlso autoCloseSeconds > 0 Then
-                Dim remainingTime As Integer = autoCloseSeconds.Value
-                countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-
-                Dim timer As New System.Windows.Forms.Timer()
-                timer.Interval = 1000 ' Tick every second
-                AddHandler timer.Tick, Sub(sender, e)
-                                           remainingTime -= 1
-                                           If remainingTime > 0 Then
-                                               countdownLabel.Text = $"(closes in {remainingTime} seconds{Defaulttext})"
-                                           Else
-                                               timer.Stop()
-                                               If Not userClicked Then
-                                                   RTFMessageForm.Close()
-                                               End If
-                                           End If
-                                       End Sub
-                timer.Start()
-
-                ' Show the message box non-modally if timer is used
-                RTFMessageForm.Opacity = 1
-                RTFMessageForm.Show()
-                RTFMessageForm.BringToFront()
-                RTFMessageForm.Activate()
-                System.Windows.Forms.Application.DoEvents()
-            Else
-
-                ' Show the message box modally if no timer is used
-                RTFMessageForm.Opacity = 1
-                RTFMessageForm.TopMost = True
-                RTFMessageForm.ShowDialog()
-            End If
-        End Sub
-
-        Public Shared Sub xxxxShowHTMLCustomMessageBox(ByVal bodyText As String, Optional header As String = AN, Optional Defaulttext As String = " - execution continues meanwhile")
-            Dim t As New Threading.Thread(Sub()
-                                              Dim HTMLMessageForm As New System.Windows.Forms.Form()
-                                              Dim htmlBrowser As New System.Windows.Forms.WebBrowser()
-                                              Dim okButton As New System.Windows.Forms.Button()
-
-                                              If String.IsNullOrWhiteSpace(header) Then header = AN
-
-                                              ' Form attributes
-                                              HTMLMessageForm.Opacity = 0
-                                              HTMLMessageForm.Text = header
-                                              HTMLMessageForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
-                                              HTMLMessageForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-                                              HTMLMessageForm.MaximizeBox = True
-                                              HTMLMessageForm.MinimizeBox = True
-                                              HTMLMessageForm.ShowInTaskbar = True
-                                              HTMLMessageForm.TopMost = False
-                                              HTMLMessageForm.KeyPreview = True
-                                              HTMLMessageForm.MinimumSize = New System.Drawing.Size(650, 335)
-
-                                              ' (Optional) Remove the icon setting if you suspect it might be causing issues.
-                                              Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
-                                              HTMLMessageForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
-
-                                              Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
-
-                                              ' HTML Browser
-                                              htmlBrowser.AllowNavigation = False
-                                              htmlBrowser.WebBrowserShortcutsEnabled = False
-                                              htmlBrowser.ScrollBarsEnabled = True
-                                              htmlBrowser.ScriptErrorsSuppressed = True
-                                              htmlBrowser.DocumentText = bodyText
-                                              htmlBrowser.Width = 600
-                                              htmlBrowser.Height = 200
-                                              htmlBrowser.Location = New System.Drawing.Point(20, 20)
-                                              htmlBrowser.Anchor = System.Windows.Forms.AnchorStyles.Top Or System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right Or System.Windows.Forms.AnchorStyles.Bottom
-                                              htmlBrowser.BackColor = HTMLMessageForm.BackColor
-
-                                              AddHandler htmlBrowser.DocumentCompleted, Sub(sender, e)
-                                                                                            If htmlBrowser.Document IsNot Nothing AndAlso htmlBrowser.Document.Body IsNot Nothing Then
-                                                                                                htmlBrowser.Document.Body.Style = "font-family: 'Segoe UI'; font-size: 9pt; margin: 0px;"
-                                                                                            End If
-                                                                                        End Sub
-
-                                              HTMLMessageForm.Controls.Add(htmlBrowser)
-
-                                              ' OK Button
-                                              okButton.Text = "OK"
-                                              Dim okButtonSize As System.Drawing.Size = TextRenderer.MeasureText(okButton.Text, standardFont)
-                                              okButton.AutoSize = True
-                                              okButton.Location = New System.Drawing.Point(20, HTMLMessageForm.ClientSize.Height - okButton.Height - 20)
-                                              okButton.Anchor = System.Windows.Forms.AnchorStyles.Bottom Or System.Windows.Forms.AnchorStyles.Left
-                                              HTMLMessageForm.Controls.Add(okButton)
-
-                                              AddHandler okButton.Click, Sub(sender, e)
-                                                                             HTMLMessageForm.Close()
-                                                                             HTMLMessageForm = Nothing
-                                                                         End Sub
-
-                                              AddHandler HTMLMessageForm.KeyDown, Sub(sender, e)
-                                                                                      If e.KeyCode = System.Windows.Forms.Keys.Escape Then
-                                                                                          HTMLMessageForm.Close()
-                                                                                          HTMLMessageForm = Nothing
-                                                                                          e.SuppressKeyPress = True
-                                                                                      End If
-                                                                                  End Sub
-
-                                              AddHandler HTMLMessageForm.Shown, Sub(sender, e)
-                                                                                    HTMLMessageForm.Activate()
-                                                                                End Sub
-
-                                              AddHandler htmlBrowser.DocumentCompleted, Sub(sender, e)
-                                                                                            If htmlBrowser.Document IsNot Nothing AndAlso htmlBrowser.Document.Body IsNot Nothing Then
-                                                                                                ' Get the form's background color
-                                                                                                Dim formBackColor As System.Drawing.Color = HTMLMessageForm.BackColor
-                                                                                                ' Convert it to an RGB string (you can also use a hex string if you prefer)
-                                                                                                Dim rgbValue As String = $"rgb({formBackColor.R}, {formBackColor.G}, {formBackColor.B})"
-                                                                                                ' Apply the style to the HTML document's body, including any other styles you need
-                                                                                                htmlBrowser.Document.Body.Style = $"background-color: {rgbValue}; font-family: 'Segoe UI'; font-size: 9pt; margin: 0px;"
-                                                                                            End If
-                                                                                        End Sub
-
-                                              Dim formWidth As Integer = Math.Max(650, htmlBrowser.Width + 40)
-                                              Dim formHeight As Integer = Math.Max(335, htmlBrowser.Height + okButton.Height + 80)
-                                              HTMLMessageForm.ClientSize = New System.Drawing.Size(formWidth, formHeight)
-                                              okButton.Location = New System.Drawing.Point(20, htmlBrowser.Bottom + 20)
-
-                                              ' Optionally, if you wish to set an owner, you could get Outlook's handle here.
-                                              ' Otherwise, simply run the dialog:
-                                              HTMLMessageForm.Opacity = 1
-                                              HTMLMessageForm.ShowDialog()
-                                          End Sub)
-            t.SetApartmentState(Threading.ApartmentState.STA)
-            t.Start()
-        End Sub
-
-
-
         Public Shared Function ShowCustomVariableInputForm(
                                             ByVal prompt As String,
                                             ByVal header As String,
@@ -5916,304 +4735,6 @@ Namespace SharedLibrary
             Return (result = DialogResult.OK)
         End Function
 
-
-        Public Shared Function xxShowCustomVariableInputForm(
-                                                            ByVal prompt As String,
-                                                            ByVal header As String,
-                                                            ByRef params() As InputParameter
-                                                        ) As Boolean
-            ' Fallback header
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-
-            ' Formular initialisieren
-            Dim inputForm As New System.Windows.Forms.Form() With {
-        .Text = header,
-        .FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
-        .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
-        .MaximizeBox = False,
-        .MinimizeBox = False,
-        .Font = New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point),
-        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font,
-        .AutoScaleDimensions = New System.Drawing.SizeF(6.0F, 13.0F),
-        .AutoSize = True,
-        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-    }
-
-            ' Icon setzen
-            Dim bmpIcon As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = System.Drawing.Icon.FromHandle(bmpIcon.GetHicon())
-
-            ' Hauptlayout: zwei Spalten, Label auto, Control fill
-            Dim mainLayout As New System.Windows.Forms.TableLayoutPanel() With {
-        .ColumnCount = 2,
-        .Dock = System.Windows.Forms.DockStyle.Fill,
-        .AutoSize = True,
-        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
-        .Padding = New System.Windows.Forms.Padding(12),
-        .GrowStyle = System.Windows.Forms.TableLayoutPanelGrowStyle.AddRows
-    }
-            ' Erste Spalte: AutoSize für Label, zweite: Prozent für Eingabe
-            mainLayout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize))
-            mainLayout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0F))
-
-            ' Prompt-Label oben
-            Dim promptLabel As New System.Windows.Forms.Label() With {
-        .Text = prompt,
-        .AutoSize = True,
-        .MaximumSize = New System.Drawing.Size(400, 0),
-        .Margin = New System.Windows.Forms.Padding(0, 0, 0, 12)
-    }
-            mainLayout.Controls.Add(promptLabel, 0, 0)
-            mainLayout.SetColumnSpan(promptLabel, 2)
-
-            ' Eine Zeile pro Parameter
-            For i As Integer = 0 To params.Length - 1
-                Dim param = params(i)
-                ' Label
-                Dim lbl As New System.Windows.Forms.Label() With {
-            .Text = param.Name & ":",
-            .AutoSize = True,
-            .Anchor = System.Windows.Forms.AnchorStyles.Left,
-            .Margin = New System.Windows.Forms.Padding(0, 0, 8, 8)
-        }
-                mainLayout.Controls.Add(lbl, 0, i + 1)
-
-                ' Eingabe-Control
-                Dim ctrl As System.Windows.Forms.Control
-                If TypeOf param.Value Is Boolean Then
-                    Dim chk As New System.Windows.Forms.CheckBox() With {
-                .Checked = System.Convert.ToBoolean(param.Value),
-                .AutoSize = True,
-                .Anchor = System.Windows.Forms.AnchorStyles.Left,
-                .Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
-            }
-                    ctrl = chk
-                Else
-                    Dim txt As New System.Windows.Forms.TextBox() With {
-                .Text = param.Value.ToString(),
-                .Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right,
-                .Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
-            }
-                    ' Starte mit Mindestbreite je nach Typ
-                    If TypeOf param.Value Is String Then
-                        txt.MinimumSize = New System.Drawing.Size(400, 0)
-                    Else
-                        txt.MinimumSize = New System.Drawing.Size(50, 0)
-                    End If
-                    ctrl = txt
-                End If
-                param.InputControl = ctrl
-                mainLayout.Controls.Add(ctrl, 1, i + 1)
-            Next
-
-            ' Buttons-Panel
-            Dim buttonFlow As New System.Windows.Forms.FlowLayoutPanel() With {
-        .FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
-        .Dock = System.Windows.Forms.DockStyle.Bottom,
-        .AutoSize = True,
-        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
-        .Padding = New System.Windows.Forms.Padding(12, 8, 12, 12)
-    }
-            Dim btnOK As New System.Windows.Forms.Button() With {
-        .Text = "OK",
-        .AutoSize = True,
-        .DialogResult = System.Windows.Forms.DialogResult.OK
-    }
-            Dim btnCancel As New System.Windows.Forms.Button() With {
-        .Text = "Cancel",
-        .AutoSize = True,
-        .DialogResult = System.Windows.Forms.DialogResult.Cancel
-    }
-            buttonFlow.Controls.Add(btnCancel)
-            buttonFlow.Controls.Add(btnOK)
-
-            inputForm.Controls.Add(mainLayout)
-            inputForm.Controls.Add(buttonFlow)
-
-            ' Dialog anzeigen
-            Dim result = inputForm.ShowDialog()
-            If result = System.Windows.Forms.DialogResult.OK Then
-                ' Werte zurücklesen
-                For Each param In params
-                    Try
-                        If TypeOf param.Value Is Boolean Then
-                            param.Value = CType(param.InputControl, System.Windows.Forms.CheckBox).Checked
-                        ElseIf TypeOf param.Value Is Integer Then
-                            Dim val As Integer
-                            If Integer.TryParse(CType(param.InputControl, System.Windows.Forms.TextBox).Text, val) Then
-                                param.Value = val
-                            Else
-                                Throw New System.Exception($"Invalid value for {param.Name}.")
-                            End If
-                        ElseIf TypeOf param.Value Is Double Then
-                            Dim val As Double
-                            If Double.TryParse(CType(param.InputControl, System.Windows.Forms.TextBox).Text, val) Then
-                                param.Value = val
-                            Else
-                                Throw New System.Exception($"Invalid value for {param.Name}.")
-                            End If
-                        Else
-                            param.Value = CType(param.InputControl, System.Windows.Forms.TextBox).Text
-                        End If
-                    Catch ex As System.Exception
-                        ShowCustomMessageBox($"{ex.Message} Using original ('{param.Value}').")
-                    End Try
-                Next
-            End If
-
-            inputForm.Dispose()
-            Return (result = System.Windows.Forms.DialogResult.OK)
-        End Function
-
-
-
-        Public Shared Function xxxxShowCustomVariableInputForm(ByVal prompt As String, ByVal header As String, ByRef params() As InputParameter) As Boolean
-            ' Create a new form and set its basic properties.
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-            Dim inputForm As New Form()
-            inputForm.Font = New Drawing.Font("Segoe UI", 9)
-            inputForm.Text = header
-            ' Set the icon from resources:
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
-            inputForm.StartPosition = FormStartPosition.CenterScreen
-            inputForm.FormBorderStyle = FormBorderStyle.FixedDialog
-            inputForm.MaximizeBox = False
-            inputForm.MinimizeBox = False
-
-            ' Create a prompt label at the top (autosize).
-            Dim promptLabel As New System.Windows.Forms.Label()
-            promptLabel.MaximumSize = New Size(400, 0) ' 400 for width; 0 means no limit on height.
-            promptLabel.AutoSize = True
-            promptLabel.Text = prompt
-            promptLabel.Location = New Drawing.Point(15, 10)
-            inputForm.Controls.Add(promptLabel)
-
-            ' We'll use currentY to keep track of the vertical position.
-            Dim currentY As Integer = promptLabel.Bottom + 10
-            Dim widthneeded As Integer = 0
-
-            ' For each parameter, create a label and an input control.
-            For Each param As InputParameter In params
-                Dim paramLabel As New System.Windows.Forms.Label()
-                Dim textSize As Size = TextRenderer.MeasureText(param.Name & ":", paramLabel.Font)
-                Dim labelwidth As Integer = textSize.Width
-                If labelwidth > widthneeded Then widthneeded = labelwidth
-            Next
-
-            For Each param As InputParameter In params
-                ' Create a label for this parameter.
-                Dim paramLabel As New System.Windows.Forms.Label()
-                paramLabel.AutoSize = True
-                paramLabel.Text = param.Name & ":"
-                paramLabel.Location = New Drawing.Point(15, currentY)
-                inputForm.Controls.Add(paramLabel)
-
-                ' Create the input control.
-                Dim inputControl As Control = Nothing
-                If TypeOf param.Value Is Boolean Then
-                    ' For Boolean values use a CheckBox.
-                    Dim chk As New System.Windows.Forms.CheckBox()
-                    chk.Checked = System.Convert.ToBoolean(param.Value)
-                    chk.AutoSize = True
-                    ' Place the checkbox at a fixed X position.
-                    chk.Location = New Drawing.Point(widthneeded + 50, currentY)
-                    inputControl = chk
-                Else
-                    ' For other types use a TextBox.
-                    Dim txt As New TextBox()
-                    txt.Text = param.Value.ToString()
-                    ' Set width depending on the type.
-                    If TypeOf param.Value Is Integer OrElse TypeOf param.Value Is Double Then
-                        txt.Width = 100
-                    ElseIf TypeOf param.Value Is String Then
-                        txt.Width = 350
-                    Else
-                        txt.Width = 350
-                    End If
-                    txt.Location = New Drawing.Point(widthneeded + 50, currentY - 3)
-                    inputControl = txt
-                End If
-                inputForm.Controls.Add(inputControl)
-                ' Save a reference to the control so we can retrieve its value later.
-                param.InputControl = inputControl
-
-                ' Increase currentY for the next parameter
-                currentY += Math.Max(paramLabel.Height, inputControl.Height) + 5
-            Next
-
-            currentY += 10
-
-            ' Add OK and Cancel buttons.
-            Dim btnOK As New Button()
-            btnOK.Text = "OK"
-            btnOK.AutoSize = True
-            btnOK.DialogResult = DialogResult.OK
-            btnOK.Location = New Drawing.Point(15, currentY)
-            inputForm.Controls.Add(btnOK)
-
-            Dim btnCancel As New Button()
-            btnCancel.Text = "Cancel"
-            btnCancel.AutoSize = True
-            btnCancel.DialogResult = DialogResult.Cancel
-            btnCancel.Location = New Drawing.Point(btnOK.Right + 15, currentY)
-            inputForm.Controls.Add(btnCancel)
-
-            ' Set AcceptButton and CancelButton.
-            inputForm.AcceptButton = btnOK
-            inputForm.CancelButton = btnCancel
-
-            ' Adjust the form’s client size dynamically based on the contained controls.
-            Dim maxWidth As Integer = 0
-            For Each ctrl As Control In inputForm.Controls
-                If ctrl.Right > maxWidth Then
-                    maxWidth = ctrl.Right
-                End If
-            Next
-            promptLabel.MaximumSize = New Size(maxWidth - 15 - 15, 0)
-            inputForm.ClientSize = New Size(maxWidth + 15, btnOK.Bottom + 15)
-
-            Dim Returnvalue As Boolean = False
-
-            ' Show the form modally.
-            If inputForm.ShowDialog() = DialogResult.OK Then
-                ' For each parameter update its Value property from the associated control.
-                For Each param As InputParameter In params
-                    If TypeOf param.Value Is Boolean Then
-                        Dim chk As System.Windows.Forms.CheckBox = CType(param.InputControl, System.Windows.Forms.CheckBox)
-                        param.Value = chk.Checked
-                    ElseIf TypeOf param.Value Is Integer Then
-                        Dim txt As TextBox = CType(param.InputControl, TextBox)
-                        Dim newVal As Integer
-                        If Integer.TryParse(txt.Text, newVal) Then
-                            param.Value = newVal
-                        Else
-                            ShowCustomMessageBox($"Invalid value for {param.Name}. Will use the original value ('{param.Value}').")
-                        End If
-                    ElseIf TypeOf param.Value Is Double Then
-                        Dim txt As TextBox = CType(param.InputControl, TextBox)
-                        Dim newVal As Double
-                        If Double.TryParse(txt.Text, newVal) Then
-                            param.Value = newVal
-                        Else
-                            ShowCustomMessageBox($"Invalid value for {param.Name}. Will use the original value ('{param.Value}').")
-                        End If
-                    ElseIf TypeOf param.Value Is String Then
-                        Dim txt As TextBox = CType(param.InputControl, TextBox)
-                        param.Value = txt.Text
-                    Else
-                        ' For any other type, simply assign the text.
-                        Dim txt As TextBox = CType(param.InputControl, TextBox)
-                        param.Value = txt.Text
-                    End If
-                Next
-                Returnvalue = True
-            Else
-                Returnvalue = False
-            End If
-            inputForm.Dispose()
-            Return Returnvalue
-        End Function
 
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
         Private Shared Function SendMessage(
@@ -6608,7 +5129,7 @@ Namespace SharedLibrary
                 ' Eindeutig die Core-Enums benutzen:
                 pane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight
                 pane.DockPositionRestrict = Microsoft.Office.Core.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNone
-                pane.Width = 580
+                pane.Width = If(My.Settings.panewidth > 0, My.Settings.panewidth, Default_PaneWidth)
                 pane.Visible = True
                 ctrl.ParentPane = pane
                 CurrentCustomTaskPane = pane
@@ -6659,6 +5180,15 @@ Namespace SharedLibrary
             Public Sub New()
                 InitializeComponent()
                 Me.Dock = DockStyle.Fill
+                AddHandler Me.Resize, AddressOf OnControlResize
+            End Sub
+
+            Private Sub OnControlResize(sender As Object, e As EventArgs)
+                If ParentPane IsNot Nothing Then
+                    ' Aktuelle Breite des Panes in den Settings sichern
+                    My.Settings.PaneWidth = ParentPane.Width
+                    My.Settings.Save()
+                End If
             End Sub
 
             Private Sub InitializeComponent()
@@ -6879,272 +5409,11 @@ Namespace SharedLibrary
                 Try
                     If ParentPane IsNot Nothing Then ParentPane.Visible = False
                 Catch
+                    ' Handle errors silently
                 End Try
             End Sub
         End Class
 
-
-
-
-        Public Shared Function xxShowCustomWindow(introLine As String, ByVal bodyText As String, finalRemark As String, header As String, Optional NoRTF As Boolean = False, Optional Getfocus As Boolean = False, Optional InsertMarkdown As Boolean = False) As String
-
-            Dim OriginalText As String = bodyText
-            Dim styledForm As New System.Windows.Forms.Form()
-            Dim introLabel As New System.Windows.Forms.Label()
-            Dim bodyTextBox As New System.Windows.Forms.RichTextBox()
-            Dim finalRemarkLabel As New System.Windows.Forms.Label()
-            Dim editedButton As New System.Windows.Forms.Button()
-            Dim originalButton As New System.Windows.Forms.Button()
-            Dim markButton As New System.Windows.Forms.Button()
-            Dim cancelButton As New System.Windows.Forms.Button()
-            Dim toolStrip As New System.Windows.Forms.ToolStrip()
-
-            ' Get screen dimensions
-            Dim screenWidth As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Width
-            Dim screenHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height
-
-            ' Calculate maximum dimensions maintaining a 16:9 aspect ratio
-            Dim maxWidth As Integer = screenWidth \ 2
-            Dim maxHeight As Integer = Math.Min(screenHeight \ 2, (maxWidth * 9) \ 16)
-            maxWidth = Math.Min(maxWidth, (maxHeight * 16) \ 9)
-
-            ' Set minimum dimensions
-            Dim minWidth As Integer = 400
-            Dim minHeight As Integer = 300
-
-            ' Form attributes
-            styledForm.Text = header
-            'styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
-            styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
-            styledForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-            styledForm.MaximizeBox = False
-            styledForm.MinimizeBox = False
-            styledForm.ShowInTaskbar = False
-            styledForm.TopMost = True
-            styledForm.CancelButton = cancelButton
-
-            ' Set the icon
-            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo) ' Add your logo to resources
-            styledForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
-
-            ' Set predefined font for consistent layout
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
-            styledForm.Font = standardFont
-
-            ' Intro line label
-            introLabel.Text = introLine
-            introLabel.Font = standardFont
-            introLabel.AutoSize = True
-            introLabel.MaximumSize = New System.Drawing.Size(maxWidth - 40, 0)
-            introLabel.Location = New System.Drawing.Point(10, 10)
-            styledForm.Controls.Add(introLabel)
-
-            ' Final remark label
-            If Not String.IsNullOrEmpty(finalRemark) Then
-                finalRemarkLabel.Text = finalRemark
-                finalRemarkLabel.Font = standardFont
-                finalRemarkLabel.AutoSize = True
-                finalRemarkLabel.MaximumSize = New System.Drawing.Size(maxWidth - 40, 0)
-            End If
-
-            ' Edited Button
-            editedButton.Text = "OK, use edited text"
-            Dim buttonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(editedButton.Text, standardFont)
-            Dim buttonWidth As Integer = buttonSize.Width + 20
-            Dim buttonHeight As Integer = buttonSize.Height + 10
-            editedButton.Size = New System.Drawing.Size(buttonWidth, buttonHeight)
-
-            ' Original Button
-            originalButton.Text = "OK, use original text"
-            Dim originalButtonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(originalButton.Text, standardFont)
-            Dim originalButtonWidth As Integer = originalButtonSize.Width + 20
-            originalButton.Size = New System.Drawing.Size(originalButtonWidth, buttonHeight)
-
-            If InsertMarkdown Then
-                ' Markdown Button
-                markButton.Text = "Insert original text with formatting"
-                Dim markButtonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(markButton.Text, standardFont)
-                Dim markButtonWidth As Integer = markButtonSize.Width + 20
-                markButton.Size = New System.Drawing.Size(markButtonWidth, buttonHeight)
-            End If
-
-            ' Cancel Button
-            cancelButton.Text = "Cancel"
-            Dim cancelButtonSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(cancelButton.Text, standardFont)
-            Dim cancelButtonWidth As Integer = cancelButtonSize.Width + 20
-            cancelButton.Size = New System.Drawing.Size(cancelButtonWidth, buttonHeight)
-
-            ' Calculate space needed for static elements
-            Dim staticElementsHeight As Integer = introLabel.Height + 20 + buttonHeight + 60
-            If Not String.IsNullOrEmpty(finalRemark) Then
-                staticElementsHeight += finalRemarkLabel.Height + 10
-            End If
-
-            ' Calculate remaining space for body text
-            Dim bodyTextHeight As Integer = Math.Max(minHeight - staticElementsHeight, maxHeight - staticElementsHeight - 20)
-
-            ' Body text box
-            bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
-            bodyTextBox.Multiline = True
-            bodyTextBox.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical
-            bodyTextBox.WordWrap = True
-            bodyTextBox.Location = New System.Drawing.Point(10, introLabel.Bottom + 10)
-            bodyTextBox.Width = maxWidth - 40
-            bodyTextBox.Height = bodyTextHeight - 20
-
-            ' ToolStrip for text formatting
-            toolStrip.Dock = System.Windows.Forms.DockStyle.None
-            toolStrip.Location = New System.Drawing.Point(bodyTextBox.Right - 130, bodyTextBox.Top - 35)
-
-            Dim boldButton As New System.Windows.Forms.ToolStripButton("B") With {.Font = New System.Drawing.Font(standardFont, FontStyle.Bold)}
-            AddHandler boldButton.Click, Sub(sender, e)
-                                             If bodyTextBox.SelectionLength > 0 Then
-                                                 bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Bold)
-                                             End If
-                                         End Sub
-
-            Dim italicButton As New System.Windows.Forms.ToolStripButton("I") With {.Font = New System.Drawing.Font(standardFont, FontStyle.Italic)}
-            AddHandler italicButton.Click, Sub(sender, e)
-                                               If bodyTextBox.SelectionLength > 0 Then
-                                                   bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Italic)
-                                               End If
-                                           End Sub
-
-            Dim underlineButton As New System.Windows.Forms.ToolStripButton("U") With {.Font = New System.Drawing.Font(standardFont, FontStyle.Underline)}
-            AddHandler underlineButton.Click, Sub(sender, e)
-                                                  If bodyTextBox.SelectionLength > 0 Then
-                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Underline)
-                                                  End If
-                                              End Sub
-
-            Dim bulletButton As New System.Windows.Forms.ToolStripButton("•") With {.Font = New System.Drawing.Font(standardFont, FontStyle.Regular)}
-            AddHandler bulletButton.Click, Sub(sender, e)
-                                               bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
-                                               bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
-                                               bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
-                                           End Sub
-
-            toolStrip.Items.AddRange(New System.Windows.Forms.ToolStripItem() {boldButton, italicButton, underlineButton, bulletButton})
-            styledForm.Controls.Add(toolStrip)
-
-            ' Format text: Bold between ** and ** or {{ and }}
-            bodyTextBox.Text = bodyText
-
-            bodyTextBox.AppendText(" ")
-            bodyTextBox.Select(bodyTextBox.TextLength - 1, 1)
-            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, FontStyle.Bold)
-            bodyTextBox.DeselectAll()
-
-            bodyText = bodyTextBox.Rtf
-
-            Dim pattern As String = "(\*\*.*?\*\*|\{\{.*?\}\})"
-            Dim matches As MatchCollection = Regex.Matches(bodyText, pattern)
-            Dim newbody = bodyText
-
-            ' Process matches in reverse order
-            For Each match As Match In matches.Cast(Of Match).Reverse()
-                Dim startIndex As Integer = match.Index
-                Dim boldText As String = match.Value
-                Dim plainText As String = boldText.Substring(2, boldText.Length - 4) ' Remove ** or {{ }}
-
-                ' Apply bold formatting
-                newbody = newbody.Remove(startIndex, boldText.Length).Insert(startIndex, "\b\f1 " & plainText & "\b0\f0 ")
-
-            Next
-
-            bodyTextBox.Rtf = newbody
-
-            ' Deselect any text
-            bodyTextBox.Select(0, 0)
-
-            styledForm.Controls.Add(bodyTextBox)
-
-            ' Position final remark label and buttons
-            If Not String.IsNullOrEmpty(finalRemark) Then
-                finalRemarkLabel.Location = New System.Drawing.Point(10, bodyTextBox.Bottom + 10)
-                styledForm.Controls.Add(finalRemarkLabel)
-                editedButton.Location = New System.Drawing.Point(bodyTextBox.Left, finalRemarkLabel.Bottom + 20)
-                originalButton.Location = New System.Drawing.Point(editedButton.Right + 10, finalRemarkLabel.Bottom + 20)
-                If InsertMarkdown Then
-                    markButton.Location = New System.Drawing.Point(originalButton.Right + 10, finalRemarkLabel.Bottom + 20)
-                    cancelButton.Location = New System.Drawing.Point(markButton.Right + 10, finalRemarkLabel.Bottom + 20)
-                Else
-                    cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, finalRemarkLabel.Bottom + 20)
-                End If
-            Else
-                editedButton.Location = New System.Drawing.Point(bodyTextBox.Left, finalRemarkLabel.Bottom + 20)
-                originalButton.Location = New System.Drawing.Point(editedButton.Right + 10, bodyTextBox.Bottom + 20)
-                If InsertMarkdown Then
-                    markButton.Location = New System.Drawing.Point(originalButton.Right + 10, bodyTextBox.Bottom + 20)
-                    cancelButton.Location = New System.Drawing.Point(markButton.Right + 10, bodyTextBox.Bottom + 20)
-                Else
-                    cancelButton.Location = New System.Drawing.Point(originalButton.Right + 10, bodyTextBox.Bottom + 20)
-                End If
-            End If
-
-            styledForm.Controls.Add(editedButton)
-            styledForm.Controls.Add(originalButton)
-            If InsertMarkdown Then
-                styledForm.Controls.Add(markButton)
-            End If
-            styledForm.Controls.Add(cancelButton)
-
-            ' Event handlers for buttons
-            Dim returnValue As String = String.Empty
-
-            AddHandler editedButton.Click, Sub(sender, e)
-                                               If NoRTF Then
-                                                   returnValue = bodyTextBox.Text
-                                               Else
-                                                   returnValue = bodyTextBox.Rtf
-                                               End If
-                                               styledForm.DialogResult = DialogResult.OK
-                                               styledForm.Close()
-                                           End Sub
-
-            AddHandler originalButton.Click, Sub(sender, e)
-                                                 If NoRTF Then
-                                                     returnValue = OriginalText
-                                                 Else
-                                                     returnValue = bodyText
-                                                 End If
-                                                 styledForm.DialogResult = DialogResult.OK
-                                                 styledForm.Close()
-                                             End Sub
-            If InsertMarkdown Then
-
-                AddHandler markButton.Click, Sub(sender, e)
-                                                 returnValue = "Markdown"
-                                                 styledForm.DialogResult = DialogResult.OK
-                                                 styledForm.Close()
-                                             End Sub
-            End If
-
-            AddHandler cancelButton.Click, Sub(sender, e)
-                                               returnValue = String.Empty
-                                               styledForm.DialogResult = DialogResult.Cancel
-                                               styledForm.Close()
-                                           End Sub
-
-            ' Adjust form size dynamically
-            Dim formWidth As Integer = Math.Max(minWidth, Math.Min(maxWidth, bodyTextBox.Width + 20))
-            Dim formHeight As Integer = Math.Max(minHeight, Math.Min(maxHeight, staticElementsHeight + bodyTextBox.Height + 120))
-            styledForm.ClientSize = New System.Drawing.Size(formWidth, formHeight)
-
-            ' Show dialog and return appropriate value
-
-            styledForm.TopMost = True
-            styledForm.BringToFront()
-            styledForm.Activate()
-            styledForm.Focus()
-            If Getfocus Then
-                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
-                Dim Result = styledForm.ShowDialog(New WindowWrapper(outlookHwnd))
-            Else
-                styledForm.ShowDialog()
-            End If
-            Return returnValue
-        End Function
 
 
         Public Class InputParameter
@@ -7169,17 +5438,6 @@ Namespace SharedLibrary
             End Sub
         End Class
 
-        Public Class xxInputParameter
-            Public Property Name As String
-            Public Property Value As Object
-            ' We use this property to keep track of the dynamically created control.
-            Public Property InputControl As Control
-
-            Public Sub New(ByVal name As String, ByVal value As Object)
-                Me.Name = name
-                Me.Value = value
-            End Sub
-        End Class
 
         Public Shared Function MissingSettingsWindow(Settings As Dictionary(Of String, String), context As ISharedContext) As Boolean
 
@@ -7324,7 +5582,7 @@ Namespace SharedLibrary
 
             InitializeConfig(context, False, False)
 
-            If context.INIloaded = False Then Exit Sub
+            If context.INIloaded = False Then Return
 
             ' Create the form
             Dim settingsForm As New System.Windows.Forms.Form()
@@ -7397,7 +5655,7 @@ Namespace SharedLibrary
                     Dim checkBox As New System.Windows.Forms.CheckBox()
                     checkBox.Checked = Boolean.Parse(GetSettingValue(setting.Key, context))
                     checkBox.Location = New System.Drawing.Point(controlXOffset, yPos)
-                    If setting.Key.Contains("_2") And Not context.INI_SecondAPI Then
+                    If setting.Key.Contains("_2") AndAlso Not context.INI_SecondAPI Then
                         checkBox.Enabled = False
                     Else
                         checkBox.Enabled = True
@@ -7410,7 +5668,7 @@ Namespace SharedLibrary
                     textBox.Text = GetSettingValue(setting.Key, context)
                     textBox.Size = New System.Drawing.Size(defaultControlWidth, 20)
                     textBox.Location = New System.Drawing.Point(controlXOffset, yPos)
-                    If setting.Key.Contains("_2") And Not context.INI_SecondAPI Then
+                    If setting.Key.Contains("_2") AndAlso Not context.INI_SecondAPI Then
                         textBox.Enabled = False
                     Else
                         textBox.Enabled = True
@@ -7420,9 +5678,6 @@ Namespace SharedLibrary
                     ToolTip.SetToolTip(textBox, ToolTipText)
                 End If
 
-                If setting.Key.Contains("_2") Then
-
-                End If
                 yPos += lineSpacing
             Next
 
@@ -7516,7 +5771,7 @@ Namespace SharedLibrary
             Dim updateButtonSize As System.Drawing.Size = TextRenderer.MeasureText(updateButton.Text, standardFont)
             updateButton.Size = New System.Drawing.Size(updateButtonSize.Width + 20, updateButtonSize.Height + 10)
             updateButton.Location = New System.Drawing.Point(aboutButton.Right + buttonSpacing, cancelButton.Top)
-            If ApplicationDeployment.IsNetworkDeployed Or Not String.IsNullOrWhiteSpace(context.INI_UpdatePath) Then
+            If ApplicationDeployment.IsNetworkDeployed OrElse Not String.IsNullOrWhiteSpace(context.INI_UpdatePath) Then
                 settingsForm.Controls.Add(updateButton)
                 RightSide = updateButton.Right
             End If
@@ -7693,7 +5948,7 @@ Namespace SharedLibrary
                                               ShowAboutWindow(settingsForm, CapturedContext)
                                           End Sub
 
-            If ApplicationDeployment.IsNetworkDeployed Or Not String.IsNullOrWhiteSpace(CapturedContext.INI_UpdatePath) Then
+            If ApplicationDeployment.IsNetworkDeployed OrElse Not String.IsNullOrWhiteSpace(CapturedContext.INI_UpdatePath) Then
 
                 AddHandler updateButton.Click, Sub(sender, e)
                                                    Dim updater As New UpdateHandler()
@@ -7817,7 +6072,7 @@ Namespace SharedLibrary
         Public Shared Function IsBooleanSetting(settingKey As String) As Boolean
             ' Determine if a setting is a Boolean based on its key
             Dim booleanSettings As New List(Of String) From {
-        "DoubleS", "Clean", "KeepFormat1", "ReplaceText1",
+        "DoubleS", "Clean", "KeepFormat1", "MarkdownConvert", "ReplaceText1",
         "KeepFormat2", "KeepParaFormatInline", "ReplaceText2", "DoMarkupOutlook", "DoMarkupWord",
         "APIDebug", "ISearch_Approve", "ISearch", "Lib"
             }
@@ -7894,6 +6149,8 @@ Namespace SharedLibrary
                     Return context.INI_Clean.ToString()
                 Case "KeepFormat1"
                     Return context.INI_KeepFormat1.ToString()
+                Case "MarkdownConvert"
+                    Return context.INI_MarkdownConvert.ToString()
                 Case "ReplaceText1"
                     Return context.INI_ReplaceText1.ToString()
                 Case "KeepFormat2"
@@ -8066,6 +6323,8 @@ Namespace SharedLibrary
                     context.INI_Clean = Boolean.Parse(value)
                 Case "KeepFormat1"
                     context.INI_KeepFormat1 = Boolean.Parse(value)
+                Case "MarkdownConvert"
+                    context.INI_MarkdownConvert = Boolean.Parse(value)
                 Case "ReplaceText1"
                     context.INI_ReplaceText1 = Boolean.Parse(value)
                 Case "KeepFormat2"
@@ -8282,7 +6541,7 @@ Namespace SharedLibrary
                 DefaultPath = GetDefaultINIPath(context.RDV)
                 DefaultPath2 = GetDefaultINIPath("Word")
 
-                If Not String.IsNullOrWhiteSpace(RegFilePath) And RegPath_IniPrio Then
+                If Not String.IsNullOrWhiteSpace(RegFilePath) AndAlso RegPath_IniPrio Then
                     IniFilePath = System.IO.Path.Combine(ExpandEnvironmentVariables(RegFilePath), $"{AN2}.ini")
                 ElseIf System.IO.File.Exists(DefaultPath) Then
                     IniFilePath = DefaultPath
@@ -8299,7 +6558,7 @@ Namespace SharedLibrary
                 ' Validate IniFilePath
                 If Not System.IO.File.Exists(IniFilePath) Then
                     ShowCustomMessageBox($"The configuration file '{IniFilePath}' was not found.")
-                    Exit Sub
+                    Return
                 End If
 
                 ' Create a temporary file for the updated configuration
@@ -8312,7 +6571,7 @@ Namespace SharedLibrary
                     {"HeaderA", context.INI_HeaderA},
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
-                    {"Anon", context.INI_ANON},
+                    {"Anon", context.INI_Anon},
                     {"APICall", context.INI_APICall},
                     {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
@@ -8328,6 +6587,7 @@ Namespace SharedLibrary
                     {"DoubleS", context.INI_DoubleS.ToString()},
                     {"Clean", context.INI_Clean.ToString()},
                     {"KeepFormat1", context.INI_KeepFormat1.ToString()},
+                    {"MarkdownConvert", context.INI_MarkdownConvert.ToString()},
                     {"ReplaceText1", context.INI_ReplaceText1.ToString()},
                     {"KeepFormat2", context.INI_KeepFormat2.ToString()},
                     {"KeepFormatCap", context.INI_KeepFormatCap.ToString()},
@@ -8408,6 +6668,7 @@ Namespace SharedLibrary
                     {"SP_NoFillers", context.SP_NoFillers},
                     {"SP_Podcast", context.SP_Podcast},
                     {"SP_Shorten", context.SP_Shorten},
+                    {"SP_InsertClipboard", context.SP_InsertClipboard},
                     {"SP_Summarize", context.SP_Summarize},
                     {"SP_MailReply", context.SP_MailReply},
                     {"SP_MailSumup", context.SP_MailSumup},
@@ -8449,6 +6710,7 @@ Namespace SharedLibrary
                     {"SP_NoFillers", Default_SP_NoFillers},
                     {"SP_Podcast", Default_SP_Podcast},
                     {"SP_Shorten", Default_SP_Shorten},
+                    {"SP_InsertClipboard", Default_SP_InsertClipboard},
                     {"SP_Summarize", Default_SP_Summarize},
                     {"SP_MailReply", Default_SP_MailReply},
                     {"SP_MailSumup", Default_SP_MailSumup},
@@ -8558,7 +6820,7 @@ Namespace SharedLibrary
                 ' Validate IniFilePath
                 If Not System.IO.File.Exists(IniFilePath) Then
                     ShowCustomMessageBox($"The configuration file '{IniFilePath}' was not found.")
-                    Exit Sub
+                    Return
                 End If
 
                 ' Create a temporary file for the updated configuration
@@ -8879,6 +7141,7 @@ Namespace SharedLibrary
             variableValues.Add("Language1", context.INI_Language1)
             variableValues.Add("Language2", context.INI_Language2)
             variableValues.Add("KeepFormat1", context.INI_KeepFormat1)
+            variableValues.Add("MarkdownConvert", context.INI_MarkdownConvert)
             variableValues.Add("KeepFormat2", context.INI_KeepFormat2)
             variableValues.Add("KeepFormatCap", context.INI_KeepFormatCap)
             variableValues.Add("KeepParaFormatInline", context.INI_KeepParaFormatInline)
@@ -8928,6 +7191,7 @@ Namespace SharedLibrary
             variableValues.Add("SP_NoFillers", context.SP_NoFillers)
             variableValues.Add("SP_Podcast", context.SP_Podcast)
             variableValues.Add("SP_Shorten", context.SP_Shorten)
+            variableValues.Add("SP_InsertClipboard", context.SP_InsertClipboard)
             variableValues.Add("SP_Summarize", context.SP_Summarize)
             variableValues.Add("SP_MailReply", context.SP_MailReply)
             variableValues.Add("SP_MailSumup", context.SP_MailSumup)
@@ -9017,6 +7281,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("Language1") Then context.INI_Language1 = updatedValues("Language1")
                     If updatedValues.ContainsKey("Language2") Then context.INI_Language2 = updatedValues("Language2")
                     If updatedValues.ContainsKey("KeepFormat1") Then context.INI_KeepFormat1 = CBool(updatedValues("KeepFormat1"))
+                    If updatedValues.ContainsKey("MarkdownConvert") Then context.INI_MarkdownConvert = CBool(updatedValues("MarkdownConvert"))
                     If updatedValues.ContainsKey("KeepFormat2") Then context.INI_KeepFormat2 = CBool(updatedValues("KeepFormat2"))
                     If updatedValues.ContainsKey("KeepFormatCap") Then context.INI_KeepFormatCap = CInt(updatedValues("KeepFormatCap"))
                     If updatedValues.ContainsKey("KeepParaFormatInline") Then context.INI_KeepParaFormatInline = CBool(updatedValues("KeepParaFormatInline"))
@@ -9034,6 +7299,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_NoFillers") Then context.SP_NoFillers = updatedValues("SP_NoFillers")
                     If updatedValues.ContainsKey("SP_Podcast") Then context.SP_Podcast = updatedValues("SP_Podcast")
                     If updatedValues.ContainsKey("SP_Shorten") Then context.SP_Shorten = updatedValues("SP_Shorten")
+                    If updatedValues.ContainsKey("SP_InsertClipboard") Then context.SP_InsertClipboard = updatedValues("SP_InsertClipboard")
                     If updatedValues.ContainsKey("SP_Summarize") Then context.SP_Summarize = updatedValues("SP_Summarize")
                     If updatedValues.ContainsKey("SP_MailReply") Then context.SP_MailReply = updatedValues("SP_MailReply")
                     If updatedValues.ContainsKey("SP_MailSumup") Then context.SP_MailSumup = updatedValues("SP_MailSumup")
@@ -9425,9 +7691,6 @@ Namespace SharedLibrary
             buttonPanel.Controls.Add(editButton)
 
             ' Align edit button to the right
-            Dim spacer As New Panel With {
-                        .Dock = DockStyle.Fill
-                    }
             buttonPanel.Controls.SetChildIndex(editButton, buttonPanel.Controls.Count - 1)
 
             ' Handle Edit button click
@@ -9534,313 +7797,6 @@ Namespace SharedLibrary
         End Function
 
 
-
-        Public Shared Function xxxxShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean, Context As ISharedContext) As (String, Boolean, Boolean, Boolean)
-
-            filePath = ExpandEnvironmentVariables(filePath)
-
-            Dim LoadResult = LoadPrompts(filePath, Context)
-            Dim NoBubbles As Boolean = False
-            Dim NoMarkup As Boolean = False
-
-            If enableMarkup = Nothing Then
-                NoMarkup = True
-                enableMarkup = False
-            End If
-
-            If enableBubbles = Nothing Then
-                NoBubbles = True
-                enableBubbles = False
-            End If
-
-            If LoadResult <> 0 Then Return ("", False, False, False)
-
-            ' Create the form
-            Dim settingsForm As New Form With {
-                        .Text = "Select Prompt",
-                        .Width = 900,
-                        .Height = 650,
-                        .StartPosition = FormStartPosition.CenterScreen,
-                        .Padding = New Padding(10)
-                    }
-
-            ' Set icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            settingsForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Set a predefined font
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            settingsForm.Font = standardFont
-
-            ' Create a table layout panel for structured arrangement
-            Dim layout As New TableLayoutPanel With {
-                        .Dock = DockStyle.Fill,
-                        .ColumnCount = 2,
-                        .RowCount = 3,
-                        .Padding = New Padding(10)
-                    }
-
-            ' Configure column and row styles
-            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
-            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
-            layout.RowStyles.Add(New RowStyle(SizeType.Percent, 70))
-            layout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
-            layout.RowStyles.Add(New RowStyle(SizeType.Absolute, 50))
-
-            settingsForm.Controls.Add(layout)
-
-            ' Create listbox for prompt titles
-            Dim titleListBox As New ListBox With {
-                        .Dock = DockStyle.Fill,
-                        .Margin = New Padding(10)
-                    }
-            titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
-            layout.Controls.Add(titleListBox, 0, 0)
-
-            ' Create textbox for prompt content
-            Dim promptTextBox As New TextBox With {
-                            .Dock = DockStyle.Fill,
-                            .Multiline = True,
-                            .ReadOnly = True,
-                            .ScrollBars = ScrollBars.Vertical,
-                            .Margin = New Padding(10)
-                        }
-            layout.Controls.Add(promptTextBox, 1, 0)
-
-            ' Ensure equal sizes for selector and preview
-            AddHandler settingsForm.Resize, Sub()
-                                                Dim equalHeight = layout.GetRowHeights()(0)
-                                                titleListBox.Height = equalHeight
-                                                promptTextBox.Height = equalHeight
-                                            End Sub
-
-            ' Preselect the first prompt
-            If Context.PromptTitles.Count > 0 Then
-                titleListBox.SelectedIndex = 0
-                promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
-            End If
-
-            ' Handle title selection
-            AddHandler titleListBox.SelectedIndexChanged, Sub()
-                                                              Dim selectedIndex = titleListBox.SelectedIndex
-                                                              If selectedIndex >= 0 Then
-                                                                  Dim selectedPrompt = Context.PromptLibrary(selectedIndex).Replace("\n", vbCrLf)
-                                                                  promptTextBox.Text = selectedPrompt
-                                                              End If
-                                                          End Sub
-
-            ' Handle Enter key to confirm selection
-            AddHandler titleListBox.KeyDown, Sub(sender, e)
-                                                 If e.KeyCode = Keys.Enter Then
-                                                     settingsForm.DialogResult = DialogResult.OK
-                                                     settingsForm.Close()
-                                                 End If
-                                             End Sub
-
-            ' Create a panel for checkboxes
-            Dim checkboxPanel As New FlowLayoutPanel With {
-                        .FlowDirection = FlowDirection.TopDown,
-                        .WrapContents = False,
-                        .Dock = DockStyle.Top,  'Fill
-                        .Margin = New Padding(10),
-                        .AutoSize = True,
-                        .AutoSizeMode = AutoSizeMode.GrowAndShrink
-                    }
-            layout.Controls.Add(checkboxPanel, 0, 1)
-
-            ' Checkboxes
-            Dim markupCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be provided as a markup",
-                        .AutoSize = True,
-                        .Enabled = enableMarkup,
-                        .Visible = Not NoMarkup
-                    }
-
-            Dim clipboardCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be put in the clipboard",
-                        .AutoSize = True
-                    }
-
-            Dim bubblesCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be in the form of bubbles",
-                        .AutoSize = True,
-                        .Enabled = enableBubbles,
-                        .Visible = Not NoBubbles
-                    }
-
-            checkboxPanel.Controls.Add(markupCheckbox)
-            checkboxPanel.Controls.Add(clipboardCheckbox)
-            checkboxPanel.Controls.Add(bubblesCheckbox)
-
-            ' Ensure mutual exclusivity of checkboxes
-            AddHandler markupCheckbox.CheckedChanged, Sub()
-                                                          If markupCheckbox.Checked Then
-                                                              bubblesCheckbox.Checked = False
-                                                              clipboardCheckbox.Checked = False
-                                                          End If
-                                                      End Sub
-
-            AddHandler bubblesCheckbox.CheckedChanged, Sub()
-                                                           If bubblesCheckbox.Checked Then
-                                                               markupCheckbox.Checked = False
-                                                               clipboardCheckbox.Checked = False
-                                                           End If
-                                                       End Sub
-
-            AddHandler clipboardCheckbox.CheckedChanged, Sub()
-                                                             If clipboardCheckbox.Checked Then
-                                                                 markupCheckbox.Checked = False
-                                                                 bubblesCheckbox.Checked = False
-                                                             End If
-                                                         End Sub
-
-            ' File path label
-            Dim filePathLabel As New System.Windows.Forms.Label With {
-                            .Text = $"Source: {filePath}",
-                            .AutoSize = True,
-                            .MaximumSize = New Size(layout.Width, 0),
-                            .Margin = New Padding(10)
-                        }
-            layout.Controls.Add(filePathLabel, 1, 1)
-
-            ' Add OK, Cancel, and Edit buttons
-            Dim buttonPanel As New FlowLayoutPanel With {
-                            .FlowDirection = FlowDirection.LeftToRight,
-                            .Dock = DockStyle.Bottom,
-                            .Padding = New Padding(10)
-                        }
-            layout.Controls.Add(buttonPanel, 0, 2)
-            layout.SetColumnSpan(buttonPanel, 2)
-
-            Dim okButton As New Button With {
-                        .Text = "OK",
-                        .AutoSize = True,
-                        .DialogResult = DialogResult.OK
-                    }
-
-            Dim cancelButton As New Button With {
-                        .Text = "Cancel",
-                        .AutoSize = True,
-                        .DialogResult = DialogResult.Cancel
-                    }
-
-            Dim editButton As New Button With {
-                        .Text = "Edit",
-                        .AutoSize = True,
-                        .Anchor = AnchorStyles.Right
-                    }
-            buttonPanel.Controls.Add(okButton)
-            buttonPanel.Controls.Add(cancelButton)
-            buttonPanel.Controls.Add(editButton)
-
-            ' Align edit button to the right
-            Dim spacer As New Panel With {
-                        .Dock = DockStyle.Fill
-                    }
-            buttonPanel.Controls.SetChildIndex(editButton, buttonPanel.Controls.Count - 1)
-
-            ' Handle Edit button click
-            AddHandler editButton.Click, Sub()
-                                             Dim editorForm As New Form With {
-                                                 .Text = "Edit Prompt Library",
-                                                 .Width = 800,
-                                                 .Height = 600,
-                                                 .StartPosition = FormStartPosition.CenterParent,
-                                                 .Padding = New Padding(10)
-                                             }
-
-                                             ' Set icon for editor
-                                             editorForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-                                             Dim descriptionLabel As New System.Windows.Forms.Label With {
-                                                 .Text = $"You can now edit your prompts (stored at {filePath}). Make sure that on each line, the description and the prompt is separated by a '|'; you can use ';' for indicating comments.",
-                                                 .Dock = DockStyle.Top,
-                                                 .Font = standardFont,
-                                                 .AutoSize = True,
-                                                 .MaximumSize = New Size(editorForm.Width - 20, 0),
-                                                 .Margin = New Padding(10, 20, 20, 20)
-                                             }
-
-                                             Dim editorTextBox As New TextBox With {
-                                                 .Multiline = True,
-                                                 .Dock = DockStyle.Fill,
-                                                 .ScrollBars = ScrollBars.Both,
-                                                 .Font = standardFont,
-                                                 .Margin = New Padding(20),
-                                                 .Height = 400
-                                             }
-
-                                             ' Load file content into editor
-                                             editorTextBox.Text = System.IO.File.ReadAllText(filePath)
-                                             editorTextBox.SelectionStart = 0
-                                             editorTextBox.SelectionLength = 0
-
-                                             Dim editorButtonPanel As New FlowLayoutPanel With {
-                                                 .FlowDirection = FlowDirection.LeftToRight,
-                                                 .Dock = DockStyle.Bottom,
-                                                 .Padding = New Padding(10),
-                                                 .AutoSize = True
-                                             }
-
-                                             Dim saveButton As New Button With {
-                                                 .Text = "Save",
-                                                 .Font = standardFont,
-                                                 .AutoSize = True
-                                             }
-
-                                             Dim cancelEditButton As New Button With {
-                                                 .Text = "Cancel",
-                                                 .Font = standardFont,
-                                                 .AutoSize = True
-                                             }
-
-                                             AddHandler cancelEditButton.Click, Sub()
-                                                                                    editorForm.Close()
-                                                                                End Sub
-
-                                             AddHandler saveButton.Click, Sub()
-                                                                              System.IO.File.WriteAllText(filePath, editorTextBox.Text)
-                                                                              editorForm.Close()
-
-                                                                              ' Reload prompts after saving
-                                                                              LoadPrompts(filePath, Context)
-                                                                              titleListBox.Items.Clear()
-                                                                              titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
-                                                                              If Context.PromptTitles.Count > 0 Then
-                                                                                  titleListBox.SelectedIndex = 0
-                                                                                  promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
-                                                                              End If
-                                                                              titleListBox.Focus()
-                                                                          End Sub
-
-                                             editorButtonPanel.Controls.Add(saveButton)
-                                             editorButtonPanel.Controls.Add(cancelEditButton)
-
-                                             editorForm.Controls.Add(editorTextBox)
-                                             editorForm.Controls.Add(descriptionLabel)
-                                             editorForm.Controls.Add(editorButtonPanel)
-                                             editorForm.ShowDialog()
-                                             titleListBox.Focus()
-                                         End Sub
-
-            ' Show the form
-            Dim result As DialogResult = settingsForm.ShowDialog()
-
-            If result = DialogResult.OK Then
-                Dim selectedIndex = titleListBox.SelectedIndex
-                If selectedIndex >= 0 Then
-                    Return (
-                        Context.PromptLibrary(selectedIndex),
-                        markupCheckbox.Checked,
-                        bubblesCheckbox.Checked,
-                        clipboardCheckbox.Checked
-                    )
-                End If
-            End If
-
-            ' Return defaults if cancelled or no selection
-            Return ("", False, False, False)
-        End Function
 
 
         Public Shared Function LoadPrompts(filePath As String, context As ISharedContext) As Integer
@@ -10746,7 +8702,7 @@ Namespace SharedLibrary
             Dim selectedList = GetSelectedConfigList()
 
             If selectedList Is Nothing OrElse currentConfigControls.Count = 0 Then
-                Exit Sub
+                Return
             End If
 
             ' currentConfigControls hat immer "Label" + "TextBox" (oder was auch immer),
@@ -11062,18 +9018,58 @@ Namespace SharedLibrary
 
     Public Class UpdateHandler
 
+        Public Shared MainControl As System.Windows.Forms.Control
+        Public Shared HostHandle As IntPtr
+
+        Private Class NativeMethods
+            <Runtime.InteropServices.DllImport("user32.dll")>
+            Public Shared Function SetForegroundWindow(hWnd As IntPtr) As Boolean
+            End Function
+        End Class
+
+
+        Private Shared Function UIInvokePrompt(prompt As String, caption As String) As Integer
+            ' 1) Bring the host to the front
+            NativeMethods.SetForegroundWindow(HostHandle)
+
+            ' 2) Use MainControl.Invoke to run on the real UI thread
+            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
+                Dim result As Integer = 0
+                MainControl.Invoke(Sub()
+                                       result = SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption)
+                                   End Sub)
+                Return result
+            Else
+                Return SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption)
+            End If
+        End Function
+
+        Private Shared Sub UIInvokeMessage(msg As String, caption As String)
+            NativeMethods.SetForegroundWindow(HostHandle)
+
+            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
+                MainControl.Invoke(Sub()
+                                       SharedMethods.ShowCustomMessageBox(msg, caption)
+                                   End Sub)
+            Else
+                SharedMethods.ShowCustomMessageBox(msg, caption)
+            End If
+        End Sub
+
+
+
         Public Sub CheckAndInstallUpdates(appname As String, LocalPath As String)
             Try
                 ' Ensure the application is ClickOnce deployed
 
-                If ApplicationDeployment.IsNetworkDeployed And String.IsNullOrWhiteSpace(LocalPath) Then
+                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
                     Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
                     Dim currentDate As Date = Date.Now
 
                     ' Check for updates
 
-                    If Deployment.CheckForUpdate() Then
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update is available online ({Deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
+                    If deployment.CheckForUpdate() Then
+                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
 
                         If dialogResult = 1 Then
                             ' Download and apply the update -- removed for the time being due to lack of reliability
@@ -11117,7 +9113,6 @@ Namespace SharedLibrary
                         Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"This will initiate the installer for this add-in. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?", "Yes", "No")
                         If dialogResult = 1 Then
                             Dim vstoFilePath As String = ""
-                            Debug.WriteLine(appname)
                             Select Case Left(appname, 4)
                                 Case "Word"
                                     vstoFilePath = System.IO.Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
@@ -11142,12 +9137,187 @@ Namespace SharedLibrary
             End Try
         End Sub
 
+        Private Shared _appname As String
+        Private Shared _localPath As String
+        Private Shared _checkIntervalInDays As Integer
 
-        Public Shared Sub PeriodicCheckForUpdates(checkIntervalInDays As Integer, appname As String, LocalPath As String)
+
+        Public Shared Sub PeriodicCheckForUpdates(
+        checkIntervalInDays As Integer,
+        appname As String,
+        LocalPath As String)
+
+            Try
+                If checkIntervalInDays = 0 Then Return
+                _appname = appname
+                _localPath = LocalPath
+                _checkIntervalInDays = checkIntervalInDays
+
+                ' 1) Last check timestamp
+                Dim lastCheck As Date = If(
+            Left(_appname, 4) = "Word", My.Settings.LastUpdateCheckWord,
+            If(Left(_appname, 4) = "Exce", My.Settings.LastUpdateCheckExcel,
+            If(Left(_appname, 4) = "Outl", My.Settings.LastUpdateCheckOutlook, Date.MinValue)))
+                Dim nowDate As Date = Date.Now
+                Dim days As Double = (nowDate - lastCheck).TotalDays
+
+                ' 2) Skip if interval not reached
+                If days < _checkIntervalInDays AndAlso _checkIntervalInDays > 0 Then
+                    Return
+                End If
+
+                ' 3) Network-deployed? Silent async check if so
+                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(_localPath) Then
+                    Dim dep = ApplicationDeployment.CurrentDeployment
+                    ' subscribe once
+                    RemoveHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
+                    AddHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
+                    dep.CheckForUpdateAsync()
+                Else
+                    ' Local .vsto installer
+                    Dim vstoFile = Path.Combine(
+                Environment.ExpandEnvironmentVariables(_localPath),
+                $"{_appname.ToLowerInvariant()}\{SharedMethods.AN3} for {_appname}.vsto")
+                    If File.Exists(vstoFile) Then
+                        RunVstoInstaller(vstoFile)
+                    Else
+
+                        UIInvokeMessage(
+                                    $"The configuration asks me to check for local updates of {SharedMethods.AN}, " &
+                                    $"but I have not found '{vstoFile}'. Please inform your administrator.",
+                                    $"{SharedMethods.AN} Updater")
+
+                    End If
+                    ' always save timestamp for local installs
+                    SaveTimestamp(nowDate)
+                End If
+
+            Catch dex As DeploymentException
+                UIInvokeMessage(
+            "The check for new updates could not be completed due to an access right restriction. " &
+            "Your installation may have to be freshly installed. Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+                If _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
+
+            Catch ex As Exception
+                UIInvokeMessage(
+            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared Sub OnCheck(sender As Object, e As CheckForUpdateCompletedEventArgs)
+            Dim dep = CType(sender, ApplicationDeployment)
+            Dim nowDate As Date = Date.Now
+
+            Try
+                If e.Error IsNot Nothing Then
+                    ' access-rights/elevation error
+                    UIInvokeMessage(
+                "The check for new updates could not be completed due to an access right restriction. " &
+                "Your installation may have to be freshly installed. Please inform your administrator.",
+                $"{SharedMethods.AN} Updater")
+                    If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
+                    Return
+                End If
+
+                If e.UpdateAvailable Then
+                    ' prompt user with versions
+                    Dim localV = dep.CurrentVersion.ToString()
+                    Dim remoteV = e.AvailableVersion.ToString()
+                    Dim prompt =
+                $"A new version is available (current: {localV}, new: {remoteV}). " &
+                "Do you want to install it now?"
+                    Dim choice = UIInvokePrompt(
+                prompt, $"{SharedMethods.AN} Updater")
+
+                    If choice = 1 Then
+                        ' install now
+                        Dim appUrl = dep.UpdateLocation.AbsoluteUri
+                        Dim vstoUrl = appUrl.Replace(".application", ".vsto")
+                        RunVstoInstaller(vstoUrl)
+                        SaveTimestamp(nowDate)
+
+                    Else
+                        ' user postponed
+                        If _checkIntervalInDays = -1 Then
+                            SaveTimestamp(nowDate)
+                        ElseIf _checkIntervalInDays > 0 Then
+                            Dim postPrompt =
+                        $"Do you want to pause update checks for {_checkIntervalInDays} days?"
+                            Dim postChoice = UIInvokePrompt(
+                        postPrompt, $"{SharedMethods.AN} Updater")
+                            If postChoice = 1 Then
+                                SaveTimestamp(nowDate)
+                            End If
+                        End If
+                    End If
+                End If
+
+            Catch dex As DeploymentException
+                UIInvokeMessage(
+            "The check for new updates could not be completed due to an access right restriction. " &
+            "Your installation may have to be freshly installed. Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+                If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
+
+            Catch ex As Exception
+                UIInvokeMessage(
+            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared Sub RunVstoInstaller(pathOrUrl As String)
+            Dim common = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)
+            Dim base = Path.Combine(common, "Microsoft Shared", "VSTO")
+            Dim installer = Directory.GetFiles(base, "VSTOInstaller.exe", SearchOption.AllDirectories).FirstOrDefault()
+            If installer Is Nothing Then
+                UIInvokeMessage(
+            "The update could not be completed (VSTOInstaller.exe not found). " &
+            "Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+                Return
+            End If
+
+            Try
+                Dim args = $"/S /I ""{pathOrUrl}"""
+                Dim psi = New ProcessStartInfo(installer, args) With {
+            .UseShellExecute = False,
+            .CreateNoWindow = True
+        }
+                Using p = Process.Start(psi)
+                    p.WaitForExit()
+                End Using
+                UIInvokeMessage(
+            "Update completed. It will be active the next time you restart your application.",
+            $"{SharedMethods.AN} Updater")
+
+            Catch ex As Exception
+                UIInvokeMessage(
+            $"The update could not be completed: {ex.Message}. Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared Sub SaveTimestamp(timeStamp As Date)
+            Select Case Left(_appname, 4)
+                Case "Word" : My.Settings.LastUpdateCheckWord = timeStamp
+                Case "Exce" : My.Settings.LastUpdateCheckExcel = timeStamp
+                Case "Outl" : My.Settings.LastUpdateCheckOutlook = timeStamp
+            End Select
+            My.Settings.Save()
+        End Sub
+
+
+
+
+
+        Public Shared Sub oldPeriodicCheckForUpdates(checkIntervalInDays As Integer, appname As String, LocalPath As String)
             Try
                 ' Get the last update check time from settings
 
-                If checkIntervalInDays = 0 Then Exit Sub
+                If checkIntervalInDays = 0 Then Return
 
                 Dim lastCheck As Date
 
@@ -11159,7 +9329,7 @@ Namespace SharedLibrary
                     Case "Outl"
                         lastCheck = My.Settings.LastUpdateCheckOutlook
                     Case Else
-                        Exit Sub
+                        Return
                 End Select
 
                 Dim currentDate As Date = Date.Now
@@ -11168,10 +9338,10 @@ Namespace SharedLibrary
                 Dim elapsedDays As Double = (currentDate - lastCheck).TotalDays
 
                 ' Check for updates if the interval has passed
-                If elapsedDays >= checkIntervalInDays Or checkIntervalInDays < 0 Then
+                If elapsedDays >= checkIntervalInDays OrElse checkIntervalInDays < 0 Then
                     ' Ensure the application is ClickOnce deployed
 
-                    If ApplicationDeployment.IsNetworkDeployed And String.IsNullOrWhiteSpace(LocalPath) Then
+                    If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
                         Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
 
                         Dim Dialogresult As Integer = 0
@@ -11197,7 +9367,7 @@ Namespace SharedLibrary
                                 SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
                             End If
 
-                            If Dialogresult = 1 Or Dialogresult = 2 Then
+                            If Dialogresult = 1 OrElse Dialogresult = 2 Then
                                 ' Update the last check time
                                 Select Case Left(appname, 4)
                                     Case "Word"
@@ -11211,7 +9381,7 @@ Namespace SharedLibrary
                             End If
 
                         End If
-                        If Dialogresult = 1 Or Dialogresult = 2 Then
+                        If Dialogresult = 1 OrElse Dialogresult = 2 Then
                             ' Update the last check time
                             Select Case Left(appname, 4)
                                 Case "Word"
@@ -11246,7 +9416,7 @@ Namespace SharedLibrary
                                 SharedMethods.ShowCustomMessageBox($"Installer '{vstoFilePath}' not found. Check 'UpdatePath =' in the '{SharedMethods.AN2}.ini''.", $"{SharedMethods.AN} Updater")
                             End If
                         End If
-                        If dialogResult = 1 Or dialogResult = 2 Then
+                        If dialogResult = 1 OrElse dialogResult = 2 Then
                             ' Update the last check time
                             Select Case Left(appname, 4)
                                 Case "Word"
@@ -11668,7 +9838,7 @@ Namespace SharedLibrary
     '   WILDCARD*          (wildcard '*' converts to ".*")
     '   Multiple entities can be comma-separated on one line; quoted strings ( "multi word" ) are treated as single terms.
     '
-    ' Placeholder format: [prefix_GGGG_SSS]
+    ' Placeholder format: <prefix_GGGG_SSS>
     '   - prefix: default "redacted" or custom via {{prefix}}
     '   - GGGG: 4-digit GroupID (unique per pattern)
     '   - SSS:  sub-index (starts at 1 for first match of that pattern, increments for subsequent distinct matches)
