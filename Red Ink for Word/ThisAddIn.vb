@@ -4333,7 +4333,7 @@ Public Class ThisAddIn
 
             End If
 
-            If Not NoSelectedText AndAlso INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) Then
+            If Not NoSelectedText AndAlso INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) AndAlso rng.Text.Length < INI_MarkupDiffCap Then
                 ConvertRangeFormattingToMarkdown()
                 rng = selection.Range
             End If
