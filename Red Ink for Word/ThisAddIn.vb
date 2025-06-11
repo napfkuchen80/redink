@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 9.6.2025
+' 10.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -328,7 +328,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.090625 Gen2 Beta Test"
+    Public Const Version As String = "V.100625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -379,6 +379,10 @@ Public Class ThisAddIn
     Private Const RIMenu = AN
     Private Const OldRIMenu = AN & " " & ChrW(&HD83D) & ChrW(&HDC09)
     Private Const MinHelperVersion = 1 ' Minimum version of the helper file that is required
+
+    Public Const SearchChunkSize As Integer = 120 ' Size of chunks used for search (in characters)
+    Public Const RemoveCRforSearch As Boolean = False ' Whether to remove CRLF from search text
+
     Private Const VoskSource = "https://alphacephei.com/vosk/models"
     Private Const WhisperSource = "https://huggingface.co/ggerganov/whisper.cpp/tree/main"
 
@@ -4584,16 +4588,30 @@ Public Class ThisAddIn
                             Dim commentText As String = parts(1).Trim()
 
                             Try
-                                If findText.Length <= 255 Then
+                                If findText.Length <= SearchChunkSize Then
                                     ' Use the built-in Find directly if <= 255 characters
-                                    If selection.Find.Execute(FindText:=findText) Then
+                                    With selection.Find
+                                        .ClearFormatting()
+                                        .Text = NormalizeTextForSearch(findText, RemoveCRforSearch, INI_Clean)
+                                        .Forward = True
+                                        .Wrap = Word.WdFindWrap.wdFindStop
+                                        .MatchWildcards = True
+                                    End With
+                                    Debug.WriteLine($"Searching for: '{findText}' with normalized text: '{selection.Find.Text}'")
+
+                                    If selection.Find.Execute() Then
                                         Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                     Else
                                         notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
                                     End If
+                                    'If selection.Find.Execute(FindText:=findText) Then
+                                    '    Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
+                                    'Else
+                                    '    notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
+                                    'End If
                                 Else
                                     ' Use chunk-by-chunk search for > 255 characters
-                                    If FindLongTextInChunks(findText, 255, selection) Then
+                                    If FindLongTextInChunks(findText, SearchChunkSize, selection, ThisAddIn.RemoveCRforSearch) Then
                                         ' If found, selection now covers the entire matched text
                                         Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                     Else
@@ -5027,7 +5045,7 @@ Public Class ThisAddIn
         End Try
     End Function
 
-    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection) As Boolean
+    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, RemoveCR As Boolean) As Boolean
         ' Store original selection to restore if needed
         Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
         Dim originalStart As Integer = selection.Start
@@ -5051,19 +5069,20 @@ Public Class ThisAddIn
         For i As Integer = 0 To chunks.Count - 1
             Dim currentChunk As String = chunks(i)
 
-            Dim chunk As String = chunks(i)
-
+            Dim chunk As String = NormalizeTextForSearch(chunks(i), RemoveCR, INI_Clean)
+            Debug.WriteLine($"Searching for: '{chunks(i)}' with normalized text: '{chunk}'")
             With selection.Find
                 .Forward = True
                 .Wrap = Word.WdFindWrap.wdFindStop
                 .Format = False
-                If INI_Clean Then
+                .Text = chunk ' Set the text to search for
+                If INI_Clean Or RemoveCR Then
                     .MatchWildcards = True
                     ' replace every literal space with [ ]@ (one-or-more spaces)
-                    .Text = chunk.Replace(" ", "[ ]@")
+                    ' .Text = chunk.Replace(" ", "[ ]@")
                 Else
                     .MatchWildcards = False
-                    .Text = chunk
+                    '.Text = chunk
                 End If
             End With
 
@@ -5103,6 +5122,38 @@ Public Class ThisAddIn
         selection.SetRange(overallMatchStart, overallMatchEnd)
         Return True
     End Function
+
+    ''' <summary>
+    ''' Erzeugt ein Such­muster, das variable Leerzeichen, Absatz-
+    ''' und Zeilen­umbrüche abfängt.
+    ''' </summary>
+    Public Shared Function NormalizeTextForSearch(
+        txt As String,
+        Optional allowParagraphBreaks As Boolean = True,
+        Optional allowMultiSpaces As Boolean = True
+                    ) As String
+
+        Dim pattern As String = txt
+        Dim whiteToken As String
+
+        ' Token bestimmen: nur Spaces → "[ ]@",  sonst alles → "([ ]|^13|^l)@"
+        If allowParagraphBreaks Then
+            'whiteToken = "([ ]|^13|^l)@"
+            whiteToken = "([ ]|^13)@"
+        ElseIf allowMultiSpaces Then
+            whiteToken = "[ ]@"
+        End If
+        ' Jede *einfache* Leerstelle im Suchbegriff durch das Token ersetzen
+        If allowMultiSpaces Or allowParagraphBreaks Then
+            pattern = pattern.Replace(" ", whiteToken)
+        End If
+        If Not allowParagraphBreaks Then
+            pattern = pattern.Replace(vbCrLf, "^p").Replace(vbCr, "^p").Replace(vbLf, "^p")
+        End If
+
+        Return pattern
+    End Function
+
 
 
     Public Sub MarkupSelectedTextWithRegex(regexResult As String)
@@ -5271,7 +5322,7 @@ Public Class ThisAddIn
             End If
 
 
-            If Len(oldText) > 255 Then
+            If Len(oldText) > SearchChunkSize Then
 
                 Dim selectionStart As Integer = doc.Application.Selection.Start
                 Dim selectionEnd As Integer = doc.Application.Selection.End
@@ -5279,7 +5330,7 @@ Public Class ThisAddIn
                 Dim found As Boolean = False
 
                 ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, 255, doc.Application.Selection) = True
+                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -5339,16 +5390,18 @@ Public Class ThisAddIn
                             Exit Do
                         End If
 
+                        oldText = NormalizeTextForSearch(oldText, RemoveCRforSearch, ThisAddIn.INI_Clean)
+
                         With workRange.Find
                             .ClearFormatting()
-                            '.Text = oldText
-                            If ThisAddIn.INI_Clean Then
+                            .Text = oldText
+                            If ThisAddIn.INI_Clean Or RemoveCRforSearch Then
                                 .MatchWildcards = True
                                 ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                                .Text = oldText.Replace(" ", "[ ]@")
+                                '.Text = oldText.Replace(" ", "[ ]@")
                             Else
                                 .MatchWildcards = False
-                                .Text = oldText
+                                '.Text = oldText
                             End If
                             .Forward = True
                             .Wrap = Word.WdFindWrap.wdFindStop
@@ -5476,6 +5529,7 @@ Public Class ThisAddIn
 
         ' Parse and insert HTML content into the Word range
         ParseHtmlNode(htmlDoc.DocumentNode, range)
+        ' InsertHtml(range, fullHtml)
 
         selection.Document.Fields.Update()
 
@@ -5530,7 +5584,7 @@ Public Class ThisAddIn
             End If
 
 
-            range.Style = WdBuiltinStyle.wdStyleNormal
+            'range.Style = WdBuiltinStyle.wdStyleNormal
             Select Case childNode.Name.ToLower()
 
                 Case "div"
@@ -5903,39 +5957,40 @@ Public Class ThisAddIn
         Next
     End Sub
 
+
+
     Private Shared Sub InsertInline(
-    ByRef mainRg As Word.Range,
-    txt As String,
-    styleAction As Action(Of Word.Range),
-    Optional href As String = ""
-)
-        ' 1) Stelle sicher, dass mainRg an der Einfügestelle eine 0-Len-Range ist
+        ByRef mainRg As Word.Range,
+        txt As String,
+        styleAction As Action(Of Word.Range),
+        Optional href As String = "")
+
+        ' 1. collapse the insertion point
         mainRg.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
 
-        ' 2) Baue eine Duplicate-Range, die Du gleich füllst und formatierst
+        ' 2. create a zero-length working range and insert the text
         Dim wrk As Word.Range = mainRg.Duplicate
         wrk.Text = txt
-        styleAction(wrk)  ' z.B. wrk.Font.Bold = True
+
+        ' 3. ALWAYS start from a clean character state
+        wrk.Font.Reset()
 
         If href <> "" Then
-            ' 3a) Hyperlink ANLEGEN, während wrk noch auf den Text zeigt
-            Dim hl As Word.Hyperlink =
-            mainRg.Document.Hyperlinks.Add(
-                Anchor:=wrk,
-                Address:=href
-            )
-            ' 4a) Den Hyperlink-Feld-Range kollabieren
+            '–– create the hyperlink first …
+            Dim hl = mainRg.Document.Hyperlinks.Add(Anchor:=wrk, Address:=href)
+            '–– … then apply the desired formatting on the link range
+            styleAction(hl.Range)
+
             hl.Range.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-            ' 5a) mainRg direkt hinter das Link-Feld setzen
             mainRg.SetRange(hl.Range.End, hl.Range.End)
         Else
-            ' 3b) kein Link: jetzt wrk erst kollabieren
+            ' ordinary inline text
+            styleAction(wrk)
+
             wrk.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-            ' 4b) mainRg hinter den Plain-Text setzen
             mainRg.SetRange(wrk.End, wrk.End)
         End If
     End Sub
-
 
 
 
@@ -7225,7 +7280,7 @@ Public Class ThisAddIn
                     End If
 
                     Dim findText As String = part.Trim()
-                    If FindLongTextInChunks(findText, 255, selection) And selection IsNot Nothing Then
+                    If FindLongTextInChunks(findText, SearchChunkSize, selection, ThisAddIn.RemoveCRforSearch) And selection IsNot Nothing Then
                         'selection.Range.HighlightColorIndex = Word.WdColorIndex.wdYellow
                         doc.Comments.Add(selection.Range, $"{AN5}: '{SearchContext}'")
                         selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
@@ -7257,7 +7312,7 @@ Public Class ThisAddIn
             If Not String.IsNullOrWhiteSpace(LLMResult) Then
                 Dim FindText As String = LLMResult.Trim()
 
-                If FindLongTextInChunks(FindText, 255, selection) And selection IsNot Nothing Then
+                If FindLongTextInChunks(FindText, SearchChunkSize, selection, ThisAddIn.RemoveCRforSearch) And selection IsNot Nothing Then
                     wordApp.ActiveWindow.ScrollIntoView(selection.Range, True)
                 Else
                     ShowCustomMessageBox($"The LLM found this section:" & vbCrLf & vbCrLf & FindText & vbCrLf & vbCrLf & $"However, {AN} could not locate it in the document for technical reasons (may be due to special characters, line breaks of the LLM not quoting the text properly).", "Context Search")

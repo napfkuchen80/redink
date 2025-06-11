@@ -636,11 +636,15 @@ Public Class frmAIChat
                     pc.Argument2 = m.Groups("arg2").Value.Trim().Replace("\r\n", vbCrLf).Replace("\n", vbCrLf).Replace("\r", vbCrLf)
                 End If
 
-                If String.IsNullOrEmpty(pc.Argument2) Then
+                If String.IsNullOrWhiteSpace(pc.Argument2) Then
                     pc.Argument2 = ""
+                    If pc.Command = "REPLACE" Then
+                        pc.Argument1 = pc.Argument1.Replace("\r\n", "^p").Replace("\n", "^p").Replace("\r", "^p")
+                        pc.Argument1 = pc.Argument1.Replace(vbCrLf, "^p").Replace(vbCr, "^p").Replace(vbLf, "^p")
+                    End If
                 Else
-                    pc.Argument1 = pc.Argument1.Replace("\r\n", ".*").Replace("\n", ".*").Replace("\r", ".*")
-                    pc.Argument1 = pc.Argument1.Replace(vbCrLf, ".*").Replace(vbCr, ".*").Replace(vbLf, ".*")
+                    pc.Argument1 = pc.Argument1.Replace("\r\n", "^p").Replace("\n", "^p").Replace("\r", "^p")
+                    pc.Argument1 = pc.Argument1.Replace(vbCrLf, "^p").Replace(vbCr, "^p").Replace(vbLf, "^p")
                 End If
 
                 If Not results.Any(Function(x) x.Command = pc.Command AndAlso x.Argument1 = pc.Argument1 AndAlso x.Argument2 = pc.Argument2) Then
@@ -862,7 +866,7 @@ Public Class frmAIChat
             Dim maxStuckLimit As Integer = 2        ' Maximum allowed stuck occurrences
 
             ' Loop through the content to find and mark all instances
-            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, 255, doc.Application.Selection) = True
+            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
 
                 If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -973,7 +977,7 @@ Public Class frmAIChat
                 newTextWithMarker = newText
             End If
 
-            If Len(oldText) > 255 Then
+            If Len(oldText) > ThisAddIn.SearchChunkSize Then
 
                 Dim selectionStart As Integer = doc.Application.Selection.Start
                 Dim selectionEnd As Integer = doc.Application.Selection.End
@@ -981,7 +985,7 @@ Public Class frmAIChat
                 Dim found As Boolean = False
 
                 ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, 255, doc.Application.Selection) = True
+                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -1039,17 +1043,18 @@ Public Class frmAIChat
                             Exit Do
                         End If
 
+                        oldText = ThisAddIn.NormalizeTextForSearch(oldText, ThisAddIn.RemoveCRforSearch, ThisAddIn.INI_Clean)
                         With workRange.Find
                             .ClearFormatting()
-                            If ThisAddIn.INI_Clean Then
+                            If ThisAddIn.INI_Clean Or ThisAddIn.RemoveCRforSearch Then
                                 .MatchWildcards = True
                                 ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                                .Text = oldText.Replace(" ", "[ ]@")
+                                '.Text = oldText.Replace(" ", "[ ]@")
                             Else
                                 .MatchWildcards = False
-                                .Text = oldText
+                                '.Text = oldText
                             End If
-                            '.Text = oldText
+                            .Text = oldText
                             .Forward = True
                             .Wrap = Word.WdFindWrap.wdFindStop
                             .MatchWholeWord = False
@@ -1142,7 +1147,7 @@ Public Class frmAIChat
             Dim found As Boolean = False
 
             ' Handle cases where searchText exceeds 255 characters
-            If Len(searchText) > 255 Then
+            If Len(searchText) > ThisAddIn.SearchChunkSize Then
 
                 Dim selectionStart As Integer = doc.Application.Selection.Start
                 Dim selectionEnd As Integer = doc.Application.Selection.End
@@ -1150,7 +1155,7 @@ Public Class frmAIChat
                 doc.Application.Selection.SetRange(workrange.Start, workrange.End)
 
                 ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, 255, doc.Application.Selection) = True
+                Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -1187,17 +1192,18 @@ Public Class frmAIChat
 
             Else
                 ' Use Word's Find functionality for shorter searchText
+                searchText = ThisAddIn.NormalizeTextForSearch(searchText, ThisAddIn.RemoveCRforSearch, ThisAddIn.INI_Clean)
                 With workrange.Find
                     .ClearFormatting()
-                    If ThisAddIn.INI_Clean Then
+                    If ThisAddIn.INI_Clean Or ThisAddIn.RemoveCRforSearch Then
                         .MatchWildcards = True
                         ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                        .Text = searchText.Replace(" ", "[ ]@")
+                        '.Text = searchText.Replace(" ", "[ ]@")
                     Else
                         .MatchWildcards = False
-                        .Text = searchText
+                        '.Text = searchText
                     End If
-                    '.Text = searchText
+                    .Text = searchText
                     .Forward = True
                     .Wrap = Word.WdFindWrap.wdFindStop ' Stop after searching once
                     If .Execute() Then

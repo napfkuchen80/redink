@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 9.6.2025
+' 10.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -426,11 +426,42 @@ Namespace SharedLibrary
     End Class
 
 
+    Friend Module NativeClipboard
+        Friend Const CF_ENHMETAFILE As UInteger = 14
+
+        <DllImport("user32.dll", SetLastError:=True)>
+        Friend Function OpenClipboard(hWnd As IntPtr) As Boolean
+        End Function
+
+        <DllImport("user32.dll")>
+        Friend Function CloseClipboard() As Boolean
+        End Function
+
+        <DllImport("user32.dll")>
+        Friend Function IsClipboardFormatAvailable(fmt As UInteger) As Boolean
+        End Function
+
+        <DllImport("user32.dll")>
+        Friend Function GetClipboardData(fmt As UInteger) As IntPtr
+        End Function
+
+        <DllImport("gdi32.dll")>
+        Friend Function CopyEnhMetaFile(hEmfSrc As IntPtr,
+                                    lpszFile As String) As IntPtr
+        End Function
+
+        <DllImport("gdi32.dll")>
+        Friend Function DeleteEnhMetaFile(hemf As IntPtr) As Boolean
+        End Function
+    End Module
+
     Module WinAPI
         <DllImport("user32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
         Public Function FindWindow(lpClassName As String, lpWindowName As String) As IntPtr
         End Function
     End Module
+
+
 
     Public Module MimeHelper
 
@@ -535,7 +566,106 @@ Namespace SharedLibrary
         End Property
     End Class
 
+    Friend Module ClipboardHelper
 
+        ''' <summary>
+        ''' Safely reads supported clipboard contents (RTF, HTML, plain text, image, EMF)
+        ''' and encodes it as Base64 along with the correct MIME type.
+        ''' Prevents crashes in VSTO add-ins (Word, Excel, Outlook) caused by EMF handles or DIBs.
+        ''' </summary>
+        Friend Function TryGetClipboardObject(ByRef mimeType As String, ByRef base64 As String) As Boolean
+            Dim succeeded As Boolean = False
+            Dim localMimeType As String = Nothing
+            Dim localBase64 As String = Nothing
+
+            Dim t As New System.Threading.Thread(
+            Sub()
+                Try
+                    ' 1. RTF
+                    If System.Windows.Forms.Clipboard.ContainsText(System.Windows.Forms.TextDataFormat.Rtf) Then
+                        localMimeType = "application/rtf"
+                        localBase64 = System.Convert.ToBase64String(
+                            System.Text.Encoding.UTF8.GetBytes(
+                                System.Windows.Forms.Clipboard.GetText(System.Windows.Forms.TextDataFormat.Rtf)))
+                        succeeded = True : Exit Sub
+                    End If
+
+                    ' 2. HTML
+                    If System.Windows.Forms.Clipboard.ContainsText(System.Windows.Forms.TextDataFormat.Html) Then
+                        localMimeType = "text/html"
+                        localBase64 = System.Convert.ToBase64String(
+                            System.Text.Encoding.UTF8.GetBytes(
+                                System.Windows.Forms.Clipboard.GetText(System.Windows.Forms.TextDataFormat.Html)))
+                        succeeded = True : Exit Sub
+                    End If
+
+                    ' 3. Plain text
+                    If System.Windows.Forms.Clipboard.ContainsText() Then
+                        localMimeType = "text/plain"
+                        localBase64 = System.Convert.ToBase64String(
+                            System.Text.Encoding.UTF8.GetBytes(
+                                System.Windows.Forms.Clipboard.GetText()))
+                        succeeded = True : Exit Sub
+                    End If
+
+                    ' 4. Image (bitmap)
+                    If System.Windows.Forms.Clipboard.ContainsImage() Then
+                        Using img As System.Drawing.Image = System.Windows.Forms.Clipboard.GetImage()
+                            Using ms As New System.IO.MemoryStream()
+                                img.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                                localMimeType = "image/png"
+                                localBase64 = System.Convert.ToBase64String(ms.ToArray())
+                                succeeded = True : Exit Sub
+                            End Using
+                        End Using
+                    End If
+
+                    ' 5. EMF (Enhanced Metafile) – clone to avoid crashing Office
+                    If NativeClipboard.OpenClipboard(IntPtr.Zero) Then
+                        Try
+                            If NativeClipboard.IsClipboardFormatAvailable(NativeClipboard.CF_ENHMETAFILE) Then
+                                Dim src As IntPtr = NativeClipboard.GetClipboardData(NativeClipboard.CF_ENHMETAFILE)
+                                If src <> IntPtr.Zero Then
+                                    Dim clone As IntPtr = NativeClipboard.CopyEnhMetaFile(src, Nothing)
+                                    Using emf As New System.Drawing.Imaging.Metafile(clone, False)
+                                        Using bmp As New System.Drawing.Bitmap(emf.Width, emf.Height)
+                                            Using g As System.Drawing.Graphics = System.Drawing.Graphics.FromImage(bmp)
+                                                g.DrawImage(emf, 0, 0)
+                                                Using out As New System.IO.MemoryStream()
+                                                    bmp.Save(out, System.Drawing.Imaging.ImageFormat.Png)
+                                                    localMimeType = "image/png"
+                                                    localBase64 = System.Convert.ToBase64String(out.ToArray())
+                                                    succeeded = True
+                                                End Using
+                                            End Using
+                                        End Using
+                                    End Using
+                                    NativeClipboard.DeleteEnhMetaFile(clone)
+                                End If
+                            End If
+                        Finally
+                            NativeClipboard.CloseClipboard()
+                        End Try
+                    End If
+
+                Catch ex As System.Exception
+                    ' Suppress all exceptions to protect the host process
+                End Try
+            End Sub)
+
+            t.SetApartmentState(System.Threading.ApartmentState.STA)
+            t.Start()
+            t.Join()
+
+            If succeeded Then
+                mimeType = localMimeType
+                base64 = localBase64
+            End If
+
+            Return succeeded
+        End Function
+
+    End Module
 
     Public Class SharedMethods
 
@@ -635,7 +765,7 @@ Namespace SharedLibrary
         Const Default_SP_Correct As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to only correct spelling, missing words, clearly unnecessary words, strange or archaic language and poor style. When doing so, do not significantly change the length of the text. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. {INI_PreCorrection}"
         Const Default_SP_Improve As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be much more concise, to the point, better structured and easier to understand and in better, professional style. Change passive voice to active voice, where this makes sense. Remove rendundancies and filler words, except where this is necessary for easy reading and style. When doing so, do not significantly change the length of the text. Also, do not change the overall meaning, tone or content of the text. {INI_PreCorrection}"
         Const Default_SP_Shorten As String = "You are a legal professional and editor with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Shorten the text that is provided to you, in its original language,  and is marked as 'Texttoprocess'. Shorten it as much as necessary to ensure that the output generated by you has {ShortenLength} words. In a first step try to remove redundancies, and if this is not sufficient to fulfill the instruction, then remove less important information or combine information. However, preserve the original tone, the original message of the texttoprocess (but not the <texttoprocesstag>) and any material information. {INI_PreCorrection}"
-        Const Default_SP_InsertClipboard As String = "You will receive a binary object. Convert any text contained therein into text and provide it, with no additional information, but in a meaningful way to process it in writing a text. If there is cut-off text left, right, at the top or bottom that cannot be reasonably use when writing a text, then ignore it. You can use Markdown to keep the original formatting or tables. \n\n ONLY if the object contains no meaningful text that can be inserted, but a video or image, then describe what you see. If the object contains voice, then transcribe the voice, if possible with speaker identification/diarization and emotions, and if it is a video, describe what you see in the video. {INI_PreCorrection}"
+        Const Default_SP_InsertClipboard As String = "You will receive a binary object. Convert any text contained therein into text and provide it, with no additional information, but in a meaningful way to process it in writing a text. Do neither abbreviate nor cut-off the text contained in the object. Provide the full text, to the extent you can. If there is cut-off text left, right, at the top or bottom that cannot be reasonably use when writing a text, then ignore it. You can use Markdown to keep the original formatting or tables. \n\n ONLY if the object contains no meaningful text that can be inserted, but a video or image, then describe what you see. If the object contains voice, then transcribe the voice, if possible with speaker identification/diarization and emotions, and if it is a video, describe what you see in the video. {INI_PreCorrection}"
         Const Default_SP_Summarize As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Create a very short summary of the that is provided to you, in its original language, and is marked as 'Texttoprocess'. Ensure that your output has {SummaryLength} words. Use the same language style as in the original text, but do not add any information or other thoughts to it. {INI_PreCorrection}"
         Const Default_SP_FreestyleText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command and the text provided to you and marked as 'texttoprocess'. {INI_PreCorrection} However, do not include the text of your instruction in your output."
         Const Default_SP_FreestyleNoText As String = "You are a legal professional with excellent language, logical and rhetorical skills that precisely complies with its instructions step by step. Perform the instruction '{OtherPrompt}' using the language of the command. {INI_PreCorrection} However, do not include the text of your instruction in your output."
@@ -649,7 +779,7 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepFormulasIntact As String = "Beware, the text contains an Excel formula. Unless expressly instructed otherwise, make sure that the formula still works as intended."
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text."
-        Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting verbatim the relevant portion of the TEXTTOPROCESS followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the portion of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted portion of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks.\n4. Keep the verbatim quoted text as short as possible (ensuring that it is still unique in the TEXTTOPROCESS) and that the comment for such portion is drafted meaningful. The verbatim quote should never be more than a paragraph, preferrably less. \n5. When quoting a portion of TEXTTOPROCESS make sure that you NEVER start with a title, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the portions of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a portion of TEXTTOPROCESS that consists of several paragraphs and line breaks. If you need to comment more than one paragraph, select ONLY the first sentence and state that your comment refers to the entire section. Always limit yourself to at maximum one Paragraph. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
+        Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting a snippet of a MAXIMUM OF 25 WORDS verbatim from the relevant portion of the TEXTTOPROCESS followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted text, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the portion of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted portion of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks, do never add line breaks and never remove line breaks, either, if they exist in TEXTTOPROCESS.\n4. The quoted text sequence must be both UNIQUE in the document and NEVER longer than 25 words. Adjust the comment to make it clear which portion of the text you mean. \n5. When quoting a portion of TEXTTOPROCESS make sure that you NEVER start with a title, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the portions of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a portion of TEXTTOPROCESS that has line breaks or carriage returns. Always limit yourself to 25 words at maximum. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instructions refer to markups, changes, insertions, deletions or revisions in the text, they are found within the tags <ins>...</ins> for insertions and within the tags <del> ... </del> for deletions."
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
@@ -663,8 +793,8 @@ Namespace SharedLibrary
         Const Default_INI_ISearch_Apply_SP As String = "You are a legal professional with excellent legal, language and logical skills and you precisely comply with your instructions step by step. You will execute the following instruction in the language of the command using (1) the knowledge and Information contained in the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, and (2) the text provided within the <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present. {INI_PreCorrection} \n Instruction: '{OtherPrompt}'\n {SearchResult} \n"
         Const Default_INI_ISearch_Apply_SP_Markup As String = "You are a legal professional With excellent legal, Language And logical skills And you precisely comply With your instructions Step by Step. You will execute the following instruction In the language Of the command Using the knowledge And Information contained In the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, And applying it directly To text provided within the <TEXTTOPROCESS> And </TEXTTOPROCESS> tags (amending it, as per the instruction). {INI_PreCorrection} \n Instruction: '{OtherPrompt} \n {SearchResult} \n"
 
-        Const Default_SP_ContextSearch As String = "You are a meticulous legal document analyst specializing in precise text extraction. Your task is to identify and extract the most relevant section of text that corresponds to a given search context. Follow these instructions exactly:\n\n1. **Analyze the Search Context:**\n   * Understand the core meaning and intent of the Search Context provided below.\n   * Identify key concepts, synonyms, related terms, and potential paraphrasing that might appear in the text related to this context. Consider the *topic*, *subject matter*, and *potential implications* described in the Search Context.\n\n2. **Examine the Target Text:**\n   * Carefully read the entire text provided between the `<TEXTTOSEARCH>` and `</TEXTTOSEARCH>` tags.\n   * Keep the Search Context and your analysis from Step 1 firmly in mind while reading.\n\n3. **Identify the BEST Matching Section:**\n   * Locate the section of text (this could be a phrase, sentence, multiple sentences, a paragraph, or multiple paragraphs) that *most directly and completely* addresses the Search Context. Prioritize the *best* match, not necessarily the *first* potential match.\n   * The match may be direct (using similar wording) or indirect (conveying the same meaning or addressing the same topic).\n   * Consider the overall meaning and context of the text, not just isolated words.\n\n4. **Extract the Relevant Text:**\n   * Copy the identified section *verbatim* from the text. If it includes hyphenation, keep the hyphenation as is.\n   * Include enough surrounding text to provide *clear and unambiguous context*. The extracted text should be self-contained and understandable *without needing to refer back to the full text*. \n Make sure that the extracted text is never more than *one paragraph*. The extract text should only contain a group of words, a sentence or sentences. Never include an additional heading or title, never include leading bullets or numbers. Select the extracted text to make sure it does never include special characters. \n\n5. **Output Requirements:**\n   * Output *only* the extracted text, exactly as it appears in the original.\n   * Do *not* add any commentary, explanations, headings, quotation marks, or extra formatting.\n   * If *no* section of the text matches the Search Context, provide an empty output.\n\n6. **Strict Compliance:** Any deviation from these instructions will be considered an error.\n\nNow here is the Search Context: {SearchContext}"
-        Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph, or multiple paragraphs) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract the relevant snippet verbatim from the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting. If it includes hyphenation, keep the hyphenation as is.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than a paragraph, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters.\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
+        Const Default_SP_ContextSearch As String = "You are a meticulous legal document analyst specializing in precise text extraction. Your task is to identify and extract the most relevant section of text that corresponds to a given search context. Follow these instructions exactly:\n\n1. **Analyze the Search Context:**\n   * Understand the core meaning and intent of the Search Context provided below.\n   * Identify key concepts, synonyms, related terms, and potential paraphrasing that might appear in the text related to this context. Consider the *topic*, *subject matter*, and *potential implications* described in the Search Context.\n\n2. **Examine the Target Text:**\n   * Carefully read the entire text provided between the `<TEXTTOSEARCH>` and `</TEXTTOSEARCH>` tags.\n   * Keep the Search Context and your analysis from Step 1 firmly in mind while reading.\n\n3. **Identify the BEST Matching Section:**\n   * Locate the section of text (this could be a phrase, sentence, multiple sentences, a paragraph, or multiple paragraphs) that *most directly and completely* addresses the Search Context. Prioritize the *best* match, not necessarily the *first* potential match.\n   * The match may be direct (using similar wording) or indirect (conveying the same meaning or addressing the same topic).\n   * Consider the overall meaning and context of the text, not just isolated words.\n\n4. **Extract the Relevant Text:**\n   * Copy a snippet of MAXIMUM OF 25 Words *verbatim* from of the identified section of the text. If it includes hyphenation, keep the hyphenation as is.\n   * Include enough surrounding text to provide *clear and unambiguous context*, but NEVER more than 25 Words. \n Make sure that the extracted text is never more than *25 WORDS*. The extract text should only contain a group of words, a sentence or sentences. Never include an additional heading or title, never include leading bullets or numbers. Select the extracted text to make sure it does never include special characters. \n\n5. **Output Requirements:**\n   * Output *only* the extracted text, exactly as it appears in the original.\n   * Do *not* add any commentary, explanations, headings, quotation marks, or extra formatting. NEVER remove any line breaks, if they exist in the original. \n   * If *no* section of the text matches the Search Context, provide an empty output.\n\n6. **Strict Compliance:** Any deviation from these instructions will be considered an error.\n\nNow here is the Search Context: {SearchContext}"
+        Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract a verbatim snippet of a MAXIMUM OF 25 WORDS from the relevant portion of the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text, but NEVER EVER include more than 25 Words from the portion found; choose a meaningful part.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting. If it includes hyphenation, keep the hyphenation as is.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than 25 Words, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters. Never remove any line breaks that exist in the original text\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
 
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. The user wishes that the dialogue you generate has a particular minimum length, meaning that if the duration is more than five minutes or 1000 words, you a) need to go very deep into the topic and text given and b) ensure that you structure the dialogue to have an introduction, multiple chapters to cover each core topic of the text, and a summary and closing segment. For every five minutes of dialogue, create at least 1000 words. You MUST comply with the minimum lenght instruction given, and your output MUST include the ENTIRE dialogue. You may not end your output before you have provided the FULL dialogue (e.g., you are NOT PERMITTED to say that the dialogue continues without providing it). The minimum lenght instruction for the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n16. You shall use SSML tags, but never use any XML tags or XML headers and never provide any Markdown formatting.\n\17. It is important that you really comply with these rules, otherwise the output will be invalid. 18. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
         Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. Create me an advanced prompt for an advanced large language model that will analyze a Text (the Texttoprocess) it is provided between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, including any errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special fied of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand and provide it in the original language of the Texttoprocess. {INI_PreCorrection}"
@@ -675,7 +805,6 @@ Namespace SharedLibrary
 
         Public Shared SP_CleanTextPrompt As String = "You are a careful copy-editor and will review the text provided to you between the <TEXTTOPROCESS> tags so that it can be processed by a text-to-speech system. You do this in two steps: First, you will identify any text that cannot be easily read by a text-to-speech-system and do either of these two things: (a) If it is in brackets and merely a reference that is not relevant for a listener (such as references to other parts of the text or sources) you will remove it. (b) Otherwise, you will adapt it so that it is easily readable by a text-to-speech-system without in any way changing its content. Second, you will break up any sentences that are very long or overly complicated in two sentences without in any way changing their meaning or content. \nDuring both steps, you will not otherwise change the text and in your response provide nothing else than the text. "
         Public Shared LicensedTill As Date = CDate("1.1.2000")
-
 
 
 
@@ -1356,139 +1485,14 @@ Namespace SharedLibrary
                         Dim mimeType As String
                         Dim encodedData As String
 
-                        If FileObject = "clipboard" Then
-                            Dim dataObj As IDataObject = Clipboard.GetDataObject()
-                            Dim formats() As String = dataObj.GetFormats()
-
-                            ' 1. Dateien im Clipboard?
-                            If dataObj.GetDataPresent(DataFormats.FileDrop) Then
-                                Dim files = CType(dataObj.GetData(DataFormats.FileDrop), String())
-                                If files.Length > 0 Then
-                                    ' Alle Dateitypen (inkl. PDF, Office, Video, Audio, Archive) mit MimeHelper
-                                    Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(files(0))
-                                    mimeType = mresult.MimeType.Trim()
-                                    encodedData = mresult.EncodedData.Trim()
-                                Else
-                                    Throw New System.Exception("Clipboard does not contain any data.")
-                                End If
-
-                                ' 2. Bitmap
-                            ElseIf dataObj.GetDataPresent(DataFormats.Bitmap) Then
-                                Dim img As Image = Clipboard.GetImage()
-                                Using ms As New MemoryStream()
-                                    img.Save(ms, ImageFormat.Png)
-                                    mimeType = "image/png"
-                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
-                                End Using
-
-                                ' 3. DIB (Device-Independent Bitmap)
-                            ElseIf dataObj.GetDataPresent(DataFormats.Dib) Then
-                                Dim dibObj = dataObj.GetData(DataFormats.Dib)
-                                Using MS As New MemoryStream(CType(dibObj, Byte()))
-                                    Using bmp As New Bitmap(MS)
-                                        Using out As New MemoryStream()
-                                            bmp.Save(out, ImageFormat.Png)
-                                            mimeType = "image/png"
-                                            encodedData = System.Convert.ToBase64String(out.ToArray())
-                                        End Using
-                                    End Using
-                                End Using
-
-                                ' 4. Enhanced Metafile
-                            ElseIf dataObj.GetDataPresent(DataFormats.EnhancedMetafile) Then
-                                Dim emfHandle = CType(dataObj.GetData(DataFormats.EnhancedMetafile), IntPtr)
-                                Using emf As New Metafile(emfHandle, True)
-                                    Using bmp As New Bitmap(emf.Width, emf.Height)
-                                        Using g = Graphics.FromImage(bmp)
-                                            g.DrawImage(emf, 0, 0)
-                                            Using out As New MemoryStream()
-                                                bmp.Save(out, ImageFormat.Png)
-                                                mimeType = "image/png"
-                                                encodedData = System.Convert.ToBase64String(out.ToArray())
-                                            End Using
-                                        End Using
-                                    End Using
-                                End Using
-
-                                ' 5. Audio (WAV)
-                            ElseIf dataObj.GetDataPresent(DataFormats.WaveAudio) Then
-                                Dim audioStream As Stream = CType(dataObj.GetData(DataFormats.WaveAudio), Stream)
-                                Using ms As New MemoryStream()
-                                    audioStream.CopyTo(ms)
-                                    mimeType = "audio/wav"
-                                    encodedData = System.Convert.ToBase64String(ms.ToArray())
-                                End Using
-
-                                ' 6. HTML
-                            ElseIf dataObj.GetDataPresent(DataFormats.Html) Then
-                                Dim html As String = CType(dataObj.GetData(DataFormats.Html), String)
-                                mimeType = "text/html"
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(html))
-
-                                ' 7. RTF
-                            ElseIf dataObj.GetDataPresent(DataFormats.Rtf) Then
-                                Dim rtf As String = CType(dataObj.GetData(DataFormats.Rtf), String)
-                                mimeType = "application/rtf"
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(rtf))
-
-                                ' 8. Text / JSON / XML / CSV
-                            ElseIf dataObj.GetDataPresent(DataFormats.UnicodeText) OrElse dataObj.GetDataPresent(DataFormats.Text) Then
-                                Dim textData As String = Clipboard.GetText()
-                                Dim trimmed = textData.Trim()
-                                If (trimmed.StartsWith("{") AndAlso trimmed.EndsWith("}")) OrElse
-                                    (trimmed.StartsWith("[") AndAlso trimmed.EndsWith("]")) Then
-                                    mimeType = "application/json"
-                                ElseIf trimmed.StartsWith("<") AndAlso trimmed.Contains(">") Then
-                                    mimeType = "application/xml"
-                                ElseIf trimmed.Contains(","c) AndAlso trimmed.Contains(vbCr) Then
-                                    mimeType = "text/csv"
-                                Else
-                                    mimeType = "text/plain"
-                                End If
-                                encodedData = System.Convert.ToBase64String(Encoding.UTF8.GetBytes(textData))
-
-                                ' 9. Sonstige Formate (Audio MP3, Video MP4, etc.) oder generisches Objekt
-                            Else
-                                ' Entferne bereits behandelte Formate
-                                Dim handled = New String() {
-                                                            DataFormats.FileDrop,
-                                                            DataFormats.Bitmap,
-                                                            DataFormats.Dib,
-                                                            DataFormats.EnhancedMetafile,
-                                                            DataFormats.WaveAudio,
-                                                            DataFormats.Html,
-                                                            DataFormats.Rtf,
-                                                            DataFormats.UnicodeText,
-                                                            DataFormats.Text
-                                                        }
-                                Dim remaining = formats.Where(Function(f) Not handled.Contains(f)).ToArray()
-                                If remaining.Length > 0 Then
-                                    Dim raw As Object = dataObj.GetData(remaining(0))
-                                    Dim bytes() As Byte = Nothing
-
-                                    If TypeOf raw Is Byte() Then
-                                        bytes = CType(raw, Byte())
-                                    ElseIf TypeOf raw Is Stream Then
-                                        Using ms As New MemoryStream()
-                                            CType(raw, Stream).CopyTo(ms)
-                                            bytes = ms.ToArray()
-                                        End Using
-                                    Else
-                                        ' Versuche Serialization
-                                        Using ms As New MemoryStream()
-                                            Dim bf = New Runtime.Serialization.Formatters.Binary.BinaryFormatter()
-                                            bf.Serialize(ms, raw)
-                                            bytes = ms.ToArray()
-                                        End Using
-                                    End If
-
-                                    mimeType = "application/octet-stream"
-                                    encodedData = System.Convert.ToBase64String(bytes)
-                                Else
-                                    Throw New System.Exception("No supported data found in the clipboard.")
-                                End If
+                        If FileObject.Equals("clipboard", StringComparison.OrdinalIgnoreCase) Then
+                            Dim mime As String = Nothing, data As String = Nothing
+                            If Not TryGetClipboardObject(mime, data) Then
+                                ShowCustomMessageBox("No supported data found in the clipboard.")
+                                Return ""
                             End If
-
+                            requestBody = requestBody.Replace("{mimetype}", mime) _
+                                                        .Replace("{encodeddata}", data)
                         Else
                             ' Standard-Fall: Datei per MimeHelper
                             Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
@@ -2054,7 +2058,7 @@ Namespace SharedLibrary
             Dim sb As New StringBuilder()
             sb.AppendLine()
             sb.AppendLine()
-            sb.AppendLine("References:")
+            sb.AppendLine(vbCrLf & "References:")
             For i As Integer = 0 To citationList.Count - 1
                 'sb.AppendLine($"[{i + 1}] {citationList(i)}")
                 ' jede URL im Text als [URL](URL) maskieren
