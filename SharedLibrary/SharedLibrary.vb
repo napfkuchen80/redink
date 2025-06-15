@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.6.2025
+' 15.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -784,7 +784,7 @@ Namespace SharedLibrary
         Const Default_SP_ChatExcel As String = "You are a helpful AI, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If the user has not given you read access to the worksheet (i.e. no <RANGEOFCELLS> tag), but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. If further below you are informed of the commands to make changes to the worksheet or insert comments, you know that he has given you write access and you may provide him assistance in explaining what you can do to change the worksheet, if this appears necessary. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_SP_Add_MergePrompt As String = "The text to insert or merge will be provided to you between the tags <INSERT> ... </INSERT>, and the text with which it shall be merged is between the tags <TEXTTOPROCESS> ... </TEXTTOPROCESS>. Do not insert foot or endnotes unless expressly asked, and do not insert curved brackets. "
-        Const Default_SP_MergePrompt2 As String = "You will be provided a text to insert or merge into another text. Try to understand the other text first and what it is about, and whether it already contains a specific proposal on how to insert. If so, comply with this, otherwise figure out how to best insert the substance of the text to be inserted and merge it intelligently with it."
+        Const Default_SP_MergePrompt2 As String = "You will be provided an insert-text that shall either be merged into another text or contains instructions how to amend the other text. Try to understand the insert-text first and what it is about, and whether it already contains a specific proposal on how to amend the other text. If so, comply with this, otherwise figure out how to best implement the substance of the insert-text by amending the other text and do so. Ignore out initial references such as 'RI:' and never include any explanatory comments."
         Const Default_SP_MergePrompt As String = "You will be provided a text to insert into another text. Try to understand the other text first and what it is about. Then figure out how to best insert the substance of the text to be inserted and merge it intelligently with it."
         Const Default_INI_ISearch_SearchTerm_SP As String = "You are an advanced language model tasked with generating precise and direct search terms required to fulfill the given instruction. Analyze the instruction and any additional text provided within <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present, to output only the specific search terms needed to retrieve the required information. If no additional text is provided, base your search terms solely on the instruction. The search terms should be formatted as they would appear in a search engine query, without any additional explanations or context. Instruction: {OtherPrompt}, Current Date: {CurrentDate}. Provide only the search terms, formatted for direct input into a search engine. Avoid any additional text or explanations."
         Const Default_INI_ISearch_Apply_SP As String = "You are a legal professional with excellent legal, language and logical skills and you precisely comply with your instructions step by step. You will execute the following instruction in the language of the command using (1) the knowledge and Information contained in the internet search results provided within the <SEARCHRESULT1> … </SEARCHRESULT1>, <SEARCHRESULT2> … </SEARCHRESULT2> etc. tags, and (2) the text provided within the <TEXTTOPROCESS> and </TEXTTOPROCESS> tags, if present. {INI_PreCorrection} \n Instruction: '{OtherPrompt}'\n {SearchResult} \n"
@@ -884,6 +884,155 @@ Namespace SharedLibrary
                 Me.Text = text
             End Sub
         End Class
+
+
+
+        Public Structure SelectionItem
+            Public ReadOnly DisplayText As String
+            Public ReadOnly Value As Integer
+
+            Public Sub New(text As String, value As Integer)
+                Me.DisplayText = text                      ' was “DisplayText = text”
+                Me.Value = value                           ' was “value = value”  ❌
+            End Sub
+
+            Public Overrides Function ToString() As String
+                Return DisplayText
+            End Function
+        End Structure
+
+
+        Friend NotInheritable Class SelectionFormSmall
+            Inherits System.Windows.Forms.Form
+
+            Private ReadOnly _lst As System.Windows.Forms.ListBox
+            Private ReadOnly _lbl As System.Windows.Forms.Label
+            Private _result As Integer = 0
+
+            Friend Sub New(items As IReadOnlyList(Of SelectionItem),
+                   defaultValue As Integer,
+                   promptText As String,
+                   Optional headerText As String = Nothing)
+
+                ' ---------- global font & scaling ----------
+                Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F,
+                                               System.Drawing.FontStyle.Regular,
+                                               System.Drawing.GraphicsUnit.Point)
+                Me.Font = stdFont
+                Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
+
+                ' ---------- caption & icon ----------
+                If String.IsNullOrWhiteSpace(headerText) Then headerText = AN
+                Me.Text = headerText
+
+                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                Me.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+                ' ---------- base width & centre-screen ----------
+                Const baseWidth As Integer = 400
+                Me.ClientSize = New System.Drawing.Size(baseWidth, 100)            ' temp height
+                Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+                Me.KeyPreview = True
+
+                ' ---------- label ----------
+                _lbl = New System.Windows.Forms.Label With {
+            .AutoSize = True,
+            .Text = promptText,
+            .Location = New System.Drawing.Point(10, 10),
+            .Anchor = System.Windows.Forms.AnchorStyles.Top Or
+                      System.Windows.Forms.AnchorStyles.Left Or
+                      System.Windows.Forms.AnchorStyles.Right
+        }
+                Controls.Add(_lbl)
+
+                ' ---------- listbox ----------
+                _lst = New System.Windows.Forms.ListBox With {
+            .IntegralHeight = False,
+            .SelectionMode = System.Windows.Forms.SelectionMode.One,
+            .Anchor = System.Windows.Forms.AnchorStyles.Top Or
+                      System.Windows.Forms.AnchorStyles.Left Or
+                      System.Windows.Forms.AnchorStyles.Right
+        }
+                Dim visibleRows As Integer = Math.Min(5, items.Count)
+                _lst.ItemHeight = CInt(stdFont.GetHeight())
+                _lst.Height = _lst.ItemHeight * visibleRows + 9
+                _lst.Location = New System.Drawing.Point(10, _lbl.Bottom + 10)
+                _lst.Width = ClientSize.Width - 20
+                Controls.Add(_lst)
+
+                ' ---------- populate ----------
+                For Each it In items : _lst.Items.Add(it) : Next
+
+                ' ---------- default selection ----------
+                Dim defIdx As Integer = items.ToList().FindIndex(Function(it) it.Value = defaultValue)
+                If defIdx >= 0 Then
+                    _lst.SelectedIndex = defIdx
+                    _result = items(defIdx).Value
+                End If
+                _lst.Focus()
+
+                ' ---------- adjust form height ----------
+                Dim requiredHeight As Integer = _lst.Bottom + 20         ' ▶ was “+ 10”
+                Me.ClientSize = New System.Drawing.Size(baseWidth, requiredHeight)
+                Me.MinimumSize = Me.Size
+
+                ' ---------- ENTER / double-click confirm ----------
+                AddHandler _lst.KeyDown,
+            Sub(s, e)
+                If e.KeyCode = System.Windows.Forms.Keys.Enter Then AcceptCurrentSelection()
+            End Sub
+                AddHandler _lst.DoubleClick, Sub() AcceptCurrentSelection()
+
+                ' ---------- ESC cancel ----------
+                AddHandler Me.KeyDown,
+            Sub(sender, e)
+                If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                    _result = 0
+                    Me.DialogResult = System.Windows.Forms.DialogResult.Cancel
+                    Close()
+                End If
+            End Sub
+
+                ' ---------- close button ----------
+                AddHandler Me.FormClosing,
+            Sub(s, e)
+                If Me.DialogResult <> System.Windows.Forms.DialogResult.OK Then _result = 0
+            End Sub
+            End Sub
+
+            Private Sub AcceptCurrentSelection()
+                If _lst.SelectedIndex >= 0 Then
+                    Dim item As SelectionItem = DirectCast(_lst.SelectedItem, SelectionItem)
+                    _result = item.Value
+                    Me.DialogResult = System.Windows.Forms.DialogResult.OK
+                    Close()
+                End If
+            End Sub
+
+            Friend ReadOnly Property Result As Integer
+                Get
+                    Return _result
+                End Get
+            End Property
+        End Class
+
+
+        Public Shared Function SelectValue(items As IEnumerable(Of SelectionItem),
+                                   defaultValue As Integer,
+                                   Optional prompt As String = "Please choose …",
+                                   Optional header As String = Nothing) As Integer
+
+            If items Is Nothing Then
+                System.Windows.Forms.MessageBox.Show("SelectValue Error: Items collection must not be null.")
+                Return 0
+            End If
+
+            Using frm As New SelectionFormSmall(items.ToList(), defaultValue, prompt, header)
+                frm.ShowDialog()
+                Return frm.Result            ' now returns the correct integer
+            End Using
+        End Function
+
 
 
         Private Shared clipboardData As Object = Nothing ' Variable to store clipboard content

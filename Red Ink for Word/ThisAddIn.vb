@@ -4388,7 +4388,7 @@ Public Class ThisAddIn
             Debug.WriteLine(DoTPMarkup & PutInBubbles & PutInClipboard)
 
             If (PutInBubbles Or PutInClipboard) AndAlso Not DoTPMarkup Then
-                raw = GetFinalText(rng, backMap)
+                raw = GetVisibleText(rng, backMap)
             End If
 
             'Dim originalXml As String = ""
@@ -4641,15 +4641,19 @@ Public Class ThisAddIn
                     Dim originalRange As Word.Range = selection.Range.Duplicate ' Save the original selection range
                     Dim BubblecutHappened As Boolean = False
                     Dim BubbleCount As Integer = 0
+                    Dim MaxBubbles As Integer = responseItems.Count
 
-                    If responseItems.Count = 0 Then
+                    If MaxBubbles = 0 Then
                         ShowCustomMessageBox($"The bubble command did not result in any comment(s) by the LLM.")
                     Else
-                        Dim splash As New SplashScreen("Adding bubbles To your text... press 'Esc' to abort")
+
+                        Dim splash As New SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
                         splash.Show()
                         splash.Refresh()
 
                         For Each item In responseItems
+
+                            splash.UpdateMessage($"Adding {MaxBubbles - BubbleCount} bubble(s) to your text... press 'Esc' to abort")
 
                             System.Windows.Forms.Application.DoEvents()
 
@@ -4686,7 +4690,7 @@ Public Class ThisAddIn
 
                                     Else
                                         ' Use chunk-by-chunk search for > 255 characters
-                                        If FindLongTextInChunks(findText, SearchChunkSize, selection, SelectedText, backMap) Then
+                                        If FindLongTextInChunks(findText, SearchChunkSize, selection, True) Then
                                             ' If found, selection now covers the entire matched text
                                             Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                             BubbleCount += 1
@@ -4797,7 +4801,7 @@ Public Class ThisAddIn
                                     If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                 End If
                                 Dim SaveRng As Range = rng.Duplicate
-                                CompareAndInsert(SelectedText, LLMResult, rng, MarkupMethod = 3, "This Is the markup Of the text inserted:")
+                                CompareAndInsert(SelectedText, LLMResult, rng, MarkupMethod = 3, "This is the markup of the text inserted:")
                                 If Not ParaFormatInline AndAlso Not NoFormatting Then
                                     ApplyParagraphFormat(rng)
                                 End If
@@ -5262,215 +5266,254 @@ Public Class ThisAddIn
 
 
 
-    '══════════════════════════════════════════════════════════════════════════
-    '  FindLongTextRobustRegex   –   no selection drift, finds across numbered ¶
-    '══════════════════════════════════════════════════════════════════════════
-
-
-    Public Function FindLongTextRobustRegex(
+    Public Function FindLongTextIncremental(
         ByVal findText As String,
-        ByRef sel As Microsoft.Office.Interop.Word.Selection) As Boolean
+        ByRef sel As Selection,
+        Optional ByVal skipDeleted As Boolean = False,
+        Optional ByVal probeWords As Integer = 3) As Boolean
+        'probeWords = wie viele Anfangswörter zuerst probiert werden sollen
 
-        '------------------------------------------------------------------
-        ' 0. Canonicalise the SEARCH text:  ASCII quotes/dash, collapse WS
-        '------------------------------------------------------------------
-        Dim patSrc As String = Canonicalise(findText, True)
-        If patSrc.Length = 0 Then Return False
+        '── 0. canonicalise ───────────────────────────────────────────────
+        Dim canon As String = Canonicalise(findText, True)
+        If canon.Length = 0 Then Return False
+        Dim words() As String = canon.Split({" "c}, StringSplitOptions.RemoveEmptyEntries)
+        If words.Length = 0 Then Return False
 
-        '------------------------------------------------------------------
-        ' 1. Translate to a tolerant regex
-        '    • every logical space  →  w+  plus optional  SOH  label
-        '    • straight vs curly quotes, dash vs hyphen
-        '    • hyphen   "-"  optionally followed by break + WS
-        '------------------------------------------------------------------
-        Dim pattern As String = BuildPattern(patSrc)
+        '── 1.  Probe: erste N Wörter ohne Wildcards ----------------------
+        Dim hitStart As Integer = -1, hitEnd As Integer = -1
+        If TryFindByFirstNWords(words, probeWords, sel.Range, hitStart, hitEnd, skipDeleted) _
+    OrElse TryFindByFirstWord(words, sel.Range, hitStart, hitEnd, skipDeleted) Then
 
-        '------------------------------------------------------------------
-        ' 2. Run regex directly on Word’s raw text (includes CR & SOH)
-        '------------------------------------------------------------------
-
-        Dim raw As String = sel.Application.ActiveDocument.Content.Text
-
-            Dim rx As New Regex(pattern,
-                                    +RegexOptions.IgnoreCase Or RegexOptions.Singleline Or
-                                    +RegexOptions.CultureInvariant,
-                                    +TimeSpan.FromSeconds(1))
-
-            Dim m As Match = rx.Match(raw)
-            If Not m.Success Then Return False
-
-            '------------------------------------------------------------------
-            ' 3.  Precise hit → precise Range
-            '     (skip any leading CR/LF + SOH + list-label inside the match)
-            '------------------------------------------------------------------
-
-            ' already have:  m.Index  (hitStart)   m.Length (hitLen)
-            sel.SetRange(m.Index, m.Index + m.Length)
-
-            AlignSelectionToRegexHit(sel, raw, m.Index, m.Length)   ' << just one call
-
-        Return True
-
-    End Function
-
-
-    Public Function FindLongTextRobustRegex(
-        ByVal findText As String,
-        ByRef sel As Microsoft.Office.Interop.Word.Selection, raw As String, backmap As List(Of Integer)) As Boolean
-
-        '------------------------------------------------------------------
-        ' 0. Canonicalise the SEARCH text:  ASCII quotes/dash, collapse WS
-        '------------------------------------------------------------------
-        Dim patSrc As String = Canonicalise(findText, True)
-        If patSrc.Length = 0 Then Return False
-
-        '------------------------------------------------------------------
-        ' 1. Translate to a tolerant regex
-        '    • every logical space  →  w+  plus optional  SOH  label
-        '    • straight vs curly quotes, dash vs hyphen
-        '    • hyphen   "-"  optionally followed by break + WS
-        '------------------------------------------------------------------
-        Dim pattern As String = BuildPattern(patSrc)
-
-        '------------------------------------------------------------------
-        ' 2. Run regex directly on Word’s raw text (includes CR & SOH)
-        '------------------------------------------------------------------
-
-        Dim rx As New Regex(pattern,
-                    RegexOptions.IgnoreCase Or RegexOptions.Singleline Or
-                    RegexOptions.CultureInvariant,
-                    TimeSpan.FromSeconds(1))
-
-        Dim m As Match = rx.Match(raw)
-            If Not m.Success Then Return False
-
-            '– convert indices in the trimmed string back to the real document –
-            Dim hitStart As Integer = backMap(m.Index)
-            Dim hitEnd As Integer = backMap(m.Index + m.Length - 1) + 1
             sel.SetRange(hitStart, hitEnd)
+            Return True
+        End If
 
-        AlignSelectionToRegexHit(sel, raw, m.Index, m.Length, backmap)
-
-        Return True
-
+        Return False
     End Function
 
 
+    '═════════════════════════════════════════════════════════════════════
+    '  TryFindByFirstNWords  –  quick probe with the first N canonical
+    '                          words (no wild-cards, case-insensitive)
+    '═════════════════════════════════════════════════════════════════════
+    Private Function TryFindByFirstNWords(
+        ByVal words() As String,
+        ByVal n As Integer,
+        ByVal searchArea As Microsoft.Office.Interop.Word.Range,
+        ByRef hitStart As Integer,
+        ByRef hitEnd As Integer,
+        ByVal skipDeleted As Boolean) As Boolean
 
-    '───────────────────────────────────────────────────────────────────────────
-    '  AlignSelectionToRegexHit  –  call once, right after SetRange
-    '───────────────────────────────────────────────────────────────────────────
-    Private Sub AlignSelectionToRegexHit(
-        ByRef sel As Microsoft.Office.Interop.Word.Selection,
-        ByVal raw As String,
-        ByVal hitStart As Integer,
-        ByVal hitLen As Integer,
-        Optional visiblePrefix As Integer = 10)
+        n = Math.Min(n, words.Length)
+        If n = 0 Then Return False
 
-        ' 1 – canonicalise the first N printable chars of the RAW slice
-        Dim rawSlice As String = raw.Substring(hitStart, hitLen)
-        Dim targetKey As String = CanonicalKey(rawSlice, visiblePrefix)
+        'erste N Wörter zu einem Flachtext zusammenziehen
+        Dim probe As String = String.Join(" ", words, 0, n)
+        If probe.Length > 255 Then Return False            'Word-Find-Limit
 
-        ' 2 – scan at most ±40 characters around the raw hit
-        Const MAX_SHIFT As Integer = 40
-        For delta As Integer = 0 To MAX_SHIFT
+        Dim rng As Microsoft.Office.Interop.Word.Range = searchArea.Duplicate
+        With rng.Find
+            .ClearFormatting()
+            .Text = probe
+            .Forward = True
+            .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+            .MatchCase = False                        'Groß/Klein egal
+            .MatchWildcards = False                       'KEINE Wildcards
+            .Format = False
+        End With
 
-            ' try forward shift first (delta)  then backward (-delta)
-            For Each shift As Integer In {delta, -delta}
-
-                Dim newStart As Integer = hitStart + shift
-                If newStart < 0 OrElse newStart + hitLen > raw.Length Then Continue For
-
-                sel.SetRange(newStart, newStart + hitLen)
-
-                If CanonicalKey(sel.Text, visiblePrefix) = targetKey Then
-                    Exit Sub        ' we are aligned!
-                End If
-            Next
-        Next
-
-        ' If we drop out here no match was found within ±MAX_SHIFT chars.
-        ' You can raise the limit or fall back to MoveStartWhile if needed.
-    End Sub
-
-
-    Private Sub AlignSelectionToRegexHit(
-        ByRef sel As Microsoft.Office.Interop.Word.Selection,
-        ByVal raw As String,
-        ByVal hitStart As Integer,
-        ByVal hitLen As Integer,
-        ByVal backMap As List(Of Integer),
-        Optional visiblePrefix As Integer = 10)
-
-        ' 1 – canonicalise the first N printable chars of the RAW slice
-        Dim rawSlice As String = raw.Substring(hitStart, hitLen)
-        Dim targetKey As String = CanonicalKey(rawSlice, visiblePrefix)
-
-        ' 2 – scan at most ±40 characters around the raw hit
-        Const MAX_SHIFT As Integer = 2000
-        For delta As Integer = 0 To MAX_SHIFT
-
-            ' try forward shift first (delta)  then backward (-delta)
-            For Each shift As Integer In {delta, -delta}
-
-                Dim newStart As Integer = hitStart + shift
-                If newStart < 0 OrElse newStart + hitLen > raw.Length Then Continue For
-
-                Dim candTrimStart As Integer = hitStart + shift
-                If candTrimStart < 0 OrElse candTrimStart + hitLen > raw.Length Then Continue For
-
-                Dim candDocStart As Integer = backMap(candTrimStart)
-                Dim candDocEnd As Integer = backMap(candTrimStart + hitLen - 1) + 1
-                sel.SetRange(candDocStart, candDocEnd)
-
-                If CanonicalKey(sel.Text, visiblePrefix) = targetKey Then
-                    Exit Sub        ' we are aligned!
-                End If
-            Next
-        Next
-
-        ' If we drop out here no match was found within ±MAX_SHIFT chars.
-        ' You can raise the limit or fall back to MoveStartWhile if needed.
-    End Sub
-
-
-
-    '───────────────────────────────────────────────────────────────────────────
-    '  CanonicalKey  –  returns the first “visiblePrefix” canonical glyphs
-    '───────────────────────────────────────────────────────────────────────────
-    Private Function CanonicalKey(src As String, visiblePrefix As Integer) As String
-
-        If String.IsNullOrEmpty(src) Then Return ""
-
-        Dim sb As New System.Text.StringBuilder
-        Dim seen As Integer = 0
-        Dim needSpace As Boolean = False
-
-        For Each ch As Char In src
-            If Char.IsWhiteSpace(ch) OrElse ch = ChrW(160) Then
-                needSpace = True
-            ElseIf AscW(ch) <= 32 Then
-                Continue For                         ' control char – ignore
-            ElseIf AscW(ch) = &HAD Then
-                Continue For
-            ElseIf INI_DoubleS AndAlso (AscW(ch) = &HDF OrElse AscW(ch) = &H1E9E) Then   ' ß  or  ẞ
-                ' counts as TWO canonical glyphs: “S” “S”
-                If seen + 2 > visiblePrefix Then Exit For
-                sb.Append("SS") : seen += 2
-            Else
-                If needSpace Then
-                    sb.Append(" "c) : seen += 1 : needSpace = False
-                    If seen = visiblePrefix Then Exit For
-                End If
-                sb.Append(Canon(ch)) : seen += 1
-                If seen = visiblePrefix Then Exit For
+        Do While rng.Find.Execute()
+            Dim candStart As Integer = rng.Start
+            If ConfirmFullHit(searchArea.Document, candStart, words, hitEnd, skipDeleted) Then
+                hitStart = candStart
+                Return True
             End If
-        Next
-        Return sb.ToString()
+            rng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+        Loop
+
+        Return False                                        '→ Fallback 1-Word
     End Function
 
 
-    ' Canon straight/curly quotes → ASCII, en/em-dash → "-", and UCase
+
+
+    Private Function TryFindByFirstWord(
+        ByVal words() As String,
+        ByVal searchArea As Microsoft.Office.Interop.Word.Range,
+        ByRef hitStart As Integer,
+        ByRef hitEnd As Integer,
+        ByVal skipDeleted As Boolean) As Boolean       '← new argument
+
+        If words.Length = 0 Then Return False
+        Dim firstWord As String = words(0)
+
+        Dim rng As Microsoft.Office.Interop.Word.Range = searchArea.Duplicate
+        With rng.Find
+            .ClearFormatting()
+            .Text = firstWord
+            .Forward = True
+            .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+            .MatchCase = False
+            .MatchWholeWord = False
+            .MatchWildcards = False
+            .Format = False
+        End With
+
+        Do While rng.Find.Execute()
+            Dim candStart As Integer = rng.Start
+            If ConfirmFullHit(searchArea.Document, candStart, words, hitEnd, skipDeleted) Then
+                hitStart = candStart
+                Return True
+            End If
+            rng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+        Loop
+        Return False
+    End Function
+
+
+    Private Function ConfirmFullHit(
+        ByVal doc As Microsoft.Office.Interop.Word.Document,
+        ByVal candStart As Integer,
+        ByVal words() As String,
+        ByRef hitEnd As Integer,
+        ByVal skipDeleted As Boolean) As Boolean        '← new flag
+
+        Const SAFETY As Integer = 800
+        Dim target As String = String.Join(" ", words)
+
+        Dim buf As String
+        Dim backMap As List(Of Integer)
+
+        If skipDeleted Then
+            'pull *visible* slice (deletions removed)
+            VisibleSlice(doc, candStart, target.Length + SAFETY, buf, backMap)
+            If buf.Length = 0 Then Return False
+        Else
+            'pull raw slice (deletions included – old behaviour)
+            Dim sliceEnd As Integer = Math.Min(doc.Content.End, candStart + target.Length + SAFETY)
+            buf = doc.Range(candStart, sliceEnd).Text
+        End If
+
+        Dim iBuf As Integer = 0, iTar As Integer = 0
+        While iBuf < buf.Length AndAlso iTar < target.Length
+
+            Dim ch As Char = buf(iBuf)
+
+            '—— 1)  Listenlabel   SOH (Chr 1)  +  "a)" … +  <Tab>  überspringen ————
+            If ch = ChrW(1) Then
+                'SOH selbst überspringen
+                iBuf += 1
+                'alle Zeichen BIS zum ersten Tab oder Zeilenende ignorieren
+                While iBuf < buf.Length AndAlso buf(iBuf) <> ChrW(9) AndAlso buf(iBuf) <> ChrW(13)
+                    iBuf += 1
+                End While
+                Continue While
+            End If
+
+            '—— 2)  Feldcode      Chr 19 … Chr 20   komplett überspringen ————————
+            If ch = ChrW(19) Then
+                'bis (einschl.) FieldSeparator 20 vor rücken
+                While iBuf < buf.Length AndAlso buf(iBuf) <> ChrW(20)
+                    iBuf += 1
+                End While
+                If iBuf < buf.Length Then iBuf += 1      'Separator 20 selbst schlucken
+                Continue While
+            End If
+
+            '—— 3)  FieldEnd 21, SoftHyphen, ZWSP etc. –> IsDocNoise ————————————
+            If IsDocNoise(ch) Then
+                iBuf += 1 : Continue While
+            End If
+
+            '—— 4)  normales Zeichen   →  kanonisieren & vergleichen ————————
+            Dim canonDoc As String = CanonizeDocChar(buf, iBuf)
+            For Each c As Char In canonDoc
+                If iTar >= target.Length OrElse c <> target(iTar) Then Return False
+                iTar += 1
+            Next
+            iBuf += 1
+        End While
+
+        If iTar = target.Length Then
+            If skipDeleted Then
+                hitEnd = backMap(iBuf - 1) + 1          'map visible → real pos
+            Else
+                hitEnd = candStart + iBuf
+            End If
+            Return True
+        End If
+        Return False
+    End Function
+
+
+
+    Private Function IsDocNoise(ch As Char) As Boolean
+        Select Case AscW(ch)
+        'classic white-/control
+            Case 9, 10, 11, 12, 13, &HA0, &H7          'TAB, LF, VT, FF, CR, NBSP, BEL
+        'soft / zero-width
+            Case &HAD, &H200B, &H200C, &H200D, &H2060
+        'bidi & directional marks
+            Case &H200E, &H200F, &H202A, &H202B, &H202C, &H202D, &H202E
+        'field / list / anchor
+            Case 1, 19, 20, 21, &HFFFC
+                Return True
+            Case Else
+                Return False
+        End Select
+    End Function
+
+
+    Private Function CanonizeDocChar(buf As String, ByRef i As Integer) As String
+
+        Dim ch As Char = buf(i)
+
+        '—— German ß / ẞ ——————————————————————————————————————————————
+        If AscW(ch) = &HDF OrElse AscW(ch) = &H1E9E Then
+            Return "SS"
+        End If
+
+        Select Case ch
+'—— hyphen / dash family ————————————————————————————
+            Case "-"c,
+         ChrW(&H2010),          ' ‐
+         ChrW(&H2011),          ' -  NB-Hyphen 
+         ChrW(&H2013),          ' –
+         ChrW(&H2014),
+         ChrW(&HAD)             ' SH
+                Return ""                               'Bindestrich ignorieren
+
+    '—— double-quote family ————————————————————————————————
+            Case """"c,                 ' "
+             ChrW(&H201C),          ' “
+             ChrW(&H201D),          ' ”
+             ChrW(&H201E),          ' „
+             ChrW(&H201F),          ' ‟
+             ChrW(&HAB),          ' «
+             ChrW(&HBB),          ' »
+             ChrW(&H2039),          ' ‹
+             ChrW(&H203A)           ' ›
+                Return """"             ' canonical ASCII "
+
+    '—— single-quote / apostrophe family ————————————————
+            Case "'"c,                  ' '
+             ChrW(&H2018),          ' ‘
+             ChrW(&H2019),          ' ’
+             ChrW(&H201A),          ' ‚
+             ChrW(&H201B)           ' ‛
+                Return "'"              ' canonical ASCII '
+
+                    '—— ELLIPSIS ———————————————————————————
+            Case ChrW(&H2026)           ' …
+                Return "."            'drei ASCII-Punkte
+
+                '—— everything else ————————————————————————————————
+            Case Else
+                Return Char.ToUpperInvariant(ch)
+        End Select
+    End Function
+
+
     Private Function Canon(ch As Char) As Char
         Select Case AscW(ch)
                 '—— quotation marks ————————————
@@ -5483,66 +5526,20 @@ Public Class ThisAddIn
 
                 '—— hyphen / dash family ——
             Case 173, 8208, 8211, 8212 : Return "-"c             ' SH, NB-hy, – —
+
+                '—— ellipsis ——————————————
+            Case 8230 : Return "."c                        ' … → .  (compare to ASCII dot)
+
+
+            Case 8239        'U+202F  NARROW NBSP  ← NEU
+                Return " "c
+
                 '—— everything else ———————
             Case Else : Return Char.ToUpperInvariant(ch)
         End Select
     End Function
 
 
-    '══════════════════════════════════════════════════════════════════════
-    '  BuildPattern  –  tolerant translation, with SS ↔ ß mapping
-    '══════════════════════════════════════════════════════════════════════
-    Private Function BuildPattern(src As String) As String
-
-        Dim sb As New System.Text.StringBuilder
-
-        'use index loop so we can look-ahead and skip the 2nd “S”
-        Dim i As Integer = 0
-        Do While i < src.Length
-            Dim ch As Char = src(i)
-
-            '―― digraph “SS”  →  matches  SS  ß  ẞ
-            If INI_DoubleS AndAlso ch = "S"c AndAlso i + 1 < src.Length AndAlso src(i + 1) = "S"c Then
-                sb.Append("(?:SS|ß|ẞ)")
-                i += 2                             'skip the second S
-                Continue Do
-            End If
-
-            Select Case ch
-        '―― logical space
-                Case " "c
-                    sb.Append("\s+(?:\u0001[A-Za-z0-9\.\-\)\(]{1,8}\s+)?")
-
-        '―― hyphen / dash / soft-hyphen / wrapped hyphen
-                Case "-"c, ChrW(&HAD), ChrW(&H2010), "–"c, "—"c
-                    sb.Append("(?:\-|\u00AD|\u2010|–|—|\-\s*[\r\n]+[ \t]*)")
-
-        '―― quotes
-                Case "'"c
-                    sb.Append("['’‘‚‛]")             'ASCII + all 4 single variants
-                Case """"c
-                    sb.Append("[""“”„‟«»‹›]")        'ASCII + 3 double + French + Low
-
-        '―― regex metacharacters that need escaping
-                Case "(", ")", ".", "+", "*", "?", "[", "]", "{", "}", "\", "^", "$", "|"
-                    sb.Append("\"c & ch)
-
-                Case Else
-                    sb.Append(Regex.Escape(ch))
-            End Select
-            i += 1
-        Loop
-
-        Return sb.ToString()
-    End Function
-
-
-
-
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Canonical helpers  –  identical to earlier versions
-    '══════════════════════════════════════════════════════════════════════
     Private Function Canonicalise(src As String, collapseWS As Boolean) As String
 
 
@@ -5563,50 +5560,140 @@ Public Class ThisAddIn
                 sb.Append(Canon(ch))
             End If
         Next
-        Return sb.ToString().Trim()
+
+        Dim canonRaw As String = sb.ToString()
+
+        canonRaw = StripListLabel(canonRaw)
+
+        Return canonRaw.Trim()
+
+    End Function
+
+
+    'visible text of length ≥ sliceLen, starting at absStart, with deletions removed
+    Private Sub VisibleSlice(
+        ByVal doc As Microsoft.Office.Interop.Word.Document,
+        ByVal absStart As Integer,
+        ByVal sliceLen As Integer,
+        ByRef visOut As String,
+        ByRef mapBack As List(Of Integer))
+
+        Dim rawEnd As Integer = Math.Min(doc.Content.End, absStart + sliceLen + 500)
+        Dim rawRng As Microsoft.Office.Interop.Word.Range = doc.Range(absStart, rawEnd)
+        Dim rawTxt As String = rawRng.Text
+
+        'collect deletion intervals (relative to rawRng)
+        Dim skip As New List(Of (s As Integer, e As Integer))
+        For Each rev As Microsoft.Office.Interop.Word.Revision In doc.Revisions
+            If rev.Range.Start >= rawRng.End OrElse rev.Range.End <= rawRng.Start Then Continue For
+            If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
+        OrElse rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo Then Continue For
+            Dim relS As Integer = Math.Max(rev.Range.Start, rawRng.Start) - rawRng.Start
+            Dim relE As Integer = Math.Min(rev.Range.End, rawRng.End) - rawRng.Start
+            skip.Add((relS, relE))
+        Next
+
+        'merge overlaps
+        skip.Sort(Function(a, b) a.s.CompareTo(b.s))
+        Dim merged As New List(Of (s As Integer, e As Integer))
+        For Each iv In skip
+            If merged.Count = 0 OrElse iv.s > merged.Last.e Then
+                merged.Add(iv)
+            Else
+                merged(merged.Count - 1) = (merged.Last.s, Math.Max(merged.Last.e, iv.e))
+            End If
+        Next
+
+        'build visible buffer + back-map
+        Dim sb As New System.Text.StringBuilder(rawTxt.Length)
+        mapBack = New List(Of Integer)(rawTxt.Length)
+        Dim pos As Integer = 0
+
+        For Each iv In merged
+            If iv.s > pos Then
+                sb.Append(rawTxt, pos, iv.s - pos)
+                For i = pos To iv.s - 1
+                    mapBack.Add(rawRng.Start + i)
+                Next
+            End If
+            pos = iv.e
+        Next
+        If pos < rawTxt.Length Then
+            sb.Append(rawTxt, pos, rawTxt.Length - pos)
+            For i = pos To rawTxt.Length - 1
+                mapBack.Add(rawRng.Start + i)
+            Next
+        End If
+
+        visOut = sb.ToString()
+        If visOut.Length > sliceLen Then
+            visOut = visOut.Substring(0, sliceLen)
+            mapBack = mapBack.GetRange(0, sliceLen)
+        End If
+    End Sub
+
+
+    'Entfernt klassische Listen-Labels am Absatzanfang:
+    '  (a)   a)   i)   1.   1.3)   1.3.2   …   jeweils gefolgt von Leer- oder Tab
+    Private Function StripListLabel(txt As String) As String
+        Const pat As String =
+        "(?:^|\r|\n)" & _                             'Absatzanfang
+        "\s*" & _                                     'mögliche Einrückung
+        "(?:" &
+        "\([A-Za-z0-9]{1,3}\)|" & _                   ' (a)  (iv)  (1)
+        "[A-Za-z]{1,3}\)|" & _                        ' a)   iv)
+        "[0-9]+(?:\.[0-9]+)*[.)]?)" & _               ' 1.  1.3.2)
+        "\s+"                                         'muss von WS gefolgt sein
+        Return System.Text.RegularExpressions.Regex.Replace(
+               txt, pat, " ",
+               System.Text.RegularExpressions.RegexOptions.Multiline)
     End Function
 
 
 
-    '──────────────────────────────────────────────────────────────────────────
-    '  GetFinalText – fast, deletion-free text of *src* Range
-    '                 mapBack(i) = absolute position in document
-    '──────────────────────────────────────────────────────────────────────────
-    Private Function GetFinalText(src As Word.Range,
-                              ByRef mapBack As List(Of Integer)) As String
 
-        '----------- phase 0 : pull the slice into a native string -----------
+    '═════════════════════════════════════════════════════════════════════════════
+    '  GetVisibleText  –  fast, deletion-free text of a Range
+    '                    ▸ *src*         … any Word.Range (Selection, whole doc …)
+    '                    ▸ *mapBack(i)*  … absolute position of character *i*
+    '                                      in the original document
+    '═════════════════════════════════════════════════════════════════════════════
+    Public Function GetVisibleText(
+        ByVal src As Microsoft.Office.Interop.Word.Range,
+        ByRef mapBack As List(Of Integer)) As String
+
+        '----------- phase 0 : pull the slice into a native string --------------
         Dim raw As String = src.Text
         Dim sliceStart As Integer = src.Start
-        Dim sliceEnd As Integer = src.End          'exclusive
-        Dim rawLen As Integer = raw.Length               '← renamed
+        Dim sliceEnd As Integer = src.End         'exclusive
+        Dim rawLen As Integer = raw.Length
 
-        '----------- phase 1 : collect skip-intervals ------------------------
-        Dim skip As New List(Of (s As Integer, e As Integer))
+        '----------- phase 1 : collect *deleted* intervals ----------------------
+        Dim skip As New List(Of (s As Integer, e As Integer))   'absolute coords
 
-        For Each rev As Word.Revision In src.Document.Revisions
+        For Each rev As Microsoft.Office.Interop.Word.Revision In src.Document.Revisions
             'ignore revisions that do not overlap the slice
             If rev.Range.End <= sliceStart Then Continue For
             If rev.Range.Start >= sliceEnd Then Continue For
 
-            'keep Insertions / Moved-To → everything else is invisible
-            If rev.Type = Word.WdRevisionType.wdRevisionInsert _
-        OrElse rev.Type = Word.WdRevisionType.wdRevisionMovedTo Then Continue For
+            'keep Insertions / Moved-To      → everything else is *invisible*
+            If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
+        OrElse rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo _
+        Then Continue For
 
             Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
             Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
-
             skip.Add((fromPos, toPos))
         Next
 
+        'merge overlaps / adjacents → single sorted list
         If skip.Count > 0 Then
-            'sort & merge overlaps
             skip.Sort(Function(a, b) a.s.CompareTo(b.s))
             Dim merged As New List(Of (s As Integer, e As Integer))
             Dim cur = skip(0)
             For i = 1 To skip.Count - 1
-                If skip(i).s <= cur.e Then              'overlap/adjacent
-                    cur.e = Math.Max(cur.e, skip(i).e)  'merge
+                If skip(i).s <= cur.e Then               'overlap or adjacent
+                    cur.e = Math.Max(cur.e, skip(i).e)   'merge
                 Else
                     merged.Add(cur) : cur = skip(i)
                 End If
@@ -5615,18 +5702,16 @@ Public Class ThisAddIn
             skip = merged
         End If
 
-
-
-        '----------- phase 2 : build final text + back-map -------------------
+        '----------- phase 2 : build visible buffer + back-map ------------------
         Dim sb As New System.Text.StringBuilder(rawLen)
         mapBack = New List(Of Integer)(rawLen)
 
-        Dim relPos As Integer = 0                        'cursor in *raw*
-
+        Dim relPos As Integer = 0                             'cursor in *raw*
         For Each iv In skip
             Dim delStartRel As Integer = iv.s - sliceStart
-            Dim delEndRel As Integer = iv.e - sliceStart
+            Dim delEndRel As Integer = iv.e - sliceStart    'exclusive
 
+            'copy visible run BEFORE this deletion
             Dim visLen As Integer = delStartRel - relPos
             If visLen > 0 Then
                 sb.Append(raw, relPos, visLen)
@@ -5634,84 +5719,26 @@ Public Class ThisAddIn
                     mapBack.Add(sliceStart + pos)
                 Next
             End If
-
-            relPos = Math.Max(relPos, delEndRel)         'jump past deletion
+            relPos = Math.Max(relPos, delEndRel)              'jump past deletion
         Next
 
-        If relPos < rawLen Then                          'tail after last deletion
+        'tail after last deletion
+        If relPos < rawLen Then
             sb.Append(raw, relPos, rawLen - relPos)
             For pos = relPos To rawLen - 1
                 mapBack.Add(sliceStart + pos)
             Next
         End If
 
-
-
-        Return sb.ToString()
+        Return sb.ToString()                                  'visible text only
     End Function
 
 
 
 
+    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, Optional Skipdeleted As Boolean = False) As Boolean
 
-    '──────────────────────────────────────────────────────────────────────────
-    '  GetFinalText          – works on the *passed* Range / Selection
-    '                          • returns its final-view text (deletions gone)
-    '                          • mapBack(i)  = absolute position in document
-    '──────────────────────────────────────────────────────────────────────────
-    Private Function OldGetFinalText(src As Word.Range,
-                              ByRef mapBack As List(Of Integer)) As String
-
-        Dim raw As String = src.Text                     'text of the slice
-        Dim len As Integer = raw.Length
-        Dim delMark(len - 1) As Boolean                  'True → char is deleted
-
-        Dim sliceStart As Integer = src.Start
-        Dim sliceEnd As Integer = src.End
-
-        '–– mark every revision *inside this slice* that is NOT part of final text ––
-        For Each rev As Word.Revision In src.Revisions
-
-            'keep only Insertions and Moved-To
-            If rev.Type = Word.WdRevisionType.wdRevisionInsert OrElse
-           rev.Type = Word.WdRevisionType.wdRevisionMovedTo Then Continue For
-
-            'skip revisions that lie outside the slice (rare when using doc.Revisions)
-            Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
-            Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
-
-            For i = fromPos To toPos - 1
-                delMark(i - sliceStart) = True           'index relative to slice
-            Next
-        Next
-
-        '–– build final string and absolute back-map ––
-        Dim sb As New System.Text.StringBuilder(len)
-        mapBack = New List(Of Integer)(len)
-
-        For i = 0 To len - 1
-            If Not delMark(i) Then
-                sb.Append(raw.Chars(i))
-                mapBack.Add(sliceStart + i)              'absolute pos in document
-            End If
-        Next
-
-        Return sb.ToString()
-    End Function
-
-
-
-
-    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, ByVal raw As String, ByVal backmap As List(Of Integer)) As Boolean
-
-        Return FindLongTextRobustRegex(findText, selection, raw, backmap) ' New Version using regex
-
-    End Function
-
-
-    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection) As Boolean
-
-        Return FindLongTextRobustRegex(findText, selection) ' New Version using regex
+        Return FindLongTextIncremental(findText, selection, Skipdeleted)
 
         ' Store original selection to restore if needed
         Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
@@ -7549,11 +7576,25 @@ Public Class ThisAddIn
                 OtherPrompt = SP_MergePrompt2
             End If
 
+            Dim items = {
+                New SelectionItem("Word", 1),
+                New SelectionItem("Diff", 2),
+                New SelectionItem("Diff Window", 3),
+                New SelectionItem("Regex", 4),
+                New SelectionItem("None", 5)
+                }
+
+            Dim DefaultItem As Integer = 5
+            If INI_DoMarkupWord Then DefaultItem = INI_MarkupMethodWord
+            Dim picked As Integer = SelectValue(items, DefaultItem, "Choose markup method ...")
+
+            If picked < 1 Then Return
+
             Dim result As String = Await ProcessSelectedText(
             OtherPrompt & " " & SP_Add_MergePrompt & " <INSERT>" &
             newtext & "</INSERT> ",
             True, INI_KeepFormat2, INI_KeepParaFormatInline,
-            INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord,
+            INI_ReplaceText2, If(picked < 5, True, False), If(picked < 5, picked, INI_MarkupMethodWord),
             False, False, True, False, INI_KeepFormatCap)
 
         Catch ex As System.Exception
