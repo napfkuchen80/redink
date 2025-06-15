@@ -57,6 +57,7 @@ Partial Class Ribbon1
         Dim RibbonDialogLauncherImpl1 As Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher = Me.Factory.CreateRibbonDialogLauncher
         Me.Tab1 = Me.Factory.CreateRibbonTab
         Me.Group1 = Me.Factory.CreateRibbonGroup
+        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.Menu1 = Me.Factory.CreateRibbonMenu
         Me.RI_Primlang = Me.Factory.CreateRibbonButton
         Me.RI_SecLang = Me.Factory.CreateRibbonButton
@@ -67,6 +68,8 @@ Partial Class Ribbon1
         Me.RI_NoFillers = Me.Factory.CreateRibbonButton
         Me.RI_Friendly = Me.Factory.CreateRibbonButton
         Me.RI_Convincing = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergePart = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergeFull = Me.Factory.CreateRibbonButton
         Me.RI_Shorten = Me.Factory.CreateRibbonButton
         Me.RI_Anonymize = Me.Factory.CreateRibbonButton
         Me.RI_SwitchParty = Me.Factory.CreateRibbonButton
@@ -87,14 +90,15 @@ Partial Class Ribbon1
         Me.RI_TimeSpan = Me.Factory.CreateRibbonButton
         Me.RI_Regex = Me.Factory.CreateRibbonButton
         Me.RI_Import = Me.Factory.CreateRibbonButton
+        Me.RI_InsertClipboard = Me.Factory.CreateRibbonButton
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_Transcriptor = Me.Factory.CreateRibbonButton
         Me.Settings = Me.Factory.CreateRibbonButton
-        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
-        Me.RI_InsertClipboard = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergeFullPrompt = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergePartPrompt = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -116,6 +120,18 @@ Partial Class Ribbon1
         Me.Group1.Label = "Red Ink"
         Me.Group1.Name = "Group1"
         Me.Group1.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
+        '
+        'Group2
+        '
+        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
+        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
+        Me.Group2.Items.Add(Me.RI_PrimLang2)
+        Me.Group2.Items.Add(Me.RI_Correct2)
+        Me.Group2.Items.Add(Me.RI_Chat)
+        Me.Group2.KeyTip = "RIQ"
+        Me.Group2.Label = "Red Ink"
+        Me.Group2.Name = "Group2"
+        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'Menu1
         '
@@ -183,6 +199,10 @@ Partial Class Ribbon1
         Me.Menu4.Items.Add(Me.RI_NoFillers)
         Me.Menu4.Items.Add(Me.RI_Friendly)
         Me.Menu4.Items.Add(Me.RI_Convincing)
+        Me.Menu4.Items.Add(Me.RI_BalloonMergePart)
+        Me.Menu4.Items.Add(Me.RI_BalloonMergeFull)
+        Me.Menu4.Items.Add(Me.RI_BalloonMergePartPrompt)
+        Me.Menu4.Items.Add(Me.RI_BalloonMergeFullPrompt)
         Me.Menu4.Label = "Improve"
         Me.Menu4.Name = "Menu4"
         Me.Menu4.OfficeImageId = "Drawing1GalleryBrightness"
@@ -220,6 +240,24 @@ Partial Class Ribbon1
         Me.RI_Convincing.OfficeImageId = "SendContactMenu"
         Me.RI_Convincing.ScreenTip = "Make your text more convincing"
         Me.RI_Convincing.ShowImage = True
+        '
+        'RI_BalloonMergePart
+        '
+        Me.RI_BalloonMergePart.Label = "Apply comment"
+        Me.RI_BalloonMergePart.Name = "RI_BalloonMergePart"
+        Me.RI_BalloonMergePart.OfficeImageId = "ReviewPreviousComment"
+        Me.RI_BalloonMergePart.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "rt of the document"
+        Me.RI_BalloonMergePart.ShowImage = True
+        '
+        'RI_BalloonMergeFull
+        '
+        Me.RI_BalloonMergeFull.Label = "Apply comment to para"
+        Me.RI_BalloonMergeFull.Name = "RI_BalloonMergeFull"
+        Me.RI_BalloonMergeFull.OfficeImageId = "ReviewPreviousComment"
+        Me.RI_BalloonMergeFull.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "ragraph of the document"
+        Me.RI_BalloonMergeFull.ShowImage = True
         '
         'RI_Shorten
         '
@@ -397,6 +435,15 @@ Partial Class Ribbon1
     ""
         Me.RI_Import.ShowImage = True
         '
+        'RI_InsertClipboard
+        '
+        Me.RI_InsertClipboard.Label = "Clipboard to Text"
+        Me.RI_InsertClipboard.Name = "RI_InsertClipboard"
+        Me.RI_InsertClipboard.OfficeImageId = "ConvertInkMenu"
+        Me.RI_InsertClipboard.ScreenTip = "Will convert to text what is contained in the clipboard (e.g., screenshot, video," &
+    " audio, image)"
+        Me.RI_InsertClipboard.ShowImage = True
+        '
         'RI_Chat2
         '
         Me.RI_Chat2.Label = "Chatbot"
@@ -419,18 +466,6 @@ Partial Class Ribbon1
         Me.Settings.OfficeImageId = "SetupClassicOffline"
         Me.Settings.ScreenTip = "Allows you to temporarily change the settings"
         Me.Settings.ShowImage = True
-        '
-        'Group2
-        '
-        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
-        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
-        Me.Group2.Items.Add(Me.RI_PrimLang2)
-        Me.Group2.Items.Add(Me.RI_Correct2)
-        Me.Group2.Items.Add(Me.RI_Chat)
-        Me.Group2.KeyTip = "RIQ"
-        Me.Group2.Label = "Red Ink"
-        Me.Group2.Name = "Group2"
-        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
         'RI_PrimLang2
         '
@@ -458,14 +493,23 @@ Partial Class Ribbon1
         Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
         Me.RI_Chat.ShowImage = True
         '
-        'RI_InsertClipboard
+        'RI_BalloonMergeFullPrompt
         '
-        Me.RI_InsertClipboard.Label = "Clipboard to Text"
-        Me.RI_InsertClipboard.Name = "RI_InsertClipboard"
-        Me.RI_InsertClipboard.OfficeImageId = "ConvertInkMenu"
-        Me.RI_InsertClipboard.ScreenTip = "Will convert to text what is contained in the clipboard (e.g., screenshot, video," &
-    " audio, image)"
-        Me.RI_InsertClipboard.ShowImage = True
+        Me.RI_BalloonMergeFullPrompt.Label = "Apply comment to para (edit)"
+        Me.RI_BalloonMergeFullPrompt.Name = "RI_BalloonMergeFullPrompt"
+        Me.RI_BalloonMergeFullPrompt.OfficeImageId = "ReviewEditComment"
+        Me.RI_BalloonMergeFullPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "ragraph of the document (you can edit the prompt)"
+        Me.RI_BalloonMergeFullPrompt.ShowImage = True
+        '
+        'RI_BalloonMergePartPrompt
+        '
+        Me.RI_BalloonMergePartPrompt.Label = "Apply comment (edit)"
+        Me.RI_BalloonMergePartPrompt.Name = "RI_BalloonMergePartPrompt"
+        Me.RI_BalloonMergePartPrompt.OfficeImageId = "ReviewEditComment"
+        Me.RI_BalloonMergePartPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "ragraph of the document (you can edit the prompt)"
+        Me.RI_BalloonMergePartPrompt.ShowImage = True
         '
         'Ribbon1
         '
@@ -647,6 +691,10 @@ Partial Class Ribbon1
     Friend WithEvents RI_SpecialModel As RibbonButton
     Friend WithEvents RI_Anonymization As RibbonButton
     Friend WithEvents RI_InsertClipboard As RibbonButton
+    Friend WithEvents RI_BalloonMergePart As RibbonButton
+    Friend WithEvents RI_BalloonMergeFull As RibbonButton
+    Friend WithEvents RI_BalloonMergePartPrompt As RibbonButton
+    Friend WithEvents RI_BalloonMergeFullPrompt As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

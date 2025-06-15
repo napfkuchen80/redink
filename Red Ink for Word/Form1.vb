@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 29.5.2025
+' 14.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -611,18 +611,60 @@ Public Class frmAIChat
         Dim results As New List(Of ParsedCommand)
 
         Try
-            ' Regex Explanation:
-            ' \[#       matches literal [#
-            ' (?<cmd>[^:]+)    matches 1 or more characters that are not :, captured as group "cmd"
-            ' :\s*     matches a colon and optional whitespace
-            ' @@(?<arg1>[^@]+)@@   matches @@ + 1 or more non-@ chars + @@, capturing as group "arg1"
-            ' \s*      optional whitespace
-            ' (?:§§(?<arg2>[^§]+)§§)?  optional group: §§ + 1 or more non-§ chars + §§, captured as "arg2"
-            ' \s*      optional whitespace
-            ' #\]      literal #]
-            ' The "?" after the group means "optional"
+            ' ------------------------------------------------------------------------------
+            ' REGEX PATTERN to parse blocks shaped like
+            '     [#cmd:@@arg1@@ §§arg2§§#]
+            '
+            '   \[#(?<cmd>[^:]+):\s*@@(?<arg1>(?:[^@]|@(?!@))*?)@@\s*
+            '     (?:§§(?<arg2>(?:[^§]|§(?!§))*?)§§)?\s*#\]
+            '
+            ' EXPLANATION (left-to-right)
+            ' ------------------------------------------------------------------------------
+            ' \[#                       – literal “[#” (opens the block)
+            '
+            ' (?<cmd>[^:]+)             – named group  cmd
+            '                              • one or more characters, anything except “:”
+            '                              • therefore ends exactly at the first colon
+            '
+            ' :\s*@@                    – literal “:” plus optional whitespace,
+            '                              followed by **exactly two** @ (start delimiter
+            '                              for arg1)
+            '
+            ' (?<arg1>(?:[^@]|@(?!@))*?) – named group  arg1
+            '                              • any character sequence
+            '                              • a single @ is allowed
+            '                              • **stops only** at a double @@
+            '                                (tempered-greedy token  @(?!@) )
+            '
+            ' @@\s*                     – end delimiter for arg1 (double @) plus
+            '                              optional whitespace
+            '
+            ' (?:                       – ── optional arg2 block ──
+            '     §§
+            '     (?<arg2>(?:[^§]|§(?!§))*?)
+            '                            – named group  arg2
+            '                              • any character sequence
+            '                              • a single § is allowed
+            '                              • **stops only** at a double §§
+            '     §§
+            ' )?                        – end of optional arg2 block
+            '
+            ' \s*#\]                    – optional whitespace, literal “#]”
+            '                              (closes the entire block)
+            ' ------------------------------------------------------------------------------
+            ' Notes:
+            ' • Single @ or § inside the arguments are allowed; only **double** @@ or §§
+            '   terminate the corresponding argument.
+            ' • You can change the delimiters if needed—just keep the same “tempered
+            '   greedy token” logic so the inner data remains safe.
+            ' ------------------------------------------------------------------------------
 
-            Dim pattern As String = "\[#(?<cmd>[^:]+):\s*@@(?<arg1>[^@]+)@@\s*(?:§§(?<arg2>[^§]*)§§)?\s*#\]"
+
+
+            Dim pattern As String = "\[#(?<cmd>[^:]+):\s*@@(?<arg1>(?:[^@]|@(?!@))*?)@@\s*(?:§§(?<arg2>(?:[^§]|§(?!§))*?)§§)?\s*#\]"
+
+            'Old: Dim pattern As String = "\[#(?<cmd>[^:]+):\s*@@(?<arg1>[^@]+)@@\s*(?:§§(?<arg2>[^§]*)§§)?\s*#\]"
+
             Dim regex As New Regex(pattern)
 
             For Each m As Match In regex.Matches(input)
@@ -866,7 +908,7 @@ Public Class frmAIChat
             Dim maxStuckLimit As Integer = 2        ' Maximum allowed stuck occurrences
 
             ' Loop through the content to find and mark all instances
-            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
+            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
 
                 If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -985,7 +1027,7 @@ Public Class frmAIChat
                 Dim found As Boolean = False
 
                 ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
+                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -1043,10 +1085,10 @@ Public Class frmAIChat
                             Exit Do
                         End If
 
-                        oldText = ThisAddIn.NormalizeTextForSearch(oldText, ThisAddIn.RemoveCRforSearch, ThisAddIn.INI_Clean)
+                        oldText = ThisAddIn.NormalizeTextForSearch(oldText, ThisAddIn.INI_Clean)
                         With workRange.Find
                             .ClearFormatting()
-                            If ThisAddIn.INI_Clean Or ThisAddIn.RemoveCRforSearch Then
+                            If ThisAddIn.INI_Clean Then
                                 .MatchWildcards = True
                                 ' turn each " " into "[ ]@" so Word will match 1+ spaces
                                 '.Text = oldText.Replace(" ", "[ ]@")
@@ -1155,7 +1197,7 @@ Public Class frmAIChat
                 doc.Application.Selection.SetRange(workrange.Start, workrange.End)
 
                 ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, ThisAddIn.SearchChunkSize, doc.Application.Selection, ThisAddIn.RemoveCRforSearch) = True
+                Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
 
                     If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -1192,10 +1234,10 @@ Public Class frmAIChat
 
             Else
                 ' Use Word's Find functionality for shorter searchText
-                searchText = ThisAddIn.NormalizeTextForSearch(searchText, ThisAddIn.RemoveCRforSearch, ThisAddIn.INI_Clean)
+                searchText = ThisAddIn.NormalizeTextForSearch(searchText, ThisAddIn.INI_Clean)
                 With workrange.Find
                     .ClearFormatting()
-                    If ThisAddIn.INI_Clean Or ThisAddIn.RemoveCRforSearch Then
+                    If ThisAddIn.INI_Clean Then
                         .MatchWildcards = True
                         ' turn each " " into "[ ]@" so Word will match 1+ spaces
                         '.Text = searchText.Replace(" ", "[ ]@")

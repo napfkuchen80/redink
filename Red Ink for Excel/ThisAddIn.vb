@@ -1338,33 +1338,6 @@ Public Class ThisAddIn
         End Set
     End Property
 
-    Public Shared Property INI_Placeholder_01 As String
-        Get
-            Return _context.INI_Placeholder_01
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_01 = value
-        End Set
-    End Property
-
-    Public Shared Property INI_Placeholder_02 As String
-        Get
-            Return _context.INI_Placeholder_02
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_02 = value
-        End Set
-    End Property
-
-    Public Shared Property INI_Placeholder_03 As String
-        Get
-            Return _context.INI_Placeholder_03
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_03 = value
-        End Set
-    End Property
-
     Public Shared Property INI_MarkupMethodHelper As Integer
         Get
             Return _context.INI_MarkupMethodHelper

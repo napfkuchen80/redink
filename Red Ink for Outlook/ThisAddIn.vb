@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.6.2025
+' 15.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -23,25 +23,26 @@
 
 Option Explicit On
 
-Imports Microsoft.Office.Interop.Outlook
-Imports Microsoft.Office.Interop.Word
-Imports System.Windows.Forms
-Imports System.Threading.Tasks
-Imports DiffPlex
-Imports DiffPlex.DiffBuilder
-Imports DiffPlex.DiffBuilder.Model
-Imports SharedLibrary.SharedLibrary
-Imports SharedLibrary.SharedLibrary.SharedContext
-Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
-Imports System.Text.RegularExpressions
-Imports Markdig
-Imports SharedLibrary.SharedLibrary.SharedMethods
-Imports System.Runtime.InteropServices
-Imports Microsoft.Office.Interop
 Imports System.Diagnostics
 Imports System.IO
 Imports System.Net
+Imports System.Runtime.InteropServices
+Imports System.Text.RegularExpressions
 Imports System.Threading
+Imports System.Threading.Tasks
+Imports System.Windows.Forms
+Imports DiffPlex
+Imports DiffPlex.DiffBuilder
+Imports DiffPlex.DiffBuilder.Model
+Imports Markdig
+Imports Microsoft.Office.Interop
+Imports Microsoft.Office.Interop.Outlook
+Imports Microsoft.Office.Interop.Word
+Imports Microsoft.VisualBasic.FileIO
+Imports SharedLibrary.SharedLibrary
+Imports SharedLibrary.SharedLibrary.SharedContext
+Imports SharedLibrary.SharedLibrary.SharedMethods
+Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
 
 
 Module Module1
@@ -63,6 +64,8 @@ Public Class ThisAddIn
     Public StartupInitialized As Boolean = False
     Private mainThreadControl As New System.Windows.Forms.Control()
     Private WithEvents outlookExplorer As Outlook.Explorer
+    Private ReadOnly uiCtx As System.Threading.SynchronizationContext =
+        System.Threading.SynchronizationContext.Current
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
 
@@ -126,7 +129,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.100625 Gen2 Beta Test"
+    Public Const Version As String = "V.150625 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1196,14 +1199,6 @@ Public Class ThisAddIn
         End Set
     End Property
 
-    Public Shared Property INI_Placeholder_03 As String
-        Get
-            Return _context.INI_Placeholder_03
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_03 = value
-        End Set
-    End Property
 
     Public Shared Property INI_ISearch_Apply_SP As String
         Get
@@ -1257,14 +1252,6 @@ Public Class ThisAddIn
         End Set
     End Property
 
-    Public Shared Property INI_Placeholder_01 As String
-        Get
-            Return _context.INI_Placeholder_01
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_01 = value
-        End Set
-    End Property
 
     Public Shared Property INI_Lib_Apply_SP As String
         Get
@@ -1284,14 +1271,6 @@ Public Class ThisAddIn
         End Set
     End Property
 
-    Public Shared Property INI_Placeholder_02 As String
-        Get
-            Return _context.INI_Placeholder_02
-        End Get
-        Set(value As String)
-            _context.INI_Placeholder_02 = value
-        End Set
-    End Property
 
 
 
@@ -1499,6 +1478,84 @@ Public Class ThisAddIn
 
 #Region "SharedLibrary"
 
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' Runs a Sub on the UI thread and *waits* for it to complete.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function SwitchToUi(uiAction As System.Action) _
+        As System.Threading.Tasks.Task
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Object)()
+
+        mainThreadControl.Invoke(New MethodInvoker(
+        Sub()
+            Try
+                uiAction.Invoke()
+                tcs.SetResult(Nothing)
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+            End Try
+        End Sub))
+
+        Return tcs.Task        ' completes only after uiAction finished
+    End Function
+
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' Runs a Function(Of T) on the UI thread and waits for its return value.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function SwitchToUi(Of T)(uiFunc As System.Func(Of T)) _
+        As System.Threading.Tasks.Task(Of T)
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of T)()
+
+        mainThreadControl.Invoke(New MethodInvoker(
+        Sub()
+            Try
+                tcs.SetResult(uiFunc.Invoke())
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+            End Try
+        End Sub))
+
+        Return tcs.Task        ' completes only after uiFunc returns
+    End Function
+
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' SwitchToUiTask  –  runs an *async* function (returns Task(Of T)) on the
+    ' Outlook UI thread and gives you a Task(Of T) you can Await from any thread.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function SwitchToUiTask(Of T)(
+        uiFunc As System.Func(Of System.Threading.Tasks.Task(Of T))) _
+        As System.Threading.Tasks.Task(Of T)
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of T)()
+
+        mainThreadControl.BeginInvoke(New MethodInvoker(
+        Sub()
+            Try
+                Dim inner As System.Threading.Tasks.Task(Of T) = uiFunc.Invoke()
+                inner.ContinueWith(
+                    Sub(taskObj)
+                        If taskObj.IsFaulted Then
+                            tcs.SetException(taskObj.Exception.InnerExceptions)
+                        ElseIf taskObj.IsCanceled Then
+                            tcs.SetCanceled()
+                        Else
+                            tcs.SetResult(taskObj.Result)
+                        End If
+                    End Sub,
+                    System.Threading.Tasks.TaskScheduler.Default)
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+            End Try
+        End Sub))
+
+        Return tcs.Task
+    End Function
+
+
     Public Sub InitializeConfig(FirstTime As Boolean, Reload As Boolean)
         _context.InitialConfigFailed = False
         _context.RDV = "Outlook (" & Version & ")"
@@ -1650,7 +1707,11 @@ Public Class ThisAddIn
                         ShortenLength = (Textlength - (Textlength * (100 - ShortenPercent) / 100))
                         Command_InsertAfter(InterpolateAtRuntime(SP_Shorten), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
                     Case "Sumup"
-                        FreeStyle_InsertBefore(SP_MailSumup, False)
+
+                        Dim selectedText As String = mailItem.Body
+                        ShowSumup(selectedText)
+
+                        'FreeStyle_InsertBefore(SP_MailSumup, False)
                     Case "Answers"
                         FreeStyle_InsertBefore(SP_MailReply, True)
                     Case "Freestyle"
@@ -2025,8 +2086,7 @@ Public Class ThisAddIn
 
             If AskForPrompt Then
                 ' Prompt for additional instructions
-                OtherPrompt = SLib.ShowCustomInputBox("Please provide additional information and instructions for drafting an answer:", $"{AN} Answers", False)
-                If String.IsNullOrEmpty(OtherPrompt) Then Return
+                OtherPrompt = SLib.ShowCustomInputBox("Please provide additional instructions for drafting an answer (or leave it empty for the most likely substantive response):", $"{AN} Answers", False)
 
                 ' Call your LLM function with the selected text
                 LLMResult = Await LLM(InterpolateAtRuntime(SP_MailReply), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)
@@ -2989,23 +3049,18 @@ Public Class ThisAddIn
 
     End Sub
 
+
+
     ' WebExtension integration
 
     Private httpListener As HttpListener
     Private listenerThread As Thread
     Private isShuttingDown As Boolean = False
-
+    Private listenerTask As System.Threading.Tasks.Task
 
     Private Sub StartupHttpListener()
-        ' Start the HTTP listener on a background thread.
-
-        listenerThread = New Thread(Async Sub()
-                                        ' Await the function to ensure proper handling
-                                        Await StartHttpListener()
-                                    End Sub)
-
-        listenerThread.IsBackground = True
-        listenerThread.Start()
+        ' fire-and-forget – no raw Thread needed
+        listenerTask = StartHttpListener()          ' <— this compiles
     End Sub
 
 
@@ -3018,372 +3073,413 @@ Public Class ThisAddIn
         End If
     End Sub
 
-    Private Async Function NewStartHttpListener() As Task(Of String)
-        Try
-            httpListener = New HttpListener()
-            httpListener.Prefixes.Add("http://127.0.0.1:12333/")
-            httpListener.Start()
 
-            isShuttingDown = False
-
-            While Not isShuttingDown
-                Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
-                ' Fire and forget: handle request in the background
-                Dim result = System.Threading.Tasks.Task.Run(Async Function()
-                                                                 Dim resultx = Await HandleHttpRequest(context)
-                                                                 Return resultx
-                                                             End Function)
-            End While
-        Catch ex As System.Exception
-            ' Log or handle exceptions as needed
-        End Try
-    End Function
-
-
-
-    Private Async Function StartHttpListener() As Task(Of String)
-        Dim prefix As String = "http://127.0.0.1:12333/"
+    Private Async Function StartHttpListener() As System.Threading.Tasks.Task
+        Const prefix As String = "http://127.0.0.1:12333/"
         Dim consecutiveFailures As Integer = 0
 
-        Try
-            ' Initialize the listener once.
-            If httpListener Is Nothing Then
-                httpListener = New HttpListener()
-                httpListener.Prefixes.Add(prefix)
-                httpListener.Start()
-                Debug.WriteLine("HttpListener started.")
-            End If
-
-            While Not isShuttingDown
-                Dim delayNeeded As Boolean = False
-
-                ' If for some reason the listener is not active, restart it.
-                If httpListener Is Nothing OrElse Not httpListener.IsListening Then
-                    Try
-                        If httpListener IsNot Nothing Then
-                            httpListener.Close()
-                        End If
-                    Catch ex As System.Exception
-                        Debug.WriteLine("Error closing HttpListener: " & ex.Message)
-                    End Try
-
+        While Not isShuttingDown
+            Try
+                ' ensure listener is alive
+                If httpListener Is Nothing Then
                     httpListener = New HttpListener()
                     httpListener.Prefixes.Add(prefix)
                     httpListener.Start()
-                    Debug.WriteLine("HttpListener restarted.")
+                    Debug.WriteLine("HttpListener started.")
+                ElseIf Not httpListener.IsListening Then
+                    httpListener.Close()
+                    httpListener = Nothing
+                    Continue While   ' next loop will recreate
                 End If
 
-                Try
-                    ' Asynchronously wait for an incoming request.
-                    Dim context As HttpListenerContext = Await httpListener.GetContextAsync()
-                    Dim result As String = Await HandleHttpRequest(context)
-                    Debug.WriteLine("Request handled successfully.")
-                    ' Reset the failure counter on success.
-                    consecutiveFailures = 0
-                Catch ex As System.ObjectDisposedException
-                    Debug.WriteLine("HttpListener was disposed. Restarting listener...")
-                    consecutiveFailures += 1
-                    delayNeeded = True
-                Catch ex As System.Exception
-                    Debug.WriteLine("Error handling HTTP request: " & ex.Message)
-                    consecutiveFailures += 1
-                    delayNeeded = True
-                End Try
+                ' wait for a request
+                Dim ctx As HttpListenerContext = Await httpListener.GetContextAsync()
 
-                ' Check if we have reached the maximum number of consecutive failures.
-                If consecutiveFailures >= 10 Then
-                    Debug.WriteLine("Too many consecutive failures. Shutting down.")
-                    isShuttingDown = True
-                    Exit While
-                End If
+                ' fire-and-forget handler
+                Call HandleHttpRequest(ctx) _                        ' ignore returned Task
+                        .ContinueWith( _                                 ' line-continuation
+                            Sub(tResult As System.Threading.Tasks.Task)
+                                If tResult.IsFaulted AndAlso
+                                   tResult.Exception IsNot Nothing Then
 
-                ' If an error occurred, delay before restarting.
-                If delayNeeded Then
-                    Await System.Threading.Tasks.Task.Delay(5000)
-                End If
-            End While
-        Catch ex As System.Exception
-            Debug.WriteLine("Error in StartHttpListener: " & ex.Message)
-        End Try
+                                    Debug.WriteLine("HandleHttpRequest error: " &
+                                                    tResult.Exception.GetBaseException().Message)
+                                End If
+                            End Sub, _                                   ' ← underscore
+                            System.Threading.Tasks.TaskScheduler.Default)
 
-        Return ""
-    End Function
-
-
-
-
-    Private Async Function HandleHttpRequest(ByVal context As HttpListenerContext) As Task(Of String)
-        Try
-            ' 1) Retrieve the request
-            Dim request As HttpListenerRequest = context.Request
-            Dim response As HttpListenerResponse = context.Response
-
-            ' Handle preflight (OPTIONS) request
-            If request.HttpMethod = "OPTIONS" Then
-                Debug.Print("Handling preflight (OPTIONS) request...")
-                response.AddHeader("Access-Control-Allow-Origin", "*")
-                response.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-                response.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
-                response.StatusCode = 204 ' No Content
-                'response.OutputStream.Close()
-                response.Close()
-                Return ""
-            End If
-
-            ' Initialize request body variable
-            Dim requestBody As String = String.Empty
-
-            ' Handle entity body (for POST/PUT, etc.)
-            If request.HasEntityBody Then
-                Debug.Print("Processing request body...")
-                Using reader As New StreamReader(request.InputStream, Encoding.UTF8)
-                    requestBody = reader.ReadToEnd()
-                End Using
-                Debug.Print("Request Body: " & requestBody)
-            End If
-
-            ' 2) Process the request
-            '    - Parse JSON or handle requestBody
-            Dim responseText As String = Await ProcessRequestInAddIn(requestBody, request.RawUrl)
-
-            ' 3) Write a response with CORS headers
-            Dim buffer As Byte() = Encoding.UTF8.GetBytes(responseText)
-            response.ContentLength64 = buffer.Length
-            response.ContentType = "text/plain; charset=utf-8"
-            response.AddHeader("Access-Control-Allow-Origin", "*") ' Allow cross-origin requests
-
-            Using output As Stream = response.OutputStream
-                output.Write(buffer, 0, buffer.Length)
-            End Using
-            response.Close()
-            Debug.WriteLine("HTTP Request completed without errors.")
-            Return ""
-
-        Catch ex As System.Exception
-            ' If there's an error, return an error response to the caller
-            Try
-                Dim errorStr = "Error: " & ex.Message
-                Dim errorBytes = Encoding.UTF8.GetBytes(errorStr)
-                context.Response.ContentLength64 = errorBytes.Length
-                context.Response.StatusCode = 500  ' Internal server error
-                context.Response.OutputStream.Write(errorBytes, 0, errorBytes.Length)
-                'context.Response.OutputStream.Close()
-                context.Response.Close()
-            Catch
-                ' If we can’t even write an error, just ignore
+                consecutiveFailures = 0                        ' success
+            Catch ex As ObjectDisposedException
+                consecutiveFailures += 1
+            Catch ex As System.Exception
+                consecutiveFailures += 1
+                Debug.WriteLine("Listener error: " & ex.Message)
             End Try
-            Debug.WriteLine("HTTP Request completed with errors.")
-            Return ""
-        End Try
-    End Function
 
-    Private Async Function RunLLMOnMainThread(sysprompt As String, userprompt As String) As Task(Of String)
-        Dim tcs As New TaskCompletionSource(Of String)()
-
-        ' Use Invoke to marshal work to the main thread
-        mainThreadControl.Invoke(
-        Sub()
-            ' Run the LLM function on the main thread and set the TaskCompletionSource result
-            Dim task = LLM(sysprompt, userprompt, "", "", 0)
-            task.ContinueWith(
-                Sub(t)
-                    If t.IsFaulted Then
-                        tcs.SetException(t.Exception)
-                    ElseIf t.IsCanceled Then
-                        tcs.SetCanceled()
-                    Else
-                        tcs.SetResult(t.Result)
-                    End If
-                End Sub)
-        End Sub)
-
-        ' Await the TaskCompletionSource's Task to ensure the result is returned
-        Return Await tcs.Task
-    End Function
-
-    Private Sub RunCompareAndInsertTextOnMainThread(textbody As String, result As String, ShowInWindow As Boolean)
-        mainThreadControl.Invoke(Sub()
-                                     CompareAndInsertText(textbody, result, ShowInWindow) ' Blocking wait is safe here since we're on the main thread.
-                                 End Sub)
-    End Sub
-
-
-    Private Async Function ProcessRequestInAddIn(requestBody As String, rawUrl As String) As Task(Of String)
-
-        Dim result As String = ""
-
-        Try
-            ' Parse the JSON string
-            Dim jsonObject As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(requestBody)
-
-            Debug.WriteLine("Requestbody = " & requestBody)
-
-            ' Check if the "command" segment contains "redink_sendtoword"
-
-            Dim URL As String = jsonObject("URL")?.ToString()
-            Dim Command As String = jsonObject("Command")?.ToString()
-            Dim Instruction As String = jsonObject("Instruction")?.ToString()
-            Dim Textbody As String = jsonObject("Text")?.ToString()
-
-            If Command IsNot Nothing Then
-                Select Case Command
-                    Case "redink_sendtooutlook"
-
-                        If Not String.IsNullOrWhiteSpace(Textbody) Then
-                            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-                            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
-
-                            ' Ensure the inspector is open and the item is a MailItem
-                            If inspector IsNot Nothing AndAlso TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
-                                Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
-
-                                ' Check if the email is in compose mode
-                                If mailItem.Sent = False Then
-                                    ' Get the Word editor for the email
-                                    Dim wordEditor As Microsoft.Office.Interop.Word.Document = TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
-
-                                    If wordEditor IsNot Nothing Then
-                                        ' Insert the text at the current cursor position
-                                        Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
-                                        selection.TypeText(Textbody)
-                                    End If
-                                End If
-                            End If
-                            ' Release COM objects in reverse order of creation
-                            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-                            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
-
-                        End If
-                        result = ""
-
-                    Case "redink_translate"
-
-                        If Not String.IsNullOrWhiteSpace(Textbody) Then
-                            TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate (for Browser)", True, INI_Language1)
-
-                            If Not String.IsNullOrWhiteSpace(TranslateLanguage) And TranslateLanguage <> "ESC" Then
-
-                                Dim LLMResult As String = Await RunLLMOnMainThread(InterpolateAtRuntime(SP_Translate), "<TEXTTOPROCESS>" & Textbody & "</TEXTTOPROCESS>")
-                                LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-                                If Not String.IsNullOrEmpty(LLMResult) Then
-                                    result = LLMResult
-                                    result = Trim(result).Replace("**", "")
-                                Else
-                                    result = ""
-                                End If
-                            Else
-                                result = ""
-                            End If
-                        Else
-                            result = ""
-                        End If
-
-                    Case "redink_correct"
-
-                        If Not String.IsNullOrWhiteSpace(Textbody) Then
-
-                            Dim LLMResult As String = Await RunLLMOnMainThread(InterpolateAtRuntime(SP_Correct), "<TEXTTOPROCESS>" & Textbody & "</TEXTTOPROCESS>")
-                            LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-                            If Not String.IsNullOrEmpty(LLMResult) Then
-                                result = LLMResult
-                                RunCompareAndInsertTextOnMainThread(Textbody, result, True)
-                                System.Windows.Forms.Application.DoEvents()
-                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then result = ""
-                                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then result = ""
-                            Else
-                                result = ""
-                            End If
-                        Else
-                            result = ""
-                        End If
-
-                    Case "redink_freestyle"
-
-                        result = ""
-
-                        Dim MarkupInstruct As String = $"start with '{MarkupPrefix}' for markups"
-                        Dim InsertInstruct As String = $"with '{InsertPrefix}' for directly inserting the result"
-                        Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
-                        Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; ctrl-p for your last prompt")
-
-                        Dim NoText As Boolean = False
-                        Dim DoMarkup As Boolean = False
-                        Dim DoInsert As Boolean = False
-
-                        If String.IsNullOrWhiteSpace(Textbody) Then NoText = True
-
-                        If Not NoText Then
-                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute using the selected text ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False, "", My.Settings.LastPrompt)
-                        Else
-                            OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({MarkupInstruct}, {InsertInstruct}){PromptLibInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (for Browser)", False, "", My.Settings.LastPrompt)
-                        End If
-
-                        If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
-
-                            Dim promptlibresult As (String, Boolean, Boolean, Boolean)
-
-                            promptlibresult = ShowPromptSelector(INI_PromptLibPath, Not NoText, Nothing)
-
-                            OtherPrompt = promptlibresult.Item1
-                            DoMarkup = promptlibresult.Item2
-                            DoInsert = Not promptlibresult.Item4
-
-                        Else
-                            If String.IsNullOrEmpty(OtherPrompt) OrElse OtherPrompt = "ESC" Then OtherPrompt = ""
-                        End If
-
-                        If OtherPrompt <> "" Then
-                            My.Settings.LastPrompt = OtherPrompt
-                            My.Settings.Save()
-
-                            If OtherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
-                                OtherPrompt = OtherPrompt.Substring(InsertPrefix.Length).Trim()
-                                DoInsert = True
-                            ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                                OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
-                                DoMarkup = True
-                                DoInsert = True
-                            End If
-                            Dim LLMResult As String = ""
-                            If Not NoText Then
-                                LLMResult = Await RunLLMOnMainThread(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & Textbody & "</TEXTTOPROCESS>")
-                            Else
-                                LLMResult = Await RunLLMOnMainThread(InterpolateAtRuntime(SP_FreestyleNoText), "")
-                            End If
-                            LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-
-                            If Not String.IsNullOrEmpty(LLMResult) Then
-                                result = LLMResult
-                                If DoMarkup Then
-                                    RunCompareAndInsertTextOnMainThread(Textbody, result, True)
-                                    System.Windows.Forms.Application.DoEvents()
-                                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then result = ""
-                                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then result = ""
-                                End If
-                                If Not DoInsert Then
-                                    Dim FinalText As String = SLib.ShowCustomWindow("The LLM has provided the following result (you can edit it):", result, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, True, True)
-
-                                    If FinalText <> "" Then
-                                        SLib.PutInClipboard(FinalText)
-                                        Debug.WriteLine("Finaltext=" & FinalText)
-                                    End If
-                                    result = ""
-                                End If
-                            Else
-                                result = ""
-                            End If
-
-                        End If
-
-
-                End Select
+            ' if we hit 10 failures in a row, recycle the listener
+            If consecutiveFailures >= 10 AndAlso Not isShuttingDown Then
+                Debug.WriteLine("Restarting HttpListener after 10 failures.")
+                Try
+                    If httpListener IsNot Nothing Then httpListener.Close()
+                Catch
+                End Try
+                httpListener = Nothing
+                consecutiveFailures = 0
+                Await System.Threading.Tasks.Task.Delay(5000)  ' back-off pause
             End If
-        Catch ex As System.Exception
-            MessageBox.Show($"Error in ProcessRequestInAddIn: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
-
-        Return result
-
+        End While
     End Function
+    ' ---------------------------------------------------------------------------
+
+    Private Async Function HandleHttpRequest(
+            ctx As System.Net.HttpListenerContext) As System.Threading.Tasks.Task
+
+        Dim req = ctx.Request
+        Dim res = ctx.Response
+
+        If req.HttpMethod = "OPTIONS" Then
+            res.AddHeader("Access-Control-Allow-Origin", "*")
+            res.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            res.StatusCode = 204 : res.Close() : Return
+        End If
+
+        Dim body As String = ""
+        If req.HasEntityBody Then
+            Using rdr As New IO.StreamReader(req.InputStream, System.Text.Encoding.UTF8)
+                body = Await rdr.ReadToEndAsync().ConfigureAwait(False)
+            End Using
+        End If
+
+        Dim responseText As String =
+            Await ProcessRequestInAddIn(body, req.RawUrl).ConfigureAwait(False)
+
+        Dim buf = System.Text.Encoding.UTF8.GetBytes(responseText)
+        res.ContentLength64 = buf.Length
+        res.ContentType = "text/plain; charset=utf-8"
+        res.AddHeader("Access-Control-Allow-Origin", "*")
+        Using os = res.OutputStream
+            Await os.WriteAsync(buf, 0, buf.Length).ConfigureAwait(False)
+        End Using
+        res.Close()
+    End Function
+    ' ---------------------------------------------------------------------------
+
+    ' --------------- LLM helper (runs off the UI thread) -----------------------
+    Private Function RunLlmAsync(
+        sysPrompt As String,
+        userPrompt As String) _
+        As System.Threading.Tasks.Task(Of String)
+
+        ' LLM already returns Task(Of String)  →  use SwitchToUiTask
+        Return SwitchToUiTask(Function()
+                                  Return LLM(sysPrompt, userPrompt, "", "", 0)
+                              End Function)
+    End Function
+    ' ---------------------------------------------------------------------------
+
+    ' --------------- Compare & insert helper (runs on UI) ----------------------
+    '───────────────────────────────────────────────────────────────────────────
+    ' Shows the compare window on the UI thread and BLOCKS the calling
+    ' Task until the user dismisses it.  Returns True if the user accepted,
+    ' False if Esc was pressed (like the original code).
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function CompareAndInsertSyncConfirm(
+        originalText As String,
+        llmResult As String) _
+        As System.Threading.Tasks.Task(Of Boolean)
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Boolean)
+
+        ' marshal to UI thread with BeginInvoke so listener thread never blocks
+        mainThreadControl.BeginInvoke(New MethodInvoker(
+        Sub()
+
+            ' 1) show compare window (modal for this thread)
+            CompareAndInsertText(originalText, llmResult, True)
+
+            ' 2) pump one message cycle so the Esc keystroke is processed
+            System.Windows.Forms.Application.DoEvents()
+
+            ' 3) read Esc status exactly like the old code
+            Dim escNow As Boolean =
+                (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0
+            Dim escDown As Boolean =
+                (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0
+
+            Dim accepted As Boolean = Not (escNow Or escDown)
+
+            tcs.SetResult(accepted)      ' unblock the awaiting thread
+        End Sub))
+
+        Return tcs.Task       ' caller awaits without blocking the listener
+    End Function
+    ' ---------------------------------------------------------------------------
+
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' Waits asynchronously until the preview window (ShowRTFCustomMessageBox)
+    ' is either closed with OK  → returns True
+    '                     or Esc is pressed       → returns False
+    ' Works even though the preview window is created on its own worker thread.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function WaitForPreviewDecisionAsync() _
+        As System.Threading.Tasks.Task(Of Boolean)
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Boolean)()
+
+        ' Run once on the UI thread: attach handlers when the form appears
+        SwitchToUi(Sub()
+
+                       ' 1) keep checking until the preview form exists
+                       Dim previewForm As System.Windows.Forms.Form = Nothing
+                       Dim searchTimer As New System.Windows.Forms.Timer() With {.Interval = 100}
+
+                       AddHandler searchTimer.Tick,
+            Sub()
+
+                If previewForm Is Nothing OrElse previewForm.IsDisposed Then
+                    previewForm = System.Windows.Forms.Application.OpenForms _
+                                      .Cast(Of System.Windows.Forms.Form)() _
+                                      .FirstOrDefault(Function(f) f.Name = "ShowRTFCustomMessageBox" _
+                                                          OrElse f.Text.StartsWith(AN))
+
+                    If previewForm Is Nothing Then Return  ' continue searching
+                    ' found the form ⇒ attach handlers ------------------------
+                    previewForm.KeyPreview = True
+
+                    AddHandler previewForm.KeyDown,
+                        Sub(_s, e)
+                            If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                                tcs.TrySetResult(False)     ' user cancelled
+                            End If
+                        End Sub
+
+                    AddHandler previewForm.FormClosed,
+                        Sub(_s, _e)
+                            tcs.TrySetResult(True)          ' user accepted (OK)
+                        End Sub
+                End If
+
+                ' stop searching once the Task is completed
+                If tcs.Task.IsCompleted Then searchTimer.Stop()
+            End Sub
+
+                       searchTimer.Start()
+                   End Sub).Wait()   ' Wait only for handler-attachment setup
+
+        Return tcs.Task    ' listener awaits without polling or blocking UI
+    End Function
+
+
+
+
+    ' ---------------- MAIN REQUEST DISPATCH ------------------------------------
+    Private Async Function ProcessRequestInAddIn(
+            body As String,
+            rawUrl As String) As System.Threading.Tasks.Task(Of String)
+
+        Dim j = Newtonsoft.Json.Linq.JObject.Parse(body)
+        Dim cmd = j("Command")?.ToString()
+        Dim textBody = j("Text")?.ToString()
+        Dim sourceUrl = j("URL")?.ToString()
+
+        Select Case cmd
+        ' -------------------------------------------------------------------
+            Case "redink_sendtooutlook"
+                If String.IsNullOrWhiteSpace(textBody) Then Return ""
+                ' All Outlook automation on UI thread
+                Await SwitchToUi(Sub()
+                                     Dim olApp = Globals.ThisAddIn.Application
+                                     Dim insp = olApp.ActiveInspector()
+                                     If insp Is Nothing Then Exit Sub
+                                     If Not TypeOf insp.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then Exit Sub
+                                     Dim mail = CType(insp.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+                                     If mail.Sent Then Exit Sub
+                                     Dim doc = CType(insp.WordEditor, Microsoft.Office.Interop.Word.Document)
+                                     Dim rng = doc.Application.Selection.Range
+                                     doc.Application.ScreenUpdating = False
+                                     rng.Text = textBody & " (" & sourceUrl & ")"
+                                     doc.Application.ScreenUpdating = True
+                                     ' release COM objects
+                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(rng)
+                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(doc)
+                                 End Sub)
+                Return ""
+        ' -------------------------------------------------------------------
+            Case "redink_translate"
+                ' ─── 1  guard clauses ─────────────────────────────────────────
+                If String.IsNullOrWhiteSpace(textBody) Then Return ""
+
+                ' Ask the user for a target language (UI thread)
+                Dim targetLang As String = Await SwitchToUi(Function()
+                                                                Return SLib.ShowCustomInputBox(
+                   "Enter your target language:",
+                   AN & " Translate (for Browser)",
+                   True, INI_Language1)
+                                                            End Function)
+
+                If String.IsNullOrWhiteSpace(targetLang) OrElse targetLang = "ESC" Then
+                    Return ""                                   ' user cancelled
+                End If
+
+                ' ─── 2  call the LLM on the UI thread, get Task(Of String) ─────
+                Dim llmOut As String = Await RunLlmAsync(
+                    InterpolateAtRuntime(SP_Translate),
+                    $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
+
+                ' ─── 3  clean up the wrapper tags / markdown ──────────────────
+                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "") _
+                   .Replace("</TEXTTOPROCESS>", "") _
+                   .Replace("**", "").Trim()
+
+                If llmOut = "" Then Return ""                  ' safety net
+
+                ' Optional: copy to clipboard so the user can paste manually
+                Await SwitchToUi(Sub() SLib.PutInClipboard(llmOut))
+
+                ' ─── 4  SEND the translation back to the caller ───────────────
+                Return llmOut
+
+            ' -------------------------------------------------------------------
+            Case "redink_correct"
+
+                If String.IsNullOrWhiteSpace(textBody) Then Return ""
+
+                ' 1)  Run the LLM on the UI thread
+                Dim llmOut As String = Await RunLlmAsync(
+                                                    InterpolateAtRuntime(SP_Correct),
+                                                    $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
+                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
+
+                If llmOut = "" Then Return ""
+
+                ' 2)  Show the compare / preview window (synchronous)
+                Await SwitchToUi(Sub()
+                                     CompareAndInsertText(textBody, llmOut, True)
+                                 End Sub)
+
+                ' 3)  
+                Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
+
+                If Not accepted Then Return ""          ' Esc pressed → abort
+
+                Return llmOut
+
+        ' -------------------------------------------------------------------
+            Case "redink_freestyle"
+
+                '─── A  gather prompt on UI thread ──────────────────────────────
+                Dim noText As Boolean = String.IsNullOrWhiteSpace(textBody)
+
+                Dim promptCaption As String = AN & " Freestyle (for Browser)"
+
+                Dim sb As New System.Text.StringBuilder()
+                If noText Then
+                    sb.Append("Please provide the prompt you wish to execute ")
+                Else
+                    sb.Append("Please provide the prompt you wish to execute using the selected text ")
+                End If
+
+                sb.Append("(" & MarkupPrefix & " for markups, " & InsertPrefix & " for direct insert)")
+                If INI_PromptLib Then sb.Append(" or press 'OK' for the prompt library")
+                If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then sb.Append("; ctrl-p for your last prompt")
+                sb.Append(":")
+                Dim promptMsg As String = sb.ToString()
+
+                OtherPrompt = Await SwitchToUi(Function()
+                                                   Return SLib.ShowCustomInputBox(promptMsg, promptCaption, False, "", My.Settings.LastPrompt)
+                                               End Function)
+
+                Dim doMarkupFlag As Boolean = False
+                Dim doInsertFlag As Boolean = False
+
+                '─── prompt library branch ─────────────────────────────────────
+                If String.IsNullOrEmpty(otherPrompt) AndAlso otherPrompt <> "ESC" AndAlso INI_PromptLib Then
+                    Dim sel = Await SwitchToUi(Function()
+                                                   Return ShowPromptSelector(INI_PromptLibPath, Not noText, Nothing)
+                                               End Function)                         ' (prompt, doMarkup, doInsert, canceled)
+
+                    otherPrompt = sel.Item1
+                    doMarkupFlag = sel.Item2
+                    doInsertFlag = Not sel.Item4         ' library’s “canceled” → insert = False
+                End If
+
+                ' user cancelled
+                If String.IsNullOrWhiteSpace(otherPrompt) OrElse otherPrompt = "ESC" Then
+                    Return ""
+                End If
+
+                ' remember last prompt
+                My.Settings.LastPrompt = otherPrompt
+                My.Settings.Save()
+
+                '─── decode prefix flags ───────────────────────────────────────
+                If otherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
+                    otherPrompt = otherPrompt.Substring(InsertPrefix.Length).Trim()
+                    doInsertFlag = True
+                ElseIf otherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                    otherPrompt = otherPrompt.Substring(MarkupPrefix.Length).Trim()
+                    doMarkupFlag = True
+                    doInsertFlag = True          ' old logic: markup implies insert
+                End If
+
+                '─── B  call the LLM on UI thread (async) ──────────────────────
+                Dim llmResult As String
+                If noText Then
+                    llmResult = Await RunLlmAsync(
+            InterpolateAtRuntime(SP_FreestyleNoText), "")
+                Else
+                    llmResult = Await RunLlmAsync(
+            InterpolateAtRuntime(SP_FreestyleText),
+            $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
+                End If
+
+                llmResult = llmResult.Replace("<TEXTTOPROCESS>", "") _
+                         .Replace("</TEXTTOPROCESS>", "") _
+                         .Trim()
+
+                If String.IsNullOrEmpty(llmResult) Then Return ""
+
+                '─── C  present / insert / clipboard exactly like old code ─────
+
+                ' A) markup path (implies insert)  -----------------------------
+                If doMarkupFlag Then
+                    Await SwitchToUi(Sub()
+                                         CompareAndInsertText(textBody, llmResult, True)
+                                     End Sub)
+
+                    Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
+
+                    If Not accepted Then Return ""          ' Esc pressed → abort
+
+                    Return llmResult                    ' user accepted
+                End If
+
+                ' B) plain insert path  ----------------------------------------
+                If doInsertFlag Then
+                    'Await InsertTextIntoCurrentMailAsync(llmResult)
+                    Return llmResult                        ' send text back
+                End If
+
+                ' C) clipboard-only path  --------------------------------------
+                Dim finalTxt As String = Await SwitchToUi(Function()
+                                                              Return SLib.ShowCustomWindow(
+                                                                  "The LLM has provided the following result (you can edit it):",
+                                                                  llmResult,
+                                                                  "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).",
+                                                                  AN, True, True)
+                                                          End Function)
+
+                If Not String.IsNullOrWhiteSpace(finalTxt) Then
+                    Await SwitchToUi(Sub() SLib.PutInClipboard(finalTxt))
+                End If
+
+                Return ""                                   ' old behaviour: no body sent
+
+        End Select
+    End Function
+
+
 
 End Class

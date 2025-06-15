@@ -139,4 +139,20 @@ Public Class Ribbon1
     Private Sub RI_InsertClipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_InsertClipboard.Click
         Globals.ThisAddIn.InsertClipboard()
     End Sub
+
+    Private Sub RI_BallooMergePart_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_BalloonMergePart.Click
+        Globals.ThisAddIn.BalloonMerge(False, True)
+    End Sub
+
+    Private Sub RI_BalloonMergeFull_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_BalloonMergeFull.Click
+        Globals.ThisAddIn.BalloonMerge(True, True)
+    End Sub
+
+    Private Sub RI_BalloonMergePartPrompt_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_BalloonMergePartPrompt.Click
+        Globals.ThisAddIn.BalloonMerge(False, False)
+    End Sub
+
+    Private Sub RI_BalloonMergeFullPrompt_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_BalloonMergeFullPrompt.Click
+        Globals.ThisAddIn.BalloonMerge(True, False)
+    End Sub
 End Class
