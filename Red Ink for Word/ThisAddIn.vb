@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 17.6.2025
+' 22.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -19,6 +19,7 @@
 ' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
 ' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
+' Includes Nito.AsyncEx in unchanged form; Copyright (c) 2021 Stephen Cleary; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/StephenCleary/AsyncEx
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -187,20 +188,11 @@ End Class
 
 
 
-'--------------------------------------------------------------------
-'  WordSearchHelper.vb – Drop-in-Ersatz für die fehleranfällige Suche
-'--------------------------------------------------------------------
-'  Keine Option- oder Imports-Anweisungen gemäß Vorgabe
-'--------------------------------------------------------------------
+
 Public Module WordSearchHelper
 
-    'Einmal pro Aufruf gefüllt – dann von VisibleSlice genutzt
     Private deletionsCache As System.Collections.Generic.List(Of (Integer, Integer)) = Nothing
 
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Globale Regexe  (kompiliert + culture-invariant)
-    '══════════════════════════════════════════════════════════════════════
     Private ReadOnly RX_U As New _
     System.Text.RegularExpressions.Regex("\\u([0-9A-Fa-f]{4,6})",
         System.Text.RegularExpressions.RegexOptions.Compiled Or
@@ -212,26 +204,7 @@ Public Module WordSearchHelper
         System.Text.RegularExpressions.RegexOptions.CultureInvariant)
 
 
-    '══════════════════════════════════════════════════════════════════════
-    '  Öffentliche Einstiegsfunktion  (Extension für Selection)
-    '══════════════════════════════════════════════════════════════════════
 
-    '╔══════════════════════════════════════════════════════════════════╗
-    '║  FindLongTextAnchoredFast – superschnelle Anker-Suche            ║
-    '║  Schritt 1:  n Anfangswörter mit GAP  ([!0-9A-Za-z]@)            ║
-    '║  Schritt 2:  n Endwörter,  gleiche GAP, nach Start-Treffer       ║
-    '║  Schritt 3:  sichtbaren Text dazwischen holen, kanonisieren,     ║
-    '║              Regex / IndexOf gegen Needle (ohne weiteres Find)   ║
-    '╚══════════════════════════════════════════════════════════════════╝
-    '╔══════════════════════════════════════════════════════════════════╗
-    '║  FindLongTextAnchoredFast – superschnelle Anker-Suche            ║
-    '║  Schritt 1:  n Anfangswörter mit GAP  ([!0-9A-Za-z]@)            ║
-    '║  Schritt 2:  n Endwörter,  gleiche GAP, nach Start-Treffer       ║
-    '║  Schritt 3:  sichtbaren Text dazwischen holen, kanonisieren,     ║
-    '║              Regex / IndexOf gegen Needle (ohne weiteres Find)   ║
-    '╚══════════════════════════════════════════════════════════════════╝
-
-    '──────── FindLongTextAnchoredFast ─────────────────────────────────────
     Public Function FindLongTextAnchoredFast(
     ByRef sel As Microsoft.Office.Interop.Word.Selection,
     ByVal findText As String,
@@ -239,6 +212,12 @@ Public Module WordSearchHelper
     Optional ByVal nWords As Integer = 4,
     Optional ByVal cancel As System.Threading.CancellationToken = Nothing,
     Optional ByVal timeoutSeconds As Integer = 10) As Boolean
+
+        Debug.WriteLine("Skipdeleted=" & skipDeleted)
+
+        Dim _dbgLastSlice As String = ""
+        Dim _dbgLastIdx As Integer = -1
+        Dim _dbgNeedle As String = ""
 
         Dim t0 As System.DateTime = System.DateTime.UtcNow
         Dim doc As Microsoft.Office.Interop.Word.Document = sel.Document
@@ -289,13 +268,35 @@ Public Module WordSearchHelper
         Dim canonNeedle As String = Canonicalise(findText, True)
         If canonNeedle = "" Then Return False
 
-        nWords = System.Math.Min(nWords, raw.Length)
-        Do While nWords > 1 AndAlso
-          BuildWildcardProbe(raw.Take(nWords).ToArray()).Length > 255
+        '---- NEU: Kompletter Wildcard-Suchlauf, falls < 255 ----
+        Dim fullWildcardPattern As String = BuildWildcardProbe(raw)
+        If fullWildcardPattern.Length <= 255 Then
+            Dim rngFull As Microsoft.Office.Interop.Word.Range = area.Duplicate
+            With rngFull.Find
+                .ClearFormatting() : .Replacement.ClearFormatting()
+                .Font.Reset() : .ParagraphFormat.Reset()
+                .Text = fullWildcardPattern
+                .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                .MatchCase = False : .MatchWildcards = True
+                .Format = False : .IgnoreSpace = True
+            End With
+            If rngFull.Find.Execute() Then
+                sel.SetRange(rngFull.Start, rngFull.End)
+                Return True
+            End If
+        End If
+
+        ' Fallback auf Anker-Logik, falls kompletter Suchlauf nicht möglich war
+        If raw.Length < 2 Then Return False ' Anker-Logik braucht min. 2 Wörter
+
+        ' nWords so wählen, dass Start- und End-Anker nicht überlappen
+        nWords = System.Math.Min(nWords, raw.Length \ 2)
+        If nWords < 1 Then nWords = 1
+
+        ' Sicherstellen, dass der Start-Anker nicht zu lang ist
+        Do While nWords > 1 AndAlso BuildWildcardProbe(raw.Take(nWords).ToArray()).Length > 255
             nWords -= 1
         Loop
-        If nWords < 1 Then nWords = 1
-        If raw.Length <= nWords Then nWords = System.Math.Max(1, raw.Length - 1)
 
         Dim startPat As String = BuildWildcardProbe(raw.Take(nWords).ToArray())
         Dim endWords() As String = raw.Skip(raw.Length - nWords).ToArray()
@@ -348,16 +349,20 @@ Public Module WordSearchHelper
 
                 If okE Then
                     Dim sliceTxt As String, back As System.Collections.Generic.IReadOnlyList(Of Integer)
-                    VisibleSlice(doc, posStart, eRng.End - posStart, sliceTxt, back)
+                    VisibleSlice(doc, posStart, eRng.End - posStart, skipDeleted, sliceTxt, back)
+
+                    Debug.WriteLine(sliceTxt & vbCrLf)
 
                     Dim canSlice As String = Canonicalise(sliceTxt, True)
                     Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
-                    If idx >= 0 AndAlso idx <= 3 Then
-                        Dim endIdx As Integer = idx + canonNeedle.Length - 1
-                        If endIdx < back.Count Then
-                            sel.SetRange(back(idx), back(endIdx) + 1)
-                            Return True
-                        End If
+
+                    _dbgLastSlice = canSlice
+                    _dbgLastIdx = idx
+                    _dbgNeedle = canonNeedle
+
+                    If idx >= 0 Then
+                        sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
+                        Return True
                     End If
                 End If
 
@@ -366,37 +371,33 @@ Public Module WordSearchHelper
                 Try : okS = fS.Execute() : Catch : okS = False : End Try
             End While
         End Using
+
+        Dim elapsedSec As Double = (System.DateTime.UtcNow - t0).TotalSeconds
+
+        System.Diagnostics.Debug.WriteLine("===== FindLongTextAnchoredFast: FINAL DEBUG =====")
+        System.Diagnostics.Debug.WriteLine("  findText        = '" & findText & "'")
+        System.Diagnostics.Debug.WriteLine("  lastIdx         = " & _dbgLastIdx)
+        System.Diagnostics.Debug.WriteLine("  needle.Length   = " & _dbgNeedle.Length)
+        System.Diagnostics.Debug.WriteLine("  slice.Length    = " & _dbgLastSlice.Length)
+        System.Diagnostics.Debug.WriteLine("  contains?       = " & _dbgLastSlice.Contains(_dbgNeedle).ToString())
+        ' show first and last 200 chars of the slice
+        Dim previewLen As Integer = 200
+        Dim startEx As String = If(_dbgLastSlice.Length <= previewLen,
+                                _dbgLastSlice,
+                                _dbgLastSlice.Substring(0, previewLen) & "…")
+        Dim endEx As String = If(_dbgLastSlice.Length <= previewLen,
+                                "",
+                                "…" & _dbgLastSlice.Substring(_dbgLastSlice.Length - previewLen))
+        System.Diagnostics.Debug.WriteLine("  slice excerpt start: '" & startEx & "'")
+        If endEx <> "" Then
+            System.Diagnostics.Debug.WriteLine("  slice excerpt end:   '" & endEx & "'")
+        End If
+        System.Diagnostics.Debug.WriteLine("===============================================")
+
         Return False
     End Function
 
 
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Hilfsfunktionen
-    '══════════════════════════════════════════════════════════════════════
-
-    Private Function BuildLiteralProbe(words() As String) As String
-        Dim sb As New System.Text.StringBuilder(words.Length * 10)
-        For i = 0 To words.Length - 1
-            If i > 0 Then sb.Append(" "c)
-
-            Dim w As String = words(i).Replace("-"c, "?"c) _
-                                   .Replace(ChrW(&H2010), "?"c) _
-                                   .Replace(ChrW(&H2011), "?"c) _
-                                   .Replace(ChrW(&H2013), "?"c) _
-                                   .Replace(ChrW(&HAD), "?"c)
-            sb.Append(EscapeForWordWildcard(w))
-        Next
-        Return sb.ToString()
-    End Function
-
-    '────────── BuildWildcardProbe ──────────────────────────────────────
-    ' ▸ verbindet n Wörter mit GENAU 1 Space  
-    ' ▸ ersetzt alle Hyphen-Varianten durch ?  
-    ' ▸ ersetzt JEDE Placeholder-Sequenz  [ … ]   (egal wie lang)  durch  \[*\]*
-    '   –  \[   = Literal-„[“  
-    '   –  *    = 0–n beliebige Zeichen (Inhalt des Platzhalters)  
-    '   –  \]*  = schließende Klammer, evtl. nachfolgender Punkt/Komma etc.
     Private Function BuildWildcardProbe(ByVal words() As String) As String
         Dim sb As New System.Text.StringBuilder(words.Length * 14)
         Dim i As Integer = 0
@@ -456,14 +457,11 @@ Public Module WordSearchHelper
                      System.StringSplitOptions.RemoveEmptyEntries)
     End Function
 
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Sichtbaren Slice ohne gelöschte Revisionen holen (+ Back-Map)
-    '══════════════════════════════════════════════════════════════════════
     Private Sub VisibleSlice(
     ByVal doc As Microsoft.Office.Interop.Word.Document,
     ByVal absStart As Integer,
     ByVal sliceLen As Integer,
+    ByVal skipDeleted As Boolean,
     ByRef visOut As String,
     ByRef mapBack As System.Collections.Generic.IReadOnlyList(Of Integer))
 
@@ -472,6 +470,19 @@ Public Module WordSearchHelper
         System.Math.Min(doc.Content.End, absStart + sliceLen + 500)
         Dim rawRng As Microsoft.Office.Interop.Word.Range = doc.Range(absStart, rawEnd)
         Dim rawTxt As String = rawRng.Text
+
+        If Not skipDeleted Then
+            ' auf sliceLen kürzen
+            Dim outTxt As String = If(rawTxt.Length > sliceLen, rawTxt.Substring(0, sliceLen), rawTxt)
+            visOut = outTxt
+            ' Back-Map 1:1 aufbauen
+            Dim backList = New System.Collections.Generic.List(Of Integer)(outTxt.Length)
+            For i As Integer = 0 To outTxt.Length - 1
+                backList.Add(absStart + i)
+            Next
+            mapBack = backList
+            Return
+        End If
 
         '---- Deletions-Cache einmalig aufbauen ----------------------------
         If deletionsCache Is Nothing Then
@@ -560,7 +571,17 @@ Public Module WordSearchHelper
         For Each ch As Char In src
             If IsDocNoise(ch) Then Continue For
 
-            If System.Char.IsWhiteSpace(ch) OrElse AscW(ch) = &HA0 Then
+            Dim code As Integer = AscW(ch)
+            Dim isHyphenOrWs As Boolean = System.Char.IsWhiteSpace(ch) OrElse code = &HA0
+
+            If Not isHyphenOrWs Then
+                Select Case code
+                    Case &H2010, &H2011, &H2013, &H2014, &HAD, 45 ' Hyphen family
+                        isHyphenOrWs = True
+                End Select
+            End If
+
+            If isHyphenOrWs Then
                 pendingSpace = True
             Else
                 If pendingSpace AndAlso collapseWS Then sb.Append(" "c)
@@ -570,10 +591,6 @@ Public Module WordSearchHelper
         Next
         Return sb.ToString().Trim()
     End Function
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Noise-Prüfung, Hyphenhandling, Canon-Mapping
-    '══════════════════════════════════════════════════════════════════════
 
 
     Private Function IsDocNoise(ByVal ch As Char) As Boolean
@@ -588,20 +605,13 @@ Public Module WordSearchHelper
         Return False
     End Function
 
-    'Nur unsichtbare Zeichen und Bindestrich-Familie werden entfernt,
-    '«ß/ẞ» → «SS», alle sichtbaren Klammern bleiben erhalten.
-    'Nur unsichtbare / layouttechnische Zeichen fliegen raus,
-    'gesamte sichtbare Satz­zeichen-Palette (inkl. aller Klammern) bleibt erhalten.
     Private Function CanonizeDocChar(ByVal ch As Char) As String
         Select Case AscW(ch)
-            Case &HDF, &H1E9E : Return "SS"   ' ß / ẞ
-            Case &H2010, &H2011, &H2013, &H2014, &HAD, 45     ' weiche / NB-Hyphen & Dash
-                Return ""
+            Case &HDF, &H1E9E : Return "SS"  ' ß / ẞ
             Case Else
                 Return System.Char.ToUpperInvariant(ch)
         End Select
     End Function
-
 
     'Maskiert alle Word-Wildcard-Sonderzeichen, damit sie literale Bedeutung behalten
     Private Function EscapeForWordWildcard(ByVal s As String) As String
@@ -618,10 +628,6 @@ Public Module WordSearchHelper
         Return sb.ToString()
     End Function
 
-
-    '══════════════════════════════════════════════════════════════════════
-    '  Kleiner Range-Wrapper – garantiert Dispose + Collapse Utility
-    '══════════════════════════════════════════════════════════════════════
     Private NotInheritable Class RangeProxy
         Implements System.IDisposable
 
@@ -654,9 +660,6 @@ End Module
 Public Class ThisAddIn
 
 
-
-
-
     <System.Runtime.InteropServices.DllImport("user32.dll",
     SetLastError:=True, CharSet:=System.Runtime.InteropServices.CharSet.Auto)>
     Public Shared Function GetAsyncKeyState(ByVal vKey As System.Int32) As System.Int16
@@ -666,9 +669,6 @@ Public Class ThisAddIn
     Private Const VK_ESCAPE As System.Int32 = &H1B
 
 
-    <DllImport("kernel32.dll", SetLastError:=True)>
-    Private Shared Function SetThreadExecutionState(esFlags As UInteger) As UInteger
-    End Function
 
     <DllImport("user32.dll", SetLastError:=True)>
     Private Shared Function FindWindow(
@@ -821,7 +821,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.170625 Gen2 Beta Test"
+    Public Const Version As String = "V.220625 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -850,7 +850,8 @@ Public Class ThisAddIn
     Private Const ObjectTrigger As String = "(file)"
     Private Const ObjectTrigger2 As String = "(clip)"
     Private Const InPlacePrefix As String = "Replace:"
-    Private Const AddPrefix As String = "Add:"
+    Private Const AddPrefix As String = "Append:"
+    Private Const AddPrefix2 As String = "Add:"
     Private Const MarkupPrefix As String = "Markup:"
     Private Const MarkupPrefixDiff As String = "MarkupDiff:"
     Private Const MarkupPrefixDiffW As String = "MarkupDiffW:"
@@ -928,17 +929,6 @@ Public Class ThisAddIn
     "ar", "bg", "ca", "cs", "da", "el", "et", "fi", "hi", "hu",
     "id", "nl", "no", "pl", "ro", "sv", "th", "tr", "uk", "vi"
 }
-
-    Private Const ES_CONTINUOUS As UInteger = &H80000000UI
-    Private Const ES_SYSTEM_REQUIRED As UInteger = &H1UI
-    Private Const ES_DISPLAY_REQUIRED As UInteger = &H2UI
-    Private Const ES_AWAYMODE_REQUIRED As UInteger = &H40UI
-
-    Private Const ES_KEEP_SYSTEM_ONLY As UInteger = ES_CONTINUOUS Or ES_SYSTEM_REQUIRED
-    Private Const ES_KEEP_SYSTEM_AND_DISPLAY As UInteger = ES_CONTINUOUS Or ES_SYSTEM_REQUIRED Or ES_DISPLAY_REQUIRED
-    Private Const ES_KEEP_CURRENT_SETTING As UInteger = ES_KEEP_SYSTEM_ONLY
-
-    Private Shared prevExecState As UInteger = Nothing
 
     Private Const Code_JsonTemplateFormatter As String = "Public Module JsonTemplateFormatter" & vbCrLf & "''' <summary>''' Hauptfunktion für JSON-String + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String" & vbCrLf & "Dim jObj As JObject" & vbCrLf & "Try" & vbCrLf & "jObj = JObject.Parse(json)" & vbCrLf & "Catch ex As Newtonsoft.Json.JsonReaderException" & vbCrLf & "Return $""[Fehler beim Parsen des JSON: {ex.Message}]""" & vbCrLf & "End Try" & vbCrLf & "Return FormatJsonWithTemplate(jObj, template)" & vbCrLf & "End Function" & vbCrLf & "''' <summary>''' Hauptfunktion für direkten JObject + Template''' </summary>" & vbCrLf & "Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String" & vbCrLf & "If String.IsNullOrWhiteSpace(template) Then Return """"" & vbCrLf & "template = template.Replace(""\\N"", vbCrLf).Replace(""\\n"", vbCrLf).Replace(""\\R"", vbCrLf).Replace(""\\r"", vbCrLf)" & vbCrLf & "template = Regex.Replace(template, ""<cr>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "Dim hasLoop = Regex.IsMatch(template, ""\\{\\%\\s*for\\s+([^\\s\\%]+)\\s*\\%\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim hasPh = Regex.IsMatch(template, ""\\{([^}]+)\\}"")" & vbCrLf & "If Not hasLoop AndAlso Not hasPh Then Return FindJsonProperty(jObj, template)" & vbCrLf & "Dim loopRegex = New Regex(""\\{\\%\\s*for\\s+([^%\\s]+)\\s*\\%\\}(.*?)\\{\\%\\s*endfor\\s*\\%\\}"", RegexOptions.Singleline Or RegexOptions.IgnoreCase)" & vbCrLf & "Dim mLoop = loopRegex.Match(template)" & vbCrLf & "While mLoop.Success" & vbCrLf & "Dim fullBlock = mLoop.Value" & vbCrLf & "Dim rawPath = mLoop.Groups(1).Value.Trim()" & vbCrLf & "Dim innerTpl = mLoop.Groups(2).Value" & vbCrLf & "Dim path = If(rawPath.StartsWith(""$""), rawPath, ""$."" & rawPath)" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim items = tokens.SelectMany(Function(t) If t.Type = JTokenType.Array Then Return CType(t, JArray).OfType(Of JObject)() ElseIf t.Type = JTokenType.Object Then Return {CType(t, JObject)} Else Return Enumerable.Empty(Of JObject)() End If)" & vbCrLf & "Dim rendered = items.Select(Function(o) FormatJsonWithTemplate(o, innerTpl)).ToArray()" & vbCrLf & "template = template.Replace(fullBlock, If(rendered.Any, String.Join(vbCrLf & vbCrLf, rendered), """"""))" & vbCrLf & "mLoop = loopRegex.Match(template)" & vbCrLf & "End While" & vbCrLf & "Dim phRegex = New Regex(""\\{(.+?)\\}"", RegexOptions.Singleline)" & vbCrLf & "Dim result = template" & vbCrLf & "For Each mPh As Match In phRegex.Matches(template)" & vbCrLf & "Dim fullPh = mPh.Value" & vbCrLf & "Dim content = mPh.Groups(1).Value" & vbCrLf & "Dim isHtml As Boolean = False" & vbCrLf & "Dim isNoCr As Boolean = False" & vbCrLf & "If content.StartsWith(""htmlnocr:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : isNoCr = True : content = content.Substring(""htmlnocr:"".Length) ElseIf content.StartsWith(""html:"", StringComparison.OrdinalIgnoreCase) Then isHtml = True : content = content.Substring(""html:"".Length) ElseIf content.StartsWith(""nocr:"", StringComparison.OrdinalIgnoreCase) Then isNoCr = True : content = content.Substring(""nocr:"".Length)" & vbCrLf & "Dim parts = content.Split(New Char() {""|""c}, 2)" & vbCrLf & "Dim pathPh = parts(0).Trim()" & vbCrLf & "Dim remainder = If(parts.Length > 1, parts(1), String.Empty)" & vbCrLf & "Dim sep As String = vbCrLf" & vbCrLf & "Dim mappings As Dictionary(Of String, String) = Nothing" & vbCrLf & "If Not String.IsNullOrEmpty(remainder) Then If remainder.Contains(""=""c) Then mappings = ParseMappings(remainder) Else sep = remainder.Replace(""\\n"", vbCrLf)" & vbCrLf & "Dim replacement = RenderTokens(jObj, pathPh, sep, isHtml, isNoCr, mappings)" & vbCrLf & "result = result.Replace(fullPh, replacement)" & vbCrLf & "Next" & vbCrLf & "Return result" & vbCrLf & "End Function" & vbCrLf & "Private Function RenderTokens(jObj As JObject, path As String, sep As String, isHtml As Boolean, isNoCr As Boolean, mappings As Dictionary(Of String, String)) As String" & vbCrLf & "Try" & vbCrLf & "If Not path.StartsWith(""$"") AndAlso Not path.StartsWith(""@"") Then path = ""$."" & path" & vbCrLf & "Dim tokens = jObj.SelectTokens(path)" & vbCrLf & "Dim list As New List(Of String)" & vbCrLf & "For Each t In tokens" & vbCrLf & "Dim raw = t.ToString()" & vbCrLf & "If mappings IsNot Nothing AndAlso mappings.ContainsKey(raw) Then raw = mappings(raw)" & vbCrLf & "If isHtml Then raw = HtmlToMarkdownSimple(raw)" & vbCrLf & "If isNoCr Then raw = Regex.Replace(raw, ""[\r\n]+"", "" "") : raw = Regex.Replace(raw, ""\s{2,}"", "" "") : raw = Regex.Replace(raw, ""[\u2022\u2023\u25E6]"", String.Empty) : raw = raw.Trim()" & vbCrLf & "list.Add(raw)" & vbCrLf & "Next" & vbCrLf & "Return If(list.Count = 0, """", String.Join(sep, list))" & vbCrLf & "Catch ex As System.Exception" & vbCrLf & "Return """"" & vbCrLf & "End Try" & vbCrLf & "End Function" & vbCrLf & "Private Function ParseMappings(defs As String) As Dictionary(Of String, String)" & vbCrLf & "Dim dict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)" & vbCrLf & "For Each pair In defs.Split("";""c)" & vbCrLf & "Dim kv = pair.Split(New Char() {""=""c}, 2)" & vbCrLf & "If kv.Length = 2 Then dict(kv(0).Trim()) = kv(1).Trim()" & vbCrLf & "Next" & vbCrLf & "Return dict" & vbCrLf & "End Function" & vbCrLf & "Public Function HtmlToMarkdownSimple(html As String) As String" & vbCrLf & "Dim s = WebUtility.HtmlDecode(html)" & vbCrLf & "s = Regex.Replace(s, ""</?p\s*/?>"", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<br\s*/?>"", vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<strong>(.*?)</strong>"", ""**$1**"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<em>(.*?)</em>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<span\b[^>]*>(.*?)</span>"", ""*$1*"", RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<li>(.*?)</li>"", ""- $1"" & vbCrLf, RegexOptions.IgnoreCase)" & vbCrLf & "s = Regex.Replace(s, ""<[^>]+>"", String.Empty)" & vbCrLf & "s = Regex.Replace(s, ""("" & vbCrLf & ""){3,}"", vbCrLf & vbCrLf)" & vbCrLf & "Return s.Trim()" & vbCrLf & "End Function" & vbCrLf & "End Module"
     Private Const SP_GenerateResponseKey As String = "I have code that will generate from a JSON string an Markdown output using a Template, which the code will parse together with the JSON file. I want you to create me a working template taking into account (i) the code, (ii) the structure of the JSON file and (iii) my instructions. If the JSON has arrays, make sure you correctly handle them. To produce your output, first provide the barebones template one one single line (do not use placeholders, provide the text how template should look like; for linebreaks, use only <cr>), then provide a brief explanation without any formatting. I will provide you in the following first the code, and then you will get the (sample) JSON file and my instructions. Follow them carefully."
@@ -3572,14 +3562,31 @@ Public Class ThisAddIn
                 optsCodeList.Add(codeList)
             Next
 
+            If Not String.IsNullOrWhiteSpace(SP_QueryPrompt) Then
+                parameterDefs.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter("Run query assistant", False))
+            End If
+
             OtherPrompt = ""
+
+            Dim runQueryAssistant As Boolean = False
 
             If parameterDefs.Count > 0 Then
                 Dim parameters() As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameterDefs.ToArray()
                 If ShowCustomVariableInputForm("Please configure your parameters:", "Use '" & INI_Model_2 & "'", parameters) Then
 
+                    Dim loopCount As Integer = parameters.Length
+
+                    ' Wenn es einen SP_QueryPrompt gibt, ist der letzte Parameter unser Boolean-Flag
+                    If Not String.IsNullOrWhiteSpace(SP_QueryPrompt) Then
+                        Dim lastParam = parameters(parameters.Length - 1)
+                        If TypeOf lastParam.Value Is System.Boolean Then
+                            runQueryAssistant = CType(lastParam.Value, System.Boolean)
+                            loopCount -= 1    ' excl. Flag aus der folgenden Schleife
+                        End If
+                    End If
+
                     ' === NEU: Werte auslesen mit Range-Clamping und Mapping ===
-                    For i As Integer = 0 To parameters.Length - 1
+                    For i As Integer = 0 To loopCount - 1
                         Dim p As SharedLibrary.SharedLibrary.SharedMethods.InputParameter = parameters(i)
                         Dim rawValue As String = p.Value.ToString().Trim()
                         Dim t As String = typesList(i)
@@ -3650,6 +3657,19 @@ Public Class ThisAddIn
             End If
 
             SelectedText = selection.Text.Trim()
+
+            If runQueryAssistant Then
+
+                Dim querytext As String = Await LLM(SP_QueryPrompt, "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0, False)
+
+                querytext = SLib.ShowCustomInputBox("This prompt has been generated based on your selection; modify it as you wish:", $"{AN} Query Assistant", False, querytext.Trim()).Trim()
+                If String.IsNullOrWhiteSpace(querytext) OrElse querytext.ToLower() = "esc" Then
+                    Return
+                End If
+                SelectedText = querytext.Trim()
+
+            End If
+
             Dim llmresult As String = Await LLM(OtherPrompt, SelectedText, "", "", 0, True)
 
             SP_MergePrompt_Cached = SP_MergePrompt
@@ -4168,6 +4188,9 @@ Public Class ThisAddIn
                 DoInplace = True
             ElseIf OtherPrompt.StartsWith(AddPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
                 OtherPrompt = OtherPrompt.Substring(AddPrefix.Length).Trim()
+                DoInplace = False
+            ElseIf OtherPrompt.StartsWith(AddPrefix2, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(AddPrefix2.Length).Trim()
                 DoInplace = False
             ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
                 OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
@@ -4850,13 +4873,10 @@ Public Class ThisAddIn
 
             End If
 
-            Dim backMap As List(Of Integer) = Nothing
             Dim raw As String = ""
 
-            Debug.WriteLine(DoTPMarkup & PutInBubbles & PutInClipboard)
-
-            If (PutInBubbles Or PutInClipboard) AndAlso Not DoTPMarkup Then
-                raw = GetVisibleText(rng, backMap)
+            If (PutInBubbles Or PutInClipboard) AndAlso Not DoTPMarkup AndAlso rng IsNot Nothing Then
+                raw = GetVisibleText(rng)
             End If
 
             'Dim originalXml As String = ""
@@ -5733,90 +5753,166 @@ Public Class ThisAddIn
 
 
 
+    Public Function GetVisibleText(ByVal src As Range) As String
+        ' 1) Null-/Leerauswahl abfangen
+        If src Is Nothing Then
+            Return String.Empty
+        End If
 
-
-
-
-    '═════════════════════════════════════════════════════════════════════════════
-    '  GetVisibleText  –  fast, deletion-free text of a Range
-    '                    ▸ *src*         … any Word.Range (Selection, whole doc …)
-    '                    ▸ *mapBack(i)*  … absolute position of character *i*
-    '                                      in the original document
-    '═════════════════════════════════════════════════════════════════════════════
-    Public Function GetVisibleText(
-        ByVal src As Microsoft.Office.Interop.Word.Range,
-        ByRef mapBack As List(Of Integer)) As String
-
-        '----------- phase 0 : pull the slice into a native string --------------
+        ' 2) Rohtext einmal holen für Fast-Path
         Dim raw As String = src.Text
+        If String.IsNullOrEmpty(raw) Then
+            Return String.Empty
+        End If
+
+        ' 3) Fast-Path: keine Revisionen in dieser Range → sofort zurückgeben
+        If src.Revisions.Count = 0 Then
+            Return raw
+        End If
+
         Dim sliceStart As Integer = src.Start
-        Dim sliceEnd As Integer = src.End         'exclusive
+        Dim sliceEnd As Integer = src.End    ' exklusiv
+
+        ' 4) Gelöschte Intervalle (Revisions ohne Insert/Move) sammeln
+        Dim skips As New List(Of (s As Integer, e As Integer))()
+        For Each rev As Revision In src.Revisions
+            If rev.Type = WdRevisionType.wdRevisionInsert _
+           OrElse rev.Type = WdRevisionType.wdRevisionMovedTo Then
+                Continue For
+            End If
+
+            Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
+            Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
+            If fromPos < toPos Then
+                skips.Add((fromPos, toPos))
+            End If
+        Next
+
+        ' 5) Intervalle zusammenführen
+        Dim merged As List(Of (s As Integer, e As Integer)) = MergeIntervals(skips)
+
+        ' 6) Komplement-Intervalle (sichtbare Segmente) ermitteln
+        Dim keep As New List(Of (s As Integer, e As Integer))()
+        Dim pos As Integer = sliceStart
+        For Each iv In merged
+            If iv.s > pos Then
+                keep.Add((pos, iv.s))
+            End If
+            pos = Math.Max(pos, iv.e)
+        Next
+        If pos < sliceEnd Then
+            keep.Add((pos, sliceEnd))
+        End If
+
+        ' 7) Stück für Stück aus Word‐Range auslesen
+        Dim sb As New StringBuilder()
+        For Each iv In keep
+            sb.Append(src.Document.Range(iv.s, iv.e).Text)
+        Next
+
+        Return sb.ToString()
+    End Function
+
+    Private Function MergeIntervals(ByVal intervals As List(Of (s As Integer, e As Integer))) _
+    As List(Of (s As Integer, e As Integer))
+
+        Dim result As New List(Of (s As Integer, e As Integer))()
+        If intervals.Count = 0 Then
+            Return result
+        End If
+
+        intervals.Sort(Function(a, b) a.s.CompareTo(b.s))
+        Dim cur = intervals(0)
+
+        For i As Integer = 1 To intervals.Count - 1
+            Dim nxt = intervals(i)
+            If nxt.s <= cur.e Then
+                cur.e = Math.Max(cur.e, nxt.e)
+            Else
+                result.Add(cur)
+                cur = nxt
+            End If
+        Next
+
+        result.Add(cur)
+        Return result
+    End Function
+
+
+
+
+    Public Function oldGetVisibleText(ByVal src As Microsoft.Office.Interop.Word.Range) As String
+        ' Gracefully handle no selection or null input
+        If src Is Nothing Then
+            Return String.Empty
+        End If
+
+        Dim raw As String = src.Text
+        If String.IsNullOrEmpty(raw) Then
+            Return String.Empty
+        End If
+
+        Dim sliceStart As Integer = src.Start
+        Dim sliceEnd As Integer = src.End         ' exclusive
         Dim rawLen As Integer = raw.Length
 
-        '----------- phase 1 : collect *deleted* intervals ----------------------
-        Dim skip As New List(Of (s As Integer, e As Integer))   'absolute coords
-
+        ' Phase 1: collect intervals of *deleted* text (revisions that are not insert/move-to)
+        Dim skip As New List(Of (s As Integer, e As Integer))
         For Each rev As Microsoft.Office.Interop.Word.Revision In src.Document.Revisions
-            'ignore revisions that do not overlap the slice
-            If rev.Range.End <= sliceStart Then Continue For
-            If rev.Range.Start >= sliceEnd Then Continue For
-
-            'keep Insertions / Moved-To      → everything else is *invisible*
+            ' skip revisions outside our slice
+            If rev.Range.End <= sliceStart OrElse rev.Range.Start >= sliceEnd Then Continue For
+            ' keep insertions and moves; everything else is invisible
             If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
-        OrElse rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo _
-        Then Continue For
+                OrElse rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo Then Continue For
 
             Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
             Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
             skip.Add((fromPos, toPos))
         Next
 
-        'merge overlaps / adjacents → single sorted list
+        ' Merge overlapping or adjacent intervals
         If skip.Count > 0 Then
             skip.Sort(Function(a, b) a.s.CompareTo(b.s))
             Dim merged As New List(Of (s As Integer, e As Integer))
             Dim cur = skip(0)
-            For i = 1 To skip.Count - 1
-                If skip(i).s <= cur.e Then               'overlap or adjacent
-                    cur.e = Math.Max(cur.e, skip(i).e)   'merge
+            For i As Integer = 1 To skip.Count - 1
+                If skip(i).s <= cur.e Then
+                    cur.e = Math.Max(cur.e, skip(i).e)
                 Else
-                    merged.Add(cur) : cur = skip(i)
+                    merged.Add(cur)
+                    cur = skip(i)
                 End If
             Next
             merged.Add(cur)
             skip = merged
         End If
 
-        '----------- phase 2 : build visible buffer + back-map ------------------
-        Dim sb As New System.Text.StringBuilder(rawLen)
-        mapBack = New List(Of Integer)(rawLen)
+        ' Phase 2: build visible text buffer
+        Dim sb As New StringBuilder()
+        Dim relPos As Integer = 0
 
-        Dim relPos As Integer = 0                             'cursor in *raw*
         For Each iv In skip
             Dim delStartRel As Integer = iv.s - sliceStart
-            Dim delEndRel As Integer = iv.e - sliceStart    'exclusive
+            Dim delEndRel As Integer = iv.e - sliceStart    ' exclusive
 
-            'copy visible run BEFORE this deletion
+            ' Append visible segment before this deletion
             Dim visLen As Integer = delStartRel - relPos
             If visLen > 0 Then
                 sb.Append(raw, relPos, visLen)
-                For pos = relPos To delStartRel - 1
-                    mapBack.Add(sliceStart + pos)
-                Next
             End If
-            relPos = Math.Max(relPos, delEndRel)              'jump past deletion
+
+            ' Skip over deleted segment
+            relPos = Math.Max(relPos, delEndRel)
         Next
 
-        'tail after last deletion
+        ' Append remaining tail after last deletion
         If relPos < rawLen Then
             sb.Append(raw, relPos, rawLen - relPos)
-            For pos = relPos To rawLen - 1
-                mapBack.Add(sliceStart + pos)
-            Next
         End If
 
-        Return sb.ToString()                                  'visible text only
+        Return sb.ToString()
     End Function
+
 
 
 
@@ -5825,6 +5921,12 @@ Public Class ThisAddIn
 
         Return WordSearchHelper.FindLongTextAnchoredFast(selection, findText, Skipdeleted)
 
+    End Function
+
+    Function xxx(ByRef selection As Word.Selection, ByVal findText As String, Optional INI_Clean As Boolean = False) As Boolean
+        ' This function searches for a long text in chunks of a specified sizeed as needed) 
+
+        Dim chunkSize As Integer = 1000 ' Define the chunk size for breaking the text into smaller parts
         ' Store original selection to restore if needed
         Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
         Dim originalStart As Integer = selection.Start
@@ -6269,13 +6371,25 @@ Public Class ThisAddIn
 
         range.Delete()
 
-        Dim markdownpipeline As MarkdownPipeline = New MarkdownPipelineBuilder() _
-                        .UseAdvancedExtensions() _
-                        .UseEmojiAndSmiley() _
-                        .UseTaskLists() _
-                        .UseMathematics() _
-                        .UseGenericAttributes() _
-                        .Build()
+
+        Dim builder As New MarkdownPipelineBuilder()
+
+        builder.UsePipeTables()
+        builder.UseGridTables()
+        builder.UseSoftlineBreakAsHardlineBreak()
+        builder.UseListExtras()
+        builder.UseFootnotes()
+        builder.UseDefinitionLists()
+        builder.UseAbbreviations()
+        builder.UseAutoLinks()
+        builder.UseTaskLists()
+        builder.UseEmojiAndSmiley()
+        builder.UseMathematics()
+        builder.UseFigures()
+        builder.UseAdvancedExtensions()
+        builder.UseGenericAttributes()
+
+        Dim markdownPipeline As MarkdownPipeline = builder.Build()
 
         Dim htmlResult As String = Markdown.ToHtml(Result, markdownpipeline).Trim
 
@@ -6760,38 +6874,62 @@ Public Class ThisAddIn
 
 
 
-
-    Public Function AddMarkupTags(rng As Range, Optional TPMarkupName As String = Nothing) As String
+    Public Function AddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
         Dim resultBuilder As New StringBuilder()
 
-        ' Check revisions in the range to apply markup for deletions and insertions
-        For Each rev As Revision In rng.Revisions
-            Dim includeMarkup As Boolean = True
+        ' 1. Alle Revisionen in Dokumentreihenfolge sortieren
+        Dim revList = rng.Revisions _
+        .Cast(Of Revision)() _
+        .OrderBy(Function(r) r.Range.Start) _
+        .ToList()
 
-            ' Check if we need to filter by TPMarkupName
+        ' 2. Startposition auf Anfang des Bereichs setzen
+        Dim currentPos As Integer = rng.Start
+
+        ' 3. Über jede Revision iterieren
+        For Each rev As Revision In revList
+            ' 3a. Unveränderten Text vor der Revision anhängen
+            If rev.Range.Start > currentPos Then
+                Dim unchangedRange As Range = rng.Document.Range(currentPos, rev.Range.Start)
+                resultBuilder.Append(unchangedRange.Text)
+            End If
+
+            ' 3b. Prüfen, ob nach TPMarkupName gefiltert werden soll
+            Dim includeMarkup As Boolean = True
             If Not String.IsNullOrEmpty(TPMarkupName) Then
                 If Not String.Equals(rev.Author, TPMarkupName, StringComparison.OrdinalIgnoreCase) Then
                     includeMarkup = False
                 End If
             End If
 
-            ' Apply markup based on the type of revision
+            ' 3c. Revisionstext mit Tags oder neutral anhängen
             If includeMarkup Then
-                If rev.Type = WdRevisionType.wdRevisionDelete Then
-                    resultBuilder.Append("<del>").Append(rev.Range.Text).Append("</del>")
-                ElseIf rev.Type = WdRevisionType.wdRevisionInsert Then
-                    resultBuilder.Append("<ins>").Append(rev.Range.Text).Append("</ins>")
-                Else
-                    resultBuilder.Append(rev.Range.Text)
-                End If
+                Select Case rev.Type
+                    Case WdRevisionType.wdRevisionDelete
+                        resultBuilder.Append("<del>").Append(rev.Range.Text).Append("</del>")
+                    Case WdRevisionType.wdRevisionInsert
+                        resultBuilder.Append("<ins>").Append(rev.Range.Text).Append("</ins>")
+                    Case Else
+                        resultBuilder.Append(rev.Range.Text)
+                End Select
             Else
                 resultBuilder.Append(rev.Range.Text)
             End If
+
+            ' 3d. Position hinter der Revision setzen
+            currentPos = rev.Range.End
         Next
 
-        ' Return the result
+        ' 4. Restlichen unveränderten Text bis zum Ende des Bereichs anhängen
+        If currentPos < rng.End Then
+            Dim tailRange As Range = rng.Document.Range(currentPos, rng.End)
+            resultBuilder.Append(tailRange.Text)
+        End If
+
+        ' Ergebnis zurückgeben
         Return resultBuilder.ToString()
     End Function
+
 
     Public Function RemoveMarkupTags(text As String) As String
         ' Remove <del>, </del>, <ins>, and </ins> tags using regular expressions
@@ -6801,7 +6939,7 @@ Public Class ThisAddIn
 
     Private Sub CompareAndInsertComparedoc(originalText As String, newText As String, targetrange As Range, Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
 
-        Dim splash As New SLib.SplashScreen("Creating markup using the Word compare functionality (ignore any flickering and press 'No' if prompted) ...")
+        Dim splash As New SplashScreen("Creating markup using the Word compare functionality (ignore any flickering and press 'No' if prompted) ...")
         splash.Show()
         splash.Refresh()
 
@@ -8212,11 +8350,11 @@ Public Class ThisAddIn
                 If Aborted Then
                     ShowCustomMessageBox($"Search aborted. {SuccessHits} hit(s) have been highlighted so far.", "Context Search")
                 ElseIf notFoundParts.Count > 0 Then
-                    Dim errorlist As String = ShowCustomWindow($"{SuccessHits} hit(s) have been highlighted using Context Search. The following hit(s) could not be found:", String.Join(vbCrLf, notFoundParts), "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN, True)
+                    Dim errorlist As String = ShowCustomWindow($"{SuccessHits} hit(s) have been highlighted using Context Search. The following hit(s) could not be found:", String.Join(vbCrLf, notFoundParts), "The above error list will be included in a final comment at the end of your last hit (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN, True)
                     If errorlist <> "" And errorlist.ToLower() <> "esc" Then
                         SLib.PutInClipboard(errorlist)
                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                        Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & errorlist)
+                        Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5} could not locate these sections: " & vbCrLf & errorlist)
                     End If
                 Else
                     ShowCustomMessageBox($"{SuccessHits} hit(s) have been highlighted.", "Context Search")
@@ -9444,7 +9582,17 @@ Public Class ThisAddIn
 
         Inherits Form
 
-        Private STT_PreExistingSleepBlocker As Boolean = False
+        ' --- P/Invoke for SetThreadExecutionState ---
+        <DllImport("kernel32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
+        Private Shared Function SetThreadExecutionState(ByVal esFlags As UInteger) As UInteger
+        End Function
+
+        ' Constants for sleep prevention
+        Private Const ES_CONTINUOUS As UInteger = &H80000000UI
+        Private Const ES_SYSTEM_REQUIRED As UInteger = &H1UI
+        Private Const ES_DISPLAY_REQUIRED As UInteger = &H2UI ' Optional: keeps the display on too
+
+        Private _iSetTheSleepLock As Boolean = False
 
         Private RichTextBox1 As Forms.RichTextBox
         Private StartButton As Forms.Button
@@ -9750,7 +9898,6 @@ Public Class ThisAddIn
         End Sub
 
 
-
         Public Sub ConfigureAudioOutputDevice()
             ' 1) Alle aktiven Render-Endpoints ermitteln
             Dim enumerator As New MMDeviceEnumerator()
@@ -9814,10 +9961,6 @@ Public Class ThisAddIn
                 End If
             End If
         End Sub
-
-
-
-
 
         Private Sub InitializeComponents()
             ' --- DPI‐aware form setup ---
@@ -10039,14 +10182,17 @@ Public Class ThisAddIn
                 WhisperRecognizer = Nothing
             End If
 
-            If IsNothing(prevExecState) Then
+            ' Only release the sleep lock IF we were the ones who set it.
+            If _iSetTheSleepLock Then
+                ' We are responsible, so we release the lock.
                 SetThreadExecutionState(ES_CONTINUOUS)
+                _iSetTheSleepLock = False ' Reset our flag
+                Debug.WriteLine("This form released the sleep lock.")
             Else
-                If Not STT_PreExistingSleepBlocker Then
-                    SetThreadExecutionState(prevExecState)
-                    prevExecState = Nothing
-                End If
+                ' We are not responsible, so we do nothing to the execution state.
+                Debug.WriteLine("Another component is managing the sleep lock. This form took no action.")
             End If
+
 
         End Function
 
@@ -10834,12 +10980,22 @@ Public Class ThisAddIn
             End If
             waveIn.StartRecording()
 
-            If IsNothing(prevExecState) Then
-                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
-                STT_PreExistingSleepBlocker = False
+            ' Always request that the system stay awake.
+            ' The function returns the PREVIOUS state.
+            Dim previousState As UInteger = SetThreadExecutionState(ES_CONTINUOUS Or ES_SYSTEM_REQUIRED)
+
+            ' Now, check if the SYSTEM_REQUIRED flag was already set in the previous state.
+            ' We use a bitwise AND. If the result is 0, the flag was NOT set before our call.
+            If (previousState And ES_SYSTEM_REQUIRED) = 0 Then
+                ' The lock was NOT active before. Therefore, *we* are responsible for releasing it later.
+                _iSetTheSleepLock = True
+                Debug.WriteLine("Sleep lock was not active. This form has now acquired it.")
             Else
-                STT_PreExistingSleepBlocker = True
+                ' The lock was ALREADY active. We are not responsible for releasing it.
+                _iSetTheSleepLock = False
+                Debug.WriteLine("Sleep lock was already active. This form will not release it.")
             End If
+
 
             Return True
 
@@ -12216,7 +12372,53 @@ Public Class ThisAddIn
 
     ' Text-to-Speech Engine 
 
-    Private Shared TTS_PreExistingSleepBlocker As Boolean = False
+    <DllImport("kernel32.dll", CharSet:=CharSet.Auto, SetLastError:=True)>
+    Private Shared Function SetThreadExecutionState(ByVal esFlags As UInteger) As UInteger
+    End Function
+
+    Private Const ES_CONTINUOUS As UInteger = &H80000000UI
+    Private Const ES_SYSTEM_REQUIRED As UInteger = &H1UI
+
+    ' Flag to track if the TTS engine is responsible for the current sleep lock.
+    Private Shared _ttsAcquiredTheSleepLock As Boolean = False
+
+    ''' <summary>
+    ''' Cooperatively acquires a system sleep lock for TTS operations.
+    ''' It checks if a lock is already active before taking responsibility for it.
+    ''' </summary>
+    Public Shared Sub AcquireTTSSleepLock()
+        ' Always request that the system stay awake.
+        ' The function returns the PREVIOUS state.
+        Dim previousState As UInteger = SetThreadExecutionState(ES_CONTINUOUS Or ES_SYSTEM_REQUIRED)
+
+        ' Check if the SYSTEM_REQUIRED flag was already set in the previous state.
+        If (previousState And ES_SYSTEM_REQUIRED) = 0 Then
+            ' The lock was NOT active before. Therefore, the TTS engine is now responsible.
+            _ttsAcquiredTheSleepLock = True
+            Debug.WriteLine("[TTS] Sleep lock was not active. TTS has now acquired it.")
+        Else
+            ' The lock was ALREADY active. The TTS engine is not responsible for releasing it.
+            _ttsAcquiredTheSleepLock = False
+            Debug.WriteLine("[TTS] Sleep lock was already active. TTS will not release it.")
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' Cooperatively releases the system sleep lock, but only if the TTS
+    ''' engine was the component that originally acquired it.
+    ''' </summary>
+    Public Shared Sub ReleaseTTSSleepLock()
+        ' Only release the sleep lock IF we were the ones who set it.
+        If _ttsAcquiredTheSleepLock Then
+            ' We are responsible, so we release the lock.
+            SetThreadExecutionState(ES_CONTINUOUS)
+            _ttsAcquiredTheSleepLock = False ' Reset our flag
+            Debug.WriteLine("[TTS] TTS has released the sleep lock.")
+        Else
+            ' We are not responsible, so we do nothing.
+            Debug.WriteLine("[TTS] Another component is managing the sleep lock. TTS took no action.")
+        End If
+    End Sub
 
     Public Enum TTSEngine
         Google = 0
@@ -12401,14 +12603,9 @@ Public Class ThisAddIn
 
     Public Shared Async Function GenerateAudioFromText(input As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional nossml As Boolean = False, Optional Pitch As Double = 0, Optional SpeakingRate As Double = 1, Optional CurrentPara As String = "") As Task(Of Byte())
 
-        Try
+        AcquireTTSSleepLock()
 
-            If IsNothing(prevExecState) Then
-                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
-                TTS_PreExistingSleepBlocker = False
-            Else
-                TTS_PreExistingSleepBlocker = True
-            End If
+        Try
 
             Dim eng = TTS_SelectedEngine
 
@@ -12534,14 +12731,8 @@ Public Class ThisAddIn
             MessageBox.Show($"Error in GenerateAudioFromText: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return Nothing
         Finally
-            If IsNothing(prevExecState) Then
-                SetThreadExecutionState(ES_CONTINUOUS)
-            Else
-                If Not TTS_PreExistingSleepBlocker Then
-                    SetThreadExecutionState(prevExecState)
-                    prevExecState = Nothing
-                End If
-            End If
+            ' If IsNothing(prevExecState) Then ...
+            ReleaseTTSSleepLock()
         End Try
 
     End Function
@@ -12604,13 +12795,6 @@ Public Class ThisAddIn
     )
 
         Try
-
-            If IsNothing(prevExecState) Then
-                prevExecState = SetThreadExecutionState(ES_KEEP_CURRENT_SETTING)
-                TTS_PreExistingSleepBlocker = False
-            Else
-                TTS_PreExistingSleepBlocker = True
-            End If
 
             Dim outputFiles As New List(Of String)
 
@@ -12743,14 +12927,7 @@ Public Class ThisAddIn
         Catch ex As Exception
             Debug.WriteLine($"Error generating podcast audio: {ex.Message}")
         Finally
-            If IsNothing(prevExecState) Then
-                SetThreadExecutionState(ES_CONTINUOUS)
-            Else
-                If Not TTS_PreExistingSleepBlocker Then
-                    SetThreadExecutionState(prevExecState)
-                    prevExecState = Nothing
-                End If
-            End If
+
         End Try
     End Sub
 

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.6.2025
+' 22.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -19,6 +19,7 @@
 ' Includes Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet
 ' Includes Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
+' Includes Nito.AsyncEx in unchanged form; Copyright (c) 2021 Stephen Cleary; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/StephenCleary/AsyncEx
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Imports System.ComponentModel
@@ -38,8 +39,11 @@ Imports System.Text
 Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports System.Windows.Forms
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Window
 Imports HtmlAgilityPack
+Imports Markdig
 Imports Markdig.Extensions
+Imports Markdig.Syntax
 Imports Microsoft.ML.OnnxRuntime
 Imports Microsoft.ML.OnnxRuntime.Tensors
 Imports Microsoft.ML.Tokenizers
@@ -47,6 +51,7 @@ Imports Microsoft.Office.Interop
 Imports Microsoft.Office.Interop.Word
 Imports Microsoft.Office.Tools
 Imports Microsoft.Win32
+Imports NAudio
 Imports NAudio.Utils
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
@@ -663,6 +668,434 @@ Namespace SharedLibrary
 
     End Module
 
+
+    Public Class SplashScreenCountDown
+        Inherits System.Windows.Forms.Form
+
+        ' ─── Controls & state ───────────────────────────────────────
+        Private lblMessage As System.Windows.Forms.Label
+        Private picLogo As System.Windows.Forms.PictureBox
+        Private remainingSeconds As Integer
+        Private baseText As String
+        Private countdownCts As System.Threading.CancellationTokenSource
+
+        ' Used to wait until the form is loaded before returning from Show()
+        Private loadedEvent As System.Threading.ManualResetEventSlim
+        Private splashThread As System.Threading.Thread
+
+        ''' <summary>
+        ''' Fires when the user presses Esc.
+        ''' </summary>
+        Public Event CancelRequested As System.EventHandler
+
+        ' ─── WinAPI for dragging ─────────────────────────────────────
+        <System.Runtime.InteropServices.DllImport("user32.dll", SetLastError:=True)>
+        Private Shared Function ReleaseCapture() As Boolean
+        End Function
+
+        <System.Runtime.InteropServices.DllImport("user32.dll", SetLastError:=True)>
+        Private Shared Function SendMessage(
+        ByVal hWnd As IntPtr,
+        ByVal wMsg As Integer,
+        ByVal wParam As IntPtr,
+        ByVal lParam As IntPtr
+    ) As IntPtr
+        End Function
+
+        Private Const WM_NCLBUTTONDOWN As Integer = &HA1
+        Private Const HTCAPTION As Integer = 2
+
+        ''' <summary>
+        ''' customText: text prefix  
+        ''' formWidth/Height: if >0, override autosize  
+        ''' countdownSeconds: initial countdown length (0=no countdown)  
+        ''' </summary>
+        Public Sub New(
+        Optional ByVal customText As String = "Please wait …",
+        Optional ByVal formWidth As Integer = 0,
+        Optional ByVal formHeight As Integer = 0,
+        Optional ByVal countdownSeconds As Integer = 0)
+
+            MyBase.New()
+
+            ' ─── Form basics ──────────────────────────────────────────
+            Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None
+            Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            Me.BackColor = System.Drawing.ColorTranslator.FromWin32(&H8000000F)
+            Me.KeyPreview = True
+
+            ' ─── Logo ──────────────────────────────────────────────────
+            picLogo = New System.Windows.Forms.PictureBox() With {
+            .Image = New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo),
+            .SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom
+        }
+            Me.Controls.Add(picLogo)
+
+            ' ─── Label ────────────────────────────────────────────────
+            Dim stdFont As System.Drawing.Font =
+            New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            lblMessage = New System.Windows.Forms.Label() With {
+            .Font = stdFont,
+            .AutoSize = True,
+            .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        }
+            Me.Controls.Add(lblMessage)
+
+            ' ─── Layout & initial text ────────────────────────────────
+            baseText = customText
+            remainingSeconds = countdownSeconds
+            Dim initialText As String = If(countdownSeconds > 0,
+                                       $"{customText} {countdownSeconds}s",
+                                       customText)
+            lblMessage.Text = initialText
+
+            Dim padding As Integer = 10
+            Dim textSize As System.Drawing.Size =
+            System.Windows.Forms.TextRenderer.MeasureText(initialText, stdFont)
+            lblMessage.Size = textSize
+
+            ' logo height == text height (equal vertical padding)
+            Dim logoSize As Integer = textSize.Height
+            picLogo.SetBounds(padding, padding, logoSize, logoSize)
+
+            ' center label vertically next to logo
+            Dim labelX As Integer = picLogo.Right + padding
+            Dim labelY As Integer = padding + (logoSize - textSize.Height) \ 2
+            lblMessage.SetBounds(labelX, labelY, textSize.Width, textSize.Height)
+
+            ' auto-size form (unless overridden)
+            Dim clientW As Integer = lblMessage.Right + padding
+            Dim clientH As Integer = logoSize + padding * 2
+            If formWidth > 0 Then clientW = formWidth
+            If formHeight > 0 Then clientH = formHeight
+            Me.ClientSize = New System.Drawing.Size(clientW, clientH)
+
+            ' ESC cancels
+            AddHandler Me.KeyDown, AddressOf OnKeyDown
+
+            ' kick off countdown if requested
+            If countdownSeconds > 0 Then
+                StartCountdown()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Instance-based Show: spins up its own STA thread & message loop.
+        ''' </summary>
+        Public Shadows Sub Show()
+            ' prevent multiple shows
+            If splashThread IsNot Nothing Then Return
+
+            loadedEvent = New System.Threading.ManualResetEventSlim(False)
+
+            ' start a new STA thread for this form
+            splashThread = New System.Threading.Thread(Sub()
+                                                           ' signal when the form is loaded
+                                                           AddHandler Me.Load, Sub(s, e) loadedEvent.Set()
+                                                           System.Windows.Forms.Application.Run(Me)
+                                                       End Sub)
+
+            splashThread.SetApartmentState(System.Threading.ApartmentState.STA)
+            splashThread.IsBackground = True
+            splashThread.Start()
+
+            ' wait until the Load event has fired
+            loadedEvent.Wait()
+        End Sub
+
+        ''' <summary>
+        ''' Instance-based Close: marshals back to the form's thread.
+        ''' </summary>
+        Public Shadows Sub Close()
+            If Me.InvokeRequired Then
+                Me.Invoke(New System.Action(Sub() MyBase.Close()))
+            Else
+                MyBase.Close()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Update the label text without affecting the countdown.
+        ''' </summary>
+        Public Sub UpdateMessage(ByVal newMessage As String)
+            If Me.InvokeRequired Then
+                Me.Invoke(New System.Action(Sub() UpdateMessage(newMessage)))
+            Else
+                lblMessage.Text = newMessage
+                Dim newSize As System.Drawing.Size =
+                System.Windows.Forms.TextRenderer.MeasureText(newMessage, lblMessage.Font)
+                lblMessage.Size = newSize
+                lblMessage.Refresh()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Stop any running countdown and start a fresh one.
+        ''' </summary>
+        Public Sub RestartCountdown(
+        ByVal seconds As Integer,
+        Optional ByVal newBaseText As String = Nothing)
+
+            If newBaseText IsNot Nothing Then
+                baseText = newBaseText
+            End If
+
+            remainingSeconds = seconds
+            UpdateMessage($"{baseText} {remainingSeconds}s")
+            StartCountdown()
+        End Sub
+
+        ''' <summary>
+        ''' Runs on a background Task, delays 1s between ticks, marshals updates via Invoke.
+        ''' </summary>
+        Private Sub StartCountdown()
+            ' cancel prior if any
+            countdownCts?.Cancel()
+            countdownCts = New System.Threading.CancellationTokenSource()
+            Dim ct = countdownCts.Token
+
+            System.Threading.Tasks.Task.Run(Async Function()
+                                                While remainingSeconds > 0 AndAlso Not ct.IsCancellationRequested
+                                                    Try
+                                                        Await System.Threading.Tasks.Task.Delay(1000, ct)
+                                                    Catch ex As System.Threading.Tasks.TaskCanceledException
+                                                        Exit While
+                                                    End Try
+
+                                                    remainingSeconds -= 1
+                                                    If remainingSeconds < 0 Then remainingSeconds = 0
+
+                                                    ' marshal update to UI thread
+                                                    If Not Me.IsDisposed Then
+                                                        If Me.InvokeRequired Then
+                                                            Me.Invoke(New System.Action(Sub()
+                                                                                            lblMessage.Text = $"{baseText} {remainingSeconds}s"
+                                                                                            lblMessage.Size = System.Windows.Forms.TextRenderer.MeasureText(lblMessage.Text, lblMessage.Font)
+                                                                                        End Sub))
+                                                        Else
+                                                            lblMessage.Text = $"{baseText} {remainingSeconds}s"
+                                                            lblMessage.Size = System.Windows.Forms.TextRenderer.MeasureText(lblMessage.Text, lblMessage.Font)
+                                                        End If
+                                                    End If
+                                                End While
+                                            End Function)
+        End Sub
+
+        ''' <summary>
+        ''' Closes + raises CancelRequested when Esc is pressed.
+        ''' </summary>
+        Private Sub OnKeyDown(ByVal sender As Object, ByVal e As System.Windows.Forms.KeyEventArgs)
+            If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                countdownCts?.Cancel()
+                RaiseEvent CancelRequested(Me, System.EventArgs.Empty)
+                Close()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Allow dragging the borderless form.
+        ''' </summary>
+        Protected Overrides Sub OnMouseDown(ByVal e As System.Windows.Forms.MouseEventArgs)
+            MyBase.OnMouseDown(e)
+            If e.Button = System.Windows.Forms.MouseButtons.Left Then
+                ReleaseCapture()
+                SendMessage(Me.Handle, WM_NCLBUTTONDOWN, CType(HTCAPTION, IntPtr), IntPtr.Zero)
+            End If
+        End Sub
+
+    End Class
+
+
+    Public Class SplashScreenWorks
+        Inherits System.Windows.Forms.Form
+
+        ' ─── Controls & state ────────────────────────────────────────
+        Private lblMessage As System.Windows.Forms.Label
+        Private picLogo As System.Windows.Forms.PictureBox
+        Private remainingSeconds As Integer
+        Private baseText As String
+        Private countdownCts As System.Threading.CancellationTokenSource
+
+        ''' <summary>
+        ''' Fires when the user presses Esc.
+        ''' </summary>
+        Public Event CancelRequested As System.EventHandler
+
+        ' ─── WinAPI for borderless dragging ───────────────────────────
+        <System.Runtime.InteropServices.DllImport("user32.dll", SetLastError:=True)>
+        Private Shared Function ReleaseCapture() As Boolean
+        End Function
+
+        <System.Runtime.InteropServices.DllImport("user32.dll", SetLastError:=True)>
+        Private Shared Function SendMessage(
+        ByVal hWnd As IntPtr,
+        ByVal wMsg As Integer,
+        ByVal wParam As IntPtr,
+        ByVal lParam As IntPtr
+    ) As IntPtr
+        End Function
+
+        Private Const WM_NCLBUTTONDOWN As Integer = &HA1
+        Private Const HTCAPTION As Integer = 2
+
+        ''' <summary>
+        ''' customText: text prefix  
+        ''' formWidth/Height: if >0, override autosize  
+        ''' countdownSeconds: initial countdown length (0=no countdown)  
+        ''' </summary>
+        Public Sub New(
+        Optional ByVal customText As String = "Please wait …",
+        Optional ByVal formWidth As Integer = 0,
+        Optional ByVal formHeight As Integer = 0,
+        Optional ByVal countdownSeconds As Integer = 0)
+
+            MyBase.New()
+
+            ' ─── Form setup ───────────────────────────────────────────
+            Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None
+            Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            Me.BackColor = System.Drawing.ColorTranslator.FromWin32(&H8000000F)
+            Me.KeyPreview = True
+
+            ' ─── Logo ─────────────────────────────────────────────────
+            picLogo = New System.Windows.Forms.PictureBox() With {
+            .Image = New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo),
+            .SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom
+        }
+            Me.Controls.Add(picLogo)
+
+            ' ─── Label ───────────────────────────────────────────────
+            Dim stdFont As System.Drawing.Font =
+            New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            lblMessage = New System.Windows.Forms.Label() With {
+            .Font = stdFont,
+            .AutoSize = True,
+            .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        }
+            Me.Controls.Add(lblMessage)
+
+            ' ─── Layout & initial text ───────────────────────────────
+            baseText = customText
+            remainingSeconds = countdownSeconds
+            Dim initialText As String = If(countdownSeconds > 0,
+                                       $"{customText} {countdownSeconds}s",
+                                       customText)
+            lblMessage.Text = initialText
+
+            Dim padding As Integer = 10
+            Dim textSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(initialText, stdFont)
+            lblMessage.Size = textSize
+
+            ' Logo height matches text height for equal top/bottom padding
+            Dim logoSize As Integer = textSize.Height
+            picLogo.SetBounds(padding, padding, logoSize, logoSize)
+
+            ' Center label vertically next to logo
+            Dim labelX As Integer = picLogo.Right + padding
+            Dim labelY As Integer = padding + (logoSize - textSize.Height) \ 2
+            lblMessage.SetBounds(labelX, labelY, textSize.Width, textSize.Height)
+
+            ' Auto‐size form to content (unless overridden)
+            Dim clientW As Integer = lblMessage.Right + padding
+            Dim clientH As Integer = logoSize + padding * 2
+            If formWidth > 0 Then clientW = formWidth
+            If formHeight > 0 Then clientH = formHeight
+            Me.ClientSize = New System.Drawing.Size(clientW, clientH)
+
+            ' ─── ESC cancels ──────────────────────────────────────────
+            AddHandler Me.KeyDown, AddressOf OnKeyDown
+
+            ' ─── Start countdown if needed ───────────────────────────
+            If countdownSeconds > 0 Then
+                StartCountdown()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Updates the label instantly without affecting the countdown.
+        ''' </summary>
+        Public Sub UpdateMessage(ByVal newMessage As String)
+            lblMessage.Text = newMessage
+            Dim newSize As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(newMessage, lblMessage.Font)
+            lblMessage.Size = newSize
+            lblMessage.Refresh()
+        End Sub
+
+        ''' <summary>
+        ''' Stops any running countdown and starts a new one.
+        ''' </summary>
+        Public Sub RestartCountdown(
+        ByVal seconds As Integer,
+        Optional ByVal newBaseText As String = Nothing)
+
+            If newBaseText IsNot Nothing Then
+                baseText = newBaseText
+            End If
+
+            remainingSeconds = seconds
+            UpdateMessage($"{baseText} {remainingSeconds}s")
+            StartCountdown()
+        End Sub
+
+        ''' <summary>
+        ''' Fires every second on a background Task and updates the UI via Invoke.
+        ''' </summary>
+        Private Sub StartCountdown()
+            ' Cancel previous if running
+            countdownCts?.Cancel()
+
+            countdownCts = New System.Threading.CancellationTokenSource()
+            Dim ct = countdownCts.Token
+
+            System.Threading.Tasks.Task.Run(Async Function()
+                                                While remainingSeconds > 0 AndAlso Not ct.IsCancellationRequested
+                                                    Try
+                                                        Await System.Threading.Tasks.Task.Delay(1000, ct)
+                                                    Catch ex As System.Threading.Tasks.TaskCanceledException
+                                                        Exit While
+                                                    End Try
+
+                                                    remainingSeconds -= 1
+                                                    If remainingSeconds < 0 Then remainingSeconds = 0
+
+                                                    ' Update on UI thread
+                                                    If Not Me.IsDisposed Then
+                                                        If Me.InvokeRequired Then
+                                                            Me.Invoke(Sub() UpdateMessage($"{baseText} {remainingSeconds}s"))
+                                                        Else
+                                                            UpdateMessage($"{baseText} {remainingSeconds}s")
+                                                        End If
+                                                    End If
+                                                End While
+                                            End Function)
+        End Sub
+
+        ''' <summary>
+        ''' ESC closes + raises CancelRequested.
+        ''' </summary>
+        Private Sub OnKeyDown(ByVal sender As Object, ByVal e As System.Windows.Forms.KeyEventArgs)
+            If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                countdownCts?.Cancel()
+                RaiseEvent CancelRequested(Me, System.EventArgs.Empty)
+                Me.Close()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Allow dragging borderless form.
+        ''' </summary>
+        Protected Overrides Sub OnMouseDown(ByVal e As System.Windows.Forms.MouseEventArgs)
+            MyBase.OnMouseDown(e)
+            If e.Button = System.Windows.Forms.MouseButtons.Left Then
+                ReleaseCapture()
+                SendMessage(Me.Handle, WM_NCLBUTTONDOWN, CType(HTCAPTION, IntPtr), IntPtr.Zero)
+            End If
+        End Sub
+
+    End Class
+
+
+
     Public Class SharedMethods
 
         ' Amend the following two values to hard code the encryption key and permitted domains (otherwise the values are taken from the registry at the path below)
@@ -695,6 +1128,7 @@ Namespace SharedLibrary
         Private Const RegexSeparator2 As String = "§§§"  ' Set also in Word Addin
 
         Public Shared SP_MergePrompt_Cached As String = ""
+        Public Shared SP_QueryPrompt As String = ""
 
         Public Const AnonFile = "redink-anon.txt"
         Public Const AnonPlaceholder = "redacted"
@@ -729,7 +1163,8 @@ Namespace SharedLibrary
             "11. Google Speech V1 library and related API libraries in unchanged form; Copyright (c) 2024 Google LLC; licensed under the Apache 2.0 license (https://licenses.nuget.org/Apache-2.0) at https://github.com/googleapis/google-cloud-dotnet" & vbCrLf &
             "12. Google Protobuf in unchanged form; Copyright (c) 2025 Google Inc.; licensed under the BSD-3-Clause license (https://licenses.nuget.org/BSD-3-Clause) at https://github.com/protocolbuffers/protobuf" & vbCrLf &
             "13. MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf" & vbCrLf &
-            "14. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
+            "14. Nito.AsyncEx In unchanged form; Copyright (c) 2021 Stephen Cleary; licensed under the MIT License under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/StephenCleary/AsyncEx" & vbCrLf &
+            "15. Various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; " &
             "Copyright (c) 2016- Microsoft Corp." & vbCrLf & vbCrLf & "Disclaimer:" & vbCrLf & vbCrLf &
             "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 'As Is' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE." & vbCrLf & vbCrLf &
             "See the Red Ink license file (https://apps.vischer.com/redink/license.txt) for more information."
@@ -813,6 +1248,9 @@ Namespace SharedLibrary
             Next
             Return ExpandEnvironmentVariables(DefaultINIPaths.Values.First())
         End Function
+
+
+
 
         Public Class SplashScreen
 
@@ -1064,6 +1502,41 @@ Namespace SharedLibrary
         End Sub
 
         Public Shared Sub InsertTextWithBoldMarkers(selection As Object, gptResult As String)
+
+            Dim wordSelection As Microsoft.Office.Interop.Word.Selection = CType(selection, Microsoft.Office.Interop.Word.Selection)
+            Dim wordRange As Microsoft.Office.Interop.Word.Range = wordSelection.Range
+
+            'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
+            'Dim htmlText As String = Markdown.ToHtml(gptResult, markdownPipeline)
+
+            'htmlText = htmlText.Replace(vbCrLf, "<br>").Replace(vbCr, "<br>").Replace(vbLf, "<br>")
+
+            Dim builder As New MarkdownPipelineBuilder()
+
+            builder.UsePipeTables()
+            builder.UseGridTables()
+            builder.UseSoftlineBreakAsHardlineBreak()
+            builder.UseListExtras()
+            builder.UseFootnotes()
+            builder.UseDefinitionLists()
+            builder.UseAbbreviations()
+            builder.UseAutoLinks()
+            builder.UseTaskLists()
+            builder.UseEmojiAndSmiley()
+            builder.UseMathematics()
+            builder.UseFigures()
+            builder.UseAdvancedExtensions()
+            builder.UseGenericAttributes()
+
+            Dim pipeline = builder.Build()
+
+            Dim htmlText As String = Markdown.ToHtml(gptResult, pipeline)
+            InsertTextWithFormat(htmlText, wordRange, True)
+
+        End Sub
+
+        Public Shared Sub oldInsertTextWithBoldMarkers(selection As Object, gptResult As String)
+
             ' Save the starting position of the insertion
             Dim startPosition As Integer = selection.Start
 
@@ -1497,12 +1970,8 @@ Namespace SharedLibrary
                 End If
             End If
 
-            Dim splash As New SplashScreen("Waiting for the LLM to respond...")
-
-            If Not Hidesplash Then
-                splash.Show()
-                splash.Refresh()
-            End If
+            Dim splash As SplashScreenCountDown = Nothing
+            Dim cts As System.Threading.CancellationTokenSource = Nothing
 
             Try
 
@@ -1577,8 +2046,20 @@ Namespace SharedLibrary
                     TimeoutValue = If(Timeout = 0, context.INI_Timeout, Timeout)
                 End If
 
-                Endpoint = Endpoint.Replace("{promptsystem}", CleanString(promptSystem))
-                Endpoint = Endpoint.Replace("{promptuser}", CleanString(promptUser.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()))
+                Dim timeoutSeconds = CInt(TimeoutValue \ 1000)
+
+                ' Create splash & CTS once:
+                splash = New SplashScreenCountDown("Waiting for the AI to respond...", 0, 0, timeoutSeconds)
+                cts = New System.Threading.CancellationTokenSource()
+                AddHandler splash.CancelRequested, Sub() cts.Cancel()
+                Dim ct As System.Threading.CancellationToken = cts.Token
+                If Not Hidesplash Then
+                    splash.Show()
+                    splash.RestartCountdown(timeoutSeconds)
+                End If
+
+                Endpoint = Endpoint.Replace("{promptsystem}", CleanString(Left(promptSystem, 32000)))
+                Endpoint = Endpoint.Replace("{promptuser}", CleanString(Left(promptUser, 32000).Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()))
                 Endpoint = Endpoint.Replace("{userinstruction}", CleanString(AddUserPrompt))
                 Endpoint = Endpoint.Trim().Replace(" ", "+")
 
@@ -1660,232 +2141,238 @@ Namespace SharedLibrary
 
                 Dim Returnvalue As String = ""
 
-                ' Configure HttpClient with timeout
-                Using handler As New System.Net.Http.HttpClientHandler()
-                    handler.UseProxy = True
-                    handler.Proxy = System.Net.WebRequest.DefaultWebProxy
-                    handler.Proxy.Credentials = System.Net.CredentialCache.DefaultCredentials
-                    Using client As New System.Net.Http.HttpClient(handler)
-                        client.Timeout = TimeSpan.FromMilliseconds(TimeoutValue)
+                Try
 
-                        ' Add headers
-                        'If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                        'client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
-                        'End If
+                    ' Configure HttpClient with timeout
+                    Using handler As New System.Net.Http.HttpClientHandler()
+                        handler.UseProxy = True
+                        handler.Proxy = System.Net.WebRequest.DefaultWebProxy
+                        handler.Proxy.Credentials = System.Net.CredentialCache.DefaultCredentials
+                        Using client As New System.Net.Http.HttpClient(handler)
+                            client.Timeout = TimeSpan.FromMilliseconds(TimeoutValue)
 
-                        'If context.INI_APIDebug Then
-                        'Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
-                        'End If
+                            ' Send the request
+                            Try
 
-                        ' Send the request
-                        Try
+                                Dim maxRetries As Integer = 3
+                                Dim delayIntervals As Integer() = {5000, 10000, 30000} ' delays in milliseconds
+                                Dim responseText As String = ""
 
-                            Dim maxRetries As Integer = 3
-                            Dim delayIntervals As Integer() = {5000, 10000, 30000} ' delays in milliseconds
-                            Dim responseText As String = ""
-
-                            For attempt As Integer = 0 To maxRetries
-                                ' On retries, wait the specified delay before sending a new request.
-                                If attempt > 0 Then
-                                    If Not Hidesplash Then
-                                        splash.UpdateMessage("Slowing down ...")
+                                For attempt As Integer = 0 To maxRetries
+                                    ' On retries, wait the specified delay before sending a new request.
+                                    If attempt > 0 Then
+                                        If Not Hidesplash Then
+                                            splash.RestartCountdown(timeoutSeconds, "Slowing down...")
+                                        End If
+                                        Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1), ct)
                                     End If
-                                    Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1))
+
+                                    Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+                                    'Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
+
+                                    Dim response As System.Net.Http.HttpResponseMessage
+
+                                    splash.RestartCountdown(timeoutSeconds)
+
+                                    If useGetMethod Then
+                                        ' 1) GET-Request erstellen
+                                        Dim getReq As New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, Endpoint)
+                                        '    Falls der GET-Endpunkt einen Body erwartet (selten), könnte man hier requestContent setzen:
+                                        '    getReq.Content = requestContent
+                                        If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
+                                            getReq.Headers.Add(HeaderA, HeaderB)
+                                        End If
+                                        If context.INI_APIDebug Then
+                                            Debug.WriteLine($"SENT TO API as GET ({Endpoint}):{Environment.NewLine}{String.Empty}") ' Kein Body
+                                        End If
+                                        response = Await client.SendAsync(getReq, System.Net.Http.HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(False)
+                                    Else
+                                        ' Klassischer POST-Request
+                                        If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
+                                            client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
+                                        End If
+                                        If context.INI_APIDebug Then
+                                            Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                                        End If
+                                        response = Await client.PostAsync(Endpoint, requestContent, ct).ConfigureAwait(False)
+                                    End If
+
+
+                                    If response.IsSuccessStatusCode Then
+                                        ' Read and return the response if the call succeeded.
+                                        responseText = Await response.Content.ReadAsStringAsync().ConfigureAwait(False)
+                                        Exit For
+
+                                    ElseIf response.StatusCode = 429 Then
+                                        ' If we received a 429 error and haven't exhausted our retries, loop to retry.
+                                        If attempt = maxRetries Then
+                                            ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).")
+                                            Return ""
+                                        End If
+                                        ' Otherwise, continue the loop to retry the request.
+                                        Continue For
+                                    Else
+                                        ' For other HTTP errors, read the error content and show the message as before.
+                                        Dim errorContent As String = Await response.Content.ReadAsStringAsync().ConfigureAwait(False)
+                                        ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: {errorContent}")
+                                        Return ""
+                                    End If
+                                Next
+
+                                If Not Hidesplash Then
+                                    splash.RestartCountdown(timeoutSeconds, "Waiting for the AI to respond...")
                                 End If
 
-                                Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-                                'Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
+                                If context.INI_APIDebug Then
+                                    Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
+                                End If
 
-                                Dim response As System.Net.Http.HttpResponseMessage
+                                ' Process the response
 
-                                If useGetMethod Then
-                                    ' 1) GET-Request erstellen
-                                    Dim getReq As New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, Endpoint)
-                                    '    Falls der GET-Endpunkt einen Body erwartet (selten), könnte man hier requestContent setzen:
-                                    '    getReq.Content = requestContent
+                                Dim root As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(responseText)
+
+                                If multiCall Then
+
+                                    ' 1) Alle Keys splitten und Werte extrahieren
+                                    Dim keys() As String = postResponseKey.Split(New String() {sep2}, StringSplitOptions.None)
+                                    Dim extracted As New Dictionary(Of String, String)
+
+                                    For Each key As String In keys
+                                        Dim val As String = CType(root, Newtonsoft.Json.Linq.JObject).SelectToken(key)?.ToString()
+                                        If String.IsNullOrEmpty(val) Then
+                                            Throw New System.Exception($"POST-Response enthält keinen Wert zu '{key}'.")
+                                        End If
+                                        extracted(key) = val
+                                    Next
+
+                                    ' 2) Platzhalter im GET-Endpoint füllen
+                                    Dim rawGetEndpoint As String = getEndpointTemplate
+                                    rawGetEndpoint = rawGetEndpoint.Replace("{model}", ModelValue)
+                                    rawGetEndpoint = rawGetEndpoint.Replace("{ownsessionid}", OwnSessionID)
+                                    rawGetEndpoint = rawGetEndpoint.Replace("{apikey}", If(UseSecondAPI, context.DecodedAPI_2, context.DecodedAPI))
+                                    For Each kvp As KeyValuePair(Of String, String) In extracted
+                                        rawGetEndpoint = rawGetEndpoint.Replace("{" & kvp.Key & "}", kvp.Value)
+                                    Next
+
+                                    ' 3) Platzhalter im optionalen GET-Body füllen
+                                    Dim rawGetBody As String = getAPICallTemplate
+                                    If Not String.IsNullOrWhiteSpace(rawGetBody) Then
+                                        rawGetBody = rawGetBody.Replace("{model}", ModelValue)
+                                        rawGetBody = rawGetBody.Replace("{ownsessionid}", OwnSessionID)
+                                        rawGetBody = rawGetBody.Replace("{apikey}", If(UseSecondAPI, context.DecodedAPI_2, context.DecodedAPI))
+                                        For Each kvp As KeyValuePair(Of String, String) In extracted
+                                            rawGetBody = rawGetBody.Replace("{" & kvp.Key & "}", kvp.Value)
+                                        Next
+                                    End If
+
+                                    ' 4) GET-Anfrage vorbereiten und Header setzen
+                                    Dim getReq As New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, rawGetEndpoint)
+
                                     If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
                                         getReq.Headers.Add(HeaderA, HeaderB)
                                     End If
+
+                                    If Not String.IsNullOrWhiteSpace(rawGetBody) Then
+                                        getReq.Content = New System.Net.Http.StringContent(rawGetBody, System.Text.Encoding.UTF8, "application/json")
+                                    End If
+
                                     If context.INI_APIDebug Then
-                                        Debug.WriteLine($"SENT TO API as GET ({Endpoint}):{Environment.NewLine}{String.Empty}") ' Kein Body
+                                        Debug.WriteLine($"SENT TO API as GET ({rawGetEndpoint}):{Environment.NewLine}{rawGetBody}")
                                     End If
-                                    response = Await client.SendAsync(getReq)
-                                Else
-                                    ' Klassischer POST-Request
-                                    If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                                        client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
-                                    End If
+
+                                    splash.RestartCountdown(timeoutSeconds)
+
+                                    ' 5) GET-Anfrage senden
+                                    Dim getResponseText As String
+                                    Using getResp = Await client.SendAsync(getReq, System.Net.Http.HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(False)
+                                        If getResp.IsSuccessStatusCode Then
+                                            getResponseText = Await getResp.Content.ReadAsStringAsync().ConfigureAwait(False)
+                                        Else
+                                            Dim err = Await getResp.Content.ReadAsStringAsync().ConfigureAwait(False)
+                                            Throw New System.Exception($"HTTP GET Error {getResp.StatusCode}: {err}")
+                                        End If
+                                    End Using
+
                                     If context.INI_APIDebug Then
-                                        Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                                        Debug.WriteLine($"RECEIVED FROM API (GET):{Environment.NewLine}{getResponseText}")
                                     End If
-                                    response = Await client.PostAsync(Endpoint, requestContent)
-                                End If
 
+                                    ' 6) GET-Antwort exakt wie POST-Only weiterverarbeiten
+                                    Dim root2 As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(getResponseText)
 
-                                If response.IsSuccessStatusCode Then
-                                    ' Read and return the response if the call succeeded.
-                                    responseText = Await response.Content.ReadAsStringAsync()
-                                    Exit For
+                                    Select Case root2.Type
+                                        Case Newtonsoft.Json.Linq.JTokenType.Object
+                                            Dim obj2 As Newtonsoft.Json.Linq.JObject = CType(root2, Newtonsoft.Json.Linq.JObject)
+                                            Returnvalue = HandleObject(obj2, getResponseKey, getResponseText)
 
-                                ElseIf response.StatusCode = 429 Then
-                                    ' If we received a 429 error and haven't exhausted our retries, loop to retry.
-                                    If attempt = maxRetries Then
-                                        ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).")
-                                        Return ""
-                                    End If
-                                    ' Otherwise, continue the loop to retry the request.
-                                    Continue For
+                                        Case Newtonsoft.Json.Linq.JTokenType.Array
+                                            For Each item2 As Newtonsoft.Json.Linq.JToken In CType(root2, Newtonsoft.Json.Linq.JArray)
+                                                If item2.Type = Newtonsoft.Json.Linq.JTokenType.Object Then
+                                                    Returnvalue &= HandleObject(CType(item2, Newtonsoft.Json.Linq.JObject), getResponseKey, getResponseText)
+                                                End If
+                                            Next
+
+                                        Case Else
+                                            ShowCustomMessageBox($"Unexpected JSON root type: {root2.Type} ({getResponseText})")
+                                    End Select
+
                                 Else
-                                    ' For other HTTP errors, read the error content and show the message as before.
-                                    Dim errorContent As String = Await response.Content.ReadAsStringAsync()
-                                    ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: {errorContent}")
-                                    Return ""
-                                End If
-                            Next
+                                    ' Verarbeitung für nur POST —
+                                    Select Case root.Type
+                                        Case Newtonsoft.Json.Linq.JTokenType.Object
+                                            Dim jsonObject As Newtonsoft.Json.Linq.JObject = CType(root, Newtonsoft.Json.Linq.JObject)
+                                            Returnvalue = HandleObject(jsonObject, ResponseKey, responseText)
 
-                            If Not Hidesplash Then
-                                splash.UpdateMessage("Waiting for the LLM to respond...")
-                            End If
-
-                            If context.INI_APIDebug Then
-                                Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
-                            End If
-
-                            ' Process the response
-
-                            Dim root As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(responseText)
-
-                            If multiCall Then
-
-                                ' 1) Alle Keys splitten und Werte extrahieren
-                                Dim keys() As String = postResponseKey.Split(New String() {sep2}, StringSplitOptions.None)
-                                Dim extracted As New Dictionary(Of String, String)
-
-                                For Each key As String In keys
-                                    Dim val As String = CType(root, Newtonsoft.Json.Linq.JObject).SelectToken(key)?.ToString()
-                                    If String.IsNullOrEmpty(val) Then
-                                        Throw New System.Exception($"POST-Response enthält keinen Wert zu '{key}'.")
-                                    End If
-                                    extracted(key) = val
-                                Next
-
-                                ' 2) Platzhalter im GET-Endpoint füllen
-                                Dim rawGetEndpoint As String = getEndpointTemplate
-                                rawGetEndpoint = rawGetEndpoint.Replace("{model}", ModelValue)
-                                rawGetEndpoint = rawGetEndpoint.Replace("{ownsessionid}", OwnSessionID)
-                                rawGetEndpoint = rawGetEndpoint.Replace("{apikey}", If(UseSecondAPI, context.DecodedAPI_2, context.DecodedAPI))
-                                For Each kvp As KeyValuePair(Of String, String) In extracted
-                                    rawGetEndpoint = rawGetEndpoint.Replace("{" & kvp.Key & "}", kvp.Value)
-                                Next
-
-                                ' 3) Platzhalter im optionalen GET-Body füllen
-                                Dim rawGetBody As String = getAPICallTemplate
-                                If Not String.IsNullOrWhiteSpace(rawGetBody) Then
-                                    rawGetBody = rawGetBody.Replace("{model}", ModelValue)
-                                    rawGetBody = rawGetBody.Replace("{ownsessionid}", OwnSessionID)
-                                    rawGetBody = rawGetBody.Replace("{apikey}", If(UseSecondAPI, context.DecodedAPI_2, context.DecodedAPI))
-                                    For Each kvp As KeyValuePair(Of String, String) In extracted
-                                        rawGetBody = rawGetBody.Replace("{" & kvp.Key & "}", kvp.Value)
-                                    Next
-                                End If
-
-                                ' 4) GET-Anfrage vorbereiten und Header setzen
-                                Dim getReq As New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, rawGetEndpoint)
-
-                                If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                                    getReq.Headers.Add(HeaderA, HeaderB)
-                                End If
-
-                                If Not String.IsNullOrWhiteSpace(rawGetBody) Then
-                                    getReq.Content = New System.Net.Http.StringContent(rawGetBody, System.Text.Encoding.UTF8, "application/json")
-                                End If
-
-                                If context.INI_APIDebug Then
-                                    Debug.WriteLine($"SENT TO API as GET ({rawGetEndpoint}):{Environment.NewLine}{rawGetBody}")
-                                End If
-
-                                ' 5) GET-Anfrage senden
-                                Dim getResponseText As String
-                                Using getResp = Await client.SendAsync(getReq)
-                                    If getResp.IsSuccessStatusCode Then
-                                        getResponseText = Await getResp.Content.ReadAsStringAsync()
-                                    Else
-                                        Dim err = Await getResp.Content.ReadAsStringAsync()
-                                        Throw New System.Exception($"HTTP GET Error {getResp.StatusCode}: {err}")
-                                    End If
-                                End Using
-
-                                If context.INI_APIDebug Then
-                                    Debug.WriteLine($"RECEIVED FROM API (GET):{Environment.NewLine}{getResponseText}")
-                                End If
-
-                                ' 6) GET-Antwort exakt wie POST-Only weiterverarbeiten
-                                Dim root2 As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(getResponseText)
-
-                                Select Case root2.Type
-                                    Case Newtonsoft.Json.Linq.JTokenType.Object
-                                        Dim obj2 As Newtonsoft.Json.Linq.JObject = CType(root2, Newtonsoft.Json.Linq.JObject)
-                                        Returnvalue = HandleObject(obj2, getResponseKey, getResponseText)
-
-                                    Case Newtonsoft.Json.Linq.JTokenType.Array
-                                        For Each item2 As Newtonsoft.Json.Linq.JToken In CType(root2, Newtonsoft.Json.Linq.JArray)
-                                            If item2.Type = Newtonsoft.Json.Linq.JTokenType.Object Then
-                                                Returnvalue &= HandleObject(CType(item2, Newtonsoft.Json.Linq.JObject), getResponseKey, getResponseText)
-                                            End If
-                                        Next
-
-                                    Case Else
-                                        ShowCustomMessageBox($"Unexpected JSON root type: {root2.Type} ({getResponseText})")
-                                End Select
-
-                            Else
-                                ' Verarbeitung für nur POST —
-                                Select Case root.Type
-                                    Case Newtonsoft.Json.Linq.JTokenType.Object
-                                        Dim jsonObject As Newtonsoft.Json.Linq.JObject = CType(root, Newtonsoft.Json.Linq.JObject)
-                                        Returnvalue = HandleObject(jsonObject, ResponseKey, responseText)
-
-                                    Case Newtonsoft.Json.Linq.JTokenType.Array
-                                        For Each item As Newtonsoft.Json.Linq.JToken In CType(root, Newtonsoft.Json.Linq.JArray)
-                                            If item.Type = Newtonsoft.Json.Linq.JTokenType.Object Then
-                                                Returnvalue &= HandleObject(CType(item, Newtonsoft.Json.Linq.JObject),
+                                        Case Newtonsoft.Json.Linq.JTokenType.Array
+                                            For Each item As Newtonsoft.Json.Linq.JToken In CType(root, Newtonsoft.Json.Linq.JArray)
+                                                If item.Type = Newtonsoft.Json.Linq.JTokenType.Object Then
+                                                    Returnvalue &= HandleObject(CType(item, Newtonsoft.Json.Linq.JObject),
                                                 ResponseKey, responseText)
-                                            End If
-                                        Next
+                                                End If
+                                            Next
 
-                                    Case Else
-                                        ShowCustomMessageBox($"Unexpected JSON root type: {root.Type} ({responseText})")
-                                End Select
-                            End If
+                                        Case Else
+                                            ShowCustomMessageBox($"Unexpected JSON root type: {root.Type} ({responseText})")
+                                    End Select
+                                End If
 
 
-                        Catch ex As System.Net.Http.HttpRequestException
-                            ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
-                        Catch ex As TaskCanceledException
-                            ShowCustomMessageBox($"The request to the LLM timed out. Please try again or increase the timeout setting.")
-                        Catch ex As System.Exception
-                            ShowCustomMessageBox($"The response from the LLM resulted in an error: {ex.Message}")
-                        End Try
-                    End Using ' Dispose HttpClient
-                End Using ' Dispose HttpClientHandler
-
+                            Catch ex As System.Net.Http.HttpRequestException When Not ct.IsCancellationRequested
+                                ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
+                            Catch ex As TaskCanceledException When ct.IsCancellationRequested
+                                ' Wenn wirklich wir den Token gecancelt haben → durchreichen
+                                Throw New OperationCanceledException(ct)
+                            Catch ex As TaskCanceledException When Not ct.IsCancellationRequested
+                                ShowCustomMessageBox($"The request to the LLM timed out. Please try again or increase the timeout setting.")
+                            Catch ex As System.Exception When Not ct.IsCancellationRequested
+                                ShowCustomMessageBox($"The response from the LLM resulted in an error: {ex.Message}")
+                            End Try
+                        End Using ' Dispose HttpClient
+                    End Using ' Dispose HttpClientHandler
+                Catch ex As OperationCanceledException
+                    ShowCustomMessageBox("Request canceled.")
+                    Return ""
+                Finally
+                    cts.Dispose()
+                    If Not Hidesplash Then splash.Close()
+                End Try
                 If DoubleS Then
-                    Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
-                End If
-                If context.INI_Clean Then
-                    Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
-                    Returnvalue = RemoveHiddenMarkers(Returnvalue)
-                End If
+                        Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
+                    End If
+                    If context.INI_Clean Then
+                        Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
+                        Returnvalue = RemoveHiddenMarkers(Returnvalue)
+                    End If
 
-                If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
+                    If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
 
-                Return Returnvalue
+                    Return Returnvalue
 
-            Catch ex As System.Exception
-                ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}")
-                Return ""
-            Finally
-                If Not Hidesplash Then
+                Catch ex As System.Exception
+                    ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}")
+                    Return ""
+                Finally
+                    If Not Hidesplash Then
                     splash.Close()
                 End If
             End Try
@@ -2346,6 +2833,59 @@ Namespace SharedLibrary
 
 
         Public Shared Function CleanString(ByVal input As String) As String
+            ' If empty or whitespace, return empty
+            If String.IsNullOrWhiteSpace(input) Then
+                Return ""
+            End If
+
+            ' 1) First pass: escape everything into sbEscaped
+            Dim sbEscaped As New System.Text.StringBuilder(input.Length * 2)
+
+            For Each c As Char In input
+                Select Case AscW(c)
+                    Case 8      ' backspace
+                        sbEscaped.Append("\b")
+                    Case 9      ' tab
+                        sbEscaped.Append("\t")
+                    Case 10     ' line feed
+                        sbEscaped.Append("\n")
+                    Case 12     ' form feed
+                        sbEscaped.Append("\f")
+                    Case 13     ' carriage return → normalized to \n
+                        sbEscaped.Append("\n")
+                    Case 34     ' double-quote → must become \" 
+                        ' Append a backslash, then a quote
+                        sbEscaped.Append("\").Append("""")
+                    Case 92     ' backslash → \\ 
+                        sbEscaped.Append("\\")
+                    Case 0 To 31  ' other control codes → \uXXXX
+                        sbEscaped.Append("\u").Append(AscW(c).ToString("X4"))
+                    Case Else
+                        sbEscaped.Append(c)
+                End Select
+            Next
+
+            ' 2) Second pass: collapse multiple spaces to one, exactly like your While-Replace loop
+            Dim sbResult As New System.Text.StringBuilder(sbEscaped.Length)
+            Dim lastWasSpace As Boolean = False
+
+            For Each c As Char In sbEscaped.ToString()
+                If c = " "c Then
+                    If Not lastWasSpace Then
+                        sbResult.Append(" "c)
+                        lastWasSpace = True
+                    End If
+                Else
+                    sbResult.Append(c)
+                    lastWasSpace = False
+                End If
+            Next
+
+            Return sbResult.ToString()
+        End Function
+
+
+        Public Shared Function xxCleanString(ByVal input As String) As String
             Dim cleanedString As String = ""
 
             If Not IsEmptyOrBlank(input) Then
@@ -3104,6 +3644,7 @@ Namespace SharedLibrary
                 mc.Parameter3 = If(configDict.ContainsKey("Parameter3"), configDict("Parameter3"), "")
                 mc.Parameter4 = If(configDict.ContainsKey("Parameter4"), configDict("Parameter4"), "")
                 mc.MergePrompt = If(configDict.ContainsKey("MergePrompt"), configDict("MergePrompt"), context.SP_MergePrompt)
+                mc.QueryPrompt = If(configDict.ContainsKey("QueryPrompt"), configDict("QueryPrompt"), "")
                 mc.ModelDescription = Description
 
                 mc.APIKeyBack = mc.APIKey
@@ -3190,6 +3731,7 @@ Namespace SharedLibrary
                 context.INI_Model_Parameter3 = If(Not String.IsNullOrEmpty(config.Parameter3), config.Parameter3, "")
                 context.INI_Model_Parameter4 = If(Not String.IsNullOrEmpty(config.Parameter4), config.Parameter4, "")
                 context.SP_MergePrompt = If(Not String.IsNullOrEmpty(config.MergePrompt), config.MergePrompt, "")
+                SP_QueryPrompt = If(Not String.IsNullOrEmpty(config.QueryPrompt), config.QueryPrompt, "")
 
             Catch ex As System.Exception
                 MessageBox.Show("Error in ApplyModelConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -9782,6 +10324,7 @@ Namespace SharedLibrary
         Public Property Parameter3 As String
         Public Property Parameter4 As String
         Public Property MergePrompt As String
+        Public Property QueryPrompt As String
 
         Public Function Clone() As ModelConfig
             Return DirectCast(Me.MemberwiseClone(), ModelConfig)
