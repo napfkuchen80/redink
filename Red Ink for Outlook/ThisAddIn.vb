@@ -2297,10 +2297,10 @@ Public Class ThisAddIn
                         selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
                         If DoMarkup And MarkupMethod <> 3 Then
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                            SLib.InsertTextWithBoldMarkers(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                         Else
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
-                            SLib.InsertTextWithBoldMarkers(selection, vbCrLf & LLMResult & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf)
 
                         End If
                     End If
@@ -2568,12 +2568,12 @@ Public Class ThisAddIn
 
                 ' Insert the result as a new paragraph
                 If DoMarkup And MarkupMethod <> 3 Then
-                    SLib.InsertTextWithBoldMarkers(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                    SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                 Else
                     If DoInplace Then
-                        SLib.InsertTextWithBoldMarkers(selection, LLMResult)
+                        SLib.InsertTextWithMarkdown(selection, LLMResult)
                     Else
-                        SLib.InsertTextWithBoldMarkers(selection, vbCrLf & LLMResult & vbCrLf)
+                        SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf)
                     End If
                 End If
 

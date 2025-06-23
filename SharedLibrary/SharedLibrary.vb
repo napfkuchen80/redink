@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.6.2025
+' 23.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1501,7 +1501,8 @@ Namespace SharedLibrary
             End If
         End Sub
 
-        Public Shared Sub InsertTextWithBoldMarkers(selection As Object, gptResult As String)
+
+        Public Shared Sub InsertTextWithMarkdown(selection As Object, gptResult As String)
 
             Dim wordSelection As Microsoft.Office.Interop.Word.Selection = CType(selection, Microsoft.Office.Interop.Word.Selection)
             Dim wordRange As Microsoft.Office.Interop.Word.Range = wordSelection.Range
@@ -1535,7 +1536,7 @@ Namespace SharedLibrary
 
         End Sub
 
-        Public Shared Sub oldInsertTextWithBoldMarkers(selection As Object, gptResult As String)
+        Public Shared Sub InsertTextWithBoldMarkers(selection As Object, gptResult As String)
 
             ' Save the starting position of the insertion
             Dim startPosition As Integer = selection.Start
