@@ -2226,6 +2226,13 @@ Namespace SharedLibrary
 
                                 If context.INI_APIDebug Then
                                     Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
+                                    Try
+                                        Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                                        Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug.txt")
+                                        System.IO.File.WriteAllText(debugFilePath, responseText)
+                                    Catch
+                                        ' Silent fail
+                                    End Try
                                 End If
 
                                 ' Process the response
@@ -2296,6 +2303,13 @@ Namespace SharedLibrary
 
                                     If context.INI_APIDebug Then
                                         Debug.WriteLine($"RECEIVED FROM API (GET):{Environment.NewLine}{getResponseText}")
+                                        Try
+                                            Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                                            Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug_GET.txt")
+                                            System.IO.File.WriteAllText(debugFilePath, responseText)
+                                        Catch
+                                            ' Silent fail
+                                        End Try
                                     End If
 
                                     ' 6) GET-Antwort exakt wie POST-Only weiterverarbeiten
