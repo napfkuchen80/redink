@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 23.6.2025
+' 30.6.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -2163,7 +2163,7 @@ Namespace SharedLibrary
                                     ' On retries, wait the specified delay before sending a new request.
                                     If attempt > 0 Then
                                         If Not Hidesplash Then
-                                            splash.RestartCountdown(timeoutSeconds, "Slowing down...")
+                                            splash.RestartCountdown(timeoutSeconds, "Slowing down due to AI...")
                                         End If
                                         Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1), ct)
                                     End If
@@ -2181,7 +2181,9 @@ Namespace SharedLibrary
                                         '    Falls der GET-Endpunkt einen Body erwartet (selten), könnte man hier requestContent setzen:
                                         '    getReq.Content = requestContent
                                         If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                                            getReq.Headers.Add(HeaderA, HeaderB)
+                                            If Not getReq.Headers.Contains(HeaderA) Then
+                                                getReq.Headers.Add(HeaderA, HeaderB)
+                                            End If
                                         End If
                                         If context.INI_APIDebug Then
                                             Debug.WriteLine($"SENT TO API as GET ({Endpoint}):{Environment.NewLine}{String.Empty}") ' Kein Body
@@ -2190,9 +2192,11 @@ Namespace SharedLibrary
                                     Else
                                         ' Klassischer POST-Request
                                         If Not String.IsNullOrEmpty(HeaderA) AndAlso Not String.IsNullOrEmpty(HeaderB) Then
-                                            client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
+                                            If Not client.DefaultRequestHeaders.Contains(HeaderA) Then
+                                                client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
+                                            End If
                                         End If
-                                        If context.INI_APIDebug Then
+                                            If context.INI_APIDebug Then
                                             Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
                                         End If
                                         response = Await client.PostAsync(Endpoint, requestContent, ct).ConfigureAwait(False)
