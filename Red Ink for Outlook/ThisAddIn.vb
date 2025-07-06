@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.6.2025
+' 6.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -131,7 +131,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.300625 Gen2 Beta Test"
+    Public Const Version As String = "V.060725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1617,7 +1617,7 @@ Public Class ThisAddIn
 
                 InspectorOpened = False
 
-                OpenInspectorAndReapplySelection(RI_Command = "Sumup")
+                OpenInspectorAndReapplySelection(RI_Command)
 
                 If Not InspectorOpened Then Exit Sub
 
@@ -1641,7 +1641,7 @@ Public Class ThisAddIn
 
                     Case "Translate"
                         TranslateLanguage = ""
-                        TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True)
+                        TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
                         If String.IsNullOrEmpty(TranslateLanguage) Then Return
                         Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
                     Case "PrimLang"
@@ -1733,86 +1733,89 @@ Public Class ThisAddIn
     End Sub
 
 
-    Public Sub OpenInspectorAndReapplySelection(Sumup As Boolean)
+    Public Sub OpenInspectorAndReapplySelection(Command As String)
         Try
             ' Grab Outlook instances
             Dim oApp As Outlook.Application = Globals.ThisAddIn.Application
             Dim oExplorer As Outlook.Explorer = oApp.ActiveExplorer()
 
+            Dim Sumup As Boolean = (Command = "Sumup")
+            Dim Translate As Boolean = (Command = "Translate" OrElse Command = "PrimLang")
+
             If oExplorer Is Nothing Then
-                If Sumup Then
+                If Sumup Or Translate Then
                     ShowCustomMessageBox("You can only use this function when you have selected an e-mail.")
                 Else
                     ShowCustomMessageBox("You can only use this function when you are editing an e-mail.")
-                End If
-                Return
-            End If
-
-            ' Check for inline response
-            Dim inlineResponse As Object = oExplorer.ActiveInlineResponse
-            If inlineResponse Is Nothing Then
-
-                ' Get the current selection in the explorer
-                Dim selection As Outlook.Selection = oExplorer.Selection
-
-                ' Check if any item is selected
-                If selection.Count = 0 Then
-                    ShowCustomMessageBox("No email is selected.")
+                    End If
                     Return
                 End If
 
-                If selection.Count > 1 Then
+                ' Check for inline response
+                Dim inlineResponse As Object = oExplorer.ActiveInlineResponse
+                If inlineResponse Is Nothing Then
+
+                    ' Get the current selection in the explorer
+                    Dim selection As Outlook.Selection = oExplorer.Selection
+
+                    ' Check if any item is selected
+                    If selection.Count = 0 Then
+                        ShowCustomMessageBox("No email is selected.")
+                        Return
+                    End If
+
+                    If selection.Count > 1 Then
                     If Not Sumup Then
                         ShowCustomMessageBox("Multiple emails selected. Please select only one email when not using Sumup mode.")
                         Return
                     Else
                         ' Combine texts from all selected emails.
                         Dim mailItems As New List(Of Microsoft.Office.Interop.Outlook.MailItem)
-                        For Each item As Object In selection
-                            If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
-                                mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
-                            End If
-                        Next
+                            For Each item As Object In selection
+                                If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
+                                    mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
+                                End If
+                            Next
 
-                        If mailItems.Count = 0 Then
-                            ShowCustomMessageBox("None of the selected items are emails.")
+                            If mailItems.Count = 0 Then
+                                ShowCustomMessageBox("None of the selected items are emails.")
+                                Return
+                            End If
+
+                            ' Order the emails: latest email first (descending order by ReceivedTime)
+                            mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
+
+                            Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+
+                            Dim selectedText As String = String.Empty
+                            Dim count As Integer = 1
+                            For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
+
+                                Dim lastVerb As Integer = 0
+
+                                Try
+                                    lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
+                                Catch comEx As COMException
+                                    ' Property nicht gesetzt → noch nicht beantwortet
+                                    lastVerb = 0
+                                Catch ex As System.Exception
+                                    ' Sicherstellen, dass System.Exception voll qualifiziert ist
+                                    lastVerb = 0
+                                End Try
+
+
+                                If lastVerb <> 102 AndAlso lastVerb <> 103 Then
+                                    Dim tag As String = count.ToString("D4") ' Format count with four digits
+                                    Dim latestBody As String = GetLatestMailBody(mail.Body)
+                                    selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
+                                    count += 1
+                                End If
+                            Next
+
+                            ShowSumup2(selectedText)
                             Return
                         End If
-
-                        ' Order the emails: latest email first (descending order by ReceivedTime)
-                        mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
-
-                        Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
-
-                        Dim selectedText As String = String.Empty
-                        Dim count As Integer = 1
-                        For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
-
-                            Dim lastVerb As Integer = 0
-
-                            Try
-                                lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
-                            Catch comEx As COMException
-                                ' Property nicht gesetzt → noch nicht beantwortet
-                                lastVerb = 0
-                            Catch ex As System.Exception
-                                ' Sicherstellen, dass System.Exception voll qualifiziert ist
-                                lastVerb = 0
-                            End Try
-
-
-                            If lastVerb <> 102 AndAlso lastVerb <> 103 Then
-                                Dim tag As String = count.ToString("D4") ' Format count with four digits
-                                Dim latestBody As String = GetLatestMailBody(mail.Body)
-                                selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
-                                count += 1
-                            End If
-                        Next
-
-                        ShowSumup2(selectedText)
-                        Return
-                    End If
-                Else
+                    Else
                     ' Only one email is selected.
                     If Sumup Then
                         Dim selectedItem As Object = selection(1)
@@ -1825,79 +1828,101 @@ Public Class ThisAddIn
                             ShowCustomMessageBox("The selected item is not an email.")
                             Return
                         End If
+                    ElseIf Translate Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
+
+                            If Command = "Translate" Then
+                                TranslateLanguage = ""
+                                TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
+                                If String.IsNullOrEmpty(TranslateLanguage) Then Return
+                            Else
+                                TranslateLanguage = INI_Language1
+                            End If
+
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
+
+                            ShowTranslate(selectedText)
+                            Return
+
+                        Else
+                            ShowCustomMessageBox("The selected item is not an email.")
+                            Return
+                        End If
                     Else
-                        ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
-                        Return
+                            ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
+                            Return
+                        End If
                     End If
+
                 End If
 
-            End If
-
-            ' Ensure it is a MailItem
-            Dim mailItem As MailItem = TryCast(inlineResponse, MailItem)
-            If mailItem Is Nothing Then
-                ShowCustomMessageBox("You can only use this function when you are editing an e-mail (currently, there is no valid e-mail item).")
-                Return
-            End If
-
-            ' Capture the user's current selection range (or caret) from the inline editor
-            Dim oldSelStart As Integer = 0
-            Dim oldSelEnd As Integer = 0
-            If Not GetSelectionOrCaretRangeFromInlineEditor(oExplorer, oldSelStart, oldSelEnd) Then
-                ' If this fails entirely (no Word editor, etc.), we can just open the window without reapplying.
-                ' But no error is shown for "empty selection" anymore – only true failures (e.g., no WordEditor).
-                ' We'll just continue and open the Inspector, albeit we can't set the cursor position.
-            End If
-
-            ' Open the Inspector modelessly
-            Dim inspector As Inspector = mailItem.GetInspector
-            If inspector Is Nothing Then
-                MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to open the ActiveInspector.",
-                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                Return
-            End If
-            inspector.Display(False) ' modeless - do not block
-
-            ' A short delay to let the new WordEditor initialize
-            System.Threading.Thread.Sleep(500)
-
-            ' Ensure it's still open
-            If inspector.CurrentItem Is Nothing Then
-                MessageBox.Show("Error in OpenInspectorAndReapplySelection: The Inspector window was closed before processing could complete.",
-                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                Return
-            End If
-
-            ' Reapply the original selection (or caret position) to the new Inspector's WordEditor
-            Try
-                Dim wordDoc As Word.Document = TryCast(inspector.WordEditor, Word.Document)
-                If wordDoc IsNot Nothing Then
-                    Dim wordSel As Word.Selection = wordDoc.Application.Selection
-
-                    ' Only reapply if we successfully retrieved the inline offsets
-                    If oldSelStart <> 0 OrElse oldSelEnd <> 0 Then
-                        wordSel.SetRange(Start:=oldSelStart, End:=oldSelEnd)
-                        wordSel.Select()
-                    End If
+                ' Ensure it is a MailItem
+                Dim mailItem As MailItem = TryCast(inlineResponse, MailItem)
+                If mailItem Is Nothing Then
+                    ShowCustomMessageBox("You can only use this function when you are editing an e-mail (currently, there is no valid e-mail item).")
+                    Return
                 End If
 
-            Catch ex As System.Exception
-                MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to restore the original selection: " & ex.Message,
+                ' Capture the user's current selection range (or caret) from the inline editor
+                Dim oldSelStart As Integer = 0
+                Dim oldSelEnd As Integer = 0
+                If Not GetSelectionOrCaretRangeFromInlineEditor(oExplorer, oldSelStart, oldSelEnd) Then
+                    ' If this fails entirely (no Word editor, etc.), we can just open the window without reapplying.
+                    ' But no error is shown for "empty selection" anymore – only true failures (e.g., no WordEditor).
+                    ' We'll just continue and open the Inspector, albeit we can't set the cursor position.
+                End If
+
+                ' Open the Inspector modelessly
+                Dim inspector As Inspector = mailItem.GetInspector
+                If inspector Is Nothing Then
+                    MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to open the ActiveInspector.",
                             "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
+                inspector.Display(False) ' modeless - do not block
+
+                ' A short delay to let the new WordEditor initialize
+                System.Threading.Thread.Sleep(500)
+
+                ' Ensure it's still open
+                If inspector.CurrentItem Is Nothing Then
+                    MessageBox.Show("Error in OpenInspectorAndReapplySelection: The Inspector window was closed before processing could complete.",
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
+
+                ' Reapply the original selection (or caret position) to the new Inspector's WordEditor
+                Try
+                    Dim wordDoc As Word.Document = TryCast(inspector.WordEditor, Word.Document)
+                    If wordDoc IsNot Nothing Then
+                        Dim wordSel As Word.Selection = wordDoc.Application.Selection
+
+                        ' Only reapply if we successfully retrieved the inline offsets
+                        If oldSelStart <> 0 OrElse oldSelEnd <> 0 Then
+                            wordSel.SetRange(Start:=oldSelStart, End:=oldSelEnd)
+                            wordSel.Select()
+                        End If
+                    End If
+
+                Catch ex As System.Exception
+                    MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to restore the original selection: " & ex.Message,
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End Try
+
+                ' Bring the new Inspector window to the foreground
+
+                InspectorOpened = True
+
+                inspector.Activate()
+
+                ' Clean up COM references
+                Marshal.ReleaseComObject(inspector)
+                Marshal.ReleaseComObject(oExplorer)
+
                 Return
-            End Try
-
-            ' Bring the new Inspector window to the foreground
-
-            InspectorOpened = True
-
-            inspector.Activate()
-
-            ' Clean up COM references
-            Marshal.ReleaseComObject(inspector)
-            Marshal.ReleaseComObject(oExplorer)
-
-            Return
 
         Catch ex As System.Exception
             MessageBox.Show("Error in OpenInspectorAndReapplySelection: " & ex.Message,
@@ -2046,6 +2071,43 @@ Public Class ThisAddIn
         Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
 
         ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up")
+
+    End Sub
+
+    Private Async Sub ShowTranslate(selectedtext As String)
+
+        Dim LLMResult As String = ""
+
+        LLMResult = Await LLM(InterpolateAtRuntime(SP_Translate), "<TEXTTOPROCESS>" & selectedtext & "</TEXTTOPROCESS>", "", "", 0)
+
+        If INI_PostCorrection <> "" Then
+            LLMResult = Await PostCorrection(LLMResult)
+        End If
+
+        'Dim markdownPipeline As MarkdownPipeline = New MarkdownPipelineBuilder().Build()
+
+        Dim builder As New MarkdownPipelineBuilder()
+
+        builder.UsePipeTables()
+        builder.UseGridTables()
+        builder.UseSoftlineBreakAsHardlineBreak()
+        builder.UseListExtras()
+        builder.UseFootnotes()
+        builder.UseDefinitionLists()
+        builder.UseAbbreviations()
+        builder.UseAutoLinks()
+        builder.UseTaskLists()
+        builder.UseEmojiAndSmiley()
+        builder.UseMathematics()
+        builder.UseFigures()
+        builder.UseAdvancedExtensions()
+        builder.UseGenericAttributes()
+
+        Dim markdownPipeline As MarkdownPipeline = builder.Build()
+
+        Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
+
+        ShowHTMLCustomMessageBox(htmlText, $"{AN} Translation")
 
     End Sub
 

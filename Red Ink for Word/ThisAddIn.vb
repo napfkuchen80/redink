@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.6.2025
+' 6.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -822,7 +822,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.300625 Gen2 Beta Test"
+    Public Const Version As String = "V.060725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -3035,6 +3035,7 @@ Public Class ThisAddIn
         chatForm.BringToFront()
     End Sub
 
+
     Public Function INILoadFail() As Boolean
         If Not INIloaded Then
             If Not StartupInitialized Then
@@ -3459,7 +3460,7 @@ Public Class ThisAddIn
                 Return
             End If
 
-            Dim iniValues() As String = {INI_Model_Parameter1, INI_Model_Parameter2, INI_Model_Parameter3, INI_Model_Parameter4}
+            Dim iniValues() As String = {HideEscape(INI_Model_Parameter1), HideEscape(INI_Model_Parameter2), HideEscape(INI_Model_Parameter3), HideEscape(INI_Model_Parameter4)}
             Dim parameterDefs As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)()
             Dim typesList As New List(Of String)()
             Dim rangesList As New List(Of Tuple(Of Integer, Integer))()
@@ -3626,25 +3627,28 @@ Public Class ThisAddIn
                             If dispList IsNot Nothing Then
                                 Dim idx As Integer = dispList.IndexOf(rawValue)
                                 If idx >= 0 Then
-                                    paramValue = codeList(idx)
+                                    paramValue = UnHideEscape(codeList(idx))
                                 Else
                                     ' Fallback: unverändert
-                                    paramValue = rawValue
+                                    paramValue = UnHideEscape(rawValue)
                                 End If
-
+                                If paramValue.ToLowerInvariant().StartsWith("(keine Auswahl)") OrElse paramValue.ToLowerInvariant().StartsWith("(no selection)") OrElse paramValue.StartsWith("---") Then
+                                    paramValue = ""
+                                End If
                             Else
                                 ' 4) Normaler String-Fall: (all)/(alle)/--- filtern
                                 Dim rvLower As String = rawValue.ToLowerInvariant()
-                                If rvLower.Contains("(all)") OrElse rvLower.Contains("(alle)") OrElse rawValue.Contains("---") Then
+                                If rvLower.StartsWith("(keine Auswahl)") OrElse rvLower.StartsWith("(no selection)") OrElse rawValue.StartsWith("---") Then
                                     rawValue = ""
                                 End If
-                                paramValue = rawValue
+                                paramValue = UnhideEscape(rawValue)
+
                             End If
                         End If
 
                         ' 5) Sonderfall Prompt
                         If p.Name.ToLowerInvariant().Contains("prompt") Then
-                            OtherPrompt = paramValue
+                            OtherPrompt = UnhideEscape(paramValue)
                         End If
 
                         ' 6) Platzhalter ersetzen
@@ -3804,6 +3808,31 @@ Public Class ThisAddIn
         End Try
     End Sub
 
+
+    ''' <summary>
+    ''' Ersetzt jede Sequenz \\X durch \\uXXXX (doppelter Backslash!).
+    ''' Aus \\; wird \\u003B, aus \\< wird \\u003C, usw.
+    ''' </summary>
+    Public Function HideEscape(ByVal input As String) As String
+            Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\(.)",
+            Function(m As System.Text.RegularExpressions.Match) As String
+                Dim c As Char = m.Groups(1).Value(0)
+                Dim hex As String = Convert.ToInt32(c).ToString("X4")
+                Return "\\u" & hex
+            End Function)
+        End Function
+
+        ''' <summary>
+        ''' Ersetzt jede Sequenz \\uXXXX (doppelter Backslash!) zurück in das jeweilige Zeichen.
+        ''' Aus \\u003B wird ;, aus \\u003C wird &lt;, usw.
+        ''' </summary>
+        Public Function UnHideEscape(ByVal input As String) As String
+            Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\u([0-9A-Fa-f]{4})",
+            Function(m As System.Text.RegularExpressions.Match) As String
+                Dim code As Integer = Integer.Parse(m.Groups(1).Value, System.Globalization.NumberStyles.HexNumber)
+                Return Convert.ToChar(code).ToString()
+            End Function)
+        End Function
 
 
 
@@ -4597,6 +4626,46 @@ Public Class ThisAddIn
 
                 If isEntirelyWithinTable Or isWholeTable Then
 
+
+                    ' Fully-qualified per your guidelines
+                    Dim sel As Word.Selection = application.Selection
+                    Dim selCRange As Word.Range = sel.Range
+
+                    ' Loop _only_ the cells the user actually selected
+                    For Each cell As Word.Cell In sel.Cells
+                        ' Make a working copy of the cell’s range, minus its end‐of‐cell marker
+                        Dim cellRange As Word.Range = cell.Range.Duplicate
+                        cellRange.End -= 1
+
+                        ' Compute the overlap of selRange & cellRange
+                        Dim intersection As Word.Range = selCRange.Duplicate
+                        intersection.Start = System.Math.Max(cellRange.Start, selCRange.Start)
+                        intersection.End = System.Math.Min(cellRange.End, selCRange.End)
+
+                        ' If there is any overlap, process _only_ that text
+                        If intersection.Start < intersection.End Then
+                            ' keep UI responsive
+                            System.Windows.Forms.Application.DoEvents()
+
+                            ' show exactly what's being processed
+                            intersection.Select()
+
+                            ' your async processing call
+                            Dim result = Await TrueProcessSelectedText(
+                                SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline,
+                                InPlace, DoMarkup, MarkupMethod, PutInClipboard,
+                                PutInBubbles, SelectionMandatory, UseSecondAPI,
+                                FormattingCap, DoTPMarkup, TPMarkupname, False,
+                                FileObject, DoPane, ChunkSize)
+
+                            ' throttle so Word doesn’t lock up
+                            Await System.Threading.Tasks.Task.Delay(500)
+                        End If
+                    Next
+
+
+#If False Then   ' old version
+
                     Dim tbl As Table = selRange.Tables(1)
 
                     For Each row As Word.Row In tbl.Rows
@@ -4635,6 +4704,8 @@ Public Class ThisAddIn
                             End If
                         Next
                     Next
+
+#End If
 
                 Else
 
@@ -4778,6 +4849,9 @@ Public Class ThisAddIn
         Return ""
 
     End Function
+
+
+
     Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0) As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
@@ -4786,6 +4860,7 @@ Public Class ThisAddIn
 
 
         Try
+
             Dim SelectedText As String = ""
             Dim rng As Range
             Dim i As Integer
@@ -4801,6 +4876,18 @@ Public Class ThisAddIn
             If selection.Type = WdSelectionType.wdSelectionIP Then NoSelectedText = True
 
             rng = selection.Range
+
+            Debug.WriteLine($"1Range Start = {rng.Start} Selection Start = {selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+            Debug.WriteLine(rng.Text)
+
+            ' Added for processing footnotes etc. too
+
+            ' What story (main text, header, footer, footnote, etc.) am I in?
+            Dim storyType As Word.WdStoryType = rng.StoryType
+            ' Grab the full Range for that story from the document
+            Dim storyRange As Word.Range = currentdoc.StoryRanges(storyType)
+
 
             If Not NoSelectedText Then
 
@@ -4827,6 +4914,25 @@ Public Class ThisAddIn
             Dim effectiveChunk As Integer = If(ChunkSize > 0, ChunkSize, Integer.MaxValue)
 
             Dim totalEndBm As Word.Bookmark
+
+            ' Added for processing footnotes etc. too
+
+            Dim docEnd As Integer = storyRange.End
+
+            If selection.End < docEnd Then
+                totalEndBm = currentdoc.Bookmarks.Add(
+                    Name:="TotalEnd",
+                    Range:=currentdoc.Range(Start:=selection.End, End:=selection.End))
+            Else
+                Dim endRange As Word.Range = storyRange.Duplicate
+                endRange.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
+                totalEndBm = currentdoc.Bookmarks.Add(
+                    Name:="TotalEnd",
+                    Range:=endRange)
+            End If
+
+
+#If False Then   ' Before addind code for footnotes; backup
             Dim docEnd As Integer = currentdoc.Content.End
 
             If selection.End < currentdoc.Content.End Then
@@ -4842,6 +4948,11 @@ Public Class ThisAddIn
                     Range:=endRange)
             End If
 
+#End If
+
+            Debug.WriteLine($"2Range Start = {rng.Start} Selection Start = {selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+            Debug.WriteLine(rng.Text)
 
             Dim safeRange As Word.Range = selection.Range
             safeRange.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseStart)
@@ -4850,7 +4961,7 @@ Public Class ThisAddIn
                     Name:="NextStart",
                     Range:=safeRange)
 
-            Do While NoSelectedText OrElse ((currentdoc.Bookmarks.Exists("NextStart") AndAlso currentdoc.Bookmarks.Exists("TotalEnd") AndAlso currentdoc.Bookmarks("NextStart").Range.Start < currentdoc.Bookmarks("TotalEnd").Range.Start))
+            Do While NoSelectedText OrElse ((currentdoc.Bookmarks.Exists("NextStart") AndAlso currentdoc.Bookmarks.Exists("TotalEnd") AndAlso currentdoc.Bookmarks("NextStart").Range.Start < currentdoc.Bookmarks("TotalEnd").Range.Start - 1))
 
                 Try
                     If Not NoSelectedText Then
@@ -4863,7 +4974,8 @@ Public Class ThisAddIn
                         Loop
 
                         ' ---- 2.1  Chunk-Ende bestimmen ----------------------------
-                        docEnd = currentdoc.Content.End
+                        'docEnd = currentdoc.Content.End  ' was used before code for footnotes etc. has been added.
+                        docEnd = storyRange.End
                         Dim restRng As Word.Range = currentdoc.Range(Start:=curStart, End:=totalEnd)
                         Dim paras As Word.Paragraphs = restRng.Paragraphs
 
@@ -4896,11 +5008,16 @@ Public Class ThisAddIn
                         selection.SetRange(Start:=curStart, End:=chunkEnd)
                         rng = selection.Range
 
+                        If rng Is Nothing OrElse rng.Text.Trim() = "" Then Exit Do
 
                     End If
                 Catch ex As System.Exception
                     Exit Do
                 End Try
+
+                Debug.WriteLine($"3Range Start = {rng.Start} Selection Start = {selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                Debug.WriteLine(rng.Text)
 
                 paraCount = 0
 
@@ -4977,24 +5094,23 @@ Public Class ThisAddIn
 
                 End If
 
+                Debug.WriteLine($"4Range Start = {rng.Start} Selection Start = {selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                Debug.WriteLine(rng.Text)
+
+
                 Dim raw As String = ""
 
                 If (PutInBubbles Or PutInClipboard) AndAlso Not DoTPMarkup AndAlso rng IsNot Nothing Then
                     raw = GetVisibleText(rng)
                 End If
 
-                ' Moved to GetTextWithSpecialElementsInLine for better compatibility
-                'If Not NoFormatting AndAlso Not NoSelectedText AndAlso INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
-                'ConvertRangeFormattingToMarkdown()
-                'rng = selection.Range
-                'End If
 
                 If Not NoSelectedText Then
 
                     If KeepFormat And Not NoFormatting Then
                         SelectedText = SLib.GetRangeHtml(rng)
                     Else
-                        'SelectedText = rng.Text
                         If NoFormatting Then
                             If DoTPMarkup Then
                                 SelectedText = AddMarkupTags(rng, TPMarkupname)
@@ -5004,7 +5120,17 @@ Public Class ThisAddIn
                             End If
                         Else
                             If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
+
+                                Debug.WriteLine($"4aRange Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                                Debug.WriteLine(rng.Text)
+
                                 SelectedText = GetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
+
+                                Debug.WriteLine($"4bRange Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                                Debug.WriteLine(rng.Text)
+
                             Else
                                 SelectedText = LegacyGetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
                             End If
@@ -5052,6 +5178,10 @@ Public Class ThisAddIn
 
                 End If
 
+                Debug.WriteLine($"5Range Start = {rng.Start} Selection Start = {selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                Debug.WriteLine(rng.Text)
+
                 Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 OtherPrompt = ""
@@ -5070,6 +5200,10 @@ Public Class ThisAddIn
                 If (MarkupMethod <> 4 Or Not DoMarkup) And InPlace And Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
 
                 If (MarkupMethod <> 4 Or Not DoMarkup) And trailingCR And (LLMResult.EndsWith(ControlChars.Cr) Or LLMResult.EndsWith(ControlChars.Lf)) Then LLMResult = LLMResult.Replace(ControlChars.Cr, ControlChars.CrLf).Replace(ControlChars.Lf, ControlChars.CrLf)
+
+                Debug.WriteLine($"6Range Start = {rng.Start} Selection Start = {selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                Debug.WriteLine(rng.Text)
 
                 If Not String.IsNullOrEmpty(LLMResult) Then
 
@@ -5342,6 +5476,7 @@ Public Class ThisAddIn
                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
 
                     ElseIf NoSelectedText Then
+
                         selection.TypeText(vbCrLf & vbCrLf)
                         InsertTextWithMarkdown(selection, LLMResult, trailingCR, True)
 
@@ -5349,6 +5484,7 @@ Public Class ThisAddIn
                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
 
                     ElseIf KeepFormat AndAlso Not NoFormatting Then
+
                         SelectedText = selection.Text
                         SLib.InsertTextWithFormat(LLMResult, rng, InPlace)
                         If DoMarkup Then
@@ -5360,9 +5496,11 @@ Public Class ThisAddIn
                                     ApplyParagraphFormat(rng)
                                 End If
                                 RestoreSpecialTextElements(SaveRng)
+                                SaveRng.Document.Fields.Update()
                             Else
                                 CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
                                 RestoreSpecialTextElements(rng)
+                                rng.Document.Fields.Update()
                             End If
                         End If
 
@@ -5371,6 +5509,10 @@ Public Class ThisAddIn
 
                     Else
                         SelectedText = selection.Text
+
+                        Debug.WriteLine($"7Range Start = {rng.Start} Selection Start = {selection.Start}")
+                        Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                        Debug.WriteLine(rng.Text)
 
                         If InPlace Then
                             If DoMarkup Then
@@ -5388,19 +5530,38 @@ Public Class ThisAddIn
                                         ApplyParagraphFormat(rng)
                                     End If
                                     RestoreSpecialTextElements(SaveRng)
+                                    SaveRng.Document.Fields.Update()
                                 Else
                                     If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                     CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
                                     RestoreSpecialTextElements(rng)
+                                    rng.Document.Fields.Update()
                                 End If
                             Else
                                 InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+
+                                Debug.WriteLine($"8Range Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                                Debug.WriteLine(rng.Text)
+
                                 rng = selection.Range
                                 Dim SaveRng As Range = rng.Duplicate
                                 If Not ParaFormatInline And Not NoFormatting Then
+                                    Debug.WriteLine($"9Range Start = {rng.Start} Selection Start = {selection.Start}")
+                                    Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+                                    Debug.WriteLine(rng.Text)
+
                                     ApplyParagraphFormat(rng)
                                 End If
+
+                                Debug.WriteLine($"10Range Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
+
+                                Debug.WriteLine($"SaveRange Start = {SaveRng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"SaveRange End = {SaveRng.End} Selection End = {selection.End}")
+
                                 RestoreSpecialTextElements(SaveRng)
+                                SaveRng.Document.Fields.Update()
                             End If
 
                         Else
@@ -5427,6 +5588,7 @@ Public Class ThisAddIn
                                         ApplyParagraphFormat(rng)
                                     End If
                                     RestoreSpecialTextElements(SaveRng)
+                                    SaveRng.Document.Fields.Update()
                                 Else
                                     If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                     CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
@@ -5447,6 +5609,7 @@ Public Class ThisAddIn
                                     ApplyParagraphFormat(rng)
                                 End If
                                 RestoreSpecialTextElements(SaveRng)
+                                SaveRng.Document.Fields.Update()
                             End If
 
                         End If
@@ -5460,7 +5623,7 @@ Public Class ThisAddIn
                     If Not DoSilent Then ShowCustomMessageBox("The LLM did not return any content to process.")
                 End If
 
-                If NoSelectedText Then Exit Do
+                If NoSelectedText Or ChunkSize = 0 Then Exit Do
 
                 Try
                     If currentdoc.Bookmarks.Exists("NextStart") Then
@@ -5473,8 +5636,8 @@ Public Class ThisAddIn
 
                     nextStartBm = currentdoc.Bookmarks.Add(
                     Name:="NextStart",
-                    Range:=currentdoc.Range(Start:=selection.End + 1, End:=selection.End + 1))
-                    nextStartBm.Range.Collapse(WdCollapseDirection.wdCollapseStart)
+                    Range:=currentdoc.Range(Start:=selection.End, End:=selection.End))
+                    nextStartBm.Range.Collapse(WdCollapseDirection.wdCollapseEnd)
 
                     If nextStartBm Is Nothing OrElse Not currentdoc.Bookmarks.Exists("NextStart") Then Exit Do
 
@@ -5486,6 +5649,7 @@ Public Class ThisAddIn
 
         Catch ex As System.Exception
             MessageBox.Show("Error in ProcessSelectedText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            INIloaded = False
         Finally
 
             Try
@@ -5677,12 +5841,6 @@ Public Class ThisAddIn
 
             ' 4) Durchgestrichen: ~~Text~~ → Text
             output = Regex.Replace(output, "~~(.+?)~~", "$1", RegexOptions.Singleline)
-
-            ' 5) Superscript: <sup>Text</sup> → Text
-            output = Regex.Replace(output, "<sup>(.+?)</sup>", "$1", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
-
-            ' 6) Subscript: <sub>Text</sub> → Text
-            output = Regex.Replace(output, "<sub>(.+?)</sub>", "$1", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
 
             Return output
 
@@ -6466,12 +6624,17 @@ Public Class ThisAddIn
             Return
         End If
 
-        Dim insertionStart As Integer = selection.Range.Start
+
 
         ' Extract the range from the selection
         Dim range As Microsoft.Office.Interop.Word.Range = selection.Range
 
         Dim LeadingTrailingSpace As Boolean = False
+
+        Debug.WriteLine($"IM1-Range Start = {selection.Start}")
+        Debug.WriteLine($"Range End = {selection.End}")
+        Debug.WriteLine("TrailingCR = " & TrailingCR)
+        Debug.WriteLine(selection.Text)
 
         If range.Start < range.End AndAlso Not TrailingCR Then
 
@@ -6483,9 +6646,12 @@ Public Class ThisAddIn
                 ' Ein 1‐Zeichen‐Range vor range
                 Dim beforerange As Range = range.Document.Range(range.Start - 1, range.Start)
                 ' Ein 1‐Zeichen‐Range nach range
-                Dim afterrange As Range = range.Document.Range(range.End, range.End + 1)
+                Dim afterrange As Range = range.Document.Range(range.End - 1, range.End + 1)
 
-                If beforerange.Text = " " AndAlso afterrange.Text = " " Then
+                'If beforerange.Text = " " AndAlso afterrange.Text = " " Then
+                Debug.WriteLine($"Beforetext='{beforerange.Text}'")
+                Debug.WriteLine($"Aftertext='{afterrange.Text}'")
+                If afterrange.Text.EndsWith(" "c) OrElse afterrange.Text.StartsWith(" "c) Then
                     LeadingTrailingSpace = True
                 Else
                     LeadingTrailingSpace = False
@@ -6495,6 +6661,7 @@ Public Class ThisAddIn
             End If
         End If
 
+
         If range.Start < range.End Then
             If TrailingCR Then
                 range.End = range.End - 1
@@ -6503,6 +6670,13 @@ Public Class ThisAddIn
             range.Delete()
 
         End If
+
+        Dim insertionStart As Integer = selection.Range.Start
+
+        Debug.WriteLine($"IM2-Range Start = {selection.Start}")
+        Debug.WriteLine($"Range End = {selection.End}")
+        Debug.WriteLine("TrailingCR = " & TrailingCR)
+        Debug.WriteLine(selection.Text)
 
 
         Dim builder As New MarkdownPipelineBuilder()
@@ -6545,7 +6719,11 @@ Public Class ThisAddIn
         ' Parse and insert HTML content into the Word range
         ParseHtmlNode(htmlDoc.DocumentNode, range)
 
-        selection.Document.Fields.Update()
+        Debug.WriteLine($"IM3-Range Start = {selection.Start}")
+        Debug.WriteLine($"Range End = {selection.End}")
+        Debug.WriteLine("LeadingTrailingSpace = " & LeadingTrailingSpace)
+        Debug.WriteLine("TrailingCR = " & TrailingCR)
+        Debug.WriteLine(selection.Text)
 
         If LeadingTrailingSpace Then
             range.Collapse(WdCollapseDirection.wdCollapseEnd)
@@ -6563,6 +6741,12 @@ Public Class ThisAddIn
         Dim doc As Microsoft.Office.Interop.Word.Document = selection.Document
         selection.SetRange(insertionStart, InsertionEnd)
         selection.Select()
+
+        Debug.WriteLine($"IM4-Range Start = {selection.Start}")
+        Debug.WriteLine($"Range End = {selection.End}")
+        Debug.WriteLine("LeadingTrailingSpace = " & LeadingTrailingSpace)
+        Debug.WriteLine("TrailingCR = " & TrailingCR)
+        Debug.WriteLine(selection.Text)
 
     End Sub
 
@@ -6712,6 +6896,20 @@ Public Class ThisAddIn
                             r.Font.Italic = True
                             If hasBold Then r.Font.Bold = True
                             If hasUnderline Then r.Font.Underline = WdUnderline.wdUnderlineSingle
+                        End Sub,
+                        nestedHref)
+
+                Case "del", "s"
+                    ' Durchgestrichen (+ evtl. verschachtelt fett/underline)
+                    Dim txtI As String = HtmlEntity.DeEntitize(childNode.InnerText)
+                    Dim hasBold As Boolean = (childNode.SelectSingleNode(".//strong|.//b") IsNot Nothing)
+                    Dim hasItalic As Boolean = (childNode.SelectSingleNode(".//em|.//i") IsNot Nothing)
+
+                    InsertInline(range, txtI,
+                        Sub(r)
+                            r.Font.StrikeThrough = True
+                            If hasBold Then r.Font.Bold = True
+                            If hasItalic Then r.Font.Italic = True
                         End Sub,
                         nestedHref)
 
@@ -7884,6 +8082,7 @@ Public Class ThisAddIn
             MessageBox.Show("Error in InsertMarkupText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
+
     Private Sub InsertMarkupTextColor(inputText As String, targetRange As Range)
         Try
             Dim wordApp As Word.Application = Globals.ThisAddIn.Application
@@ -7894,6 +8093,7 @@ Public Class ThisAddIn
             Dim originalStrikeThrough As Boolean = False
             Dim originalBold As Integer = 0
             Dim originalItalic As Integer = 0
+
 
             ' Parse the input text into chunks with formatting information
             ParseText(inputText, TextArray, FormatArray)
@@ -8015,9 +8215,6 @@ Public Class ThisAddIn
     End Function
 
 
-
-
-
     Private Structure PlaceholderInfo
         Public Offset As Integer     'offset relative to rng.Start (0-based)
         Public Length As Integer     'chars to skip in Word range
@@ -8025,19 +8222,217 @@ Public Class ThisAddIn
     End Structure
 
 
+    Private Shared ReadOnly PlaceholderComparer As Comparison(Of PlaceholderInfo) =
+    Function(a, b)
+        If a.Offset <> b.Offset Then
+            Return a.Offset.CompareTo(b.Offset)
+        End If
+        Return a.Length.CompareTo(b.Length)
+    End Function
+
+
     Public Function GetTextWithSpecialElementsInline(
-        ByRef workingrange As Word.Range,
+        ByVal workingrange As Word.Range,
         PreserveParagraphFormatInline As Boolean) As String
 
+        Dim splash As New SplashScreen("Extracting text and format ...")
+        splash.Show()
+        splash.Refresh()
+
+        Dim app As Word.Application = CType(workingrange.Application, Word.Application)
+        Dim oldSU As Boolean = app.ScreenUpdating
+        app.ScreenUpdating = False
+
         Try
+
             '──────────── 0)  Vorbereitung (Range klonen, Settings) ───────────────
             Dim rng As Word.Range = workingrange.Duplicate        'Dokument NIE ändern!
+
+
+            '──────────── Formatierungen vornehmen ────────────────────────────
+
+            Debug.WriteLine($"4-1 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+
+            ' 0a) Markdown für Kombinationen & Einzelformate (mit CR-Handling)
+            Dim f As Word.Find = rng.Find
+            Dim origSel As Word.Range = app.Selection.Range.Duplicate
+
+            ' -- Fett + Italic (Absätze) ───────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Bold = True
+                .Font.Italic = True
+                .Font.Underline = Word.WdUnderline.wdUnderlineNone
+                .Text = "(*)^13"                    'alles vor dem CR
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "***\1***^13"   '\1 = der Text ohne CR
+                .Replacement.Font.Bold = False      'Format zurücksetzen
+                .Replacement.Font.Italic = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = True
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Fett + Italic (Inline) ────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Bold = True
+                .Font.Italic = True
+                .Font.Underline = Word.WdUnderline.wdUnderlineNone
+                .Text = ""
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "***^&***"
+                .Replacement.Font.Bold = False
+                .Replacement.Font.Italic = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = False
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Nur Fett (Absätze) ──────────────────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Bold = True
+                .Text = "(*)^13"
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "**\1**^13"
+                .Replacement.Font.Bold = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = True
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Nur Fett (Inline) ──────────────────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Bold = True
+                .Text = ""
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "**^&**"
+                .Replacement.Font.Bold = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = False
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+
+            ' -- Nur Italic (Absätze) ──────────────────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Italic = True
+                .Text = "(*)^13"
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "*\1*^13"
+                .Replacement.Font.Italic = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = True
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Nur Italic (Inline) ──────────────────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Italic = True
+                .Text = ""
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "*^&*"
+                .Replacement.Font.Bold = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = False
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Underline (Absätze) ─────────────────────────────────────────────────────────
+
+            With f
+                .ClearFormatting()
+                .Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                .Text = "(*)^13"
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "<u>\1</u>^13"
+                .Replacement.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = True
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Underline (Inline) ─────────────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                .Text = ""
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "<u>^&</u>"
+                .Replacement.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = False
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Strikethrough (Absätze) ─────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.StrikeThrough = True
+                .Text = "(*)^13"                   'alles vor dem Absatz-Mark
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "~~\1~~^13" '\1 = Text ohne CR, dann </s> und erst CR
+                .Replacement.Font.StrikeThrough = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = True
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+            ' -- Strikethrough (Inline) ──────────────────────────────────────────────────
+            With f
+                .ClearFormatting()
+                .Font.StrikeThrough = True
+                .Text = ""                         'leeres Suchmuster → jeder Run
+                .Replacement.ClearFormatting()
+                .Replacement.Text = "~~^&~~"    'umschließt den gefundenen Text
+                .Replacement.Font.StrikeThrough = False
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                .Format = True
+                .MatchWildcards = False
+            End With
+            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+
+
+            ' Auswahl wiederherstellen
+            origSel.Select()
+
+
+            Debug.WriteLine($"4-5 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+
+
+            '──────────── Platzhalter vorbereiten ────────────────────────────
+
             rng.TextRetrievalMode.IncludeHiddenText = True
             rng.TextRetrievalMode.IncludeFieldCodes = True
 
             Dim placeholders As New List(Of PlaceholderInfo)
 
-            '──────────── 1)  Fuß- & Endnoten sammeln ────────────────────────────
+            '──────────── Fuß- & Endnoten sammeln ────────────────────────────
             For Each fn As Footnote In rng.Document.Footnotes
                 If fn.Reference.Start >= rng.Start AndAlso fn.Reference.Start < rng.End Then
                     Dim s As Integer = Math.Max(fn.Reference.Start, rng.Start)
@@ -8062,7 +8457,7 @@ Public Class ThisAddIn
                 End If
             Next
 
-            '──────────── 2)   Felder – GANZES Feld sauber bestimmen ──────────────
+            '──────────── Felder – GANZES Feld bestimmen ──────────────
             Const WD_FIELD_BEGIN As Integer = 19   'Chr(19)
             Const WD_FIELD_END As Integer = 21   'Chr(21)
 
@@ -8073,10 +8468,10 @@ Public Class ThisAddIn
                 '----- A) exakten Feld-Begin ermitteln ----------------------------------
                 Dim fldStartAbs As Integer = fld.Code.Start
                 Do While fldStartAbs > rng.Start AndAlso
-          AscW(rng.Characters(fldStartAbs - rng.Start).Text) <> WD_FIELD_BEGIN
+          AscW(rng.Characters(fldStartAbs - rng.Start + 1).Text) <> WD_FIELD_BEGIN
                     fldStartAbs -= 1
                 Loop
-                If AscW(rng.Characters(fldStartAbs - rng.Start).Text) <> WD_FIELD_BEGIN Then _
+                If AscW(rng.Characters(fldStartAbs - rng.Start + 1).Text) <> WD_FIELD_BEGIN Then _
         Continue For   'kein gültiger Begin im Range
 
                 '----- B) Feld-Ende (0x15) suchen --------------------------------------
@@ -8104,7 +8499,7 @@ Public Class ThisAddIn
     })
             Next
 
-            '──────────── 3)  Absatz-Platzhalter (optional) ───────────────────────
+            '──────────── Absatz-Platzhalter (optional) ───────────────────────
             If PreserveParagraphFormatInline AndAlso rng.Paragraphs.Count > 0 Then
 
                 Dim paraCount As Integer = rng.Paragraphs.Count
@@ -8147,134 +8542,59 @@ Public Class ThisAddIn
                 Next
             End If
 
-            '──────────── 4)  Platzhalter sortieren (Offset ↑, Length ↑) ──────────
-            placeholders.Sort(Function(a, b)
-                                  If a.Offset <> b.Offset Then
-                                      Return a.Offset.CompareTo(b.Offset)
-                                  End If
-                                  Return a.Length.CompareTo(b.Length)
-                              End Function)
+            '──────────── Platzhalter sortieren (Offset ↑, Length ↑) ──────────
+
+            Debug.WriteLine($"4-6 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
 
-            '──────────── 4-DBG)  Debug-Ausgaben: Originaltext & Platzhalter ────────────
-            System.Diagnostics.Debug.WriteLine("===== DEBUG: Original Range =====")
-            'Zeilenenden für bessere Lesbarkeit sichtbar machen
-            System.Diagnostics.Debug.WriteLine(rng.Text.Replace(vbCr, "⏎"))
-            For i As Integer = 1 To rng.Characters.Count          'Characters-Collection ist 1-basiert
-                Dim ch As String = rng.Characters(i).Text
-                Dim code As Integer = AscW(ch)
+            placeholders.Sort(PlaceholderComparer)
 
-                'Lesbare Repräsentation bauen
-                Dim rep As String
-                Select Case code
-                    Case 13 : rep = "<CR>"          'Carriage Return
-                    Case 9 : rep = "<TAB>"
-                    Case 19 : rep = "<0x13>"        'FIELD_BEGIN
-                    Case 20 : rep = "<0x14>"        'FIELD_SEP
-                    Case 21 : rep = "<0x15>"        'FIELD_END
-                    Case 160 : rep = "<nbsp>"        'non-breaking space
-                    Case 0 To 31 : rep = $"<0x{code:X2}>"
-                    Case Else
-                        rep = ch
-                End Select
+            ' ───── Platzhalter einfügen ────────────────────────────────
+            Dim fullText As String = rng.Text
+            Dim sbInline As New System.Text.StringBuilder(fullText.Length + placeholders.Count * 16)
+            Dim lastPos As Integer = 0
 
-                System.Diagnostics.Debug.WriteLine($"{i - 1:0000}: {rep}")
-            Next
-
-            System.Diagnostics.Debug.WriteLine("===== DEBUG: Placeholder-Liste =====")
-            For idx As Integer = 0 To placeholders.Count - 1
-                Dim ph As PlaceholderInfo = placeholders(idx)
-                System.Diagnostics.Debug.WriteLine(
-        $"#{idx:000}: Offset={ph.Offset}, Length={ph.Length}, Token={ph.Token}")
-            Next
-            System.Diagnostics.Debug.WriteLine("===== DEBUG ENDE =====")
-            '────────────────────────────────────────────────────────────────────────────
-
-
-            '──────────── 5)  Inline-Konvertierung (Markdown, Platzhalter) ────────
-            Dim sb As New StringBuilder
-            Dim nextPH As Integer = 0
-            Dim iChar As Integer = 0
-
-            'Markdown-Status
-            Dim mdBoldOpen As Boolean = False
-            Dim mdItalicOpen As Boolean = False
-            Dim mdUnderlineOpen As Boolean = False
-            Dim mdSubOpen As Boolean = False
-
-            While iChar < rng.Characters.Count
-
-                '──── 5-a) n Platzhalter an dieser Position? ─────────────────────
-                Dim skipLen As Integer = 0
-                Dim tagsClosed As Boolean = False
-
-                While nextPH < placeholders.Count AndAlso
-                  placeholders(nextPH).Offset = iChar
-
-                    Dim ph As PlaceholderInfo = placeholders(nextPH)
-
-                    If Not tagsClosed Then
-                        If mdSubOpen Then sb.Append(")") : mdSubOpen = False
-                        If mdUnderlineOpen Then sb.Append("</u>") : mdUnderlineOpen = False
-                        If mdItalicOpen Then sb.Append("*") : mdItalicOpen = False
-                        If mdBoldOpen Then sb.Append("**") : mdBoldOpen = False
-                        tagsClosed = True
-                    End If
-
-                    sb.Append(ph.Token)
-                    skipLen = Math.Max(skipLen, ph.Length)
-                    nextPH += 1
-                End While
-
-                If skipLen > 0 Then
-                    iChar += skipLen       'Zeichen des Platzhalters überspringen
-                    Continue While
+            For Each ph As PlaceholderInfo In placeholders
+                ' 1) Alles vor dem Platzhalter hinzufügen
+                If ph.Offset > lastPos Then
+                    sbInline.Append(fullText.Substring(lastPos, ph.Offset - lastPos))
                 End If
 
-                '──── 5-b) Normales Zeichen / Format ────────────────────────────
-                Dim chRng As Word.Range = rng.Characters(iChar + 1)
-                Dim ch As String = chRng.Text
-                Dim isEOL As Boolean = (ch = vbCr)
+                ' 2) Den Token einsetzen
+                sbInline.Append(ph.Token)
 
-                Dim nowBold As Boolean = (chRng.Font.Bold = -1)
-                Dim nowItalic As Boolean = (chRng.Font.Italic = -1)
-                Dim nowUnderline As Boolean = (chRng.Font.Underline <> WdUnderline.wdUnderlineNone)
-                Dim nowSub As Boolean = (chRng.Font.Subscript = -1)
+                ' 3) Position nach dem Platzhalter merken
+                lastPos = ph.Offset + ph.Length
+            Next
 
-                ' --- Tags schließen ---
-                If mdSubOpen AndAlso (Not nowSub OrElse isEOL) Then sb.Append(")") : mdSubOpen = False
-                If mdUnderlineOpen AndAlso (Not nowUnderline OrElse isEOL) Then sb.Append("</u>") : mdUnderlineOpen = False
-                If mdItalicOpen AndAlso (Not nowItalic OrElse isEOL) Then sb.Append("*") : mdItalicOpen = False
-                If mdBoldOpen AndAlso (Not nowBold OrElse isEOL) Then sb.Append("**") : mdBoldOpen = False
+            ' 4) Resttext anhängen
+            If lastPos < fullText.Length Then
+                sbInline.Append(fullText.Substring(lastPos))
+            End If
 
-                ' --- Tags öffnen ---
-                If (Not mdBoldOpen) AndAlso nowBold AndAlso Not isEOL Then sb.Append("**") : mdBoldOpen = True
-                If (Not mdItalicOpen) AndAlso nowItalic AndAlso Not isEOL Then sb.Append("*") : mdItalicOpen = True
-                If (Not mdUnderlineOpen) AndAlso nowUnderline AndAlso Not isEOL Then sb.Append("<u>") : mdUnderlineOpen = True
-                If (Not mdSubOpen) AndAlso nowSub AndAlso Not isEOL Then sb.Append("~(") : mdSubOpen = True
+            Debug.WriteLine($"4-7 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
-                sb.Append(ch)
-                iChar += 1
-            End While
+            ' Ergebnis verwenden
+            Return sbInline.ToString()
 
-            '──── 5-c) Am Ende offene Tags schließen ────────────────────────────
-            If mdSubOpen Then sb.Append(")")
-            If mdUnderlineOpen Then sb.Append("</u>")
-            If mdItalicOpen Then sb.Append("*")
-            If mdBoldOpen Then sb.Append("**")
-
-            Return sb.ToString()
 
         Catch ex As System.Exception
             'Fail-Safe: reiner Text
+            Debug.WriteLine("Error in GetTextWithSpecialElementsInline: " & ex.Message)
             Return workingrange.Text
+        Finally
+            app.ScreenUpdating = oldSU
+            splash.Close()
+
         End Try
     End Function
 
 
-
-
     Private Function LegacyGetTextWithSpecialElementsInline(ByRef workingrange As Word.Range, PreserveParagraphFormatInline As Boolean) As String
+
+        Debug.WriteLine("LegacyGetTextWithSpecialElementsInline called")
 
         Try
             Dim resultText As String = workingrange.Text
