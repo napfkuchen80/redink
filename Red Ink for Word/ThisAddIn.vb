@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 6.7.2025
+' 8.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -822,7 +822,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.060725 Gen2 Beta Test"
+    Public Const Version As String = "V.080725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -8246,7 +8246,7 @@ Public Class ThisAddIn
         Try
 
             '──────────── 0)  Vorbereitung (Range klonen, Settings) ───────────────
-            Dim rng As Word.Range = workingrange.Duplicate        'Dokument NIE ändern!
+            Dim rng As Word.Range = workingrange.Duplicate
 
 
             '──────────── Formatierungen vornehmen ────────────────────────────
@@ -8255,171 +8255,141 @@ Public Class ThisAddIn
             Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
             ' 0a) Markdown für Kombinationen & Einzelformate (mit CR-Handling)
-            Dim f As Word.Find = rng.Find
             Dim origSel As Word.Range = app.Selection.Range.Duplicate
 
-            ' -- Fett + Italic (Absätze) ───────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Bold = True
-                .Font.Italic = True
-                .Font.Underline = Word.WdUnderline.wdUnderlineNone
-                .Text = "(*)^13"                    'alles vor dem CR
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "***\1***^13"   '\1 = der Text ohne CR
-                .Replacement.Font.Bold = False      'Format zurücksetzen
-                .Replacement.Font.Italic = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = True
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' Annahme: rng ist dein Ursprungsbereich (Word.Range)
 
-            ' -- Fett + Italic (Inline) ────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Bold = True
-                .Font.Italic = True
-                .Font.Underline = Word.WdUnderline.wdUnderlineNone
-                .Text = ""
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "***^&***"
-                .Replacement.Font.Bold = False
-                .Replacement.Font.Italic = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = False
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 1) Fett + Italic  (Absatz)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Font.Italic = True
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "***\1***^13",
+                        Sub(rep)                          ' nur Bold & Italic abstellen
+                            rep.Bold = False
+                            rep.Italic = False
+                        End Sub)
 
-            ' -- Nur Fett (Absätze) ──────────────────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Bold = True
-                .Text = "(*)^13"
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "**\1**^13"
-                .Replacement.Font.Bold = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = True
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 2) Fett + Italic  (Inline)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Font.Italic = True
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "***^&***",
+                        Sub(rep)
+                            rep.Bold = False
+                            rep.Italic = False
+                        End Sub)
 
-            ' -- Nur Fett (Inline) ──────────────────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Bold = True
-                .Text = ""
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "**^&**"
-                .Replacement.Font.Bold = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = False
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 3) Nur Fett  (Absatz)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "**\1**^13",
+                        Sub(rep)
+                            rep.Bold = False
+                        End Sub)
 
+            ' 4) Nur Fett  (Inline)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "**^&**",
+                        Sub(rep)
+                            rep.Bold = False
+                        End Sub)
 
-            ' -- Nur Italic (Absätze) ──────────────────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Italic = True
-                .Text = "(*)^13"
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "*\1*^13"
-                .Replacement.Font.Italic = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = True
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 5) Nur Italic  (Absatz)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Italic = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "*\1*^13",
+                        Sub(rep)
+                            rep.Italic = False
+                        End Sub)
 
-            ' -- Nur Italic (Inline) ──────────────────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Italic = True
-                .Text = ""
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "*^&*"
-                .Replacement.Font.Bold = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = False
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 6) Nur Italic  (Inline)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Italic = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "*^&*",
+                        Sub(rep)
+                            rep.Italic = False
+                        End Sub)
 
-            ' -- Underline (Absätze) ─────────────────────────────────────────────────────────
+            ' 7) Underline  (Absatz)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "<u>\1</u>^13",
+                        Sub(rep)
+                            rep.Underline = Word.WdUnderline.wdUnderlineNone
+                        End Sub)
 
-            With f
-                .ClearFormatting()
-                .Font.Underline = Word.WdUnderline.wdUnderlineSingle
-                .Text = "(*)^13"
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "<u>\1</u>^13"
-                .Replacement.Font.Underline = Word.WdUnderline.wdUnderlineNone
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = True
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 8) Underline  (Inline)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "<u>^&</u>",
+                        Sub(rep)
+                            rep.Underline = Word.WdUnderline.wdUnderlineNone
+                        End Sub)
 
-            ' -- Underline (Inline) ─────────────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.Underline = Word.WdUnderline.wdUnderlineSingle
-                .Text = ""
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "<u>^&</u>"
-                .Replacement.Font.Underline = Word.WdUnderline.wdUnderlineNone
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = False
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            ' 9) Strikethrough  (Absatz)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.StrikeThrough = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "~~\1~~^13",
+                        Sub(rep)
+                            rep.StrikeThrough = False
+                        End Sub)
 
-            ' -- Strikethrough (Absätze) ─────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.StrikeThrough = True
-                .Text = "(*)^13"                   'alles vor dem Absatz-Mark
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "~~\1~~^13" '\1 = Text ohne CR, dann </s> und erst CR
-                .Replacement.Font.StrikeThrough = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = True
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
+            '10) Strikethrough  (Inline)
+            ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.StrikeThrough = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "~~^&~~",
+                        Sub(rep)
+                            rep.StrikeThrough = False
+                        End Sub)
 
-            ' -- Strikethrough (Inline) ──────────────────────────────────────────────────
-            With f
-                .ClearFormatting()
-                .Font.StrikeThrough = True
-                .Text = ""                         'leeres Suchmuster → jeder Run
-                .Replacement.ClearFormatting()
-                .Replacement.Text = "~~^&~~"    'umschließt den gefundenen Text
-                .Replacement.Font.StrikeThrough = False
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = True
-                .MatchWildcards = False
-            End With
-            f.Execute(Replace:=Word.WdReplace.wdReplaceAll)
 
 
             ' Auswahl wiederherstellen
-            origSel.Select()
-
+            rng = workingrange.Duplicate
+            rng.Select()
 
             Debug.WriteLine($"4-5 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
             Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
@@ -8716,6 +8686,44 @@ Public Class ThisAddIn
         End Try
 
     End Function
+
+    Private Sub ReplaceWithinRange(
+        ByVal rng As Word.Range,
+        ByVal configureFind As Action(Of Word.Find),
+        ByVal replacementText As String,
+        ByVal tweakReplacement As Action(Of Word.Font))
+
+        Dim doc As Word.Document = rng.Document
+        Dim startPos As Long = rng.Start
+        Dim limitPos As Long = rng.End
+        Dim cursor As Long = startPos
+
+        Do
+            Dim win As Word.Range = doc.Range(Start:=cursor, End:=limitPos)
+            Dim f As Word.Find = win.Find
+
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+
+            configureFind(f)                 ' Suchformat & -Text
+            f.Replacement.Text = replacementText
+            tweakReplacement(f.Replacement.Font)  ' nur gewünschtes Attribut zurücksetzen
+
+            f.Forward = True
+            f.Wrap = Word.WdFindWrap.wdFindStop
+            f.Format = True
+
+            If Not f.Execute(Replace:=Word.WdReplace.wdReplaceOne) Then Exit Do
+
+            ' falls Ersatz über Limit hinausging → rückgängig & abbrechen
+            If win.End > limitPos Then
+                doc.Undo() : Exit Do
+            End If
+
+            cursor = win.End                 ' weiter hinter dem letzten Treffer
+        Loop
+    End Sub
+
 
 
     Private Sub RestoreSpecialTextElements(workingrange As Word.Range)
