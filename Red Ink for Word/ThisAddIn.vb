@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.7.2025
+' 13.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -29,6 +29,7 @@ Imports System.Data
 Imports System.Diagnostics
 Imports System.Drawing
 Imports System.IO
+Imports System.Linq.Expressions
 Imports System.Net
 Imports System.Net.Http
 Imports System.Net.WebSockets
@@ -41,6 +42,7 @@ Imports System.Threading.Tasks
 Imports System.Windows
 Imports System.Windows.Forms
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
@@ -62,12 +64,11 @@ Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedContext
 Imports SharedLibrary.SharedLibrary.SharedMethods
+Imports VBScript_RegExp_55
 Imports Vosk
 Imports Whisper.net
 Imports Whisper.net.LibraryLoader
 Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
-Imports VBScript_RegExp_55
-Imports System.Linq.Expressions
 
 
 Public Class StopForm
@@ -822,7 +823,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080725 Gen2 Beta Test"
+    Public Const Version As String = "V.130725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -3071,6 +3072,21 @@ Public Class ThisAddIn
 
     Public Async Sub InLanguage1()
 
+#If False Then
+
+        Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+        Dim filePath As String = Path.Combine(desktopPath, "redinktest.txt")
+        If File.Exists(filePath) Then
+            Dim testtext As String = File.ReadAllText(filePath)
+            testtext = SLib.ShowCustomWindow("Testfile content:", testtext, "", AN, True, True)
+            If Not String.IsNullOrWhiteSpace(testtext) Then SLib.PutInClipboard(testtext)
+            Return
+        Else
+            Return
+        End If
+
+#End If
+
         If INILoadFail() Then Return
         TranslateLanguage = INI_Language1
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap)
@@ -3412,10 +3428,25 @@ Public Class ThisAddIn
             End If
         End If
     End Sub
+
+    Public Shared LastFreestyleModelConfig As ModelConfig
+    Public Shared LastFreestyleWasAM As Boolean = False
+    Public Shared LastFreestylePrompt As String = ""
+
     Public Async Sub FreeStyleNM()
         If INILoadFail() Then Return
         FreeStyle(False)
+
+        My.Settings.LastFreestyleModelConfig = Nothing
+        My.Settings.LastFreestyleWasAM = False
+        My.Settings.LastFreestylePrompt = My.Settings.LastPrompt
+        My.Settings.Save()
+
+        Dim result = Globals.Ribbons.Ribbon1.InitializeAppAsync()
+
     End Sub
+
+
     Public Async Sub FreeStyleAM()
         If INILoadFail() Then Return
 
@@ -3428,9 +3459,49 @@ Public Class ThisAddIn
 
         End If
 
+        LastFreestyleModelConfig = GetCurrentConfig(_context)
+
         FreeStyle(True)
 
+        My.Settings.LastFreestyleModelConfig = LastFreestyleModelConfig
+        My.Settings.LastFreestyleWasAM = True
+        My.Settings.LastFreestylePrompt = My.Settings.LastPrompt
+        My.Settings.Save()
+
+        Dim result = Globals.Ribbons.Ribbon1.InitializeAppAsync()
+
     End Sub
+
+    Public Async Sub FreeStyleRepeat()
+        If INILoadFail() Then Return
+
+        Dim LastFreestylePrompt As String = My.Settings.LastFreestylePrompt
+
+        originalConfig = GetCurrentConfig(_context)
+
+        If String.IsNullOrWhiteSpace(LastFreestylePrompt) Then
+            ShowCustomMessageBox("No last Freestyle command has been stored.")
+            Return
+        End If
+
+        If My.Settings.LastFreestyleWasAM Then
+            LastFreestyleModelConfig = My.Settings.LastFreestyleModelConfig
+
+            If LastFreestyleModelConfig IsNot Nothing Then
+                Dim ErrorFlag As Boolean = True
+                ApplyModelConfig(_context, LastFreestyleModelConfig, ErrorFlag)
+                If ErrorFlag Then
+                    ShowCustomMessageBox("There was an error assigning the last model configuration. Aborting.")
+                    Return
+                End If
+                originalConfigLoaded = True
+            End If
+        End If
+
+        FreeStyle(My.Settings.LastFreestyleWasAM, My.Settings.LastFreestylePrompt)
+
+    End Sub
+
 
 
     Public Async Sub SpecialModel()
@@ -3814,29 +3885,29 @@ Public Class ThisAddIn
     ''' Aus \\; wird \\u003B, aus \\< wird \\u003C, usw.
     ''' </summary>
     Public Function HideEscape(ByVal input As String) As String
-            Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\(.)",
+        Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\(.)",
             Function(m As System.Text.RegularExpressions.Match) As String
                 Dim c As Char = m.Groups(1).Value(0)
                 Dim hex As String = Convert.ToInt32(c).ToString("X4")
                 Return "\\u" & hex
             End Function)
-        End Function
+    End Function
 
-        ''' <summary>
-        ''' Ersetzt jede Sequenz \\uXXXX (doppelter Backslash!) zurück in das jeweilige Zeichen.
-        ''' Aus \\u003B wird ;, aus \\u003C wird &lt;, usw.
-        ''' </summary>
-        Public Function UnHideEscape(ByVal input As String) As String
-            Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\u([0-9A-Fa-f]{4})",
+    ''' <summary>
+    ''' Ersetzt jede Sequenz \\uXXXX (doppelter Backslash!) zurück in das jeweilige Zeichen.
+    ''' Aus \\u003B wird ;, aus \\u003C wird &lt;, usw.
+    ''' </summary>
+    Public Function UnHideEscape(ByVal input As String) As String
+        Return System.Text.RegularExpressions.Regex.Replace(input, "\\\\u([0-9A-Fa-f]{4})",
             Function(m As System.Text.RegularExpressions.Match) As String
                 Dim code As Integer = Integer.Parse(m.Groups(1).Value, System.Globalization.NumberStyles.HexNumber)
                 Return Convert.ToChar(code).ToString()
             End Function)
-        End Function
+    End Function
 
 
 
-    Public Async Sub FreeStyle(UseSecondAPI)
+    Public Async Sub FreeStyle(UseSecondAPI As Boolean, Optional LastPrompt As String = "")
         If INILoadFail() Then Return
         Try
             OtherPrompt = ""
@@ -3913,11 +3984,14 @@ Public Class ThisAddIn
                 AddOnInstruct = AddOnInstruct.Substring(0, lastCommaIndex) & ", and" & AddOnInstruct.Substring(lastCommaIndex + 1)
             End If
 
-
-            If Not NoText Then
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+            If LastPrompt.Trim() = "" Then
+                If Not NoText Then
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                Else
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                End If
             Else
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                OtherPrompt = LastPrompt
             End If
 
             SelectedText = ""
@@ -4027,6 +4101,19 @@ Public Class ThisAddIn
 
             If OtherPrompt.StartsWith("readlocal", StringComparison.OrdinalIgnoreCase) Then
                 SpeakSelectedText()
+                Return
+
+            End If
+
+            If OtherPrompt.StartsWith("clearlastprompt", StringComparison.OrdinalIgnoreCase) Then
+                My.Settings.LastPrompt = ""
+                My.Settings.LastFreestylePrompt = ""
+                My.Settings.LastFreestyleModelConfig = Nothing
+                My.Settings.LastFreestyleWasAM = False
+                My.Settings.Save()
+                Dim resultx = Globals.Ribbons.Ribbon1.InitializeAppAsync()
+                ShowCustomMessageBox($"The last Freestyle prompt has been cleared.")
+
                 Return
 
             End If
@@ -4202,9 +4289,9 @@ Public Class ThisAddIn
                 DoFileObject = False
             End If
 
-
             ' Regular expression to find text in the format "(markup:..." and extract until ")"
-            Dim pattern As String = $"\{TPMarkupTriggerL}}}(.*?)\{TPMarkupTriggerR}"
+            Dim pattern As String = Regex.Escape(TPMarkupTriggerL) & "(.*?)" & Regex.Escape(TPMarkupTriggerR)
+            'Dim pattern As String = $"\{TPMarkupTriggerL}(.*?)\{TPMarkupTriggerR}"
             ' Match the pattern in the input string
             Dim match As Match = Regex.Match(OtherPrompt, pattern, RegexOptions.IgnoreCase)
             If match.Success Then
@@ -4328,7 +4415,7 @@ Public Class ThisAddIn
             End If
 
             If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
-                OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
+                OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Replace("(a file object follows)", "").Replace("(a clipboard object follows)", "").Trim()
                 SysPrompt = OtherPrompt
             Else
                 If DoLib Then
@@ -4350,6 +4437,8 @@ Public Class ThisAddIn
                 ChunkSize = CInt(response)
                 If response = "" OrElse response.ToLower() = "esc" OrElse ChunkSize = 0 Then Return
                 If ChunkSize > 25 Then ChunkSize = 25
+            Else
+                ChunkSize = 0
             End If
 
             Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize)
@@ -4590,7 +4679,9 @@ Public Class ThisAddIn
 
         Else
 
-            Dim userdialog As Integer = ShowCustomYesNoBox("Your text contains tables. Shall each text section and each cell content be processed separately to maintain the table? This may take more time" & If(DoMarkup And MarkupMethod <> 2, " (will also switch to Diff [shown in text] markup). If you do not want to change the text, select 'No'.", "."), "No", "Yes, process each cell individually", $"{AN} Table Processing")
+            Dim userdialog As Integer = ShowCustomYesNoBox("Your text contains tables. Shall each text section and each cell content be processed separately to avoid the table falling apart? This will take more time." & If(ChunkSize > 0, $" Your '(iterate)' parameter will apply only outside the tables.", "") & If(DoMarkup And MarkupMethod <> 2, " For the markup, the Diff markup will be used instead of the markup method choosen by you.", "") & " If you want to abort, close this window.", "No", "Yes, process each cell individually", $"{AN} Table Processing")
+
+            If userdialog = 0 Then Return ""
 
             If userdialog = 2 Then
 
@@ -4656,7 +4747,7 @@ Public Class ThisAddIn
                                 InPlace, DoMarkup, MarkupMethod, PutInClipboard,
                                 PutInBubbles, SelectionMandatory, UseSecondAPI,
                                 FormattingCap, DoTPMarkup, TPMarkupname, False,
-                                FileObject, DoPane, ChunkSize)
+                                FileObject, DoPane, 0)
 
                             ' throttle so Word doesn’t lock up
                             Await System.Threading.Tasks.Task.Delay(500)
@@ -4750,7 +4841,7 @@ Public Class ThisAddIn
                                 ' Also verify it's not empty
                                 If textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Else
@@ -4761,7 +4852,7 @@ Public Class ThisAddIn
 
                                 If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
                                     textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
 
@@ -4794,7 +4885,7 @@ Public Class ThisAddIn
                                 cellRange.End -= 1  ' Exclude cell marker
                                 If cellRange.Start < cellRange.End Then
                                     cellRange.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize)
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, 0)
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
                             Next
@@ -4814,7 +4905,7 @@ Public Class ThisAddIn
 
                             finalChunk.Select()
                             Dim text = selection.Text
-                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize)
+                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1)
                         Else
                             Do
                                 finalChunk.Start += 1
@@ -4824,7 +4915,7 @@ Public Class ThisAddIn
 
                             If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
                                 finalChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize)
+                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1)
                             End If
                         End If
                     End If
@@ -4858,6 +4949,22 @@ Public Class ThisAddIn
         Dim selection As Selection = application.Selection
         Dim currentdoc As Word.Document = selection.Document
 
+        Debug.WriteLine(
+    vbCrLf & "CheckMaxToken=" & CheckMaxToken &
+    vbCrLf & "KeepFormat=" & KeepFormat &
+    vbCrLf & "ParaFormatInline=" & ParaFormatInline &
+    vbCrLf & "InPlace=" & InPlace &
+    vbCrLf & "DoMarkup=" & DoMarkup &
+    vbCrLf & "PutInClipboard=" & PutInClipboard &
+    vbCrLf & "PutInBubbles=" & PutInBubbles &
+    vbCrLf & "SelectionMandatory=" & SelectionMandatory &
+    vbCrLf & "UseSecondAPI=" & UseSecondAPI &
+    vbCrLf & "DoTPMarkup=" & DoTPMarkup &
+    vbCrLf & "CreatePodcast=" & CreatePodcast &
+    vbCrLf & "DoPane=" & DoPane &
+    vbCrLf & "Chunksize=" & ChunkSize &
+    vbCrLf & "Chunksize=" & FileObject
+)
 
         Try
 
@@ -4867,6 +4974,7 @@ Public Class ThisAddIn
             Dim NoFormatting As Boolean = False
             Dim NoSelectedText As Boolean = False
             Dim trailingCR As Boolean
+            Dim trailingCRcount As Integer = 0
             Dim DoSilent As Boolean = False
 
             If selection.Type = WdSelectionType.wdSelectionIP And SelectionMandatory Then
@@ -4879,7 +4987,7 @@ Public Class ThisAddIn
 
             Debug.WriteLine($"1Range Start = {rng.Start} Selection Start = {selection.Start}")
             Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-            Debug.WriteLine(rng.Text)
+            Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
             ' Added for processing footnotes etc. too
 
@@ -4909,11 +5017,61 @@ Public Class ThisAddIn
 
             If MarkupMethod = 4 Then NoFormatting = True
 
-            If ChunkSize > 0 Then DoSilent = True
+            If ChunkSize > 0 Then
+                DoSilent = True
+                If DoMarkup Then
+
+                    Select Case MarkupMethod
+                        Case 1
+                            Dim SilentMarkup As Integer = SLib.ShowCustomYesNoBox($"You have choosen both iterated processing and markups using Word compare. Iteration only works using the Regex method. Continue using Regex markup (the character cap will be ignored) or go without markups?", "Yes, Regex markups", "No, no markups")
+                            If SilentMarkup = 1 Then
+                                MarkupMethod = 4
+                            ElseIf SilentMarkup = 2 Then
+                                DoMarkup = False
+                            Else
+                                Return ""
+                            End If
+                        Case 2
+                            Dim SilentMarkup As Integer = SLib.ShowCustomYesNoBox($"You have choosen both iterated processing and markups using Diff compare. Iteration only works using the Regex method. Continue using Diff markup (the character cap will be ignored) or go without markups?", "Yes, Diff markups", "No, no markups")
+                            If SilentMarkup = 1 Then
+                                MarkupMethod = 2
+                            ElseIf SilentMarkup = 2 Then
+                                DoMarkup = False
+                            Else
+                                Return ""
+                            End If
+                        Case 3
+                            Dim SilentMarkup As Integer = SLib.ShowCustomYesNoBox($"You have choosen both iterated processing and markups using DiffW compare. Iteration only works using the Regex method. Continue using Diff markup (the character cap will be ignored) or go without markups?", "Yes, Diff markups", "No, no markups")
+                            If SilentMarkup = 1 Then
+                                MarkupMethod = 2
+                            ElseIf SilentMarkup = 2 Then
+                                DoMarkup = False
+                            Else
+                                Return ""
+                            End If
+                        Case 4
+                            Dim SilentMarkup As Integer = SLib.ShowCustomYesNoBox($"You have choosen both iterated processing and markups using the Regex method. This works, but may tak a very long time (the character cap will be ignored). Continue with Regex markups or go without markups?", "Yes, Regex markups", "No, no markups")
+                            If SilentMarkup = 1 Then
+                                MarkupMethod = 4
+                            ElseIf SilentMarkup = 2 Then
+                                DoMarkup = False
+                            Else
+                                Return ""
+                            End If
+                    End Select
+                End If
+            End If
+
+            If ChunkSize < 0 Then
+                ChunkSize = ChunkSize * -1
+                If DoMarkup Then MarkupMethod = 2  ' Force Diff when getting a negative ChunkSize (e.g., in tables)
+                DoSilent = True
+            End If
 
             Dim effectiveChunk As Integer = If(ChunkSize > 0, ChunkSize, Integer.MaxValue)
 
             Dim totalEndBm As Word.Bookmark
+
 
             ' Added for processing footnotes etc. too
 
@@ -4931,28 +5089,9 @@ Public Class ThisAddIn
                     Range:=endRange)
             End If
 
-
-#If False Then   ' Before addind code for footnotes; backup
-            Dim docEnd As Integer = currentdoc.Content.End
-
-            If selection.End < currentdoc.Content.End Then
-                totalEndBm = currentdoc.Bookmarks.Add(
-                    Name:="TotalEnd",
-                    Range:=currentdoc.Range(Start:=selection.End, End:=selection.End))
-            Else
-                Dim endRange As Word.Range = currentdoc.Content
-                endRange.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
-
-                totalEndBm = currentdoc.Bookmarks.Add(
-                    Name:="TotalEnd",
-                    Range:=endRange)
-            End If
-
-#End If
-
             Debug.WriteLine($"2Range Start = {rng.Start} Selection Start = {selection.Start}")
             Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-            Debug.WriteLine(rng.Text)
+            Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
             Dim safeRange As Word.Range = selection.Range
             safeRange.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseStart)
@@ -4963,7 +5102,9 @@ Public Class ThisAddIn
 
             Do While NoSelectedText OrElse ((currentdoc.Bookmarks.Exists("NextStart") AndAlso currentdoc.Bookmarks.Exists("TotalEnd") AndAlso currentdoc.Bookmarks("NextStart").Range.Start < currentdoc.Bookmarks("TotalEnd").Range.Start - 1))
 
+
                 Try
+
                     If Not NoSelectedText Then
 
                         Dim curStart As Integer = currentdoc.Bookmarks("NextStart").Range.Start
@@ -5017,9 +5158,12 @@ Public Class ThisAddIn
 
                 Debug.WriteLine($"3Range Start = {rng.Start} Selection Start = {selection.Start}")
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                Debug.WriteLine(rng.Text)
+                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                 paraCount = 0
+                trailingCR = False
+                trailingCRcount = 0
+
 
                 If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoSelectedText Then
 
@@ -5088,7 +5232,7 @@ Public Class ThisAddIn
                                         }
 
                         Catch ex As System.Exception
-                            'Debug.Print($"Error extracting paragraph {i}: {ex.Message}")
+                            'Debug.Print($"Error extracting paragraph {i} {ex.Message}")
                         End Try
                     Next
 
@@ -5096,7 +5240,7 @@ Public Class ThisAddIn
 
                 Debug.WriteLine($"4Range Start = {rng.Start} Selection Start = {selection.Start}")
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                Debug.WriteLine(rng.Text)
+                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
 
                 Dim raw As String = ""
@@ -5104,6 +5248,9 @@ Public Class ThisAddIn
                 If (PutInBubbles Or PutInClipboard) AndAlso Not DoTPMarkup AndAlso rng IsNot Nothing Then
                     raw = GetVisibleText(rng)
                 End If
+
+                Debug.WriteLine($"4aRange Start = {rng.Start} Selection Start = {selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
 
 
                 If Not NoSelectedText Then
@@ -5121,34 +5268,49 @@ Public Class ThisAddIn
                         Else
                             If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
 
-                                Debug.WriteLine($"4aRange Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"4bRange Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                                Debug.WriteLine(rng.Text)
+                                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                                 SelectedText = GetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
 
-                                Debug.WriteLine($"4bRange Start = {rng.Start} Selection Start = {selection.Start}")
+                                Debug.WriteLine($"4cRange Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                                Debug.WriteLine(rng.Text)
+                                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                             Else
                                 SelectedText = LegacyGetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
                             End If
                         End If
                         trailingCR = (SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbLf) Or SelectedText.EndsWith(vbCr))
+                        Dim tempText As String = SelectedText
+
+                        Do While tempText.EndsWith(vbCrLf) Or tempText.EndsWith(vbLf) Or tempText.EndsWith(vbCr)
+                            If tempText.EndsWith(vbCrLf) Then
+                                trailingCRcount += 1
+                                tempText = tempText.Substring(0, tempText.Length - vbCrLf.Length)
+                            ElseIf tempText.EndsWith(vbLf) Then
+                                trailingCRcount += 1
+                                tempText = tempText.Substring(0, tempText.Length - vbLf.Length)
+                            ElseIf tempText.EndsWith(vbCr) Then
+                                trailingCRcount += 1
+                                tempText = tempText.Substring(0, tempText.Length - vbCr.Length)
+                            End If
+                        Loop
 
                     End If
+
+                    Debug.WriteLine($"4dRange Start = {rng.Start} Selection Start = {selection.Start}")
+                    Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
 
                     Dim MaxToken As Integer = If(UseSecondAPI, INI_MaxOutputToken_2, INI_MaxOutputToken)
                     Dim EstimatedTokens As Integer = EstimateTokenCount(SelectedText)
 
                     If CheckMaxToken And MaxToken > 0 AndAlso EstimatedTokens > MaxToken AndAlso (InPlace Or DoMarkup) AndAlso Not DoSilent Then
-                        ShowCustomMessageBox("Your selected text is larger than the maximum output your LLM can supposedly generate. Therefore, the output may be shorter than expected based on maximum tokens supported, which is " & MaxToken & " tokens. Your input (with formatting information, as the case may be) has an estimated to be " & EstimatedTokens & " tokens). Therefore, check whether the output is complete.", AN, 15)
+                        ShowCustomMessageBox("Your selected text Is larger than the maximum output your LLM can supposedly generate. Therefore, the output may be shorter than expected based on maximum tokens supported, which Is " & MaxToken & " tokens. Your input (with formatting information, as the case may be) has an estimated to be " & EstimatedTokens & " tokens). Therefore, check whether the output Is complete.", AN, 15)
                     End If
 
-                    If DoSilent Then DoMarkup = False
-
-                    If DoMarkup AndAlso MarkupMethod = 2 AndAlso Len(SelectedText) > INI_MarkupDiffCap Then
+                    If DoMarkup AndAlso MarkupMethod = 2 AndAlso Len(SelectedText) > INI_MarkupDiffCap AndAlso Not DoSilent Then
                         Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
                         Select Case MarkupChange
                             Case 1
@@ -5160,7 +5322,7 @@ Public Class ThisAddIn
                         End Select
                     End If
 
-                    If DoMarkup And MarkupMethod = 4 And Len(SelectedText) > INI_MarkupRegexCap Then
+                    If DoMarkup And MarkupMethod = 4 And Len(SelectedText) > INI_MarkupRegexCap AndAlso Not DoSilent Then
                         Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Regex markup method at {INI_MarkupRegexCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}How do you want to continue?", "Use Word compare instead", "Use Regex")
                         Select Case MarkupChange
                             Case 1
@@ -5180,9 +5342,9 @@ Public Class ThisAddIn
 
                 Debug.WriteLine($"5Range Start = {rng.Start} Selection Start = {selection.Start}")
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                Debug.WriteLine(rng.Text)
+                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
-                Dim LLMResult = Await LLM(SysCommand & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                Dim LLMResult = Await LLM(SysCommand & If(DoTPMarkup, " " & SP_Add_Revisions, "") & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 OtherPrompt = ""
 
@@ -5192,24 +5354,55 @@ Public Class ThisAddIn
                     LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
                 End If
 
+                Debug.WriteLine($"LLMResult 1 = '{LLMResult}'")
+
                 If ParaFormatInline Then LLMResult = CorrectPFORMarkers(LLMResult)
+
+                Debug.WriteLine($"LLMResult 2 = '{LLMResult}'")
 
                 If DoTPMarkup Then LLMResult = RemoveMarkupTags(LLMResult)
 
-                If (MarkupMethod <> 4 Or Not DoMarkup) And InPlace And Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
-                If (MarkupMethod <> 4 Or Not DoMarkup) And InPlace And Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+                'If (MarkupMethod <> 4 Or Not DoMarkup) And InPlace And Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
+                'If (MarkupMethod <> 4 Or Not DoMarkup) And InPlace And Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
 
-                If (MarkupMethod <> 4 Or Not DoMarkup) And trailingCR And (LLMResult.EndsWith(ControlChars.Cr) Or LLMResult.EndsWith(ControlChars.Lf)) Then LLMResult = LLMResult.Replace(ControlChars.Cr, ControlChars.CrLf).Replace(ControlChars.Lf, ControlChars.CrLf)
+                'If (MarkupMethod <> 4 Or Not DoMarkup) And trailingCR And (LLMResult.EndsWith(ControlChars.Cr) Or LLMResult.EndsWith(ControlChars.Lf)) Then LLMResult = LLMResult.Replace(ControlChars.Cr, ControlChars.CrLf).Replace(ControlChars.Lf, ControlChars.CrLf)
+
+                If Not trailingCR AndAlso LLMResult.EndsWith(ControlChars.CrLf) Then LLMResult = LLMResult.TrimEnd(ControlChars.CrLf)
+                If Not trailingCR AndAlso LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
+                If Not trailingCR AndAlso LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+
+                If trailingCR Then
+                    LLMResult = LLMResult.TrimEnd({ControlChars.Cr, ControlChars.Lf})
+                    If trailingCRcount > 1 Then
+                        LLMResult &= String.Concat(Enumerable.Repeat(vbCrLf, trailingCRcount - 1))
+                    End If
+                End If
+
+                Debug.WriteLine($"LLMResult 3 = '{LLMResult}'")
+                Debug.WriteLine($"TrailingCR = {trailingCR} Count = {trailingCRcount}")
 
                 Debug.WriteLine($"6Range Start = {rng.Start} Selection Start = {selection.Start}")
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                Debug.WriteLine(rng.Text)
+                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                 If Not String.IsNullOrEmpty(LLMResult) Then
 
-                    Dim ClipPaneText1 As String = "The LLM has provided the following result (you can edit it):"
-                    Dim ClipText2 As String = "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting), or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard."
-                    Dim PaneText2 As String = "Choose to put your edited or original text in the clipboard, or inserted the original with formatting; the pane will close. You can also copy & paste from the pane."
+
+                    Debug.WriteLine(
+                                vbCrLf & "PutInClipboard=" & PutInClipboard &
+                                vbCrLf & "DoSilent=" & DoSilent &
+                                vbCrLf & "DoMarkup=" & DoMarkup &
+                                vbCrLf & "MarkupMethod=" & MarkupMethod &
+                                vbCrLf & "DoPane=" & DoPane &
+                                vbCrLf & "PutInBubbles=" & PutInBubbles &
+                                vbCrLf & "NoSelectedText=" & NoSelectedText &
+                                vbCrLf & "KeepFormat=" & KeepFormat &
+                                vbCrLf & "Inplace=" & InPlace
+                            )
+
+                    Dim ClipPaneText1 As String = "The LLM has provided the following result (you can edit it)"
+                    Dim ClipText2 As String = "You can choose whether you want to have the original text put into the clipboard Or your text with any changes you have made (without formatting), Or you can directly insert the original text in your document. If you select Cancel, nothing will be put into the clipboard."
+                    Dim PaneText2 As String = "Choose to put your edited Or original text in the clipboard, Or inserted the original with formatting; the pane will close. You can also copy & paste from the pane."
 
                     If CreatePodcast AndAlso Not DoSilent Then
                         Dim TTSAvailable As Boolean = False
@@ -5224,7 +5417,7 @@ Public Class ThisAddIn
 
 
                         If TTSAvailable Then
-                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do not have to manually remove the SSML codes, if you do not like them):", LLMResult, "The next step is the production of an audio file. You can choose whether you want to use the original text or your text with any changes you have made. The text will also be put in the clipboard. If you select Cancel, the original text will only be put into the clipboard.", AN, True)
+                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, "The next step Is the production of an audio file. You can choose whether you want to use the original text or your text with any changes you have made. The text will also be put in the clipboard. If you select Cancel, the original text will only be put into the clipboard.", AN, True)
 
                             If FinalText = "" Then
                                 SLib.PutInClipboard(LLMResult)
@@ -5234,7 +5427,7 @@ Public Class ThisAddIn
                                 If FinalText.Contains("H: ") AndAlso FinalText.Contains("G: ") Then ReadPodcast(FinalText)
                             End If
                         Else
-                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do not have to manually remove the SSML codes, if you do not like them):", LLMResult, $"The next step is the production of an audio file. Since you have not configured {AN} for Google, you unfortunately cannot do that here. However, you can choose whether you want the original text or the text with your changes to put in the clipboard for further use. If you select Cancel, no text will be put in the clipboard.", AN, True)
+                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, $"The next step Is the production of an audio file. Since you have not configured {AN} for Google, you unfortunately cannot do that here. However, you can choose whether you want the original text Or the text with your changes to put in the clipboard for further use. If you select Cancel, no text will be put in the clipboard.", AN, True)
 
                             If FinalText <> "" Then
                                 SLib.PutInClipboard(LLMResult)
@@ -5359,7 +5552,7 @@ Public Class ThisAddIn
                         Dim MaxBubbles As Integer = responseItems.Count
 
                         If MaxBubbles = 0 Then
-                            If Not DoSilent Then ShowCustomMessageBox($"The bubble command did not result in any comment(s) by the LLM.")
+                            If Not DoSilent Then ShowCustomMessageBox($"The bubble command did Not result in any comment(s) by the LLM.")
                         Else
 
                             Dim splash As New SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
@@ -5468,7 +5661,7 @@ Public Class ThisAddIn
 
                     ElseIf MarkupMethod = 4 Then
 
-                        Dim RegexResult = Await LLM(SP_MarkupRegex, "<ORIGINALTEXT>" & SelectedText & "</ORIGINALTEXT> /n <NEWTEXT>" & LLMResult & "</NEWTEXT>", "", "", 0, UseSecondAPI)
+                        Dim RegexResult = Await LLM(SP_MarkupRegex, "<ORIGINALTEXT>" & SelectedText & "</ORIGINALTEXT> /n <NEWTEXT>" & LLMResult & "</NEWTEXT>", "", "", 0, False)
 
                         MarkupSelectedTextWithRegex(RegexResult)
 
@@ -5512,7 +5705,7 @@ Public Class ThisAddIn
 
                         Debug.WriteLine($"7Range Start = {rng.Start} Selection Start = {selection.Start}")
                         Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                        Debug.WriteLine(rng.Text)
+                        Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                         If InPlace Then
                             If DoMarkup Then
@@ -5542,14 +5735,14 @@ Public Class ThisAddIn
 
                                 Debug.WriteLine($"8Range Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                                Debug.WriteLine(rng.Text)
+                                Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                                 rng = selection.Range
                                 Dim SaveRng As Range = rng.Duplicate
                                 If Not ParaFormatInline And Not NoFormatting Then
                                     Debug.WriteLine($"9Range Start = {rng.Start} Selection Start = {selection.Start}")
                                     Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
-                                    Debug.WriteLine(rng.Text)
+                                    Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                                     ApplyParagraphFormat(rng)
                                 End If
@@ -5623,7 +5816,9 @@ Public Class ThisAddIn
                     If Not DoSilent Then ShowCustomMessageBox("The LLM did not return any content to process.")
                 End If
 
-                If NoSelectedText Or ChunkSize = 0 Then Exit Do
+                If NoSelectedText Or ChunkSize = 0 Then
+                    Exit Do
+                End If
 
                 Try
                     If currentdoc.Bookmarks.Exists("NextStart") Then
@@ -5639,7 +5834,9 @@ Public Class ThisAddIn
                     Range:=currentdoc.Range(Start:=selection.End, End:=selection.End))
                     nextStartBm.Range.Collapse(WdCollapseDirection.wdCollapseEnd)
 
-                    If nextStartBm Is Nothing OrElse Not currentdoc.Bookmarks.Exists("NextStart") Then Exit Do
+                    If nextStartBm Is Nothing OrElse Not currentdoc.Bookmarks.Exists("NextStart") Then
+                        Exit Do
+                    End If
 
                 Catch ex As System.Exception
                     Exit Do
@@ -5648,8 +5845,16 @@ Public Class ThisAddIn
             Loop
 
         Catch ex As System.Exception
-            MessageBox.Show("Error in ProcessSelectedText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+
+#If DEBUG Then
+            Debug.WriteLine("Error: " & ex.Message)
+            Debug.WriteLine("Stacktrace: " & ex.StackTrace)
+
+            System.Diagnostics.Debugger.Break()
+#End If
+            MessageBox.Show("Error in TrueProcessSelectedText:  " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             INIloaded = False
+
         Finally
 
             Try
@@ -5665,6 +5870,7 @@ Public Class ThisAddIn
         End Try
 
         Return ""
+
     End Function
 
 
@@ -5826,29 +6032,7 @@ Public Class ThisAddIn
 
 
 
-    Public Function RemoveMarkdownFormatting(ByVal input As String) As String
-        Try
-            Dim output As String = input
 
-            ' 1) Fett+Kursiv: ***Text*** → Text
-            output = Regex.Replace(output, "\*\*\*(.+?)\*\*\*", "$1", RegexOptions.Singleline)
-
-            ' 2) Fett: **Text** → Text
-            output = Regex.Replace(output, "\*\*(.+?)\*\*", "$1", RegexOptions.Singleline)
-
-            ' 3) Kursiv: *Text* → Text
-            output = Regex.Replace(output, "(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "$1", RegexOptions.Singleline)
-
-            ' 4) Durchgestrichen: ~~Text~~ → Text
-            output = Regex.Replace(output, "~~(.+?)~~", "$1", RegexOptions.Singleline)
-
-            Return output
-
-        Catch ex As System.Exception
-            ' Hier könntest Du Logging oder eine Meldung einfügen
-            Throw New System.Exception("Error in RemoveMarkdownFormatting: " & ex.Message, ex)
-        End Try
-    End Function
 
 
 
@@ -6042,65 +6226,200 @@ Public Class ThisAddIn
     End Function
 
 
-
     Public Function GetVisibleText(ByVal src As Range) As String
-        ' 1) Null-/Leerauswahl abfangen
-        If src Is Nothing Then
-            Return String.Empty
-        End If
+        Try
+            ' 1) Null-/Leerauswahl abfangen
+            If src Is Nothing Then
+                Return String.Empty
+            End If
 
-        ' 2) Rohtext einmal holen für Fast-Path
-        Dim raw As String = src.Text
-        If String.IsNullOrEmpty(raw) Then
-            Return String.Empty
-        End If
+            ' 2) Rohtext einmal holen für Fast-Path
+            Dim raw As String
+            Try
+                raw = src.Text
+                If String.IsNullOrEmpty(raw) Then
+                    Return String.Empty
+                End If
+            Catch
+                Return String.Empty
+            End Try
 
-        ' 3) Fast-Path: keine Revisionen in dieser Range → sofort zurückgeben
-        If src.Revisions.Count = 0 Then
-            Return raw
-        End If
+            ' 3) Fast-Path: keine Revisionen in dieser Range → sofort zurückgeben
+            Dim revCount As Integer
+            Try
+                revCount = src.Revisions.Count
+                If revCount = 0 Then
+                    Return raw
+                End If
+            Catch
+                Return raw ' If we can't access revisions count, return raw text
+            End Try
 
-        Dim sliceStart As Integer = src.Start
-        Dim sliceEnd As Integer = src.End    ' exklusiv
+            ' Alternative approach: use Word's built-in view settings
+            Try
+                Dim doc As Document = src.Document
+                Dim origShowRevs As Boolean = doc.ShowRevisions
+                Dim origPrintRevs As Boolean = doc.PrintRevisions
 
-        ' 4) Gelöschte Intervalle (Revisions ohne Insert/Move) sammeln
-        Dim skips As New List(Of (s As Integer, e As Integer))()
-        For Each rev As Revision In src.Revisions
-            If rev.Type = WdRevisionType.wdRevisionInsert _
+                ' Temporarily hide revisions to get clean text
+                doc.ShowRevisions = False
+                doc.PrintRevisions = False
+
+                ' Get text without revisions
+                Dim visibleText As String = src.Text
+
+                ' Restore original settings
+                doc.ShowRevisions = origShowRevs
+                doc.PrintRevisions = origPrintRevs
+
+                Return visibleText
+            Catch ex As Exception
+                Debug.WriteLine($"Alternative method failed: {ex.Message}")
+                ' Continue with original algorithm if alternative fails
+            End Try
+
+            ' Original algorithm with better error handling
+            Dim sliceStart As Integer = src.Start
+            Dim sliceEnd As Integer = src.End    ' exklusiv
+
+            ' 4) Collect deleted intervals with safer revision handling
+            Dim skips As New List(Of (s As Integer, e As Integer))()
+            For Each rev As Revision In src.Revisions
+                Try
+                    ' Skip if we can't safely get revision type
+                    Dim revType As WdRevisionType = rev.Type
+
+                    If revType = WdRevisionType.wdRevisionInsert _
+                    OrElse revType = WdRevisionType.wdRevisionMovedTo Then
+                        Continue For
+                    End If
+
+                    Dim revRange As Range = rev.Range
+                    Dim fromPos As Integer = Math.Max(revRange.Start, sliceStart)
+                    Dim toPos As Integer = Math.Min(revRange.End, sliceEnd)
+                    If fromPos < toPos Then
+                        skips.Add((fromPos, toPos))
+                    End If
+                Catch ex As Exception
+                    ' Skip problematic revisions
+                    Debug.WriteLine($"Error processing revision: {ex.Message}")
+                    Continue For
+                End Try
+            Next
+
+            ' 5) Merge intervals
+            Dim merged As List(Of (s As Integer, e As Integer)) = MergeIntervals(skips)
+
+            ' 6) Determine visible segments
+            Dim keep As New List(Of (s As Integer, e As Integer))()
+            Dim pos As Integer = sliceStart
+            For Each iv In merged
+                If iv.s > pos Then
+                    keep.Add((pos, iv.s))
+                End If
+                pos = Math.Max(pos, iv.e)
+            Next
+            If pos < sliceEnd Then
+                keep.Add((pos, sliceEnd))
+            End If
+
+            ' 7) Read text segment by segment
+            Dim sb As New StringBuilder()
+            For Each iv In keep
+                Try
+                    sb.Append(src.Document.Range(iv.s, iv.e).Text)
+                Catch ex As Exception
+                    Debug.WriteLine($"Error reading segment {iv.s}-{iv.e}: {ex.Message}")
+                End Try
+            Next
+
+            Return sb.ToString()
+
+        Catch ex As Exception
+            Debug.WriteLine($"Exception in GetVisibleText: {ex.Message}{vbCrLf}{ex.StackTrace}")
+            System.Diagnostics.Debugger.Break()
+            ' Fall back to raw text or empty string in worst case
+            Try
+                Return If(src IsNot Nothing, src.Text, String.Empty)
+            Catch
+                Return String.Empty
+            End Try
+        End Try
+
+    End Function
+
+
+    Public Function xOldGetVisibleText(ByVal src As Range) As String
+#If DEBUG Then
+        Try
+#End If
+
+            ' 1) Null-/Leerauswahl abfangen
+            If src Is Nothing Then
+                Return String.Empty
+            End If
+
+            ' 2) Rohtext einmal holen für Fast-Path
+            Dim raw As String = src.Text
+            If String.IsNullOrEmpty(raw) Then
+                Return String.Empty
+            End If
+
+            ' 3) Fast-Path: keine Revisionen in dieser Range → sofort zurückgeben
+            If src.Revisions.Count = 0 Then
+                Return raw
+            End If
+
+            Dim sliceStart As Integer = src.Start
+            Dim sliceEnd As Integer = src.End    ' exklusiv
+
+            ' 4) Gelöschte Intervalle (Revisions ohne Insert/Move) sammeln
+            Dim skips As New List(Of (s As Integer, e As Integer))()
+            For Each rev As Revision In src.Revisions
+                If rev.Type = WdRevisionType.wdRevisionInsert _
            OrElse rev.Type = WdRevisionType.wdRevisionMovedTo Then
-                Continue For
+                    Continue For
+                End If
+
+                Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
+                Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
+                If fromPos < toPos Then
+                    skips.Add((fromPos, toPos))
+                End If
+            Next
+
+            ' 5) Intervalle zusammenführen
+            Dim merged As List(Of (s As Integer, e As Integer)) = MergeIntervals(skips)
+
+            ' 6) Komplement-Intervalle (sichtbare Segmente) ermitteln
+            Dim keep As New List(Of (s As Integer, e As Integer))()
+            Dim pos As Integer = sliceStart
+            For Each iv In merged
+                If iv.s > pos Then
+                    keep.Add((pos, iv.s))
+                End If
+                pos = Math.Max(pos, iv.e)
+            Next
+            If pos < sliceEnd Then
+                keep.Add((pos, sliceEnd))
             End If
 
-            Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
-            Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
-            If fromPos < toPos Then
-                skips.Add((fromPos, toPos))
-            End If
-        Next
+            ' 7) Stück für Stück aus Word‐Range auslesen
+            Dim sb As New StringBuilder()
+            For Each iv In keep
+                sb.Append(src.Document.Range(iv.s, iv.e).Text)
+            Next
 
-        ' 5) Intervalle zusammenführen
-        Dim merged As List(Of (s As Integer, e As Integer)) = MergeIntervals(skips)
+            Return sb.ToString()
+#If DEBUG Then
+        Catch ex As Exception
+            Debug.WriteLine($"Exception in GetVisibleText: {ex.Message}{vbCrLf}{ex.StackTrace}")
+            Trace.WriteLine(ex.ToString)
+            System.Diagnostics.Debugger.Break()
+            Throw
+        End Try
+#End If
 
-        ' 6) Komplement-Intervalle (sichtbare Segmente) ermitteln
-        Dim keep As New List(Of (s As Integer, e As Integer))()
-        Dim pos As Integer = sliceStart
-        For Each iv In merged
-            If iv.s > pos Then
-                keep.Add((pos, iv.s))
-            End If
-            pos = Math.Max(pos, iv.e)
-        Next
-        If pos < sliceEnd Then
-            keep.Add((pos, sliceEnd))
-        End If
-
-        ' 7) Stück für Stück aus Word‐Range auslesen
-        Dim sb As New StringBuilder()
-        For Each iv In keep
-            sb.Append(src.Document.Range(iv.s, iv.e).Text)
-        Next
-
-        Return sb.ToString()
     End Function
 
     Private Function MergeIntervals(ByVal intervals As List(Of (s As Integer, e As Integer))) _
@@ -6645,6 +6964,7 @@ Public Class ThisAddIn
             If range.Start > docStart AndAlso range.End < docEnd Then
                 ' Ein 1‐Zeichen‐Range vor range
                 Dim beforerange As Range = range.Document.Range(range.Start - 1, range.Start)
+
                 ' Ein 1‐Zeichen‐Range nach range
                 Dim afterrange As Range = range.Document.Range(range.End - 1, range.End + 1)
 
@@ -7801,8 +8121,211 @@ Public Class ThisAddIn
     End Sub
 
 
+    ' Structure to store revision information for fast processing
+    Private Structure RevInfo
+        Public Start As Integer
+        Public EndPos As Integer  ' Using EndPos instead of End to avoid keyword conflict
+        Public Text As String
+        Public Type As WdRevisionType
+        Public Author As String
+    End Structure
 
     Public Function AddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
+
+        Dim splash As New SplashScreen("Coding markups...  counting")
+        splash.Show()
+        splash.Refresh()
+
+        ' Quick exit for ranges without revisions
+        Dim revCount As Integer = 0
+        Try
+            revCount = rng.Revisions.Count
+        Catch ex As Exception
+            splash.Close()
+            Return rng.Text
+        End Try
+
+        If revCount = 0 Then
+            splash.Close()
+            Return rng.Text
+        End If
+
+        ' Get range boundaries
+        Dim rangeStart As Integer = rng.Start
+        Dim rangeEnd As Integer = rng.End
+        Dim resultBuilder As New StringBuilder(rng.Text.Length * 2)
+
+        ' Create a collection to hold all revision data in memory
+        Dim revInfos As New List(Of RevInfo)(revCount)
+
+        ' Collect all revision data in a single pass to minimize COM calls
+        For i As Integer = 1 To revCount
+            splash.UpdateMessage($"Collecting markups... {revCount - i} left")
+            Try
+
+                Dim rev As Revision = rng.Revisions(i)
+
+                Try
+                    Dim revRange As Range = rev.Range
+
+                    Dim revStart As Integer = revRange.Start
+                    Dim revEnd As Integer = revRange.End
+
+                    ' Only process revisions that overlap with our range
+                    If revEnd > rangeStart AndAlso revStart < rangeEnd Then
+                        Dim revText As String = revRange.Text
+                        Dim revType As WdRevisionType = rev.Type
+                        Dim revAuthor As String = rev.Author
+
+                        ' Create a value type to store data efficiently
+                        revInfos.Add(New RevInfo() With {
+                        .Start = revStart,
+                        .EndPos = revEnd,
+                        .Text = revText,
+                        .Type = revType,
+                        .Author = revAuthor
+                    })
+                    End If
+                Catch ex As Exception
+                    ' Skip this revision and continue
+                    Continue For
+                End Try
+            Catch ex As Exception
+                Debug.WriteLine($"AddMarkupTags: ERROR with revision {i}: {ex.Message}")
+                ' Skip and continue with next revision
+                Continue For
+            End Try
+
+        Next
+
+        ' Sort revisions by start position
+        revInfos.Sort(Function(a, b) a.Start.CompareTo(b.Start))
+
+        ' Process document with minimal COM access
+        Dim currentPos As Integer = rangeStart
+        Dim ii As Integer = 0
+
+        For Each info In revInfos
+
+            splash.UpdateMessage("Coding markups... " & revInfos.Count - ii & " left")
+            ii = ii + 1
+
+            ' Add text before this revision
+            If info.Start > currentPos Then
+                Try
+                    Debug.WriteLine($"AddMarkupTags: Getting text before revision: {currentPos} to {info.Start}")
+                    Dim beforeText As String = rng.Document.Range(currentPos, info.Start).Text
+                    resultBuilder.Append(beforeText)
+                Catch ex As Exception
+                    Debug.WriteLine($"AddMarkupTags: Error getting text before revision: {ex.Message}")
+                    ' If we can't get the text, just continue
+                End Try
+            End If
+
+            ' Check if we should include markup
+            Dim includeMarkup As Boolean = String.IsNullOrEmpty(TPMarkupName) OrElse
+            String.Equals(info.Author, TPMarkupName, StringComparison.OrdinalIgnoreCase)
+
+            ' Add revision text with markup
+            If includeMarkup Then
+                Select Case info.Type
+                    Case WdRevisionType.wdRevisionDelete
+                        resultBuilder.Append("<del>").Append(info.Text).Append("</del>")
+                        Debug.WriteLine($"AddMarkupTags: Added delete markup: {info.Text.Length} chars")
+                    Case WdRevisionType.wdRevisionInsert
+                        resultBuilder.Append("<ins>").Append(info.Text).Append("</ins>")
+                        Debug.WriteLine($"AddMarkupTags: Added insert markup: {info.Text.Length} chars")
+                    Case Else
+                        resultBuilder.Append(info.Text)
+                End Select
+            Else
+                resultBuilder.Append(info.Text)
+            End If
+
+            ' Update position
+            currentPos = info.EndPos
+        Next
+
+        ' Add any remaining text
+        If currentPos < rangeEnd Then
+            Try
+                Dim tailText As String = rng.Document.Range(currentPos, rangeEnd).Text
+                resultBuilder.Append(tailText)
+            Catch ex As Exception
+                ' If we can't get the remaining text, just return what we have
+            End Try
+        End If
+
+        splash.Close()
+
+        Return resultBuilder.ToString()
+    End Function
+
+
+    Public Function OldAddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
+        ' Read the entire range text at once to minimize COM calls
+        Dim fullText As String = rng.Text
+        Dim resultBuilder As New StringBuilder(fullText.Length * 2) ' Pre-allocate with extra space for tags
+
+        ' Get all revisions and sort them
+        Dim revList = rng.Revisions _
+        .Cast(Of Revision)() _
+        .OrderBy(Function(r) r.Range.Start - rng.Start) _
+        .ToList()
+
+        ' Track our position in the source text
+        Dim currentPos As Integer = 0
+
+        Debug.WriteLine("Revlist Number: " & revList.Count)
+
+        ' Process all revisions
+        For Each rev As Revision In revList
+            ' Calculate position relative to our range
+            Dim relativeStart As Integer = rev.Range.Start - rng.Start
+            Dim relativeEnd As Integer = rev.Range.End - rng.Start
+
+            ' Add text before this revision
+            If relativeStart > currentPos Then
+                resultBuilder.Append(fullText.Substring(currentPos, relativeStart - currentPos))
+            End If
+
+            ' Check if we should include markup for this author
+            Dim includeMarkup As Boolean = String.IsNullOrEmpty(TPMarkupName) OrElse
+            String.Equals(rev.Author, TPMarkupName, StringComparison.OrdinalIgnoreCase)
+
+            ' Get the revision text
+            Dim revText As String = rev.Range.Text
+
+            Debug.WriteLine("MarkupText: " & revText)
+
+            ' Append with appropriate tags
+            If includeMarkup Then
+                Select Case rev.Type
+                    Case WdRevisionType.wdRevisionDelete
+                        resultBuilder.Append("<del>").Append(revText).Append("</del>")
+                    Case WdRevisionType.wdRevisionInsert
+                        resultBuilder.Append("<ins>").Append(revText).Append("</ins>")
+                    Case Else
+                        resultBuilder.Append(revText)
+                End Select
+            Else
+                resultBuilder.Append(revText)
+            End If
+
+            ' Update current position
+            currentPos = relativeEnd
+        Next
+
+        ' Add any remaining text
+        If currentPos < fullText.Length Then
+            resultBuilder.Append(fullText.Substring(currentPos))
+        End If
+
+        Return resultBuilder.ToString()
+    End Function
+
+
+    Public Function xxxAddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
         Dim resultBuilder As New StringBuilder()
 
         ' 1. Alle Revisionen in Dokumentreihenfolge sortieren
@@ -7949,7 +8472,7 @@ Public Class ThisAddIn
 
         End Try
     End Sub
-    Private Sub CompareAndInsert(text1 As String, text2 As String, targetRange As Range, Optional ShowInWindow As Boolean = False, Optional TextforWindow As String = "A text with these changes will be inserted ('Esc' to abort):", Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
+    Private Sub oldCompareAndInsert(text1 As String, text2 As String, targetRange As Range, Optional ShowInWindow As Boolean = False, Optional TextforWindow As String = "A text with these changes will be inserted ('Esc' to abort):", Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
         Try
             Dim diffBuilder As New InlineDiffBuilder(New Differ())
             Dim sText As String = String.Empty
@@ -8003,6 +8526,7 @@ Public Class ThisAddIn
 
             ' Insert formatted text into the specified range
             If Not ShowInWindow Then
+                Debug.WriteLine("Text with tags:" & vbCrLf & sText & vbCrLf & vbCrLf)
                 InsertMarkupText(sText & vbCrLf, targetRange)
             Else
                 sText = Regex.Replace(sText, "\{\{.*?\}\}", String.Empty)
@@ -8018,7 +8542,379 @@ Public Class ThisAddIn
             MessageBox.Show("Error in CompareAndInsertText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
-    Private Sub InsertMarkupText(inputText As String, targetRange As Range)
+
+    Private Sub CompareAndInsert(text1 As String, text2 As String, targetRange As Range, Optional ShowInWindow As Boolean = False, Optional TextforWindow As String = "A text with these changes will be inserted ('Esc' to abort):", Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
+        Try
+
+            Dim diffBuilder As New InlineDiffBuilder(New Differ())
+            Dim sText As String = String.Empty
+
+            Debug.WriteLine("A Text1 = " & text1)
+            Debug.WriteLine("A Text2 = " & text2)
+
+            ' Pre-process the texts to replace line breaks with a unique marker
+            text1 = text1.Replace(vbCrLf, " {vbCrLf} ").Replace(vbCr, " {vbCr} ").Replace(vbLf, " {vbLf} ")
+            text2 = text2.Replace(vbCrLf, " {vbCrLf} ").Replace(vbCr, " {vbCr} ").Replace(vbLf, " {vbLf} ")
+
+            ' Normalize the texts by removing extra spaces
+            text1 = text1.Replace("  ", " ").Trim()
+            text2 = text2.Replace("  ", " ").Trim()
+
+            Debug.WriteLine("B Text1 = " & text1)
+            Debug.WriteLine("B Text2 = " & text2)
+
+            ' Split the texts into words and convert them into a line-by-line format
+            ' 3) In Worte splitten (ohne leere Einträge) und zeilenweise darstellen
+            Dim words1 As String = String.Join(
+              Environment.NewLine,
+              text1.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
+                    )
+            Dim words2 As String = String.Join(
+              Environment.NewLine,
+              text2.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
+                    )
+            ' Generate word-based diff using DiffPlex
+            Dim diffResult As DiffPaneModel = diffBuilder.BuildDiffModel(words1, words2)
+
+            ' Build the formatted output based on the diff results
+            For Each line In diffResult.Lines
+                Select Case line.Type
+                    Case ChangeType.Inserted
+                        sText &= "[INS_START]" & line.Text.Trim() & "[INS_END] "
+                    Case ChangeType.Deleted
+                        sText &= "[DEL_START]" & line.Text.Trim() & "[DEL_END] "
+                    Case ChangeType.Unchanged
+                        sText &= line.Text.Trim() & " "
+                End Select
+            Next
+
+            Debug.WriteLine("1 = " & sText)
+
+            ' Remove preceding and trailing spaces around placeholders
+            sText = sText.Replace("{vbCr}", "{vbCrLf}")
+            sText = sText.Replace("{vbLf}", "{vbCrLf}")
+            sText = sText.Replace(" {vbCrLf} ", "{vbCrLf}")
+            sText = sText.Replace(" {vbCrLf}", "{vbCrLf}")
+            sText = sText.Replace("{vbCrLf} ", "{vbCrLf}")
+
+            Debug.WriteLine("2 = " & sText)
+
+            ' Remove instances of line breaks surrounded by [DEL_START] and [DEL_END]
+            sText = sText.Replace("[DEL_START]{vbCrLf}[DEL_END] ", "")
+
+            ' Include instances of line breaks surrounded by [INS_START] and [INS_END] without the [INS...] text
+            sText = sText.Replace("[INS_START]{vbCrLf}[INS_END] ", "{vbCrLf}")
+
+            ' Entferne alle überflüssigen Leerzeilen-Platzhalter am Ende
+
+            Debug.WriteLine("3 = " & sText)
+
+            sText = sText.Replace(vbCrLf, "").Replace(vbCr, "").Replace(vbLf, "")
+
+            ' Replace placeholders with actual line breaks
+            sText = sText.Replace("{vbCrLf}", vbCrLf)
+
+            ' Adjust overlapping tags
+            sText = sText.Replace("[DEL_END] [INS_START]", "[DEL_END][INS_START]")
+            sText = sText.Replace("[INS_START][INS_END] ", "")
+            sText = RemoveInsDelTagsInPlaceholders(sText)
+
+            ' Insert formatted text into the specified range
+            If Not ShowInWindow Then
+                Debug.WriteLine("Text with tags: " & vbCrLf & "'" & sText & "'" & vbCrLf & vbCrLf)
+                InsertMarkupText(sText, targetRange)
+            Else
+                sText = Regex.Replace(sText, "\{\{.*?\}\}", String.Empty)
+
+                Dim htmlContent As String = ConvertMarkupToRTF(TextforWindow & "\r\r" & sText)
+
+                System.Threading.Tasks.Task.Run(Sub()
+                                                    ShowRTFCustomMessageBox(htmlContent)
+                                                End Sub)
+            End If
+
+        Catch ex As System.Exception
+            MessageBox.Show("Error in CompareAndInsertText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+    End Sub
+
+    Public Function RemoveInsDelTagsInPlaceholders(input As String) As String
+        Try
+            ' Regex-Pattern:
+            ' \{\{                   Literal '{{'
+            ' (?<content>.*?)        Inhalt vor dem Tag (Lazy)
+            ' \[(?:INS_START|DEL_START)\]   Start-Tag
+            ' (?<after>.*?)          Inhalt bis zum Ende der Klammer (Lazy)
+            ' \}\}                   Literal '}}'
+            ' \[(?:INS_END|DEL_END)\] Direkt folgendes End-Tag
+            Dim pattern As String = "\{\{(?<content>.*?)\[(?:INS_START|DEL_START)\](?<after>.*?)\}\}\[(?:INS_END|DEL_END)\]"
+
+            ' MatchEvaluator als Delegate
+            Dim evaluator As System.Text.RegularExpressions.MatchEvaluator =
+                Function(m As System.Text.RegularExpressions.Match) As String
+                    Return "{{" & m.Groups("content").Value & m.Groups("after").Value & "}}"
+                End Function
+
+            ' Replace mit korrektem Overload
+            Return System.Text.RegularExpressions.Regex.Replace(
+                input,
+                pattern,
+                evaluator,
+                System.Text.RegularExpressions.RegexOptions.Singleline
+            )
+        Catch ex As System.Exception
+            ' Gracefully
+
+        End Try
+    End Function
+
+    Private Sub InsertMarkupText(inputText As String, targetRange As Word.Range)
+
+        Dim wordApp As Word.Application = Globals.ThisAddIn.Application
+        Dim doc As Word.Document = wordApp.ActiveDocument
+
+        Dim originalTrack As Boolean = doc.TrackRevisions
+        Dim originalUpdate As Boolean = wordApp.ScreenUpdating
+
+        '------------------------------------------------------------------
+        '  A) Preserve the trailing ¶ so the next paragraph never joins in
+        '------------------------------------------------------------------
+        Dim startPos As Integer = targetRange.Start
+        Dim endPosNoCR As Integer = targetRange.End
+        If doc.Range(endPosNoCR - 1, endPosNoCR).Text = vbCr Then endPosNoCR -= 1
+
+        Try
+            wordApp.ScreenUpdating = False
+            doc.TrackRevisions = False
+
+            doc.Range(startPos, endPosNoCR).Delete()      ' keep ¶ intact
+            targetRange.SetRange(startPos, startPos)      ' collapsed cursor
+
+            '------------------------------------------------------------------
+            '  Merge contiguous INS- und DEL-Tags mit nur Leerzeichen dazwischen
+            '------------------------------------------------------------------
+            Dim txt As String = inputText
+            txt = System.Text.RegularExpressions.Regex.Replace(
+                  txt, "\[INS_END\](\s*)\[INS_START\]", "$1"
+              )
+            txt = System.Text.RegularExpressions.Regex.Replace(
+                  txt, "\[DEL_END\](\s*)\[DEL_START\]", "$1"
+              )
+
+            While txt.Length > 0
+                System.Windows.Forms.Application.DoEvents()
+                If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then Exit While
+
+                ' locate next opening tag
+                Dim insPos As Integer = txt.IndexOf("[INS_START]", StringComparison.Ordinal)
+                Dim delPos As Integer = txt.IndexOf("[DEL_START]", StringComparison.Ordinal)
+
+                Dim nextTagPos As Integer
+                Dim tagType As String = Nothing
+                If insPos = -1 AndAlso delPos = -1 Then
+                    nextTagPos = -1
+                ElseIf insPos = -1 OrElse (delPos <> -1 AndAlso delPos < insPos) Then
+                    nextTagPos = delPos : tagType = "DEL"
+                Else
+                    nextTagPos = insPos : tagType = "INS"
+                End If
+
+                ' plain text before tag
+                If nextTagPos = -1 OrElse nextTagPos > 0 Then
+                    Dim plain As String = If(nextTagPos = -1, txt, txt.Substring(0, nextTagPos))
+                    If plain.Length > 0 Then
+                        doc.TrackRevisions = False
+                        targetRange.InsertAfter(plain)
+                        targetRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    End If
+                End If
+                If nextTagPos = -1 Then Exit While
+
+                '==============================================================
+                '  INSERT block
+                '==============================================================
+                If tagType = "INS" Then
+                    txt = txt.Substring(nextTagPos + "[INS_START]".Length)
+                    Dim endIns As Integer = txt.IndexOf("[INS_END]", StringComparison.Ordinal)
+                    Dim insText As String = If(endIns = -1, txt, txt.Substring(0, endIns))
+                    If endIns <> -1 Then txt = txt.Substring(endIns + "[INS_END]".Length) Else txt = ""
+
+                    doc.TrackRevisions = True
+                    targetRange.InsertAfter(insText)
+                    targetRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    doc.TrackRevisions = False
+
+                    '==============================================================
+                    '  DELETION block  (with padding space)
+                    '==============================================================
+                Else
+                    txt = txt.Substring(nextTagPos + "[DEL_START]".Length)
+                    Dim endDel As Integer = txt.IndexOf("[DEL_END]", StringComparison.Ordinal)
+                    Dim delText As String = If(endDel = -1, txt, txt.Substring(0, endDel))
+                    If endDel <> -1 Then txt = txt.Substring(endDel + "[DEL_END]".Length) Else txt = ""
+
+                    ' absorb space/¶ immediately following the tag
+                    If txt.StartsWith(" ") Then
+                        delText &= " " : txt = txt.Substring(1)
+                    ElseIf txt.StartsWith(vbCrLf) Then
+                        delText &= vbCrLf : txt = txt.Substring(2)
+                    ElseIf txt.StartsWith(vbCr) Then
+                        delText &= vbCr : txt = txt.Substring(1)
+                    End If
+
+                    '--- PAD with an extra space so Word won't merge partial-word deletions
+                    Dim paddedDel As String = delText & " "
+
+                    ' a) insert silently
+                    doc.TrackRevisions = False
+                    targetRange.Text = delText
+
+                    ' c) delete with tracking ON
+                    doc.TrackRevisions = True
+                    targetRange.Delete()
+
+                    doc.TrackRevisions = False
+                    targetRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                End If
+            End While
+
+        Catch ex As System.Exception
+            Debug.WriteLine("InsertMarkupText error: " & ex.Message & vbCrLf & inputText)
+
+        Finally
+            doc.TrackRevisions = originalTrack
+            wordApp.ScreenUpdating = originalUpdate
+
+            ' Set targetRange to the full inserted text
+            Dim endPosInserted As Integer = targetRange.End
+            targetRange.SetRange(startPos, endPosInserted)
+
+            ' Set the selection to targetRange
+            wordApp.Selection.SetRange(targetRange.Start, targetRange.End)
+
+        End Try
+    End Sub
+
+
+
+
+    Private Sub xxxInsertMarkupText(inputText As String, targetRange As Word.Range)
+
+        Dim wordApp As Word.Application = Globals.ThisAddIn.Application
+        Dim doc As Word.Document = wordApp.ActiveDocument
+
+        Dim originalTrack As Boolean = doc.TrackRevisions
+        Dim originalUpdate As Boolean = wordApp.ScreenUpdating
+
+        '------------------------------------------------------------------
+        '  A) Preserve the trailing ¶ so the next paragraph never joins in
+        '------------------------------------------------------------------
+        Dim startPos As Integer = targetRange.Start
+        Dim endPosNoCR As Integer = targetRange.End
+        If doc.Range(endPosNoCR - 1, endPosNoCR).Text = vbCr Then endPosNoCR -= 1
+
+        Try
+            wordApp.ScreenUpdating = False
+            doc.TrackRevisions = False
+
+            doc.Range(startPos, endPosNoCR).Delete()      ' keep ¶ intact
+            targetRange.SetRange(startPos, startPos)      ' collapsed cursor
+
+            Dim txt As String = inputText
+
+            While txt.Length > 0
+                System.Windows.Forms.Application.DoEvents()
+                If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then Exit While
+
+                'locate next opening tag
+                Dim insPos As Integer = txt.IndexOf("[INS_START]", StringComparison.Ordinal)
+                Dim delPos As Integer = txt.IndexOf("[DEL_START]", StringComparison.Ordinal)
+
+                Dim nextTagPos As Integer
+                Dim tagType As String = Nothing
+                If insPos = -1 AndAlso delPos = -1 Then
+                    nextTagPos = -1
+                ElseIf insPos = -1 OrElse (delPos <> -1 AndAlso delPos < insPos) Then
+                    nextTagPos = delPos : tagType = "DEL"
+                Else
+                    nextTagPos = insPos : tagType = "INS"
+                End If
+
+                'plain text before tag
+                If nextTagPos = -1 OrElse nextTagPos > 0 Then
+                    Dim plain As String = If(nextTagPos = -1, txt, txt.Substring(0, nextTagPos))
+                    If plain.Length > 0 Then
+                        doc.TrackRevisions = False
+                        targetRange.InsertAfter(plain)
+                        targetRange.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    End If
+                End If
+                If nextTagPos = -1 Then Exit While
+
+                '==============================================================
+                '  INSERT block
+                '==============================================================
+                If tagType = "INS" Then
+                    txt = txt.Substring(nextTagPos + "[INS_START]".Length)
+                    Dim endIns As Integer = txt.IndexOf("[INS_END]", StringComparison.Ordinal)
+                    Dim insText As String = If(endIns = -1, txt, txt.Substring(0, endIns))
+                    If endIns <> -1 Then txt = txt.Substring(endIns + "[INS_END]".Length) Else txt = ""
+
+                    doc.TrackRevisions = True
+                    targetRange.InsertAfter(insText)
+                    targetRange.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    doc.TrackRevisions = False
+
+                    '==============================================================
+                    '  DELETION block  (with padding space)   <-- FIX B
+                    '==============================================================
+                Else
+                    txt = txt.Substring(nextTagPos + "[DEL_START]".Length)
+                    Dim endDel As Integer = txt.IndexOf("[DEL_END]", StringComparison.Ordinal)
+                    Dim delText As String = If(endDel = -1, txt, txt.Substring(0, endDel))
+                    If endDel <> -1 Then txt = txt.Substring(endDel + "[DEL_END]".Length) Else txt = ""
+
+                    'absorb space/¶ immediately following the tag
+                    If txt.StartsWith(" ") Then
+                        delText &= " " : txt = txt.Substring(1)
+                    ElseIf txt.StartsWith(vbCrLf) Then
+                        delText &= vbCrLf : txt = txt.Substring(2)
+                    ElseIf txt.StartsWith(vbCr) Then
+                        delText &= vbCr : txt = txt.Substring(1)
+                    End If
+
+                    '--- PAD with an extra space so Word won't merge partial-word deletions
+                    Dim paddedDel As String = delText & " "
+
+                    'a) insert silently
+                    doc.TrackRevisions = False
+                    'targetRange.InsertAfter(paddedDel)
+                    targetRange.Text = delText
+                    'b) select everything we just inserted
+                    'Dim delRange As Word.Range = targetRange.Duplicate
+                    'delRange.MoveEnd(WdUnits.wdCharacter, paddedDel.Length)
+
+
+                    'c) delete with tracking ON
+                    doc.TrackRevisions = True
+                    targetRange.Delete()
+
+                    doc.TrackRevisions = False
+                    targetRange.Collapse(WdCollapseDirection.wdCollapseEnd)
+                End If
+            End While
+
+        Catch ex As System.Exception
+            Debug.WriteLine("InsertMarkupText error: " & ex.Message & vbCrLf & inputText)
+
+        Finally
+            doc.TrackRevisions = originalTrack
+            wordApp.ScreenUpdating = originalUpdate
+        End Try
+    End Sub
+
+
+    Private Sub OldInsertMarkupText(inputText As String, targetRange As Range)
         Try
             Dim wordApp As Word.Application = Globals.ThisAddIn.Application
             Dim TextArray() As String = {}
@@ -8083,83 +8979,6 @@ Public Class ThisAddIn
         End Try
     End Sub
 
-    Private Sub InsertMarkupTextColor(inputText As String, targetRange As Range)
-        Try
-            Dim wordApp As Word.Application = Globals.ThisAddIn.Application
-            Dim TextArray() As String = {}
-            Dim FormatArray() As Integer = {}
-            Dim originalFontColor As WdColor = WdColor.wdColorBlack
-            Dim originalUnderline As WdUnderline = WdUnderline.wdUnderlineNone
-            Dim originalStrikeThrough As Boolean = False
-            Dim originalBold As Integer = 0
-            Dim originalItalic As Integer = 0
-
-
-            ' Parse the input text into chunks with formatting information
-            ParseText(inputText, TextArray, FormatArray)
-
-            ' Store original font properties from the range
-            With targetRange.Font
-                originalFontColor = .Color
-                originalUnderline = .Underline
-                originalStrikeThrough = .StrikeThrough
-                originalBold = .Bold
-                originalItalic = .Italic
-            End With
-
-            ' Insert each text chunk with the appropriate formatting
-            For i = 0 To TextArray.Length - 1
-                ' Reset formatting to original before each insertion
-                With targetRange.Font
-                    .Color = originalFontColor
-                    .Underline = originalUnderline
-                    .StrikeThrough = originalStrikeThrough
-                    .Bold = originalBold
-                    .Italic = originalItalic
-                End With
-
-                ' Insert the text at the target range
-                targetRange.Text = TextArray(i)
-
-                ' Define the range for the inserted text
-                Dim insertedRange As Range = targetRange.Duplicate
-                insertedRange.Start = targetRange.Start
-                insertedRange.End = targetRange.Start + TextArray(i).Length
-
-                ' Apply formatting based on the tag
-                Select Case FormatArray(i)
-                    Case 1 ' [INS_START]...[INS_END]: Blue underline
-                        With insertedRange.Font
-                            .Color = RGB(0, 0, 255)
-                            .Underline = WdUnderline.wdUnderlineSingle
-                            .StrikeThrough = False
-                        End With
-                    Case 2 ' [DEL_START]...[DEL_END]: Red strikethrough
-                        With insertedRange.Font
-                            .Color = RGB(255, 0, 0)
-                            .StrikeThrough = True
-                            .Underline = WdUnderline.wdUnderlineNone
-                        End With
-                    Case Else ' Normal text
-                        ' Already reset to original formatting
-                End Select
-
-                ' Collapse the range to the end for the next insertion
-                targetRange.Collapse(WdCollapseDirection.wdCollapseEnd)
-            Next
-
-            ' Ensure formatting is reset after all insertions
-            With targetRange.Font
-                .Color = originalFontColor
-                .Underline = originalUnderline
-                .StrikeThrough = originalStrikeThrough
-                .Bold = originalBold
-                .Italic = originalItalic
-            End With
-        Catch ex As System.Exception
-            MessageBox.Show("Error in InsertMarkupTextColor: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
-    End Sub
     Private Sub ParseText(inputText As String, ByRef TextArray() As String, ByRef FormatArray() As Integer)
         Dim pos As Integer = 1
         Dim lenText As Integer = inputText.Length
@@ -8289,6 +9108,9 @@ Public Class ThisAddIn
                             rep.Italic = False
                         End Sub)
 
+            Debug.WriteLine($"4-2 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+
             ' 3) Nur Fett  (Absatz)
             ReplaceWithinRange(rng,
                         Sub(f)
@@ -8313,6 +9135,10 @@ Public Class ThisAddIn
                             rep.Bold = False
                         End Sub)
 
+            Debug.WriteLine($"4-3 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+
+
             ' 5) Nur Italic  (Absatz)
             ReplaceWithinRange(rng,
                         Sub(f)
@@ -8336,6 +9162,10 @@ Public Class ThisAddIn
                         Sub(rep)
                             rep.Italic = False
                         End Sub)
+
+            Debug.WriteLine($"4-4 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+
 
             ' 7) Underline  (Absatz)
             ReplaceWithinRange(rng,
@@ -8388,7 +9218,7 @@ Public Class ThisAddIn
 
 
             ' Auswahl wiederherstellen
-            rng = workingrange.Duplicate
+            'rng = workingrange.Duplicate
             rng.Select()
 
             Debug.WriteLine($"4-5 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
@@ -8687,7 +9517,61 @@ Public Class ThisAddIn
 
     End Function
 
+
     Private Sub ReplaceWithinRange(
+    ByVal rng As Word.Range,
+    ByVal configureFind As Action(Of Word.Find),
+    ByVal replacementText As String,
+    ByVal tweakReplacement As Action(Of Word.Font))
+
+        Dim doc As Word.Document = rng.Document
+        Dim originalStart As Long = rng.Start
+        Dim originalEnd As Long = rng.End
+        Dim currentPosition As Long = originalStart
+
+        Do
+            ' Create a range from current position to the end of the original range
+            Dim searchRange As Word.Range = doc.Range(currentPosition, originalEnd)
+            Dim f As Word.Find = searchRange.Find
+
+            Debug.WriteLine($"Searchrange = '{searchRange.Text}'")
+
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+
+            configureFind(f)
+            f.Replacement.Text = replacementText
+            tweakReplacement(f.Replacement.Font)
+
+            f.Forward = True
+            f.Wrap = Word.WdFindWrap.wdFindStop
+            f.Format = True
+
+            ' If no more matches, exit
+            If Not f.Execute(Replace:=Word.WdReplace.wdReplaceOne) Then Exit Do
+
+            Debug.WriteLine($"Searchrange = '{searchRange.Text}' (after change)")
+
+            ' After replacement, searchRange now points to the match
+            ' Check if this match/replacement went beyond our boundary
+            If searchRange.End > originalEnd Then
+                Debug.WriteLine("Went too far!")
+                doc.Undo()
+                Exit Do
+            End If
+
+            ' Set the current position to continue from the end of this match
+            currentPosition = searchRange.End
+            originalEnd = rng.End
+
+        Loop While currentPosition < originalEnd
+
+        ' Update the original range to reflect the final processed area
+        rng.SetRange(originalStart, originalEnd)
+    End Sub
+
+
+    Private Sub oldReplaceWithinRange(
         ByVal rng As Word.Range,
         ByVal configureFind As Action(Of Word.Find),
         ByVal replacementText As String,
@@ -8701,6 +9585,7 @@ Public Class ThisAddIn
         Do
             Dim win As Word.Range = doc.Range(Start:=cursor, End:=limitPos)
             Dim f As Word.Find = win.Find
+            Debug.WriteLine("Range: " & win.Text)
 
             f.ClearFormatting()
             f.Replacement.ClearFormatting()
@@ -8717,6 +9602,7 @@ Public Class ThisAddIn
 
             ' falls Ersatz über Limit hinausging → rückgängig & abbrechen
             If win.End > limitPos Then
+                Debug.WriteLine("Went too far!")
                 doc.Undo() : Exit Do
             End If
 
@@ -9623,7 +10509,7 @@ Public Class ThisAddIn
 
             If parts.Count > 0 Then
 
-                Dim splash As New SplashScreen($"Highlighting hits... Press 'Esc' to abort")
+                Dim splash As New SplashScreen($"Highlighting {parts.Count} hits... Press 'Esc' to abort")
                 splash.Show()
                 splash.Refresh()
 
@@ -9637,6 +10523,8 @@ Public Class ThisAddIn
                 Dim SuccessHits As Integer = 0
 
                 For Each part As String In parts
+
+                    splash.UpdateMessage($"Highlighting {parts.Count - SuccessHits} hits... Press 'Esc' to abort")
 
                     System.Windows.Forms.Application.DoEvents()
 
@@ -14055,49 +14943,49 @@ Public Class ThisAddIn
     End Function
 
 
-        Public Function ParseTextToConversation(text As String) As List(Of Tuple(Of String, String))
-            Dim conversation As New List(Of Tuple(Of String, String))
-            Dim currentSpeaker As String = ""
-            Dim currentText As String = ""
+    Public Function ParseTextToConversation(text As String) As List(Of Tuple(Of String, String))
+        Dim conversation As New List(Of Tuple(Of String, String))
+        Dim currentSpeaker As String = ""
+        Dim currentText As String = ""
 
-            Dim paragraphs As String() = text.Split({vbCrLf, vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+        Dim paragraphs As String() = text.Split({vbCrLf, vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
 
-            For Each para As String In paragraphs
-                Dim trimmedText As String = para.Trim()
-                If String.IsNullOrEmpty(trimmedText) Then Continue For
+        For Each para As String In paragraphs
+            Dim trimmedText As String = para.Trim()
+            If String.IsNullOrEmpty(trimmedText) Then Continue For
 
-                ' Check if the paragraph starts with a speaker tag
-                Dim newSpeaker As String = ""
-                If hostTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
-                    newSpeaker = "H"
-                    trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
-                ElseIf guestTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
-                    newSpeaker = "G"
-                    trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
-                End If
-
-                ' If a new speaker is detected, store the previous entry and start a new one
-                If newSpeaker <> "" Then
-                    If Not String.IsNullOrEmpty(currentSpeaker) Then
-                        conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
-                    End If
-                    currentSpeaker = newSpeaker
-                    currentText = trimmedText
-                Else
-                    ' Continue the current speaker's dialogue
-                    If Not String.IsNullOrEmpty(currentSpeaker) Then
-                        currentText &= " " & trimmedText
-                    End If
-                End If
-            Next
-
-            ' Add the last entry
-            If Not String.IsNullOrEmpty(currentSpeaker) Then
-                conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
+            ' Check if the paragraph starts with a speaker tag
+            Dim newSpeaker As String = ""
+            If hostTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
+                newSpeaker = "H"
+                trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
+            ElseIf guestTags.Any(Function(tag) trimmedText.StartsWith(tag, StringComparison.OrdinalIgnoreCase)) Then
+                newSpeaker = "G"
+                trimmedText = trimmedText.Substring(trimmedText.IndexOf(":"c) + 1).Trim()
             End If
 
-            Return conversation
-        End Function
+            ' If a new speaker is detected, store the previous entry and start a new one
+            If newSpeaker <> "" Then
+                If Not String.IsNullOrEmpty(currentSpeaker) Then
+                    conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
+                End If
+                currentSpeaker = newSpeaker
+                currentText = trimmedText
+            Else
+                ' Continue the current speaker's dialogue
+                If Not String.IsNullOrEmpty(currentSpeaker) Then
+                    currentText &= " " & trimmedText
+                End If
+            End If
+        Next
+
+        ' Add the last entry
+        If Not String.IsNullOrEmpty(currentSpeaker) Then
+            conversation.Add(Tuple.Create(currentSpeaker, currentText.Trim()))
+        End If
+
+        Return conversation
+    End Function
 
 
     Async Sub GenerateAndPlayPodcastAudio(
@@ -14250,56 +15138,56 @@ Public Class ThisAddIn
 
 
     Sub MergeAudioFiles(inputFiles As List(Of String), outputFile As String)
-            Try
-                Using outputStream As New FileStream(outputFile, FileMode.Create)
-                    For Each file In inputFiles
-                        Dim mp3Bytes As Byte() = System.IO.File.ReadAllBytes(file)
-                        outputStream.Write(mp3Bytes, 0, mp3Bytes.Length)
-                    Next
-                End Using
-                Console.WriteLine("Podcast audio merged successfully!")
-            Catch ex As Exception
-                Debug.WriteLine($"Error merging audio files: {ex.Message}")
-            End Try
-        End Sub
+        Try
+            Using outputStream As New FileStream(outputFile, FileMode.Create)
+                For Each file In inputFiles
+                    Dim mp3Bytes As Byte() = System.IO.File.ReadAllBytes(file)
+                    outputStream.Write(mp3Bytes, 0, mp3Bytes.Length)
+                Next
+            End Using
+            Console.WriteLine("Podcast audio merged successfully!")
+        Catch ex As Exception
+            Debug.WriteLine($"Error merging audio files: {ex.Message}")
+        End Try
+    End Sub
 
-        ' Function to save audio to a file
-        Public Shared Sub SaveAudioToFile(audioData As Byte(), filePath As String)
-            Try
-                If audioData IsNot Nothing AndAlso audioData.Length > 0 Then
-                    File.WriteAllBytes(filePath, audioData)
-                    Debug.WriteLine($"Audio file saved: {filePath}")
-                Else
-                    Debug.WriteLine("No audio received.")
-                End If
-            Catch ex As Exception
-                Debug.WriteLine($"Error saving file: {ex.Message}")
-            End Try
-        End Sub
-
-        ' Function to play the generated MP3 audio using NAudio
-        Public Shared Sub PlayAudio(filePath As String)
-
-
-            Dim splash As New SplashScreen($"Playing MP3... press 'Esc' to abort")
-            If File.Exists(filePath) Then
-                splash.Show()
-                splash.Refresh()
+    ' Function to save audio to a file
+    Public Shared Sub SaveAudioToFile(audioData As Byte(), filePath As String)
+        Try
+            If audioData IsNot Nothing AndAlso audioData.Length > 0 Then
+                File.WriteAllBytes(filePath, audioData)
+                Debug.WriteLine($"Audio file saved: {filePath}")
+            Else
+                Debug.WriteLine("No audio received.")
             End If
+        Catch ex As Exception
+            Debug.WriteLine($"Error saving file: {ex.Message}")
+        End Try
+    End Sub
 
-            Try
+    ' Function to play the generated MP3 audio using NAudio
+    Public Shared Sub PlayAudio(filePath As String)
 
-                If File.Exists(filePath) Then
 
-                    Using mp3Reader As New Mp3FileReader(filePath)
-                        Using waveOut As New WaveOutEvent()
-                            waveOut.Init(mp3Reader)
-                            waveOut.Play()
+        Dim splash As New SplashScreen($"Playing MP3... press 'Esc' to abort")
+        If File.Exists(filePath) Then
+            splash.Show()
+            splash.Refresh()
+        End If
 
-                            ' Keep playing until the audio ends
-                            While waveOut.PlaybackState = PlaybackState.Playing
-                                Thread.Sleep(100)
-                                System.Windows.Forms.Application.DoEvents()
+        Try
+
+            If File.Exists(filePath) Then
+
+                Using mp3Reader As New Mp3FileReader(filePath)
+                    Using waveOut As New WaveOutEvent()
+                        waveOut.Init(mp3Reader)
+                        waveOut.Play()
+
+                        ' Keep playing until the audio ends
+                        While waveOut.PlaybackState = PlaybackState.Playing
+                            Thread.Sleep(100)
+                            System.Windows.Forms.Application.DoEvents()
                             If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
                                 Exit While
                             End If
@@ -14308,70 +15196,70 @@ Public Class ThisAddIn
                             End If
                         End While
 
-                            ' Stop playback
-                            waveOut.Stop()
-                        End Using ' Automatically disposes waveOut
-                    End Using ' Automatically disposes mp3Reader
+                        ' Stop playback
+                        waveOut.Stop()
+                    End Using ' Automatically disposes waveOut
+                End Using ' Automatically disposes mp3Reader
 
-                    splash.Close()
-
-                Else
-                    splash.Close()
-                    ShowCustomMessageBox("Audio file not found.")
-                End If
-            Catch ex As Exception
                 splash.Close()
-                ShowCustomMessageBox($"Error playing audio: {ex.Message}")
-            End Try
-        End Sub
 
-        Shared Async Sub GenerateAndPlayAudio(textToSpeak As String, filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
+            Else
+                splash.Close()
+                ShowCustomMessageBox("Audio file not found.")
+            End If
+        Catch ex As Exception
+            splash.Close()
+            ShowCustomMessageBox($"Error playing audio: {ex.Message}")
+        End Try
+    End Sub
 
-            Dim Temporary As Boolean = (filepath = "")
+    Shared Async Sub GenerateAndPlayAudio(textToSpeak As String, filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O")
 
-            Dim audioBytes As Byte() = Await System.Threading.Tasks.Task.Run(Function() GenerateAudioFromText(textToSpeak, languageCode, voiceName).Result)
+        Dim Temporary As Boolean = (filepath = "")
 
-            Try
-                If audioBytes IsNot Nothing Then
-                    If Temporary Then
-                        filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
-                    End If
-                    SaveAudioToFile(audioBytes, filepath)
-                    Dim Result As Integer = 1
-                    If Len(textToSpeak) > TTSLargeText Then
-                        Result = ShowCustomYesNoBox("Your audio sequence has been generated " & If(Temporary, "", $"('{filepath}') ") & "and is ready to be played. Play it?", "Yes", If(Temporary, "No", "No (file remains available)"))
-                    End If
-                    If Result = 1 Then
-                        PlayAudio(filepath)
-                    End If
-                    If Temporary Then
-                        System.IO.File.Delete(filepath)
-                    End If
+        Dim audioBytes As Byte() = Await System.Threading.Tasks.Task.Run(Function() GenerateAudioFromText(textToSpeak, languageCode, voiceName).Result)
+
+        Try
+            If audioBytes IsNot Nothing Then
+                If Temporary Then
+                    filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
                 End If
-            Catch ex As System.Exception
+                SaveAudioToFile(audioBytes, filepath)
+                Dim Result As Integer = 1
+                If Len(textToSpeak) > TTSLargeText Then
+                    Result = ShowCustomYesNoBox("Your audio sequence has been generated " & If(Temporary, "", $"('{filepath}') ") & "and is ready to be played. Play it?", "Yes", If(Temporary, "No", "No (file remains available)"))
+                End If
+                If Result = 1 Then
+                    PlayAudio(filepath)
+                End If
+                If Temporary Then
+                    System.IO.File.Delete(filepath)
+                End If
+            End If
+        Catch ex As System.Exception
 
-            End Try
-        End Sub
+        End Try
+    End Sub
 
 
-        Public Sub ReadPodcast(Text As String)
+    Public Sub ReadPodcast(Text As String)
 
-            Dim NoSSML As Boolean = My.Settings.NoSSML
-            Dim Pitch As Double = My.Settings.Pitch
-            Dim SpeakingRate As Double = My.Settings.Speakingrate
+        Dim NoSSML As Boolean = My.Settings.NoSSML
+        Dim Pitch As Double = My.Settings.Pitch
+        Dim SpeakingRate As Double = My.Settings.Speakingrate
 
-            ' Create an array of InputParameter objects.
-            Dim params() As SLib.InputParameter = {
+        ' Create an array of InputParameter objects.
+        Dim params() As SLib.InputParameter = {
                     New SLib.InputParameter("Pitch", Pitch),
                     New SLib.InputParameter("Speaking Rate", SpeakingRate),
                     New SLib.InputParameter("No SSML", NoSSML)
                     }
 
-            Dim conversation As List(Of Tuple(Of String, String)) = ParseTextToConversation(Text)
-            Dim hasHost As Boolean = conversation.Any(Function(t) t.Item1 = "H")
-            Dim hasGuest As Boolean = conversation.Any(Function(t) t.Item1 = "G")
+        Dim conversation As List(Of Tuple(Of String, String)) = ParseTextToConversation(Text)
+        Dim hasHost As Boolean = conversation.Any(Function(t) t.Item1 = "H")
+        Dim hasGuest As Boolean = conversation.Any(Function(t) t.Item1 = "G")
 
-            If hasHost AndAlso hasGuest Then
+        If hasHost AndAlso hasGuest Then
             Using frm As New TTSSelectionForm("Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Text-to-Speech - Select Voices", True) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish to use for creating your audio file and configure where to save it.", $"{AN} Google Text-to-Speech - Select Voices", True)
                 If frm.ShowDialog() = DialogResult.OK Then
                     Dim selectedVoices As List(Of String) = frm.SelectedVoices
@@ -14399,46 +15287,46 @@ Public Class ThisAddIn
                 End If
             End Using
         Else
-                ' Missing either Host or Guest
-                ShowCustomMessageBox($"No conversation was found. Use '{hostTags(0)}' and '{guestTags(0)}' to dedicate content to the host and guest.")
+            ' Missing either Host or Guest
+            ShowCustomMessageBox($"No conversation was found. Use '{hostTags(0)}' and '{guestTags(0)}' to dedicate content to the host and guest.")
+        End If
+
+    End Sub
+
+
+    Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
+
+        Dim CurrentPara As String = ""
+
+        Try
+
+            Dim Temporary As Boolean = (filepath = "")
+            Dim Alternate As Boolean = True
+
+            If Temporary Then
+                filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
             End If
 
-        End Sub
+            If voiceNameAlt = "" Then Alternate = False
 
+            ' Get the current Word selection.
+            Dim app As Word.Application = Globals.ThisAddIn.Application
+            Dim selection As Selection = app.Selection
+            If selection Is Nothing OrElse selection.Paragraphs.Count = 0 Then
+                ShowCustomMessageBox("No text selected.")
+                Return
+            End If
 
-        Public Async Sub GenerateAndPlayAudioFromSelectionParagraphs(filepath As String, Optional languageCode As String = "en-US", Optional voiceName As String = "en-US-Studio-O", Optional voiceNameAlt As String = "")
+            Dim NoSSML As Boolean = My.Settings.NoSSML
+            Dim Pitch As Double = My.Settings.Pitch
+            Dim SpeakingRate As Double = My.Settings.Speakingrate
+            Dim ReadTitleNumbers As Boolean = False
+            Dim CleanText As Boolean = False
+            Dim CleanTextPrompt As String = My.Settings.CleanTextPrompt
+            If String.IsNullOrWhiteSpace(CleanTextPrompt) Then CleanTextPrompt = SP_CleanTextPrompt
 
-            Dim CurrentPara As String = ""
-
-            Try
-
-                Dim Temporary As Boolean = (filepath = "")
-                Dim Alternate As Boolean = True
-
-                If Temporary Then
-                    filepath = System.IO.Path.Combine(ExpandEnvironmentVariables("%TEMP%"), $"{AN2}_temp.mp3")
-                End If
-
-                If voiceNameAlt = "" Then Alternate = False
-
-                ' Get the current Word selection.
-                Dim app As Word.Application = Globals.ThisAddIn.Application
-                Dim selection As Selection = app.Selection
-                If selection Is Nothing OrElse selection.Paragraphs.Count = 0 Then
-                    ShowCustomMessageBox("No text selected.")
-                    Return
-                End If
-
-                Dim NoSSML As Boolean = My.Settings.NoSSML
-                Dim Pitch As Double = My.Settings.Pitch
-                Dim SpeakingRate As Double = My.Settings.Speakingrate
-                Dim ReadTitleNumbers As Boolean = False
-                Dim CleanText As Boolean = False
-                Dim CleanTextPrompt As String = My.Settings.CleanTextPrompt
-                If String.IsNullOrWhiteSpace(CleanTextPrompt) Then CleanTextPrompt = SP_CleanTextPrompt
-
-                ' Create an array of InputParameter objects.
-                Dim params() As SLib.InputParameter = {
+            ' Create an array of InputParameter objects.
+            Dim params() As SLib.InputParameter = {
                     New SLib.InputParameter("Pitch", Pitch),
                     New SLib.InputParameter("Speaking Rate", SpeakingRate),
                     New SLib.InputParameter("No SSML", NoSSML),
@@ -14446,48 +15334,48 @@ Public Class ThisAddIn
                     New SLib.InputParameter("Clean text", CleanText)
                     }
 
-                ' Call the procedure (the parameters are passed ByRef).
-                If Not ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your audio file based on your text:", $"Create Audio", params) Then Return
+            ' Call the procedure (the parameters are passed ByRef).
+            If Not ShowCustomVariableInputForm("Please enter the following parameters to apply when creating your audio file based on your text:", $"Create Audio", params) Then Return
 
-                Pitch = CDbl(params(0).Value)
-                SpeakingRate = CDbl(params(1).Value)
-                NoSSML = CBool(params(2).Value)
-                ReadTitleNumbers = CBool(params(3).Value)
-                CleanText = CBool(params(4).Value)
+            Pitch = CDbl(params(0).Value)
+            SpeakingRate = CDbl(params(1).Value)
+            NoSSML = CBool(params(2).Value)
+            ReadTitleNumbers = CBool(params(3).Value)
+            CleanText = CBool(params(4).Value)
 
-                My.Settings.NoSSML = NoSSML
-                My.Settings.Pitch = Pitch
-                My.Settings.Speakingrate = SpeakingRate
-                My.Settings.Save()
+            My.Settings.NoSSML = NoSSML
+            My.Settings.Pitch = Pitch
+            My.Settings.Speakingrate = SpeakingRate
+            My.Settings.Save()
 
-                If CleanText Then
-                    CleanTextPrompt = ShowCustomInputBox("Please enter the prompt to 'clean' the text with (each paragraph will be submitted to this prompt)", "Create Audio", False, CleanTextPrompt).Trim()
-                    If CleanTextPrompt = "ESC" Then Return
-                    If CleanTextPrompt = "" Then
-                        CleanText = False
-                    Else
-                        My.Settings.CleanTextPrompt = CleanTextPrompt
-                        My.Settings.Save()
-                    End If
+            If CleanText Then
+                CleanTextPrompt = ShowCustomInputBox("Please enter the prompt to 'clean' the text with (each paragraph will be submitted to this prompt)", "Create Audio", False, CleanTextPrompt).Trim()
+                If CleanTextPrompt = "ESC" Then Return
+                If CleanTextPrompt = "" Then
+                    CleanText = False
+                Else
+                    My.Settings.CleanTextPrompt = CleanTextPrompt
+                    My.Settings.Save()
                 End If
+            End If
 
-                Dim totalParagraphs As Integer = selection.Paragraphs.Count
-                Dim tempFiles As New List(Of String)
-                Dim paragraphIndex As Integer = 0
-                Dim sentenceEndPunctuation As String() = {".", "!", "?", ";", ":", ",", ")", "]", "}"}
-                Dim bracketedTextPattern As String = "^\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$"
+            Dim totalParagraphs As Integer = selection.Paragraphs.Count
+            Dim tempFiles As New List(Of String)
+            Dim paragraphIndex As Integer = 0
+            Dim sentenceEndPunctuation As String() = {".", "!", "?", ";", ":", ",", ")", "]", "}"}
+            Dim bracketedTextPattern As String = "^\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$"
 
-                Dim voiceName1 As String = voiceName
-                Dim voiceName2 As String = voiceNameAlt
-                Dim currentVoiceName As String = voiceName1
-                Dim firstTitleEncountered As Boolean = False
-                Dim LastTextWasTitle As Boolean = False
+            Dim voiceName1 As String = voiceName
+            Dim voiceName2 As String = voiceNameAlt
+            Dim currentVoiceName As String = voiceName1
+            Dim firstTitleEncountered As Boolean = False
+            Dim LastTextWasTitle As Boolean = False
 
-                ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
-                ProgressBarModule.CancelOperation = False
+            ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
+            ProgressBarModule.CancelOperation = False
 
-                ' Process each paragraph in the selection.
-                For Each para As Paragraph In selection.Paragraphs
+            ' Process each paragraph in the selection.
+            For Each para As Paragraph In selection.Paragraphs
                 ' Allow the user to abort by pressing Escape.
                 If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Or (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or ProgressBarModule.CancelOperation Then
                     For Each file In tempFiles
@@ -14505,119 +15393,119 @@ Public Class ThisAddIn
                 ' Get the trimmed paragraph text.
                 Dim paraText As String
 
-                    ' Check if the paragraph has numbering
-                    If Not String.IsNullOrEmpty(para.Range.ListFormat.ListString) And ReadTitleNumbers Then
-                        ' Include the numbering before the paragraph text
-                        paraText = para.Range.ListFormat.ListString.Trim(".") & vbCrLf & para.Range.Text.Trim()
-                    Else
-                        ' No numbering, just take the paragraph text
-                        paraText = para.Range.Text.Trim()
-                    End If
+                ' Check if the paragraph has numbering
+                If Not String.IsNullOrEmpty(para.Range.ListFormat.ListString) And ReadTitleNumbers Then
+                    ' Include the numbering before the paragraph text
+                    paraText = para.Range.ListFormat.ListString.Trim(".") & vbCrLf & para.Range.Text.Trim()
+                Else
+                    ' No numbering, just take the paragraph text
+                    paraText = para.Range.Text.Trim()
+                End If
 
 
-                    ' Skip paragraphs that are empty...
-                    If String.IsNullOrWhiteSpace(paraText) Or Regex.IsMatch(paraText, bracketedTextPattern) Then Continue For
-                    ' ...or that contain only numbers or control characters.
-                    If Regex.IsMatch(paraText, "^[\d\p{C}\s]+$") Then Continue For
+                ' Skip paragraphs that are empty...
+                If String.IsNullOrWhiteSpace(paraText) Or Regex.IsMatch(paraText, bracketedTextPattern) Then Continue For
+                ' ...or that contain only numbers or control characters.
+                If Regex.IsMatch(paraText, "^[\d\p{C}\s]+$") Then Continue For
 
-                    Dim lastChar As String = paraText.Substring(paraText.Length - 1)
+                Dim lastChar As String = paraText.Substring(paraText.Length - 1)
 
-                    ' Check if the last character is one of the defined punctuation marks
-                    If Not sentenceEndPunctuation.Contains(lastChar) Then
-                        ' Append a period
-                        paraText = paraText & "."
-                    End If
+                ' Check if the last character is one of the defined punctuation marks
+                If Not sentenceEndPunctuation.Contains(lastChar) Then
+                    ' Append a period
+                    paraText = paraText & "."
+                End If
 
-                    ' Determine if this paragraph is part of a bullet list.
-                    Dim isBullet As Boolean = False
-                    If para.Range.ListFormat IsNot Nothing AndAlso para.Range.ListFormat.ListType <> WdListType.wdListNoNumbering Then
-                        isBullet = True
-                    End If
+                ' Determine if this paragraph is part of a bullet list.
+                Dim isBullet As Boolean = False
+                If para.Range.ListFormat IsNot Nothing AndAlso para.Range.ListFormat.ListType <> WdListType.wdListNoNumbering Then
+                    isBullet = True
+                End If
 
-                    ' Determine if the paragraph “looks like” a title.
-                    Dim isTitle As Boolean = False
-                    Dim styleName As String = ""
-                    Try
-                        styleName = para.Range.Style.NameLocal.ToString().ToLower()
-                    Catch ex As Exception
-                        Debug.WriteLine("Error retrieving style: " & ex.Message)
-                    End Try
-                    If styleName.Contains("heading") Then
+                ' Determine if the paragraph “looks like” a title.
+                Dim isTitle As Boolean = False
+                Dim styleName As String = ""
+                Try
+                    styleName = para.Range.Style.NameLocal.ToString().ToLower()
+                Catch ex As Exception
+                    Debug.WriteLine("Error retrieving style: " & ex.Message)
+                End Try
+                If styleName.Contains("heading") Then
+                    isTitle = True
+                Else
+                    Dim lineCount As Long = para.Range.ComputeStatistics(WdStatistic.wdStatisticLines)
+                    If lineCount <= 2 Then
                         isTitle = True
-                    Else
-                        Dim lineCount As Long = para.Range.ComputeStatistics(WdStatistic.wdStatisticLines)
-                        If lineCount <= 2 Then
-                            isTitle = True
-                        End If
-                        If Not paraText.EndsWith(".") Then
-                            isTitle = True
-                        End If
                     End If
+                    If Not paraText.EndsWith(".") Then
+                        isTitle = True
+                    End If
+                End If
 
-                    Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
-                    Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
-                    CurrentPara = Left(paraText, 400) & "..."
+                Debug.WriteLine("Para = " & paraText & vbCrLf & vbCrLf)
+                Debug.WriteLine("IsTitle = " & isTitle & vbCrLf)
+                CurrentPara = Left(paraText, 400) & "..."
 
-                    If isTitle AndAlso Alternate Then
-                        If Not firstTitleEncountered Then
-                            firstTitleEncountered = True
-                            ' For the very first title, keep the current voice unchanged.
-                        Else
-                            If Not LastTextWasTitle Then
-                                ' Switch the voice if the last paragraph was not a title.
-                                Debug.WriteLine("Switching ...")
-                                If currentVoiceName = voiceName1 Then
-                                    currentVoiceName = voiceName2
-                                Else
-                                    currentVoiceName = voiceName1
-                                End If
+                If isTitle AndAlso Alternate Then
+                    If Not firstTitleEncountered Then
+                        firstTitleEncountered = True
+                        ' For the very first title, keep the current voice unchanged.
+                    Else
+                        If Not LastTextWasTitle Then
+                            ' Switch the voice if the last paragraph was not a title.
+                            Debug.WriteLine("Switching ...")
+                            If currentVoiceName = voiceName1 Then
+                                currentVoiceName = voiceName2
+                            Else
+                                currentVoiceName = voiceName1
                             End If
                         End If
-                        LastTextWasTitle = True
-                    Else
-                        LastTextWasTitle = False
                     End If
+                    LastTextWasTitle = True
+                Else
+                    LastTextWasTitle = False
+                End If
 
-                    ' Set the maximum value if you know the total number of steps.
-                    GlobalProgressMax = totalParagraphs
+                ' Set the maximum value if you know the total number of steps.
+                GlobalProgressMax = totalParagraphs
 
-                    ' Update the current progress value and status label.
-                    GlobalProgressValue = paragraphIndex + 1
-                    GlobalProgressLabel = $"Paragraph {paragraphIndex + 1} of {totalParagraphs} (some may be skipped)"
+                ' Update the current progress value and status label.
+                GlobalProgressValue = paragraphIndex + 1
+                GlobalProgressLabel = $"Paragraph {paragraphIndex + 1} of {totalParagraphs} (some may be skipped)"
 
-                    ' For bullet lists, insert a short pause BEFORE the paragraph.
-                    If isBullet Then
-                        Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.1)
-                        If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
-                    End If
+                ' For bullet lists, insert a short pause BEFORE the paragraph.
+                If isBullet Then
+                    Dim silenceFileBefore As String = Await GenerateSilenceAudioFileAsync(0.1)
+                    If Not String.IsNullOrEmpty(silenceFileBefore) Then tempFiles.Add(silenceFileBefore)
+                End If
 
-                    If CleanText Then
-                        ' Remove any unwanted characters from the paragraph text.
-                        paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", 0, False, True)
-                        paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
-                        CurrentPara = Left(CurrentPara, 100) & $"... [cleaned: {Left(paraText, 400)}...]"
-                        Debug.WriteLine("Cleaned Para = " & paraText & vbCrLf & vbCrLf)
-                    End If
+                If CleanText Then
+                    ' Remove any unwanted characters from the paragraph text.
+                    paraText = Await LLM(CleanTextPrompt, "<TEXTTOPROCESS>" & paraText & "</TEXTTOPROCESS>", "", "", 0, False, True)
+                    paraText = paraText.Trim().Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "").Trim()
+                    CurrentPara = Left(CurrentPara, 100) & $"... [cleaned: {Left(paraText, 400)}...]"
+                    Debug.WriteLine("Cleaned Para = " & paraText & vbCrLf & vbCrLf)
+                End If
 
-                    ' Generate the audio for the paragraph via your TTS API.
-                    Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate, CurrentPara)
+                ' Generate the audio for the paragraph via your TTS API.
+                Dim paragraphAudioBytes As Byte() = Await GenerateAudioFromText(paraText, languageCode, currentVoiceName, NoSSML, Pitch, SpeakingRate, CurrentPara)
 
-                    CurrentPara = ""
+                CurrentPara = ""
 
-                    If paragraphAudioBytes IsNot Nothing Then
-                        Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
-                        File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
-                        tempFiles.Add(tempParaFile)
-                    Else
-                        ' If audio generation failed, skip this paragraph.
-                        Continue For
-                    End If
+                If paragraphAudioBytes IsNot Nothing Then
+                    Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
+                    File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
+                    tempFiles.Add(tempParaFile)
+                Else
+                    ' If audio generation failed, skip this paragraph.
+                    Continue For
+                End If
 
-                    ' For bullet lists, insert a short pause AFTER the paragraph.
-                    If isBullet Then
-                        Dim silenceFileAfterBullet As String = Await GenerateSilenceAudioFileAsync(0.3)
-                        If Not String.IsNullOrEmpty(silenceFileAfterBullet) Then tempFiles.Add(silenceFileAfterBullet)
-                    End If
+                ' For bullet lists, insert a short pause AFTER the paragraph.
+                If isBullet Then
+                    Dim silenceFileAfterBullet As String = Await GenerateSilenceAudioFileAsync(0.3)
+                    If Not String.IsNullOrEmpty(silenceFileAfterBullet) Then tempFiles.Add(silenceFileAfterBullet)
+                End If
 
                 ' After each paragraph, add an extra pause:
                 ' • Use a medium pause (0.7 sec) for titles.
@@ -14625,86 +15513,86 @@ Public Class ThisAddIn
                 If isTitle Then
                     Dim silenceFileTitle As String = Await GenerateSilenceAudioFileAsync(0.7)
                     If Not String.IsNullOrEmpty(silenceFileTitle) Then tempFiles.Add(silenceFileTitle)
-                    Else
+                Else
                     Dim silenceFileRegular As String = Await GenerateSilenceAudioFileAsync(0.3)
                     If Not String.IsNullOrEmpty(silenceFileRegular) Then tempFiles.Add(silenceFileRegular)
-                    End If
-
-                    Await System.Threading.Tasks.Task.Delay(1000) ' Delay to not overhwelm the API
-
-                    paragraphIndex += 1
-                Next
-
-                ' If no valid paragraphs were found, notify the user.
-                If tempFiles.Count = 0 Then
-                    ShowCustomMessageBox("No valid paragraphs found For audio generation; skipping empty ones And {...}, [...] And (...).")
-                    Return
                 End If
 
-                If Not ProgressBarModule.CancelOperation Then
-                    ' Merge all the temporary audio files into one final file.
-                    MergeAudioFiles(tempFiles, filepath)
+                Await System.Threading.Tasks.Task.Delay(1000) ' Delay to not overhwelm the API
+
+                paragraphIndex += 1
+            Next
+
+            ' If no valid paragraphs were found, notify the user.
+            If tempFiles.Count = 0 Then
+                ShowCustomMessageBox("No valid paragraphs found For audio generation; skipping empty ones And {...}, [...] And (...).")
+                Return
+            End If
+
+            If Not ProgressBarModule.CancelOperation Then
+                ' Merge all the temporary audio files into one final file.
+                MergeAudioFiles(tempFiles, filepath)
+            End If
+
+            ' Cleanup temporary files.
+            For Each file In tempFiles
+                Try
+                    If IO.File.Exists(file) Then IO.File.Delete(file)
+                Catch ex As Exception
+                    Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
+                End Try
+            Next
+
+            If Not ProgressBarModule.CancelOperation Then
+                ProgressBarModule.CancelOperation = True
+                ' Play the merged audio file.
+                PlayAudio(filepath)
+                If Temporary Then
+                    System.IO.File.Delete(filepath)
                 End If
+            Else
+                ProgressBarModule.CancelOperation = True
+                ShowCustomMessageBox("Audio generation aborted by user.")
+            End If
 
-                ' Cleanup temporary files.
-                For Each file In tempFiles
-                    Try
-                        If IO.File.Exists(file) Then IO.File.Delete(file)
-                    Catch ex As Exception
-                        Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}")
-                    End Try
-                Next
+        Catch ex As Exception
+            ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}{If(String.IsNullOrEmpty(CurrentPara), "", "; Text: " & CurrentPara) & " [in clipboard]"}).")
+            If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(ex.Message & vbCrLf & vbCrLf & CurrentPara)
+        End Try
+    End Sub
 
-                If Not ProgressBarModule.CancelOperation Then
-                    ProgressBarModule.CancelOperation = True
-                    ' Play the merged audio file.
-                    PlayAudio(filepath)
-                    If Temporary Then
-                        System.IO.File.Delete(filepath)
-                    End If
-                Else
-                    ProgressBarModule.CancelOperation = True
-                    ShowCustomMessageBox("Audio generation aborted by user.")
-                End If
+    Private Async Function GenerateSilenceAudioFileAsync(durationSeconds As Double) As Task(Of String)
+        Return Await System.Threading.Tasks.Task.Run(Function() GenerateSilenceAudioFile(durationSeconds))
+    End Function
 
-            Catch ex As Exception
-                ShowCustomMessageBox($"Error generating audio from selected paragraphs ({ex.Message}{If(String.IsNullOrEmpty(CurrentPara), "", "; Text: " & CurrentPara) & " [in clipboard]"}).")
-                If Not String.IsNullOrEmpty(CurrentPara) Then SLib.PutInClipboard(ex.Message & vbCrLf & vbCrLf & CurrentPara)
-            End Try
-        End Sub
+    ' Synchronous helper that creates a buffer of silence and encodes it to MP3.
+    Private Function GenerateSilenceAudioFile(durationSeconds As Double) As String
+        Try
+            ' Set audio format parameters.
+            Dim sampleRate As Integer = 24000       ' Adjust as needed to match your TTS output.
+            Dim channels As Integer = 1
+            Dim bitsPerSample As Integer = 16
+            Dim blockAlign As Integer = channels * (bitsPerSample \ 8)
+            Dim totalSamples As Integer = CInt(sampleRate * durationSeconds)
+            Dim totalBytes As Integer = totalSamples * blockAlign
 
-        Private Async Function GenerateSilenceAudioFileAsync(durationSeconds As Double) As Task(Of String)
-            Return Await System.Threading.Tasks.Task.Run(Function() GenerateSilenceAudioFile(durationSeconds))
-        End Function
+            ' Create a buffer filled with zeros (silence).
+            Dim silenceBytes(totalBytes - 1) As Byte
+            ' (The array is automatically initialized to zeros.)
 
-        ' Synchronous helper that creates a buffer of silence and encodes it to MP3.
-        Private Function GenerateSilenceAudioFile(durationSeconds As Double) As String
-            Try
-                ' Set audio format parameters.
-                Dim sampleRate As Integer = 24000       ' Adjust as needed to match your TTS output.
-                Dim channels As Integer = 1
-                Dim bitsPerSample As Integer = 16
-                Dim blockAlign As Integer = channels * (bitsPerSample \ 8)
-                Dim totalSamples As Integer = CInt(sampleRate * durationSeconds)
-                Dim totalBytes As Integer = totalSamples * blockAlign
+            ' Generate a temporary file name.
+            Dim tempFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
 
-                ' Create a buffer filled with zeros (silence).
-                Dim silenceBytes(totalBytes - 1) As Byte
-                ' (The array is automatically initialized to zeros.)
-
-                ' Generate a temporary file name.
-                Dim tempFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
-
-                ' Wrap the silence buffer in a MemoryStream and then a RawSourceWaveStream.
-                Using ms As New MemoryStream(silenceBytes)
-                    Dim waveFormat As New WaveFormat(sampleRate, bitsPerSample, channels)
-                    Using waveStream As New RawSourceWaveStream(ms, waveFormat)
-                        ' Encode the silence to MP3.
-                        MediaFoundationEncoder.EncodeToMp3(waveStream, tempFile)
-                    End Using
+            ' Wrap the silence buffer in a MemoryStream and then a RawSourceWaveStream.
+            Using ms As New MemoryStream(silenceBytes)
+                Dim waveFormat As New WaveFormat(sampleRate, bitsPerSample, channels)
+                Using waveStream As New RawSourceWaveStream(ms, waveFormat)
+                    ' Encode the silence to MP3.
+                    MediaFoundationEncoder.EncodeToMp3(waveStream, tempFile)
                 End Using
+            End Using
 
-                Return tempFile
+            Return tempFile
             Catch ex As Exception
                 Debug.WriteLine($"Error generating silence audio: {ex.Message}")
                 Return Nothing

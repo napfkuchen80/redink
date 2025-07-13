@@ -72,12 +72,12 @@ Partial Class Ribbon1
         Me.RI_AdjustHeight = Me.Factory.CreateRibbonButton
         Me.RI_AdjustLegacyNotes = Me.Factory.CreateRibbonButton
         Me.RI_Regex = Me.Factory.CreateRibbonButton
+        Me.RI_Chat = Me.Factory.CreateRibbonButton
         Me.Settings = Me.Factory.CreateRibbonButton
         Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM2 = Me.Factory.CreateRibbonButton
-        Me.RI_Chat = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -205,7 +205,7 @@ Partial Class Ribbon1
         '
         'RI_FreestyleAM
         '
-        Me.RI_FreestyleAM.Label = "Freestyle (2nd model)"
+        Me.RI_FreestyleAM.Label = "Freestyle (2nd)"
         Me.RI_FreestyleAM.Name = "RI_FreestyleAM"
         Me.RI_FreestyleAM.OfficeImageId = "CustomActionsGallery"
         Me.RI_FreestyleAM.ScreenTip = "Allows you to to enter a prompt and have the result shown (and inserted) using th" &
@@ -256,6 +256,14 @@ Partial Class Ribbon1
         Me.RI_Regex.ScreenTip = "Will perform a RegEx search (and replace)"
         Me.RI_Regex.ShowImage = True
         '
+        'RI_Chat
+        '
+        Me.RI_Chat.Label = "Chatbot"
+        Me.RI_Chat.Name = "RI_Chat"
+        Me.RI_Chat.OfficeImageId = "ContactUs"
+        Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
+        Me.RI_Chat.ShowImage = True
+        '
         'Settings
         '
         Me.Settings.Label = "Settings"
@@ -296,14 +304,6 @@ Partial Class Ribbon1
         Me.RI_FreestyleNM2.OfficeImageId = "CustomActionsGallery"
         Me.RI_FreestyleNM2.ScreenTip = "Allows you to to enter a prompt and have the result shown (and inserted)"
         Me.RI_FreestyleNM2.ShowImage = True
-        '
-        'RI_Chat
-        '
-        Me.RI_Chat.Label = "Chatbot"
-        Me.RI_Chat.Name = "RI_Chat"
-        Me.RI_Chat.OfficeImageId = "ContactUs"
-        Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
-        Me.RI_Chat.ShowImage = True
         '
         'Ribbon1
         '

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.6.2025
+' 13.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -203,7 +203,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.300625 Gen2 Beta Test"
+    Public Const Version As String = "V.130725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -1947,6 +1947,7 @@ Public Class ThisAddIn
     Public SelectedText As String
 
     Public Structure CellState
+        Public WorksheetName As String
         Public CellAddress As String
         Public OldValue As Object
         Public HadFormula As Boolean
@@ -2438,6 +2439,7 @@ Public Class ThisAddIn
                                 End If
                                 If Not String.IsNullOrWhiteSpace(LLMResult) Then
                                     Dim state As New CellState With {
+                                                                    .WorksheetName = cell.Worksheet.Name,
                                                                     .CellAddress = cell.Address,
                                                                     .OldValue = cell.Value,
                                                                     .HadFormula = cell.HasFormula,
@@ -2504,6 +2506,7 @@ Public Class ThisAddIn
 
                                 If Not String.IsNullOrWhiteSpace(LLMResult) Then
                                     Dim state As New CellState With {
+                                                                    .WorksheetName = cell.Worksheet.Name,
                                                                     .CellAddress = cell.Address,
                                                                     .OldValue = cell.Value,
                                                                     .HadFormula = cell.HasFormula,
@@ -2628,7 +2631,6 @@ Public Class ThisAddIn
 
 
     Private Sub HandleIntelligentMerge(selectedText As String)
-        ' Hier Deine bestehende Merge-Logik aufrufen:
         IntelligentMerge(selectedText)
     End Sub
 
@@ -2637,6 +2639,7 @@ Public Class ThisAddIn
         instructions = ParseLLMResponse(newtext)
         ApplyLLMInstructions(instructions, True)  ' Always DoBubbles
         ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+        Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
     End Sub
 
 
@@ -2743,8 +2746,8 @@ Public Class ThisAddIn
                     If shouldProcess Then
 
                         Try
-                            sb.AppendLine($"Cell {addr}:")
-                            sb.AppendLine($"  Value: {raw}")
+                            sb.AppendLine($"Cell {addr} has:")
+                            sb.AppendLine($"- Value: {raw}")
 
                             ' Formeln optional auslesen
                             If IncludeFormulas AndAlso cell.HasFormula Then
@@ -2755,12 +2758,12 @@ Public Class ThisAddIn
                                 When comEx.ErrorCode = &H800A03EC
                                     f = cell.Formula.ToString()
                                 End Try
-                                sb.AppendLine($"  Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
+                                sb.AppendLine($"- Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
                             End If
 
                             ' Kommentare (klassisch)
                             If cell.Comment IsNot Nothing Then
-                                sb.AppendLine($"  Comment: {cell.Comment.Text()}")
+                                sb.AppendLine($"- Comment: {cell.Comment.Text()}")
                             End If
 
                             ' ThreadedComments per the Excel object model
@@ -2773,11 +2776,11 @@ Public Class ThisAddIn
                                     Dim txt = topObj.Text
                                     ' .Author.Name
                                     Dim authName = topObj.Author.Name
-                                    sb.AppendLine($"  Threaded: {txt} (by {authName})")
+                                    sb.AppendLine($"- Threaded comment: {txt} (by {authName})")
 
                                     ' now each reply
                                     For Each rep In topObj.Replies  ' an IEnumerable
-                                        sb.AppendLine($"    Reply: {rep.Text} (by {rep.Author.Name})")
+                                        sb.AppendLine($"- Reply comment: {rep.Text} (by {rep.Author.Name})")
                                     Next
                                 End If
                             Catch ex As System.Runtime.InteropServices.COMException When ex.ErrorCode = &H800A03EC
@@ -2859,32 +2862,32 @@ Public Class ThisAddIn
                                             End If
                                         End If
 
-                                        sb.AppendLine($"  Dropdown options (separated by §): {String.Join("§", options)}")
+                                        sb.AppendLine($"- Dropdown options (separated by §): {String.Join("§", options)}")
                                     End If
                                 End If
 
                             Catch ex As Exception
-                                sb.AppendLine($"  Error reading dropdown: {ex.Message}")
+                                sb.AppendLine($"- Error reading dropdown: {ex.Message}")
                             End Try
 
 
                             ' 2) Farben (nur bei Abweichung)
                             If DoColor Then
                                 If cell.Font.Color <> defaultFontColor Then
-                                    sb.AppendLine($"  FontColor: {cell.Font.Color}")
+                                    sb.AppendLine($"- FontColor: {cell.Font.Color}")
                                 End If
                                 If cell.Interior.Color <> defaultInteriorColor Then
-                                    sb.AppendLine($"  BackgroundColor: {cell.Interior.Color}")
+                                    sb.AppendLine($"- BackgroundColor: {cell.Interior.Color}")
                                 End If
                             End If
 
-                            sb.AppendLine(New String("-"c, 40))
+                            sb.AppendLine(New String("-"c, 5))
 
                         Catch ex As System.Runtime.InteropServices.COMException _
                         When ex.ErrorCode = &H800A03EC
-                            sb.AppendLine($"  COM-Error in Cell {addr}: {ex.Message}")
+                            sb.AppendLine($"- COM-Error in Cell {addr}: {ex.Message}")
                         Catch ex As System.Exception
-                            sb.AppendLine($"  Error in Cell {addr}: {ex.Message}")
+                            sb.AppendLine($"- Error in Cell {addr}: {ex.Message}")
                         Finally
                             Marshal.ReleaseComObject(cell)
                         End Try
@@ -3068,6 +3071,23 @@ Public Class ThisAddIn
                             If Regex.IsMatch(cellAddress, "^[A-Z]+\d+$") Then
                                 targetRange = activeSheet.Range(cellAddress)
 
+                                ' Store the state BEFORE any changes
+                                Dim state As New CellState With {
+                                        .WorksheetName = targetRange.Worksheet.Name,
+                                        .CellAddress = targetRange.Address,
+                                        .OldValue = targetRange.Value,
+                                        .HadFormula = targetRange.HasFormula,
+                                        .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
+                                    }
+
+                                ' Handle merged cells properly
+                                If targetRange.MergeCells Then
+                                    targetRange = targetRange.MergeArea.Cells(1, 1)
+                                End If
+
+                                ' Add the state to undoStates - do this BEFORE making changes
+                                undoStates.Add(state)
+
                                 ' Handle merged cells properly
                                 If targetRange.MergeCells Then
                                     targetRange = targetRange.MergeArea.Cells(1, 1)
@@ -3087,54 +3107,15 @@ Public Class ThisAddIn
                                     End If
 
                                 ElseIf formulaOrValue.StartsWith("=") Then
-                                    Dim state As New CellState With {
-                                                                    .CellAddress = targetRange.Address,
-                                                                    .OldValue = targetRange.Value,
-                                                                    .HadFormula = targetRange.HasFormula,
-                                                                    .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
-                                                                }
+
                                     ' Fix cell format issues
                                     targetRange.Value = ""
                                     targetRange.NumberFormat = "General"
 
                                     SetFormulaSafe(targetRange, formulaOrValue, excelApp)
 
-                                    'Try
-                                    'targetRange.Formula2 = formulaOrValue
-                                    'undoStates.Add(state)
-                                    'Catch ex As Exception
-                                    'If ex.Message.Contains("HRESULT: 0x800A03EC") Then
-                                    'Try
-                                    'targetRange.FormulaLocal = formulaOrValue
-                                    'undoStates.Add(state)
-                                    'Catch ex2 As Exception
-                                    'If ex2.Message.Contains("HRESULT: 0x800A03EC") Then
-                                    'Try
-                                    'formulaOrValueLocale = Trim(ConvertFormulaToLocale(formulaOrValue, excelApp))
-                                    'targetRange.FormulaLocal = formulaOrValueLocale
-                                    'undoStates.Add(state)
-                                    'Catch ex3 As Exception
-                                    'If ex3.Message.Contains("HRESULT: 0x800A03EC") Then
-                                    'ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
-                                    'Else
-                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                    'End If
-                                    'End Try
-                                    'Else
-                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                    'End If
-                                    'End Try
-                                    'Else
-                                    'ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                                    'End If
-                                    'End Try
                                 Else
-                                    Dim state As New CellState With {
-                                                                    .CellAddress = targetRange.Address,
-                                                                    .OldValue = targetRange.Value,
-                                                                    .HadFormula = targetRange.HasFormula,
-                                                                    .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
-                                                                }
+
                                     ' Assign values properly
                                     If IsNumeric(formulaOrValue) Then
                                         targetRange.Value = formulaOrValue
@@ -3144,7 +3125,6 @@ Public Class ThisAddIn
                                         targetRange.NumberFormat = "@"
                                         targetRange.Value = cleanedValue
                                     End If
-                                    undoStates.Add(state)
 
                                 End If
                             Else
@@ -3823,7 +3803,165 @@ Public Class ThisAddIn
     End Function
 
 
+
     Public Sub UndoAction()
+        Try
+            Dim app As Excel.Application = Globals.ThisAddIn.Application
+            Dim totalCount As Integer = undoStates.Count
+            Dim restoredCount As Integer = 0
+
+            ' Force complete shutdown of Excel's background calculation
+            app.ScreenUpdating = False
+            app.EnableEvents = False
+            app.Calculation = Excel.XlCalculation.xlCalculationManual
+
+            Debug.WriteLine($"Starting undo of {undoStates.Count} states")
+
+            ' Process each saved state to restore the previous value or formula
+            For i As Integer = 0 To undoStates.Count - 1
+                Dim state = undoStates(i)
+                Try
+                    Dim ws As Worksheet = Nothing
+                    ' Get worksheet - use error handling to be safe
+                    Try
+                        ws = app.Workbooks.Item(app.ActiveWorkbook.Name).Worksheets(state.WorksheetName)
+                    Catch wsEx As Exception
+                        Debug.WriteLine($"Could not find worksheet {state.WorksheetName}: {wsEx.Message}")
+                        Continue For
+                    End Try
+
+                    ' Get the range on the worksheet
+                    Dim rng As Excel.Range = Nothing
+                    Try
+                        rng = ws.Range(state.CellAddress)
+                    Catch rngEx As Exception
+                        Debug.WriteLine($"Failed to get range {state.CellAddress}: {rngEx.Message}")
+                        Continue For
+                    End Try
+
+                    If rng IsNot Nothing Then
+                        Debug.WriteLine($"Processing {i + 1}/{totalCount}: {state.WorksheetName}!{state.CellAddress}")
+
+                        ' First, check if it's in a table
+                        Dim isTableCell As Boolean = False
+                        Try
+                            For Each tbl As Microsoft.Office.Interop.Excel.ListObject In ws.ListObjects
+                                If app.Intersect(tbl.Range, rng) IsNot Nothing Then
+                                    isTableCell = True
+                                    Debug.WriteLine($"  Cell is in table: {tbl.Name}")
+                                    Exit For
+                                End If
+                            Next
+                        Catch tableEx As Exception
+                            Debug.WriteLine($"  Table check error: {tableEx.Message}")
+                        End Try
+
+                        ' Now restore the value using different strategies
+                        If state.HadFormula Then
+                            Debug.WriteLine($"  Restoring formula: {state.OldFormula}")
+
+                            ' Try multiple approaches for formula restoration
+                            Dim success As Boolean = False
+
+                            ' Approach 1: Direct formula setting
+                            If Not success Then
+                                Try
+                                    rng.Formula = state.OldFormula
+                                    success = True
+                                    Debug.WriteLine("  Set using Formula")
+                                Catch ex As Exception
+                                    Debug.WriteLine($"  Formula method failed: {ex.Message}")
+                                End Try
+                            End If
+
+                            ' Approach 2: Formula2 (newer Excel versions)
+                            If Not success Then
+                                Try
+                                    rng.Formula2 = state.OldFormula
+                                    success = True
+                                    Debug.WriteLine("  Set using Formula2")
+                                Catch ex As Exception
+                                    Debug.WriteLine($"  Formula2 method failed: {ex.Message}")
+                                End Try
+                            End If
+
+                            ' Approach 3: FormulaR1C1 as fallback
+                            If Not success Then
+                                Try
+                                    rng.FormulaR1C1 = state.OldFormula
+                                    success = True
+                                    Debug.WriteLine("  Set using FormulaR1C1")
+                                Catch ex As Exception
+                                    Debug.WriteLine($"  FormulaR1C1 method failed: {ex.Message}")
+                                End Try
+                            End If
+
+                            ' Last resort: Set as value
+                            If Not success Then
+                                Try
+                                    rng.Value = state.OldValue
+                                    success = True
+                                    Debug.WriteLine("  Set using Value (fallback)")
+                                Catch ex As Exception
+                                    Debug.WriteLine($"  Value fallback failed: {ex.Message}")
+                                End Try
+                            End If
+
+                            If success Then restoredCount += 1
+                        Else
+                            Debug.WriteLine($"  Restoring value: {state.OldValue}")
+                            Try
+                                ' For non-formula cells, just set the value
+                                rng.Value = state.OldValue
+                                restoredCount += 1
+                            Catch ex As Exception
+                                Debug.WriteLine($"  Value restore error: {ex.Message}")
+                            End Try
+                        End If
+
+                        ' Force immediate update of this cell
+                        Try
+                            rng.Calculate()
+                        Catch ex As Exception
+                            ' Ignore calculation errors
+                        End Try
+                    End If
+                Catch ex As Exception
+                    Debug.WriteLine($"Error processing state {i}: {ex.Message}")
+                End Try
+
+                ' Force periodic UI refresh during long undos
+                If i Mod 5 = 0 Then
+                    app.ScreenUpdating = True
+                    System.Threading.Thread.Sleep(10)
+                    app.ScreenUpdating = False
+                End If
+            Next
+
+            Debug.WriteLine($"Undo complete: {restoredCount}/{totalCount} cells restored")
+            undoStates.Clear()
+            Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
+
+        Catch ex As System.Exception
+            MessageBox.Show("Error during undo: " & ex.Message)
+        Finally
+            ' Always restore Excel's calculation settings
+            Dim app As Excel.Application = Globals.ThisAddIn.Application
+            app.ScreenUpdating = True
+            app.EnableEvents = True
+            app.Calculation = Excel.XlCalculation.xlCalculationAutomatic
+
+            ' Force a full recalculation to ensure all dependencies update
+            Try
+                app.CalculateFull()
+            Catch ex As Exception
+                Debug.WriteLine($"Final calculation error: {ex.Message}")
+            End Try
+        End Try
+    End Sub
+
+
+    Public Sub xxUndoAction()
         Try
             Dim app As Excel.Application = Globals.ThisAddIn.Application
 
@@ -3842,7 +3980,7 @@ Public Class ThisAddIn
 
             Dim result = Globals.Ribbons.Ribbon1.UpdateUndoButton()
 
-            
+
         Catch ex As System.Exception
             MessageBox.Show("Error during undo (" & ex.Message & ").")
         End Try

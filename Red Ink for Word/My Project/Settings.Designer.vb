@@ -497,6 +497,41 @@ Namespace My
                 Me("TTSProvider") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute()>  _
+        Public Property LastFreestyleModelConfig() As Global.SharedLibrary.SharedLibrary.ModelConfig
+            Get
+                Return CType(Me("LastFreestyleModelConfig"),Global.SharedLibrary.SharedLibrary.ModelConfig)
+            End Get
+            Set
+                Me("LastFreestyleModelConfig") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property LastFreestylePrompt() As String
+            Get
+                Return CType(Me("LastFreestylePrompt"),String)
+            End Get
+            Set
+                Me("LastFreestylePrompt") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property LastFreestyleWasAM() As Boolean
+            Get
+                Return CType(Me("LastFreestyleWasAM"),Boolean)
+            End Get
+            Set
+                Me("LastFreestyleWasAM") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

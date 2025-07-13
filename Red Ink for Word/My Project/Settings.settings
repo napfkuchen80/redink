@@ -113,5 +113,14 @@
     <Setting Name="TTSProvider" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="LastFreestyleModelConfig" Type="SharedLibrary.SharedLibrary.ModelConfig" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastFreestylePrompt" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastFreestyleWasAM" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

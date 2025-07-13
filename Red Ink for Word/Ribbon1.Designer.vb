@@ -57,7 +57,6 @@ Partial Class Ribbon1
         Dim RibbonDialogLauncherImpl1 As Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher = Me.Factory.CreateRibbonDialogLauncher
         Me.Tab1 = Me.Factory.CreateRibbonTab
         Me.Group1 = Me.Factory.CreateRibbonGroup
-        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.Menu1 = Me.Factory.CreateRibbonMenu
         Me.RI_Primlang = Me.Factory.CreateRibbonButton
         Me.RI_SecLang = Me.Factory.CreateRibbonButton
@@ -70,6 +69,8 @@ Partial Class Ribbon1
         Me.RI_Convincing = Me.Factory.CreateRibbonButton
         Me.RI_BalloonMergePart = Me.Factory.CreateRibbonButton
         Me.RI_BalloonMergeFull = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergePartPrompt = Me.Factory.CreateRibbonButton
+        Me.RI_BalloonMergeFullPrompt = Me.Factory.CreateRibbonButton
         Me.RI_Shorten = Me.Factory.CreateRibbonButton
         Me.RI_Anonymize = Me.Factory.CreateRibbonButton
         Me.RI_SwitchParty = Me.Factory.CreateRibbonButton
@@ -83,6 +84,7 @@ Partial Class Ribbon1
         Me.RI_Anonymization = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
+        Me.RI_FreestyleRepeat = Me.Factory.CreateRibbonButton
         Me.RI_Search = Me.Factory.CreateRibbonButton
         Me.Menu2 = Me.Factory.CreateRibbonMenu
         Me.RI_Halves = Me.Factory.CreateRibbonButton
@@ -94,11 +96,10 @@ Partial Class Ribbon1
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_Transcriptor = Me.Factory.CreateRibbonButton
         Me.Settings = Me.Factory.CreateRibbonButton
+        Me.Group2 = Me.Factory.CreateRibbonGroup
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
-        Me.RI_BalloonMergeFullPrompt = Me.Factory.CreateRibbonButton
-        Me.RI_BalloonMergePartPrompt = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -121,18 +122,6 @@ Partial Class Ribbon1
         Me.Group1.Name = "Group1"
         Me.Group1.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
         '
-        'Group2
-        '
-        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
-        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
-        Me.Group2.Items.Add(Me.RI_PrimLang2)
-        Me.Group2.Items.Add(Me.RI_Correct2)
-        Me.Group2.Items.Add(Me.RI_Chat)
-        Me.Group2.KeyTip = "RIQ"
-        Me.Group2.Label = "Red Ink"
-        Me.Group2.Name = "Group2"
-        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
-        '
         'Menu1
         '
         Me.Menu1.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge
@@ -148,6 +137,7 @@ Partial Class Ribbon1
         Me.Menu1.Items.Add(Me.Menu3)
         Me.Menu1.Items.Add(Me.RI_FreestyleNM)
         Me.Menu1.Items.Add(Me.RI_FreestyleAM)
+        Me.Menu1.Items.Add(Me.RI_FreestyleRepeat)
         Me.Menu1.Items.Add(Me.RI_Search)
         Me.Menu1.Items.Add(Me.Menu2)
         Me.Menu1.Items.Add(Me.RI_Chat2)
@@ -258,6 +248,24 @@ Partial Class Ribbon1
         Me.RI_BalloonMergeFull.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
     "ragraph of the document"
         Me.RI_BalloonMergeFull.ShowImage = True
+        '
+        'RI_BalloonMergePartPrompt
+        '
+        Me.RI_BalloonMergePartPrompt.Label = "Apply comment (edit)"
+        Me.RI_BalloonMergePartPrompt.Name = "RI_BalloonMergePartPrompt"
+        Me.RI_BalloonMergePartPrompt.OfficeImageId = "ReviewEditComment"
+        Me.RI_BalloonMergePartPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "ragraph of the document (you can edit the prompt)"
+        Me.RI_BalloonMergePartPrompt.ShowImage = True
+        '
+        'RI_BalloonMergeFullPrompt
+        '
+        Me.RI_BalloonMergeFullPrompt.Label = "Apply comment to para (edit)"
+        Me.RI_BalloonMergeFullPrompt.Name = "RI_BalloonMergeFullPrompt"
+        Me.RI_BalloonMergeFullPrompt.OfficeImageId = "ReviewEditComment"
+        Me.RI_BalloonMergeFullPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
+    "ragraph of the document (you can edit the prompt)"
+        Me.RI_BalloonMergeFullPrompt.ShowImage = True
         '
         'RI_Shorten
         '
@@ -372,6 +380,14 @@ Partial Class Ribbon1
     "hout a text (using the 2nd configured model, if available)"
         Me.RI_FreestyleAM.ShowImage = True
         '
+        'RI_FreestyleRepeat
+        '
+        Me.RI_FreestyleRepeat.Label = "Freestyle (redo)"
+        Me.RI_FreestyleRepeat.Name = "RI_FreestyleRepeat"
+        Me.RI_FreestyleRepeat.OfficeImageId = "CustomActionsGallery"
+        Me.RI_FreestyleRepeat.ScreenTip = "Will repeat the last Freestyle command without prompting"
+        Me.RI_FreestyleRepeat.ShowImage = True
+        '
         'RI_Search
         '
         Me.RI_Search.Label = "Context Search"
@@ -467,6 +483,18 @@ Partial Class Ribbon1
         Me.Settings.ScreenTip = "Allows you to temporarily change the settings"
         Me.Settings.ShowImage = True
         '
+        'Group2
+        '
+        RibbonDialogLauncherImpl1.ScreenTip = "Tickle my brain, Inky!"
+        Me.Group2.DialogLauncher = RibbonDialogLauncherImpl1
+        Me.Group2.Items.Add(Me.RI_PrimLang2)
+        Me.Group2.Items.Add(Me.RI_Correct2)
+        Me.Group2.Items.Add(Me.RI_Chat)
+        Me.Group2.KeyTip = "RIQ"
+        Me.Group2.Label = "Red Ink"
+        Me.Group2.Name = "Group2"
+        Me.Group2.Position = Me.Factory.RibbonPosition.AfterOfficeId("GroupNames")
+        '
         'RI_PrimLang2
         '
         Me.RI_PrimLang2.KeyTip = "E"
@@ -492,24 +520,6 @@ Partial Class Ribbon1
         Me.RI_Chat.OfficeImageId = "ContactUs"
         Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
         Me.RI_Chat.ShowImage = True
-        '
-        'RI_BalloonMergeFullPrompt
-        '
-        Me.RI_BalloonMergeFullPrompt.Label = "Apply comment to para (edit)"
-        Me.RI_BalloonMergeFullPrompt.Name = "RI_BalloonMergeFullPrompt"
-        Me.RI_BalloonMergeFullPrompt.OfficeImageId = "ReviewEditComment"
-        Me.RI_BalloonMergeFullPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
-    "ragraph of the document (you can edit the prompt)"
-        Me.RI_BalloonMergeFullPrompt.ShowImage = True
-        '
-        'RI_BalloonMergePartPrompt
-        '
-        Me.RI_BalloonMergePartPrompt.Label = "Apply comment (edit)"
-        Me.RI_BalloonMergePartPrompt.Name = "RI_BalloonMergePartPrompt"
-        Me.RI_BalloonMergePartPrompt.OfficeImageId = "ReviewEditComment"
-        Me.RI_BalloonMergePartPrompt.ScreenTip = "Apply the text (selected) in your comment balloon to the text in the commented pa" &
-    "ragraph of the document (you can edit the prompt)"
-        Me.RI_BalloonMergePartPrompt.ShowImage = True
         '
         'Ribbon1
         '
@@ -644,6 +654,18 @@ Partial Class Ribbon1
             Me.RI_SpecialModel.Visible = True
         End If
 
+        Dim LastFreestylePrompt As String = My.Settings.LastFreestylePrompt
+        If Trim(LastFreestylePrompt) = "" Then
+            Me.RI_FreestyleRepeat.Enabled = False
+        Else
+            Me.RI_FreestyleRepeat.Enabled = True
+            If My.Settings.LastFreestyleWasAM Then
+                Me.RI_FreestyleRepeat.ScreenTip = My.Settings.LastFreestyleModelConfig.Model & ": " & LastFreestylePrompt
+            Else
+                Me.RI_FreestyleRepeat.ScreenTip = LastFreestylePrompt
+            End If
+        End If
+
         Me.Menu1.ScreenTip = If(String.IsNullOrEmpty(ThisAddIn.INI_UsageRestrictions), "",
                             ThisAddIn.INI_UsageRestrictions)
         Me.Menu1.SuperTip = $"{AN} " & ThisAddIn.Version &
@@ -695,6 +717,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_BalloonMergeFull As RibbonButton
     Friend WithEvents RI_BalloonMergePartPrompt As RibbonButton
     Friend WithEvents RI_BalloonMergeFullPrompt As RibbonButton
+    Friend WithEvents RI_FreestyleRepeat As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

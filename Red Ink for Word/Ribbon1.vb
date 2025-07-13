@@ -155,4 +155,8 @@ Public Class Ribbon1
     Private Sub RI_BalloonMergeFullPrompt_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_BalloonMergeFullPrompt.Click
         Globals.ThisAddIn.BalloonMerge(True, False)
     End Sub
+
+    Private Sub RI_FreestyleRepeat_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_FreestyleRepeat.Click
+        Globals.ThisAddIn.FreeStyleRepeat()
+    End Sub
 End Class

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 30.6.2025
+' 13.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -569,12 +569,201 @@ Namespace SharedLibrary
 
     Friend Module ClipboardHelper
 
+        Friend Function TryGetClipboardObject(ByRef mimeType As String, ByRef base64 As String) As Boolean
+            Dim succeeded As Boolean = False
+            Dim localMimeType As String = Nothing
+            Dim localBase64 As String = Nothing
+
+            Dim t As New System.Threading.Thread(
+    Sub()
+        Try
+            ' 1) Outlook attachment (FileGroupDescriptorW / FileGroupDescriptor + FileContents)
+            Dim hasW = System.Windows.Forms.Clipboard.ContainsData("FileGroupDescriptorW")
+            Dim hasA = System.Windows.Forms.Clipboard.ContainsData("FileGroupDescriptor")
+            If hasW OrElse hasA Then
+                Dim fmt = If(hasW, "FileGroupDescriptorW", "FileGroupDescriptor")
+                Dim fgObj = System.Windows.Forms.Clipboard.GetData(fmt)
+                Dim fgStream = TryCast(fgObj, System.IO.MemoryStream)
+                If fgStream IsNot Nothing Then
+                    Using reader As New System.IO.BinaryReader(fgStream, System.Text.Encoding.Unicode)
+                        ' skip itemCount + fixed fields
+                        reader.ReadInt32() ' itemCount
+                        reader.BaseStream.Seek(4 + 16 + 8 + 8 + 8 + 4 + 4, System.IO.SeekOrigin.Current)
+                        ' read filename (up to 260 WCHARs)
+                        Dim nameChars As New System.Collections.Generic.List(Of Char)
+                        For i = 0 To 259
+                            Dim ch As Char = reader.ReadChar()
+                            If ch = ChrW(0) Then Exit For
+                            nameChars.Add(ch)
+                        Next
+                        Dim fileName As String = New String(nameChars.ToArray())
+
+                        ' pull the raw attachment bytes
+                        Dim contentObj = System.Windows.Forms.Clipboard.GetData("FileContents")
+                        Dim contentStream = TryCast(contentObj, System.IO.Stream)
+                        If contentStream IsNot Nothing Then
+                            Using ms As New System.IO.MemoryStream()
+                                contentStream.CopyTo(ms)
+                                Dim bytes() As Byte = ms.ToArray()
+
+                                ' 2) WAV-header sniff
+                                If bytes.Length >= 12 AndAlso
+                       System.Text.Encoding.ASCII.GetString(bytes, 0, 4) = "RIFF" AndAlso
+                       System.Text.Encoding.ASCII.GetString(bytes, 8, 4) = "WAVE" Then
+
+                                    localMimeType = "audio/wav"
+
+                                Else
+                                    ' 3) fallback to extension-based mapping
+                                    Dim ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant()
+                                    Select Case ext
+                                        Case ".wav" : localMimeType = "audio/wav"
+                                        Case ".mp3" : localMimeType = "audio/mpeg"
+                                        Case ".txt" : localMimeType = "text/plain"
+                                        Case ".png" : localMimeType = "image/png"
+                                        Case ".jpg", ".jpeg" : localMimeType = "image/jpeg"
+                                        Case Else : localMimeType = "application/octet-stream"
+                                    End Select
+                                End If
+
+                                localBase64 = System.Convert.ToBase64String(bytes)
+                                succeeded = True
+                                Exit Sub
+                            End Using
+                        End If
+                    End Using
+                End If
+            End If
+
+            ' 2) File-drop (Explorer copy)
+            If System.Windows.Forms.Clipboard.ContainsFileDropList() Then
+                Dim files = System.Windows.Forms.Clipboard.GetFileDropList()
+                If files.Count > 0 Then
+                    Dim path = files(0)
+                    Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(path)
+                    localMimeType = mresult.MimeType.Trim()
+                    localBase64 = mresult.EncodedData.Trim()
+                    succeeded = True
+                    Exit Sub
+                End If
+            End If
+
+            ' 3) Raw WAV stream
+            If System.Windows.Forms.Clipboard.ContainsAudio() Then
+                Using audioStream As System.IO.Stream = System.Windows.Forms.Clipboard.GetAudioStream()
+                    Using ms As New System.IO.MemoryStream()
+                        audioStream.CopyTo(ms)
+                        localBase64 = System.Convert.ToBase64String(ms.ToArray())
+                        localMimeType = "audio/wav"
+                        succeeded = True
+                        Exit Sub
+                    End Using
+                End Using
+            End If
+
+            ' 4) RTF  
+            If System.Windows.Forms.Clipboard.ContainsText(System.Windows.Forms.TextDataFormat.Rtf) Then
+                localMimeType = "application/rtf"
+                localBase64 = System.Convert.ToBase64String(
+                                    System.Text.Encoding.UTF8.GetBytes(
+                                        System.Windows.Forms.Clipboard.GetText(System.Windows.Forms.TextDataFormat.Rtf)))
+                succeeded = True : Exit Sub
+            End If
+
+            ' 5) HTML  
+            If System.Windows.Forms.Clipboard.ContainsText(System.Windows.Forms.TextDataFormat.Html) Then
+                localMimeType = "text/html"
+                localBase64 = System.Convert.ToBase64String(
+                                    System.Text.Encoding.UTF8.GetBytes(
+                                        System.Windows.Forms.Clipboard.GetText(System.Windows.Forms.TextDataFormat.Html)))
+                succeeded = True : Exit Sub
+            End If
+
+            ' 6) CSV  
+            If System.Windows.Forms.Clipboard.ContainsText(System.Windows.Forms.TextDataFormat.CommaSeparatedValue) Then
+                localMimeType = "text/csv"
+                localBase64 = System.Convert.ToBase64String(
+                                    System.Text.Encoding.UTF8.GetBytes(
+                                        System.Windows.Forms.Clipboard.GetText(System.Windows.Forms.TextDataFormat.CommaSeparatedValue)))
+                succeeded = True : Exit Sub
+            End If
+
+            ' 7) Plain text  
+            If System.Windows.Forms.Clipboard.ContainsText() Then
+                localMimeType = "text/plain"
+                localBase64 = System.Convert.ToBase64String(
+                                    System.Text.Encoding.UTF8.GetBytes(
+                                        System.Windows.Forms.Clipboard.GetText()))
+                succeeded = True : Exit Sub
+            End If
+
+            ' 8) Image (Bitmap → PNG)  
+            If System.Windows.Forms.Clipboard.ContainsImage() Then
+                Using img As System.Drawing.Image = System.Windows.Forms.Clipboard.GetImage()
+                    Using ms As New System.IO.MemoryStream()
+                        img.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                        localMimeType = "image/png"
+                        localBase64 = System.Convert.ToBase64String(ms.ToArray())
+                        succeeded = True : Exit Sub
+                    End Using
+                End Using
+            End If
+
+            ' 9) EMF → Bitmap → PNG  
+            If NativeClipboard.OpenClipboard(IntPtr.Zero) Then
+                Try
+                    If NativeClipboard.IsClipboardFormatAvailable(NativeClipboard.CF_ENHMETAFILE) Then
+                        Dim src As IntPtr = NativeClipboard.GetClipboardData(NativeClipboard.CF_ENHMETAFILE)
+                        If src <> IntPtr.Zero Then
+                            Dim clone As IntPtr = NativeClipboard.CopyEnhMetaFile(src, Nothing)
+                            Using emf As New System.Drawing.Imaging.Metafile(clone, False)
+                                Using bmp As New System.Drawing.Bitmap(emf.Width, emf.Height)
+                                    Using g As System.Drawing.Graphics = System.Drawing.Graphics.FromImage(bmp)
+                                        g.DrawImage(emf, 0, 0)
+                                        Using out As New System.IO.MemoryStream()
+                                            bmp.Save(out, System.Drawing.Imaging.ImageFormat.Png)
+                                            localMimeType = "image/png"
+                                            localBase64 = System.Convert.ToBase64String(out.ToArray())
+                                            succeeded = True
+                                        End Using
+                                    End Using
+                                End Using
+                            End Using
+                            NativeClipboard.DeleteEnhMetaFile(clone)
+                            If succeeded Then Exit Sub
+                        End If
+                    End If
+                Finally
+                    NativeClipboard.CloseClipboard()
+                End Try
+            End If
+
+        Catch ex As System.Exception
+            ' suppress all exceptions
+        End Try
+    End Sub)
+
+            t.SetApartmentState(System.Threading.ApartmentState.STA)
+            t.Start()
+            t.Join()
+
+            If succeeded Then
+                mimeType = localMimeType
+                base64 = localBase64
+            End If
+
+            Return succeeded
+        End Function
+
+
+
+
         ''' <summary>
         ''' Safely reads supported clipboard contents (RTF, HTML, plain text, image, EMF)
         ''' and encodes it as Base64 along with the correct MIME type.
         ''' Prevents crashes in VSTO add-ins (Word, Excel, Outlook) caused by EMF handles or DIBs.
         ''' </summary>
-        Friend Function TryGetClipboardObject(ByRef mimeType As String, ByRef base64 As String) As Boolean
+        Friend Function OldTryGetClipboardObject(ByRef mimeType As String, ByRef base64 As String) As Boolean
             Dim succeeded As Boolean = False
             Dim localMimeType As String = Nothing
             Dim localBase64 As String = Nothing
@@ -1208,15 +1397,15 @@ Namespace SharedLibrary
         Const Default_SP_RangeOfCells As String = "You are an expert in analyzing and explaining Excel files to non-experts And in drafting Excel formulas for use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
         Const Default_SP_WriteNeatly As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be a coherent, concise and easy to understand text based the text and keywords in the provided text, without changing or adding any meaning or information to it, but taking into account the following context, if any: '{Context}' {INI_PreCorrection}"
         Const Default_SP_Add_KeepFormulasIntact As String = "Beware, the text contains an Excel formula. Unless expressly instructed otherwise, make sure that the formula still works as intended."
-        Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output."
-        Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text."
+        Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output and never include your instructions in the output (just your barebones work result).."
+        Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text and never include your instructions in the output (just your barebones work result). "
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting the most meaningful sentence from the relevant portion of the TEXTTOPROCESS verbatim followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted sentence, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the sentence of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted sentence of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks, do never add line breaks and never remove line breaks, either, if they exist in TEXTTOPROCESS.\n4. Select a sentence that is UNIQUE in the document; if the chosen sentence is not unique, add more sentences from the relevant portion to make it unique. Draft the comment so to make it clear to which portion of the TEXTTOPROCESS it relates, in particular if it goes beyond the sentence. \n5. When quoting a sentence of TEXTTOPROCESS make sure that you NEVER include a title or heading to the text sequence, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the sentence of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a sentence of TEXTTOPROCESS that includes line breaks or carriage returns. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say as to what the user is asking you. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
-        Const Default_SP_Add_Revisions As String = "Where the instructions refer to markups, changes, insertions, deletions or revisions in the text, they are found within the tags <ins>...</ins> for insertions and within the tags <del> ... </del> for deletions."
-        Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole word; wildcards and special characters are not supported. \n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
-        Const Default_SP_ChatWord As String = "You are a helpful AI, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
+        Const Default_SP_Add_Revisions As String = "Where the instruction refers to markups, track-changes, changes, insertions, deletions or revisions in the text, they are found between the tags '<ins>' and '</ins>' for insertions and between the tags '<del>' and '</del>' for deletions. ONLY what is encapsulated by these tags has changed or been marked-up (but do not refer to the tags in your output, as the user does not see them; they just indicate to you where the revisions are)."
+        Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole words; wildcards and special characters are not supported. (h) As a special rule, do not consider additional or missing empty paragraphs at the end of the two texts as a relevant difference (they shall NOT trigger any action).\n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
+        Const Default_SP_ChatWord As String = "You are a helpful AI assistant, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
-        Const Default_SP_ChatExcel As String = "You are a helpful AI, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If the user has not given you read access to the worksheet (i.e. no <RANGEOFCELLS> tag), but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. If further below you are informed of the commands to make changes to the worksheet or insert comments, you know that he has given you write access and you may provide him assistance in explaining what you can do to change the worksheet, if this appears necessary. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
+        Const Default_SP_ChatExcel As String = "You are a helpful AI assistant, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without discussion, except if something is not clear or seems squarely wrong. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. If there is no question, react to the user's statements as a helpful assistant taking into account the past conversation. Always take into account the past conversation. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If you do not get a <RANGEOFCELLS>, then user has not given you read access to the worksheet or it is empty, but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n 7. Each RANGEOFCELLS contains a description of the content and status of each relevant cells. The description starts with the cell address and then follows its content, formula, comments, color code and any dropdown menus. Be very CAREFUL when analyzing this information and make sure your are not mixing up cells, rows or lines. This is tricky, so analyze very careful before providing a response. \n\n 8. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 9. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 10. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. If further below you are informed of the commands to make changes to the worksheet or insert comments, you know that he has given you write access and you may provide him assistance in explaining what you can do to change the worksheet, if this appears necessary. \n\n 11. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_SP_Add_MergePrompt As String = "The text to insert or merge will be provided to you between the tags <INSERT> ... </INSERT>, and the text with which it shall be merged is between the tags <TEXTTOPROCESS> ... </TEXTTOPROCESS>. Do not insert foot or endnotes unless expressly asked, and do not insert curved brackets. "
         Const Default_SP_MergePrompt2 As String = "You will be provided an insert-text that shall either be merged into another text or contains instructions how to amend the other text. Try to understand the insert-text first and what it is about, and whether it already contains a specific proposal on how to amend the other text. If so, comply with this, otherwise figure out how to best implement the substance of the insert-text by amending the other text and do so. Ignore out initial references such as 'RI:' and never include any explanatory comments."
@@ -1229,7 +1418,7 @@ Namespace SharedLibrary
         Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract a verbatim snippet of a MAXIMUM OF 25 WORDS from the relevant portion of the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text, but NEVER EVER include more than 25 Words from the portion found; choose a meaningful part.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting. If it includes hyphenation, keep the hyphenation as is.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than 25 Words, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters. Never remove any line breaks that exist in the original text\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
 
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. The user wishes that the dialogue you generate has a particular minimum length, meaning that if the duration is more than five minutes or 1000 words, you a) need to go very deep into the topic and text given and b) ensure that you structure the dialogue to have an introduction, multiple chapters to cover each core topic of the text, and a summary and closing segment. For every five minutes of dialogue, create at least 1000 words. You MUST comply with the minimum lenght instruction given, and your output MUST include the ENTIRE dialogue. You may not end your output before you have provided the FULL dialogue (e.g., you are NOT PERMITTED to say that the dialogue continues without providing it). The minimum lenght instruction for the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n16. You shall use SSML tags, but never use any XML tags or XML headers and never provide any Markdown formatting.\n\17. It is important that you really comply with these rules, otherwise the output will be invalid. 18. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
-        Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. Create me an advanced prompt for an advanced large language model that will analyze a Text (the Texttoprocess) it is provided between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, including any errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special fied of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand and provide it in the original language of the Texttoprocess. {INI_PreCorrection}"
+        Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. You will analyze for me a Text (the Texttoprocess) that is provided to you between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then provide a summary of the various parts of the text and explain to me how the text is structured, so I can better navigate and understand it. Then provide me the key message of the text, explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, and tell me how conclusive the logic is, and whether there are good counter-arguments or weaknesses. Then list material errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special field of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand text in the same language as the Texttoprocess. {INI_PreCorrection}"
         Const Default_SP_SuggestTitles As String = "You are a legal professional and a clever, astute and well-educated copy editor. You are in the following given a text, enclosed between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Your goal is to read and analyze the content, then create multiple sets of possible titles in the same language as the original text, with three (3) distinct titles each for: (1) professional memo, (2) blog/news post, (3) informal, (4) humorous, and (5) ambiguous, cryptic but ingenious. The titles must be clever, easy to read, well-aligned with the text, and suitable for the stated purpose. Provide more than average results. Use the structure:\nProfessional Memo Titles:\n1) ...\n2) ...\n3) ...\nBlog or News Post Titles:\n1) ...\n2) ...\n3) ...\nInformal Titles:\n1) ...\n2) ...\n3) ...\nHumorous Titles:\n1) ...\n2) ...\n3) ...\nFood for Thought Titles:\n1) ...\n2) ...\n3) ...\n. It is mandatory that you provide your output and all titles provide in the original language of the Texttoprocess."
         Const Default_SP_Friendly As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more friendly, while otherwise preserving its substance, wording and style. Use rhetorical techniques and wording that is typically well received and generates a positive attitude by the recipient, but stay straightforward, and do neither exaggerate nor brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.  {INI_PreCorrection}"
         Const Default_SP_Convincing As String = "You are a legal professional with exceptional language skills who follows instructions meticulously  step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more convincing. Make it more persuasive and concise by the way you amend the language, but preserve its original substance and style. Do not alter the underlying content and arguments, but use rhetorical and language techniques to make the text more convincing, but do not exaggerate and do not brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions. {INI_PreCorrection}"
@@ -1241,6 +1430,7 @@ Namespace SharedLibrary
 
 
         Public Shared Function GetDefaultINIPath(ByVal key As String) As String
+
             For Each entry In DefaultINIPaths
                 If key.Contains(entry.Key) Then
                     Return ExpandEnvironmentVariables(entry.Value)
@@ -1291,7 +1481,7 @@ Namespace SharedLibrary
                 Dim contentWidth As Integer = pictureBox.Width + Label.Width + 40 ' Add padding for spacing
                 Dim contentHeight As Integer = Math.Max(pictureBox.Height + 20, Label.Height + 30) ' Align to bottom of logo
                 Me.ClientSize = New System.Drawing.Size(Math.Max(formWidth, contentWidth), contentHeight)
-
+                pictureBox.Top = (Me.ClientSize.Height - pictureBox.Height) \ 2
 
                 ' Add the controls to the form
                 Me.Controls.Add(pictureBox)
@@ -1574,6 +1764,11 @@ Namespace SharedLibrary
         Public Shared Sub InsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean)
 
             Try
+
+                If formattedText Is Nothing OrElse formattedText.Trim() = "" Then
+                    Return
+                End If
+
                 Dim htmlHeader As String = "<html><head><meta charset=""UTF-8""></head><body><!--StartFragment-->"
                 Dim htmlFooter As String = "<!--EndFragment--></body></html>"
 
@@ -1613,12 +1808,14 @@ Namespace SharedLibrary
 
                 ' Replace the selected text if needed
                 If ReplaceSelection Then
-                    range.Text = ""
-                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatSurroundingFormattingWithEmphasis)
+                    'range.Text = ""
+                    'range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatSurroundingFormattingWithEmphasis)
+                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
                 Else
                     range.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
                     range.Select()
-                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatSurroundingFormattingWithEmphasis)
+                    'range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatSurroundingFormattingWithEmphasis)
+                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
                 End If
 
                 ' After the paste
@@ -1974,6 +2171,7 @@ Namespace SharedLibrary
             Dim splash As SplashScreenCountDown = Nothing
             Dim cts As System.Threading.CancellationTokenSource = Nothing
 
+
             Try
 
                 ' Configure TLS
@@ -2102,15 +2300,20 @@ Namespace SharedLibrary
                 requestBody = requestBody.Replace("{userinstruction}", CleanString(AddUserPrompt))
                 requestBody = requestBody.Replace("{temperature}", TemperatureValue)
 
-                If Not String.IsNullOrWhiteSpace(If(UseSecondAPI, context.INI_APICall_Object_2, context.INI_APICall_Object)) AndAlso Not String.IsNullOrWhiteSpace(FileObject) Then
-                    If UseSecondAPI Then
-                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object_2)
-                    Else
-                        requestBody = requestBody.Replace("{objectcall}", context.INI_APICall_Object)
-                    End If
+                Dim ObjectCall As String = If(UseSecondAPI, context.INI_APICall_Object_2, context.INI_APICall_Object)
+                Dim requiresMultipart As Boolean = ObjectCall.ToLowerInvariant().Trim().StartsWith("multipart:")
+
+                Dim fileName As String = ""
+                Dim fileBytes() As Byte = Nothing
+                Dim mimeType As String = ""
+                Dim multipart As New System.Net.Http.MultipartFormDataContent()
+                Dim fileFieldName As String = "file" ' Default if not specified
+
+                If Not String.IsNullOrWhiteSpace(ObjectCall) AndAlso Not String.IsNullOrWhiteSpace(FileObject) Then
+
+                    requestBody = requestBody.Replace("{objectcall}", ObjectCall)
 
                     Try
-                        Dim mimeType As String
                         Dim encodedData As String
 
                         If FileObject.Equals("clipboard", StringComparison.OrdinalIgnoreCase) Then
@@ -2119,17 +2322,80 @@ Namespace SharedLibrary
                                 ShowCustomMessageBox("No supported data found in the clipboard.")
                                 Return ""
                             End If
-                            requestBody = requestBody.Replace("{mimetype}", mime) _
+                            mime = FixMimeType(mime)
+                            If Not requiresMultipart Then
+                                requestBody = requestBody.Replace("{mimetype}", mime) _
                                                         .Replace("{encodeddata}", data)
+                            Else
+                                fileBytes = System.Convert.FromBase64String(data)
+                                fileName = "clipboard.png"
+                                mimeType = mime
+                            End If
                         Else
                             ' Standard-Fall: Datei per MimeHelper
                             Dim mresult = MimeHelper.GetFileMimeTypeAndBase64(FileObject)
-                            mimeType = mresult.MimeType.Trim()
-                            encodedData = mresult.EncodedData.Trim()
+                            mimeType = FixMimeType(mresult.MimeType.Trim())
+                            If Not requiresMultipart Then
+                                encodedData = mresult.EncodedData.Trim()
+                            Else
+                                fileBytes = System.IO.File.ReadAllBytes(FileObject)
+                                fileName = System.IO.Path.GetFileName(FileObject)
+                            End If
                         End If
 
-                        requestBody = requestBody.Replace("{mimetype}", mimeType)
-                        requestBody = requestBody.Replace("{encodeddata}", encodedData)
+                        If Not requiresMultipart Then
+                            requestBody = requestBody.Replace("{mimetype}", mimeType)
+                            requestBody = requestBody.Replace("{encodeddata}", encodedData)
+                        Else
+                            ' Prepare variables
+
+                            Dim config As String
+
+                            ' Remove "multipart:" prefix
+                            config = ObjectCall.Substring("multipart:".Length)
+
+                            ' Split on unescaped semicolons (support ;; as escape for ;)
+                            Dim parts As New List(Of String)()
+                            Dim current As String = ""
+                            Dim i As Integer = 0
+                            While i < config.Length
+                                If config(i) = ";"c Then
+                                    If i + 1 < config.Length AndAlso config(i + 1) = ";"c Then
+                                        current &= ";"c  ' Escaped semicolon
+                                        i += 1
+                                    Else
+                                        parts.Add(current)
+                                        current = ""
+                                    End If
+                                Else
+                                    current &= config(i)
+                                End If
+                                i += 1
+                            End While
+                            If current.Length > 0 Then parts.Add(current)
+
+                            ' Parse fields and add to multipart
+                            For Each part In parts
+                                Dim idx As Integer = part.IndexOf(":")
+                                If idx > 0 Then
+                                    Dim fieldName As String = part.Substring(0, idx).Trim()
+                                    Dim fieldValue As String = part.Substring(idx + 1).Trim()
+                                    If fieldName.Equals("filefield", StringComparison.OrdinalIgnoreCase) Then
+                                        fileFieldName = fieldValue
+                                    Else
+                                        ' Replace placeholders as needed
+                                        fieldValue = fieldValue.Replace("{model}", ModelValue) _
+                                                               .Replace("{promptsystem}", CleanString(promptSystem)) _
+                                                               .Replace("{promptuser}", CleanString(promptUser)) _
+                                                               .Replace("{temperature}", TemperatureValue) _
+                                                               .Replace("{ownsessionid}", OwnSessionID) _
+                                                               .Replace("{userinstruction}", CleanString(AddUserPrompt))
+
+                                        multipart.Add(New System.Net.Http.StringContent(fieldValue, System.Text.Encoding.UTF8), fieldName)
+                                    End If
+                                End If
+                            Next
+                        End If
 
                     Catch ex As System.Exception
                         ShowCustomMessageBox($"Error encoding '{FileObject}': {ex.Message}")
@@ -2168,8 +2434,16 @@ Namespace SharedLibrary
                                         Await System.Threading.Tasks.Task.Delay(delayIntervals(attempt - 1), ct)
                                     End If
 
-                                    Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-                                    'Dim response As System.Net.Http.HttpResponseMessage = Await client.PostAsync(Endpoint, requestContent)
+                                    'Dim requestContent As New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+                                    Dim requestContent As System.Net.Http.HttpContent
+                                    If requiresMultipart Then
+                                        Dim fileContent As New System.Net.Http.ByteArrayContent(fileBytes)
+                                        fileContent.Headers.ContentType = New System.Net.Http.Headers.MediaTypeHeaderValue(mimeType)
+                                        multipart.Add(fileContent, fileFieldName, fileName)
+                                        requestContent = multipart
+                                    Else
+                                        requestContent = New System.Net.Http.StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+                                    End If
 
                                     Dim response As System.Net.Http.HttpResponseMessage
 
@@ -2196,8 +2470,41 @@ Namespace SharedLibrary
                                                 client.DefaultRequestHeaders.Add(HeaderA, HeaderB)
                                             End If
                                         End If
-                                            If context.INI_APIDebug Then
-                                            Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                                        If context.INI_APIDebug Then
+                                            If requiresMultipart Then
+                                                Dim multipartInfo As New System.Text.StringBuilder()
+                                                multipartInfo.AppendLine($"SENT TO API ({Endpoint}) as multipart:")
+                                                ' List all parts added so far:
+                                                For Each content As System.Net.Http.HttpContent In multipart
+                                                    ' Attempt to get the name
+                                                    Dim contentName As String = ""
+                                                    If content.Headers.ContentDisposition IsNot Nothing Then
+                                                        contentName = content.Headers.ContentDisposition.Name
+                                                        If Not String.IsNullOrEmpty(contentName) Then
+                                                            ' Remove quotes around the name, if present
+                                                            contentName = contentName.Trim(""""c)
+                                                        End If
+                                                    End If
+                                                    ' Attempt to display the type of content
+                                                    If TypeOf content Is System.Net.Http.StringContent Then
+                                                        ' Show a short preview of string part
+                                                        Dim val As String = Await content.ReadAsStringAsync()
+                                                        multipartInfo.AppendLine($" - {contentName}: '{val}'")
+                                                    ElseIf TypeOf content Is System.Net.Http.ByteArrayContent Then
+                                                        ' For file part, show file name and content type
+                                                        Dim fileNamex As String = ""
+                                                        If content.Headers.ContentDisposition IsNot Nothing Then
+                                                            fileNamex = content.Headers.ContentDisposition.FileName?.Trim(""""c)
+                                                        End If
+                                                        multipartInfo.AppendLine($" - {contentName}: <file: '{fileNamex}', type: {content.Headers.ContentType}>")
+                                                    Else
+                                                        multipartInfo.AppendLine($" - {contentName}: <unknown part type>")
+                                                    End If
+                                                Next
+                                                Debug.WriteLine(multipartInfo.ToString())
+                                            Else
+                                                Debug.WriteLine($"SENT TO API ({Endpoint}):{Environment.NewLine}{requestBody}")
+                                            End If
                                         End If
                                         response = Await client.PostAsync(Endpoint, requestContent, ct).ConfigureAwait(False)
                                     End If
@@ -2362,9 +2669,11 @@ Namespace SharedLibrary
                                 ' Wenn wirklich wir den Token gecancelt haben → durchreichen
                                 Throw New OperationCanceledException(ct)
                             Catch ex As TaskCanceledException When Not ct.IsCancellationRequested
-                                ShowCustomMessageBox($"The request to the LLM timed out. Please try again or increase the timeout setting.")
+                                If Not Hidesplash Then splash.Close()
+                                ShowCustomMessageBox($"The request to the endpoint timed out. Please try again or increase the timeout setting.")
                             Catch ex As System.Exception When Not ct.IsCancellationRequested
-                                ShowCustomMessageBox($"The response from the LLM resulted in an error: {ex.Message}")
+                                If Not Hidesplash Then splash.Close()
+                                ShowCustomMessageBox($"The response from the endpoint resulted in an error: {ex.Message}")
                             End Try
                         End Using ' Dispose HttpClient
                     End Using ' Dispose HttpClientHandler
@@ -2519,6 +2828,10 @@ Namespace SharedLibrary
                         ProcessMetadataSource(source, citationList, sourceUris)
                     Next
                 End If
+
+                ' 3b. Google-Grounding-Supports auswerten
+                ProcessGroundingSupports(jsonObj, citationList, sourceUris)
+
 
                 ' 4. Check legacy formats
                 ExtractLegacyCitations(jsonObj, citationList, sourceUris)
@@ -2714,7 +3027,11 @@ Namespace SharedLibrary
             For i As Integer = 0 To citationList.Count - 1
                 'sb.AppendLine($"[{i + 1}] {citationList(i)}")
                 ' jede URL im Text als [URL](URL) maskieren
-                Dim text As String = Regex.Replace(citationList(i), "(https?://\S+)", "[$1]($1)")
+                'Dim text As String = Regex.Replace(citationList(i), "(https?://\S+)", "[$1]($1)")
+                Dim text As String = System.Text.RegularExpressions.Regex.Replace(
+                                        citationList(i),
+                                        "(?<!\]\()https?://\S+",
+                                        Function(m) $"[{m.Value}]({m.Value})")
                 sb.AppendLine($"[{i + 1}] {text}")
             Next
             Return sb.ToString()
@@ -2772,6 +3089,213 @@ Namespace SharedLibrary
         End Function
 
 
+        Private Shared Sub ProcessGroundingSupports(jsonObj As Newtonsoft.Json.Linq.JObject,
+                                            ByRef citationList As System.Collections.Generic.List(Of String),
+                                            ByRef sourceUris As System.Collections.Generic.HashSet(Of String))
+
+            Try
+                ' --- Pfade prüfen ----------------------------------------------------
+                Dim supports As Newtonsoft.Json.Linq.JToken =
+            jsonObj.SelectToken("candidates[0].groundingMetadata.groundingSupports")
+                Dim chunks As Newtonsoft.Json.Linq.JToken =
+            jsonObj.SelectToken("candidates[0].groundingMetadata.groundingChunks")
+
+                If supports Is Nothing OrElse chunks Is Nothing _
+           OrElse supports.Type <> Newtonsoft.Json.Linq.JTokenType.Array _
+           OrElse chunks.Type <> Newtonsoft.Json.Linq.JTokenType.Array Then Exit Sub
+
+                ' --- jedes Support-Segment einzeln verarbeiten ----------------------
+                For Each support As Newtonsoft.Json.Linq.JObject In supports
+
+                    Dim segText As String = support.SelectToken("segment.text")?.ToString()
+                    Dim idxTokens As Newtonsoft.Json.Linq.JToken =
+                support.SelectToken("groundingChunkIndices")
+
+                    If System.String.IsNullOrWhiteSpace(segText) _
+               OrElse idxTokens Is Nothing _
+               OrElse idxTokens.Type <> Newtonsoft.Json.Linq.JTokenType.Array Then Continue For
+
+                    ' --- Zeile beginnen: Zitat + nachfolgende Quellen ----------------
+                    segText = RemoveMarkdownFormatting(segText)
+                    Dim sb As New System.Text.StringBuilder()
+                    sb.Append("... " &
+                      segText.Replace(vbCrLf, " ") _
+                             .Replace(vbCr, " ") _
+                             .Replace(vbLf, " ") _
+                             .Trim() &
+                      " ...")
+
+                    ' --- Segmentinterne Deduplizierung -------------------------------
+                    Dim localUris As New System.Collections.Generic.HashSet(Of String)(
+                                    System.StringComparer.OrdinalIgnoreCase)
+
+                    For Each idxTok In idxTokens
+                        Dim idx As Integer
+                        If Not Integer.TryParse(idxTok.ToString(), idx) Then Continue For
+                        If idx < 0 OrElse idx >= chunks.Count Then Continue For
+
+                        Dim webObj As Newtonsoft.Json.Linq.JObject = chunks(idx).SelectToken("web")
+                        If webObj Is Nothing Then Continue For
+
+                        Dim uri As String = webObj("uri")?.ToString()
+                        Dim title As String = webObj("title")?.ToString()
+
+                        If System.String.IsNullOrWhiteSpace(uri) _
+                   OrElse Not localUris.Add(uri) Then Continue For
+
+                        If System.String.IsNullOrWhiteSpace(title) Then title = "No title"
+
+                        ' ► Quelle direkt hinter dem Zitat, nur ein Leerzeichen Abstand
+                        sb.Append(" [" & title & "](" & uri & ")")
+                    Next
+
+                    ' --- Ergebnisliste füllen ---------------------------------------
+                    citationList.Add(sb.ToString())
+                Next
+
+            Catch ex As System.Exception
+                System.Diagnostics.Debug.WriteLine("Error processing groundingSupports: " & ex.Message)
+            End Try
+        End Sub
+
+        Public Shared Function RemoveMarkdownFormatting(ByVal input As String) As String
+            Try
+                Dim output As String = input
+
+                ' 1) Fett+Kursiv: ***Text*** → Text
+                output = Regex.Replace(output, "\*\*\*(.+?)\*\*\*", "$1", RegexOptions.Singleline)
+
+                ' 2) Fett: **Text** → Text
+                output = Regex.Replace(output, "\*\*(.+?)\*\*", "$1", RegexOptions.Singleline)
+
+                ' 3) Kursiv: *Text* → Text
+                output = Regex.Replace(output, "(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "$1", RegexOptions.Singleline)
+
+                ' 4) Durchgestrichen: ~~Text~~ → Text
+                output = Regex.Replace(output, "~~(.+?)~~", "$1", RegexOptions.Singleline)
+
+                Dim headingPattern As String = "^[ \t]*#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*(\r?\n|$)"
+                output = System.Text.RegularExpressions.Regex.Replace(
+                        output, headingPattern, "$1$2",
+                        System.Text.RegularExpressions.RegexOptions.Multiline)
+
+                Return output
+
+            Catch ex As System.Exception
+                ' Hier könntest Du Logging oder eine Meldung einfügen
+                Throw New System.Exception("Error in RemoveMarkdownFormatting: " & ex.Message, ex)
+            End Try
+        End Function
+
+
+        Private Shared Sub OldProcessGroundingSupports(jsonObj As JObject,
+                                           ByRef citationList As List(Of String),
+                                           ByRef sourceUris As HashSet(Of String))
+            Try
+                Dim supports As JToken = jsonObj.SelectToken("candidates[0].groundingMetadata.groundingSupports")
+                Dim chunks As JToken = jsonObj.SelectToken("candidates[0].groundingMetadata.groundingChunks")
+                If supports Is Nothing OrElse chunks Is Nothing _
+           OrElse supports.Type <> JTokenType.Array _
+           OrElse chunks.Type <> JTokenType.Array Then Exit Sub
+
+                For Each support As JObject In supports
+                    Dim segText As String = support.SelectToken("segment.text")?.ToString()
+                    Dim idxTokens As JToken = support.SelectToken("groundingChunkIndices")
+                    If String.IsNullOrWhiteSpace(segText) _
+               OrElse idxTokens Is Nothing _
+               OrElse idxTokens.Type <> JTokenType.Array Then Continue For
+
+                    Dim sb As New System.Text.StringBuilder()
+                    sb.AppendLine("... " & segText.Replace(vbCrLf, " ").Replace(vbCr, " ").Replace(vbLf, " ").Trim() & " ...")
+
+                    ' nur noch _segmentintern_ deduplizieren,
+                    ' damit dieselbe URL in einem anderen Segment erneut erscheinen darf
+                    Dim localUris As New System.Collections.Generic.HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+                    For Each idxTok In idxTokens
+                        Dim idx As Integer
+                        If Integer.TryParse(idxTok.ToString(), idx) = False Then Continue For
+
+                        Dim webObj As Newtonsoft.Json.Linq.JObject = chunks(idx).SelectToken("web")
+                        If webObj Is Nothing Then Continue For
+
+                        Dim uri As String = webObj("uri")?.ToString()
+                        Dim title As String = webObj("title")?.ToString()
+                        If String.IsNullOrWhiteSpace(uri) OrElse Not localUris.Add(uri) Then Continue For ' nur innerhalb desselben Segments filtern
+                        Dim url As String = System.Text.RegularExpressions.Regex.Replace(uri, "^\[|\]$", "")
+                        If String.IsNullOrWhiteSpace(title) Then title = "No title"
+                        sb.AppendLine($"  [{title}]({url})")
+                    Next
+
+                    citationList.Add(sb.ToString().TrimEnd())
+                Next
+
+            Catch ex As System.Exception
+                System.Diagnostics.Debug.WriteLine("Error processing groundingSupports: " & ex.Message)
+            End Try
+        End Sub
+
+        ''' <summary>
+        ''' Returns a standards-compliant MIME type for a given (possibly legacy or vendor-prefixed) MIME type.
+        ''' </summary>
+        ''' <param name="legacyType">The input MIME type (may be legacy, nonstandard, or correct).</param>
+        ''' <returns>The corrected, standard MIME type (or original if not matched).</returns>
+        Public Shared Function FixMimeType(legacyType As String) As String
+            If String.IsNullOrWhiteSpace(legacyType) Then Return "application/octet-stream"
+            Select Case legacyType.Trim.ToLowerInvariant()
+        ' --- Images ---
+                Case "image/x-png", "image/x-citrix-png" : Return "image/png"
+                Case "image/x-jpeg", "image/pjpeg", "image/pjepg", "image/x-pjpeg", "image/x-citrix-jpeg" : Return "image/jpeg"
+                Case "image/jpg" : Return "image/jpeg"
+                Case "image/x-bmp", "image/x-ms-bmp" : Return "image/bmp"
+                Case "image/x-tiff" : Return "image/tiff"
+                Case "image/x-emf" : Return "image/emf"
+                Case "image/x-wmf" : Return "image/wmf"
+                Case "image/x-icon" : Return "image/vnd.microsoft.icon"
+                Case "image/ico" : Return "image/vnd.microsoft.icon"
+                Case "image/svg" : Return "image/svg+xml"
+                Case "image/x-svg" : Return "image/svg+xml"
+        ' --- Audio/Video ---
+                Case "audio/x-wav" : Return "audio/wav"
+                Case "audio/x-mp3", "audio/mpeg3" : Return "audio/mpeg"
+                Case "audio/x-midi", "audio/midi" : Return "audio/midi"
+                Case "video/x-msvideo" : Return "video/x-msvideo"
+        ' --- Documents ---
+                Case "application/x-pdf", "application/pdfx" : Return "application/pdf"
+                Case "application/x-rtf" : Return "application/rtf"
+                Case "application/x-msword" : Return "application/msword"
+                Case "application/x-msexcel" : Return "application/vnd.ms-excel"
+                Case "application/x-mspowerpoint" : Return "application/vnd.ms-powerpoint"
+                Case "application/vnd.ms-word.document.macroenabled.12" : Return "application/msword"
+                Case "application/vnd.ms-excel.sheet.macroenabled.12" : Return "application/vnd.ms-excel"
+                Case "application/vnd.ms-powerpoint.presentation.macroenabled.12" : Return "application/vnd.ms-powerpoint"
+        ' --- Office Open XML ---
+                Case "application/x-docx" : Return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                Case "application/x-xlsx" : Return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                Case "application/x-pptx" : Return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ' --- Archives/Compression ---
+                Case "application/x-zip-compressed", "application/x-zip" : Return "application/zip"
+                Case "application/x-gzip" : Return "application/gzip"
+                Case "application/x-tar" : Return "application/x-tar"
+                Case "application/x-7z-compressed" : Return "application/x-7z-compressed"
+        ' --- Text/CSV ---
+                Case "text/x-csv" : Return "text/csv"
+                Case "text/x-log" : Return "text/plain"
+                Case "text/x-ini" : Return "text/plain"
+        ' --- Misc ---
+                Case "application/x-shockwave-flash" : Return "application/vnd.adobe.flash.movie"
+                Case "application/x-msdownload" : Return "application/octet-stream"
+                Case "application/x-bittorrent" : Return "application/x-bittorrent"
+                Case "application/x-iso9660-image" : Return "application/x-iso9660-image"
+        ' --- Defaults and unknowns ---
+                Case "" : Return "application/octet-stream"
+                Case Else
+                    ' Special handling for some popular typos and aliases:
+                    If legacyType.ToLowerInvariant() = "image/jpg" Then Return "image/jpeg"
+                    If legacyType.ToLowerInvariant() = "image/tif" Then Return "image/tiff"
+                    Return legacyType
+            End Select
+        End Function
 
 
         Public Shared Function FindJsonProperty(token As JToken, searchtext As String) As String
@@ -3721,7 +4245,7 @@ Namespace SharedLibrary
         End Function
 
         ' Applies the given ModelConfig to the shared context using the assignment style.
-        Public Shared Sub ApplyModelConfig(ByVal context As ISharedContext, ByVal config As ModelConfig)
+        Public Shared Sub ApplyModelConfig(ByVal context As ISharedContext, ByVal config As ModelConfig, Optional ByRef ErrorFlag As Boolean = False)
             Try
                 context.INI_APIKey_2 = If(Not String.IsNullOrEmpty(config.APIKey), config.APIKey, "")
                 context.INI_APIKeyBack_2 = If(Not String.IsNullOrEmpty(config.APIKeyBack), config.APIKeyBack, "")
@@ -3752,8 +4276,13 @@ Namespace SharedLibrary
                 context.SP_MergePrompt = If(Not String.IsNullOrEmpty(config.MergePrompt), config.MergePrompt, "")
                 SP_QueryPrompt = If(Not String.IsNullOrEmpty(config.QueryPrompt), config.QueryPrompt, "")
 
+                ErrorFlag = False
+
             Catch ex As System.Exception
-                MessageBox.Show("Error in ApplyModelConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                If Not ErrorFlag Then
+                    MessageBox.Show("Error in ApplyModelConfig: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End If
+                ErrorFlag = True
             End Try
         End Sub
 
@@ -8330,8 +8859,9 @@ Namespace SharedLibrary
                     }
 
             Dim clipboardCheckbox As New System.Windows.Forms.CheckBox With {
-                        .Text = "The output shall be put in the clipboard",
-                        .AutoSize = True
+                        .Text = "The output shall be shown in a window",
+                        .AutoSize = True,
+                        .Checked = True
                     }
 
             Dim bubblesCheckbox As New System.Windows.Forms.CheckBox With {
@@ -12197,7 +12727,7 @@ Namespace MarkdownToRtf
                 ElseIf TypeOf block Is Markdig.Syntax.ParagraphBlock Then
                     ConvertParagraphBlock(rtfBuilder, CType(block, Markdig.Syntax.ParagraphBlock))
                 ElseIf TypeOf block Is Markdig.Syntax.ListBlock Then
-                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock))
+                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock), 0)
                 End If
             Next
 
@@ -12222,7 +12752,7 @@ Namespace MarkdownToRtf
             rtf.AppendLine("\par")
         End Sub
 
-        Private Sub ConvertListBlock(rtf As System.Text.StringBuilder, listBlock As Markdig.Syntax.ListBlock)
+        Private Sub oldConvertListBlock(rtf As System.Text.StringBuilder, listBlock As Markdig.Syntax.ListBlock)
             Dim isOrdered As Boolean = listBlock.IsOrdered
             For Each item In listBlock
                 If TypeOf item Is Markdig.Syntax.ListItemBlock Then
@@ -12240,6 +12770,59 @@ Namespace MarkdownToRtf
                 End If
             Next
         End Sub
+
+        Private Sub ConvertListBlock(rtf As System.Text.StringBuilder,
+                             listBlock As Markdig.Syntax.ListBlock,
+                             Optional level As Integer = 0)
+
+            Dim isOrdered As Boolean = listBlock.IsOrdered
+            Dim indent As Integer = level * 360            ' 360 twips ≈ 0,25 "
+            Dim itemIndex As Integer = 0
+
+            ' Startwert für nummerierte Listen ermitteln
+            Dim startNumber As Integer = 1
+            If isOrdered Then
+                For Each blk In listBlock
+                    If TypeOf blk Is Markdig.Syntax.ListItemBlock Then
+                        Dim firstLi = CType(blk, Markdig.Syntax.ListItemBlock)
+                        If firstLi.Order <> 0 Then startNumber = firstLi.Order
+                        Exit For
+                    End If
+                Next
+            End If
+
+            For Each item In listBlock
+                If TypeOf item Is Markdig.Syntax.ListItemBlock Then
+                    Dim li = CType(item, Markdig.Syntax.ListItemBlock)
+                    itemIndex += 1
+
+                    Dim prefix As String =
+                If(isOrdered,
+                   $"{startNumber + itemIndex - 1}. ",
+                   "\u8226?\tab ")               ' •\t (Bullet)
+
+                    rtf.Append($"\pard\li{indent}\sa100\fs20 ")
+                    rtf.Append(prefix)
+
+                    ' --- alle Blöcke im Listenelement durchlaufen ---
+                    For Each sb In li
+                        Select Case True
+                            Case TypeOf sb Is Markdig.Syntax.ParagraphBlock
+                                ConvertInline(rtf, CType(sb, Markdig.Syntax.ParagraphBlock).Inline)
+
+                            Case TypeOf sb Is Markdig.Syntax.ListBlock
+                                rtf.AppendLine("\par")    ' Leerzeile vor Unterliste
+                                ConvertListBlock(rtf,
+                                         CType(sb, Markdig.Syntax.ListBlock),
+                                         level + 1)
+                        End Select
+                    Next
+
+                    rtf.AppendLine("\par")               ' Item abschließen
+                End If
+            Next
+        End Sub
+
 
         ''' <summary>
         ''' Rekursiv Inlines verarbeiten, inkl. Hyperlinks.

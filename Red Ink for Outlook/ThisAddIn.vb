@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 6.7.2025
+' 13.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -131,7 +131,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.060725 Gen2 Beta Test"
+    Public Const Version As String = "V.130725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1575,6 +1575,21 @@ Public Class ThisAddIn
     End Function
 
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
+        If Not INIloaded Then
+            If Not StartupInitialized Then
+                Try
+                    DelayedStartupTasks()
+                    RemoveHandler outlookExplorer.Activate, AddressOf Explorer_Activate
+                Catch ex As System.Exception
+                End Try
+                If Not INIloaded Then Return Nothing
+            Else
+                InitializeConfig(False, False)
+                If Not INIloaded Then
+                    Return Nothing
+                End If
+            End If
+        End If
         SharedMethods.ShowSettingsWindow(Settings, SettingsTips, _context)
     End Function
     Private Function ShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean) As (String, Boolean, Boolean, Boolean)
@@ -2337,7 +2352,7 @@ Public Class ThisAddIn
                     If DoMarkup Then
                         LLMResult = SLib.RemoveHTML(LLMResult)
                         If MarkupMethod <> 3 Then
-                            range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf
+                            range.Text = vbCrLf & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf
                         End If
                         range.Collapse(WdCollapseDirection.wdCollapseEnd)
                         selection.SetRange(range.Start, selection.End)
@@ -2351,18 +2366,38 @@ Public Class ThisAddIn
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
                         If DoMarkup And MarkupMethod <> 3 Then
-                            selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>")
+                            'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                         Else
-                            selection.TypeText(LLMResult)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult)
+                            'selection.TypeText(LLMResult)
                         End If
                     Else
-                        selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        ' Replace this line:
+                        ' selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+
+                        ' With the following code to insert two new lines and select the last one, preserving formatting:
+                        Dim selRange As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate
+                        Dim originalFont As Microsoft.Office.Interop.Word.Font = selRange.Font.Duplicate
+
+                        ' Insert two new lines at the end of the selection
+                        selRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        selRange.Text = vbCrLf & vbCrLf
+
+                        ' Select the last new line
+                        Dim newStart As Integer = selRange.End - 2 ' Position at the start of the last vbCrLf
+                        Dim newEnd As Integer = selRange.End
+                        selection.SetRange(newStart, newEnd)
+
+                        ' Reapply the original formatting to the new selection
+                        selection.Font = originalFont
+
                         If DoMarkup And MarkupMethod <> 3 Then
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>" & vbCrLf & vbCrLf)
                         Else
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult)
 
                         End If
                     End If
@@ -2811,7 +2846,7 @@ Public Class ThisAddIn
 
         ' Insert formatted text into the Word editor
         If Not ShowInWindow Then
-            InsertFormattedText(sText & vbCrLf)
+            InsertFormattedTextFast(sText & vbCrLf)
         Else
             Dim htmlContent As String = ConvertMarkupToRTF(TextforWindow & "\r\r" & sText)
             System.Threading.Tasks.Task.Run(Sub()
@@ -2843,7 +2878,101 @@ Public Class ThisAddIn
         Return plainText
     End Function
 
+
+    Private Sub InsertFormattedTextFast(ByVal inputText As String)
+
+        '------------------------------------------------------------
+        ' 1. Convert the pseudo-tags to plain HTML
+        '------------------------------------------------------------
+        Dim markup As String = System.Net.WebUtility.HtmlEncode(inputText)
+
+        'Preserve line breaks (optional – remove if you prefer real paragraphs)
+        markup = markup.Replace(vbCrLf, "<br>")
+
+        'Replace each tag with an inline <span>
+        markup = markup.Replace("[INS_START]",
+                "<span style=""color:#0000FF;text-decoration:underline;"">") _
+                   .Replace("[INS_END]", "</span>") _
+                   .Replace("[DEL_START]",
+                "<span style=""color:#FF0000;text-decoration:line-through;"">") _
+                   .Replace("[DEL_END]", "</span>")
+
+        '------------------------------------------------------------
+        ' 2. Get the current Outlook inspector / Word selection
+        '------------------------------------------------------------
+        Dim inspector As Microsoft.Office.Interop.Outlook.Inspector =
+        TryCast(Globals.ThisAddIn.Application.ActiveInspector,
+                Microsoft.Office.Interop.Outlook.Inspector)
+
+        If inspector Is Nothing Then
+            System.Windows.Forms.MessageBox.Show(
+            "No open mail item found.",
+            "InsertFormattedTextFast",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+            Exit Sub
+        End If
+
+        Dim wordDoc As Microsoft.Office.Interop.Word.Document =
+        TryCast(inspector.WordEditor,
+                Microsoft.Office.Interop.Word.Document)
+
+        If wordDoc Is Nothing Then
+            System.Windows.Forms.MessageBox.Show(
+            "Unable to access the Word editor.",
+            "InsertFormattedTextFast",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+            Exit Sub
+        End If
+
+        Dim app As Microsoft.Office.Interop.Word.Application = wordDoc.Application
+        Dim selRange As Microsoft.Office.Interop.Word.Range = app.Selection.Range
+
+        '------------------------------------------------------------
+        ' 3. Insert the fragment in one shot
+        '------------------------------------------------------------
+        Dim oldScreenUpdating As Boolean = app.ScreenUpdating
+        app.ScreenUpdating = False
+
+        Try
+            'Your existing helper that pastes an HTML fragment
+            InsertTextWithFormat(markup, selRange, True)
+
+        Catch ex As System.Exception
+            'Handle or log as needed – shows a message box here for completeness
+            System.Windows.Forms.MessageBox.Show(
+            ex.Message,
+            "InsertFormattedTextFast",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+
+        Finally
+            'Restore Word UI state
+            app.ScreenUpdating = oldScreenUpdating
+
+            '--------------------------------------------------------
+            ' 4. Clean up COM objects in reverse order of creation
+            '--------------------------------------------------------
+            If selRange IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(selRange)
+                selRange = Nothing
+            End If
+            If wordDoc IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(wordDoc)
+                wordDoc = Nothing
+            End If
+            If inspector IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(inspector)
+                inspector = Nothing
+            End If
+        End Try
+    End Sub
+
+
+
     Private Sub InsertFormattedText(inputText As String)
+
         Dim objInspector As Microsoft.Office.Interop.Outlook.Inspector
         Dim objWordDoc As Microsoft.Office.Interop.Word.Document
         Dim objSelection As Object
