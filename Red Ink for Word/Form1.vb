@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 11.7.2025
+' 14.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -239,16 +239,16 @@ Public Class frmAIChat
 
             ' Optionally include Word document text or selection
             Dim docText As String = If(chkIncludeDocText.Checked, GetActiveDocumentText(), "")
-            Dim selectionText As String = If(chkIncludeselection.Checked, GetCurrentSelectionText(), "")
+            Dim selectionText As String = If(chkIncludeselection.Checked Or chkIncludeDocText.Checked, GetCurrentSelectionText(), "")
 
             ' Construct the full prompt
             Dim fullPrompt As New StringBuilder()
 
             If Not String.IsNullOrEmpty(docText) Then
-                fullPrompt.AppendLine("The user's content is from the document '" & Globals.ThisAddIn.Application.ActiveDocument.Name & "' and is as follows: '" & docText & "'")
+                fullPrompt.AppendLine("The user's document has the name '" & Globals.ThisAddIn.Application.ActiveDocument.Name & "' and has the following content: '" & docText & "'")
             End If
             If Not String.IsNullOrEmpty(selectionText) Then
-                fullPrompt.AppendLine("The user's selection content is from the document '" & Globals.ThisAddIn.Application.ActiveDocument.Name & "' and is as follows: '" & selectionText & "'")
+                fullPrompt.AppendLine("In the user's document '" & Globals.ThisAddIn.Application.ActiveDocument.Name & "' the user has selected the following text: '" & selectionText & "'")
             End If
             fullPrompt.AppendLine("User: " & userPrompt)
             fullPrompt.AppendLine("The conversation so far (not including any previously added text document):\n" & conversationSoFar)

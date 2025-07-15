@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 11.7.2025
+' 14.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -252,18 +252,24 @@ Public Class frmAIChat
             ' Optionally include Excel worksheet cells or selection
             Dim docText As String = ""
             Dim selectiontext As String = ""
+            Dim selectedcells As String = ""
             If chkIncludeDocText.Checked Then
                 Dim ws As Excel.Worksheet = Globals.ThisAddIn.Application.ActiveSheet
                 Dim selectedRange As Excel.Range = ws.UsedRange
                 docText = Globals.ThisAddIn.ConvertRangeToString(selectedRange, True)
             End If
-            If chkIncludeselection.Checked Then
+            If chkIncludeselection.Checked Or chkIncludeDocText.Checked Then
                 Dim appx As Excel.Application = Globals.ThisAddIn.Application
                 Dim selected As Excel.Range = appx.Selection
                 Dim used As Excel.Range = appx.ActiveSheet.UsedRange
                 Dim intersectedRange As Excel.Range = appx.Intersect(selected, used)
                 If Not intersectedRange Is Nothing Then
-                    selectiontext = Globals.ThisAddIn.ConvertRangeToString(intersectedRange, True, True)
+                    If Not chkIncludeDocText.Checked Then
+                        selectiontext = Globals.ThisAddIn.ConvertRangeToString(intersectedRange, True, True)
+                        selectedcells = intersectedRange.Address(False, False)
+                    Else
+                        selectedcells = intersectedRange.Address(False, False)
+                    End If
                 End If
             End If
 
@@ -276,9 +282,14 @@ Public Class frmAIChat
             Dim combinedName As String = workbookName & " - " & worksheetName
 
             If Not String.IsNullOrEmpty(docText) Then
-                fullPrompt.AppendLine("The user's content is from the worksheet '" & combinedName & "' and is as follows: <RANGEOFCELLS>" & docText & "</RANGEOFCELLS>")
+                fullPrompt.AppendLine("The user's current worksheet is '" & combinedName & "' and has the following content: <RANGEOFCELLS>" & docText & "</RANGEOFCELLS>")
+                If String.IsNullOrEmpty(selectiontext) Then
+                    fullPrompt.AppendLine("The user has not selected any cells in this worksheet '" & combinedName & "'.")
+                Else
+                    fullPrompt.AppendLine("In the user's current worksheet '" & combinedName & "' the user has selected the following cells: " & selectedcells)
+                End If
             ElseIf Not String.IsNullOrEmpty(selectiontext) Then
-                fullPrompt.AppendLine("The user's selected content is from the worksheet '" & combinedName & "' and is as follows: <RANGEOFCELLS>" & selectiontext & "</RANGEOFCELLS>")
+                fullPrompt.AppendLine("The user's current worksheet is '" & combinedName & "' and the user has selected the following cells: <RANGEOFCELLS>" & selectiontext & "</RANGEOFCELLS>")
             ElseIf chkIncludeselection.Checked Then
                 fullPrompt.AppendLine("The user has granted you access to a selection of the worksheet '" & combinedName & "' but it is empty.")
             ElseIf chkIncludeDocText.Checked Then
