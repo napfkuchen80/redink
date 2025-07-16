@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 13.7.2025
+' 16.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -5190,8 +5190,10 @@ Namespace SharedLibrary
             End If
 
             ' Show and return
+            messageForm.TopMost = True
             messageForm.Opacity = 1
             messageForm.ShowDialog()
+            messageForm.Activate()
             Return result
         End Function
 
@@ -6358,8 +6360,12 @@ Namespace SharedLibrary
 
                 ' Wenn‘s schon eins gibt, zuerst entfernen
                 If CurrentCustomTaskPane IsNot Nothing Then
-                    CurrentCustomTaskPane.Visible = False
-                    XtaskPanes.Remove(CurrentCustomTaskPane)
+                    Try
+                        CurrentCustomTaskPane.Visible = False
+                        XtaskPanes.Remove(CurrentCustomTaskPane)
+                    Catch comEx As System.Runtime.InteropServices.COMException
+                        ' Pane war bereits entfernt oder ungültig – ignorieren
+                    End Try
                     CurrentCustomTaskPane = Nothing
                 End If
 

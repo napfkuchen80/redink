@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 13.7.2025
+' 16.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -131,7 +131,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.130725 Gen2 Beta Test"
+    Public Const Version As String = "V.160725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -145,6 +145,7 @@ Public Class ThisAddIn
     Private Const MarkupPrefixWord As String = "MarkupWord:"
     Private Const MarkupPrefixAll As String = "Markup[Diff|DiffW|Word]:"
     Private Const ClipboardPrefix As String = "Clipboard:"
+    Private Const ClipboardPrefix2 As String = "Clip:"
     Private Const InsertPrefix As String = "Insert:"
     Private Const NoFormatTrigger As String = "(noformat)"
     Private Const NoFormatTrigger2 As String = "(nf)"
@@ -2463,11 +2464,11 @@ Public Class ThisAddIn
             Dim UseSecondAPI As Boolean = False
 
             Dim MarkupInstruct As String = $"start with '{MarkupPrefixAll}' for markups"
-            Dim InplaceInstruct As String = $"use '{InPlacePrefix}' for replacing the selection"
-            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}' for separate output"
+            Dim InplaceInstruct As String = $"use '{InPlacePrefix}' for replacing your current selection"
+            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}'/'{ClipboardPrefix2}' to have the result in a window"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
-            Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use the secondary model ({INI_Model_2})", "")
+            Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}", "")
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
             Dim ObjectInstruct As String = $"; add '{ObjectTrigger2}' for including a clipboard object"
 
@@ -2555,23 +2556,27 @@ Public Class ThisAddIn
             If OtherPrompt.StartsWith(ClipboardPrefix, StringComparison.OrdinalIgnoreCase) Then
                 OtherPrompt = OtherPrompt.Substring(ClipboardPrefix.Length).Trim()
                 DoClipboard = True
-            ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
-                DoMarkup = True
-            ElseIf OtherPrompt.StartsWith(MarkupPrefixWord, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                OtherPrompt = OtherPrompt.Substring(MarkupPrefixWord.Length).Trim()
-                DoMarkup = True
-                MarkupMethod = 1
-            ElseIf OtherPrompt.StartsWith(MarkupPrefixDiffW, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiffW.Length).Trim()
-                DoMarkup = True
-                MarkupMethod = 3
-            ElseIf OtherPrompt.StartsWith(MarkupPrefixDiff, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiff.Length).Trim()
-                DoMarkup = True
-                MarkupMethod = 2
-            ElseIf OtherPrompt.StartsWith(InPlacePrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                OtherPrompt = OtherPrompt.Substring(InPlacePrefix.Length).Trim()
+            ElseIf OtherPrompt.StartsWith(ClipboardPrefix2, StringComparison.OrdinalIgnoreCase) Then
+                OtherPrompt = OtherPrompt.Substring(ClipboardPrefix2.Length).Trim()
+                DoClipboard = True
+
+                ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
+                    DoMarkup = True
+                ElseIf OtherPrompt.StartsWith(MarkupPrefixWord, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixWord.Length).Trim()
+                    DoMarkup = True
+                    MarkupMethod = 1
+                ElseIf OtherPrompt.StartsWith(MarkupPrefixDiffW, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiffW.Length).Trim()
+                    DoMarkup = True
+                    MarkupMethod = 3
+                ElseIf OtherPrompt.StartsWith(MarkupPrefixDiff, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiff.Length).Trim()
+                    DoMarkup = True
+                    MarkupMethod = 2
+                ElseIf OtherPrompt.StartsWith(InPlacePrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                    OtherPrompt = OtherPrompt.Substring(InPlacePrefix.Length).Trim()
                 DoMarkup = False
                 MarkupMethod = 3
                 DoInplace = True
@@ -2612,6 +2617,16 @@ Public Class ThisAddIn
                 If OtherPrompt.Contains(SecondAPICode) Then
                     UseSecondAPI = True
                     OtherPrompt = OtherPrompt.Replace(SecondAPICode, "").Trim()
+
+                    If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+                        If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                            originalConfigLoaded = False
+                            Return
+                        End If
+
+                    End If
+
                 End If
             End If
 
@@ -2704,6 +2719,11 @@ Public Class ThisAddIn
             If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
             If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
+            If UseSecondAPI And originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
 
         Catch ex As System.Exception
             MessageBox.Show("Error in Freestyle_InsertAfter: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -3469,7 +3489,8 @@ Public Class ThisAddIn
     ''' </summary>
     Public Function RunLlmAsync(
     sysPrompt As String,
-    userPrompt As String
+    userPrompt As String,
+    Optional UseSecondAPI As Boolean = False
 ) As Task(Of String)
 
         ' Stelle sicher, dass unser STA-Thread und Scheduler bereit sind
@@ -3485,7 +3506,15 @@ Public Class ThisAddIn
                 Async Function() As Task(Of String)
                     ' Hier kommt Dein bisheriger LLM-Aufruf hin:
                     ' er darf HTTP machen und beliebige WinForms-Dialogs öffnen.
-                    Return Await LLM(sysPrompt, userPrompt, "", "", 0)
+
+                    Dim LLMResult As String = Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI)
+
+                    If UseSecondAPI And originalConfigLoaded Then
+                        RestoreDefaults(_context, originalConfig)
+                        originalConfigLoaded = False
+                    End If
+
+                    Return LLMResult
                 End Function)
         End Function,
         CancellationToken.None,
@@ -3702,6 +3731,8 @@ Public Class ThisAddIn
 
                 sb.Append("(" & MarkupPrefix & " for markups, " & InsertPrefix & " for direct insert)")
                 If INI_PromptLib Then sb.Append(" or press 'OK' for the prompt library")
+                If INI_SecondAPI Then sb.Append($"; add '{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}")
+
                 If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then sb.Append("; ctrl-p for your last prompt")
                 sb.Append(":")
                 Dim promptMsg As String = sb.ToString()
@@ -3712,6 +3743,7 @@ Public Class ThisAddIn
 
                 Dim doMarkupFlag As Boolean = False
                 Dim doInsertFlag As Boolean = False
+                Dim UseSecondAPI As Boolean = False
 
                 '─── prompt library branch ─────────────────────────────────────
                 If String.IsNullOrEmpty(otherPrompt) AndAlso otherPrompt <> "ESC" AndAlso INI_PromptLib Then
@@ -3743,15 +3775,32 @@ Public Class ThisAddIn
                     doInsertFlag = True          ' old logic: markup implies insert
                 End If
 
+                If INI_SecondAPI Then
+                    If OtherPrompt.Contains(SecondAPICode) Then
+                        UseSecondAPI = True
+                        OtherPrompt = OtherPrompt.Replace(SecondAPICode, "").Trim()
+
+                        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+                            Dim sel = Await SwitchToUi(Function()
+                                                           Return Not ShowModelSelection(_context, INI_AlternateModelPath)
+                                                       End Function)                         ' (prompt, doMarkup, doInsert, canceled)
+                            If sel Then
+                                originalConfigLoaded = False
+                                Return ""
+                            End If
+
+                        End If
+
+                    End If
+                End If
+
                 '─── B  call the LLM on UI thread (async) ──────────────────────
                 Dim llmResult As String
                 If noText Then
-                    llmResult = Await RunLlmAsync(
-            InterpolateAtRuntime(SP_FreestyleNoText), "")
+                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleNoText), "", UseSecondAPI)
                 Else
-                    llmResult = Await RunLlmAsync(
-            InterpolateAtRuntime(SP_FreestyleText),
-            $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
+                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleText), $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>", UseSecondAPI)
                 End If
 
                 llmResult = llmResult.Replace("<TEXTTOPROCESS>", "") _
