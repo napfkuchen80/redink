@@ -5290,20 +5290,21 @@ Public Class ThisAddIn
                                 If Not String.IsNullOrWhiteSpace(raw) Then SelectedText = raw
                             End If
                         Else
-                            If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse MarkupMethod = 3) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
+                            If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse (MarkupMethod = 3 Or MarkupMethod = 2)) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
 
                                 Debug.WriteLine($"4bRange Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
                                 Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
-                                SelectedText = GetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
+                                SelectedText = GetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline), True)
 
                                 Debug.WriteLine($"4cRange Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
                                 Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
                             Else
-                                SelectedText = LegacyGetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
+                                SelectedText = GetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline), False)
+                                'SelectedText = LegacyGetTextWithSpecialElementsInline(rng, If(NoFormatting, False, ParaFormatInline))
                             End If
                         End If
                         trailingCR = (SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbLf) Or SelectedText.EndsWith(vbCr))
@@ -10039,7 +10040,7 @@ Public Class ThisAddIn
 
     Public Function GetTextWithSpecialElementsInline(
         ByVal workingrange As Word.Range,
-        PreserveParagraphFormatInline As Boolean) As String
+        PreserveParagraphFormatInline As Boolean, DoMarkdown As Boolean) As String
 
         Dim splash As New SplashScreen("Extracting text and format ...")
         splash.Show()
@@ -10065,8 +10066,10 @@ Public Class ThisAddIn
 
             ' Annahme: rng ist dein Ursprungsbereich (Word.Range)
 
-            ' 1) Fett + Italic  (Absatz)
-            ReplaceWithinRange(rng,
+            If DoMarkdown Then
+
+                ' 1) Fett + Italic  (Absatz)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Bold = True
                             f.Font.Italic = True
@@ -10080,8 +10083,8 @@ Public Class ThisAddIn
                             rep.Italic = False
                         End Sub)
 
-            ' 2) Fett + Italic  (Inline)
-            ReplaceWithinRange(rng,
+                ' 2) Fett + Italic  (Inline)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Bold = True
                             f.Font.Italic = True
@@ -10095,11 +10098,11 @@ Public Class ThisAddIn
                             rep.Italic = False
                         End Sub)
 
-            Debug.WriteLine($"4-2 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+                Debug.WriteLine($"4-2 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
-            ' 3) Nur Fett  (Absatz)
-            ReplaceWithinRange(rng,
+                ' 3) Nur Fett  (Absatz)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Bold = True
                             f.Text = "(*)^13"
@@ -10110,8 +10113,8 @@ Public Class ThisAddIn
                             rep.Bold = False
                         End Sub)
 
-            ' 4) Nur Fett  (Inline)
-            ReplaceWithinRange(rng,
+                ' 4) Nur Fett  (Inline)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Bold = True
                             f.Text = ""
@@ -10122,12 +10125,12 @@ Public Class ThisAddIn
                             rep.Bold = False
                         End Sub)
 
-            Debug.WriteLine($"4-3 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+                Debug.WriteLine($"4-3 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
 
-            ' 5) Nur Italic  (Absatz)
-            ReplaceWithinRange(rng,
+                ' 5) Nur Italic  (Absatz)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Italic = True
                             f.Text = "(*)^13"
@@ -10138,8 +10141,8 @@ Public Class ThisAddIn
                             rep.Italic = False
                         End Sub)
 
-            ' 6) Nur Italic  (Inline)
-            ReplaceWithinRange(rng,
+                ' 6) Nur Italic  (Inline)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Italic = True
                             f.Text = ""
@@ -10150,12 +10153,12 @@ Public Class ThisAddIn
                             rep.Italic = False
                         End Sub)
 
-            Debug.WriteLine($"4-4 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-            Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
+                Debug.WriteLine($"4-4 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
+                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
 
-            ' 7) Underline  (Absatz)
-            ReplaceWithinRange(rng,
+                ' 7) Underline  (Absatz)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
                             f.Text = "(*)^13"
@@ -10166,8 +10169,8 @@ Public Class ThisAddIn
                             rep.Underline = Word.WdUnderline.wdUnderlineNone
                         End Sub)
 
-            ' 8) Underline  (Inline)
-            ReplaceWithinRange(rng,
+                ' 8) Underline  (Inline)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
                             f.Text = ""
@@ -10178,8 +10181,8 @@ Public Class ThisAddIn
                             rep.Underline = Word.WdUnderline.wdUnderlineNone
                         End Sub)
 
-            ' 9) Strikethrough  (Absatz)
-            ReplaceWithinRange(rng,
+                ' 9) Strikethrough  (Absatz)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.StrikeThrough = True
                             f.Text = "(*)^13"
@@ -10190,8 +10193,8 @@ Public Class ThisAddIn
                             rep.StrikeThrough = False
                         End Sub)
 
-            '10) Strikethrough  (Inline)
-            ReplaceWithinRange(rng,
+                '10) Strikethrough  (Inline)
+                ReplaceWithinRange(rng,
                         Sub(f)
                             f.Font.StrikeThrough = True
                             f.Text = ""
@@ -10202,7 +10205,7 @@ Public Class ThisAddIn
                             rep.StrikeThrough = False
                         End Sub)
 
-
+            End If
 
             ' Auswahl wiederherstellen
             'rng = workingrange.Duplicate
@@ -10214,8 +10217,28 @@ Public Class ThisAddIn
 
             '──────────── Platzhalter vorbereiten ────────────────────────────
 
-            rng.TextRetrievalMode.IncludeHiddenText = True
-            rng.TextRetrievalMode.IncludeFieldCodes = True
+            Dim doc As Word.Document = workingrange.Application.ActiveDocument
+            ' Einzigartigen Namen wählen, damit nichts kollidiert:
+            Dim bmName As String = "__TMP_RNG_" & Guid.NewGuid().ToString("N")
+
+            ' Bookmark anlegen (speichert Start & End)
+            doc.Bookmarks.Add(Name:=bmName, Range:=rng)
+
+            ' Umschalten
+            With rng.TextRetrievalMode
+                .IncludeHiddenText = True
+                .IncludeFieldCodes = True
+            End With
+
+            ' Bookmark auslesen und rng zurücksetzen
+            Dim bmRange As Word.Range = doc.Bookmarks(bmName).Range
+            rng.SetRange(bmRange.Start, bmRange.End)
+
+            ' Aufräumen
+            doc.Bookmarks(bmName).Delete()
+
+            'rng.TextRetrievalMode.IncludeHiddenText = True
+            'rng.TextRetrievalMode.IncludeFieldCodes = True
 
             Dim placeholders As New List(Of PlaceholderInfo)
 
@@ -10336,6 +10359,8 @@ Public Class ThisAddIn
 
 
             placeholders.Sort(PlaceholderComparer)
+
+            Debug.WriteLine("placeholders: " & String.Join(", ", placeholders.Select(Function(ph) $"[Offset={ph.Offset}, Length={ph.Length}, Token={ph.Token}]")))
 
             ' ───── Platzhalter einfügen ────────────────────────────────
             Dim fullText As String = rng.Text
