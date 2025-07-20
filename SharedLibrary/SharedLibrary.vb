@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.7.2025
+' 19.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -3146,7 +3146,7 @@ Namespace SharedLibrary
                         If System.String.IsNullOrWhiteSpace(title) Then title = "No title"
 
                         ' ► Quelle direkt hinter dem Zitat, nur ein Leerzeichen Abstand
-                        sb.Append(" [" & title & "](" & uri & ")")
+                        sb.Append(" ([" & title & "](" & uri & "))")
                     Next
 
                     ' --- Ergebnisliste füllen ---------------------------------------
@@ -5988,6 +5988,11 @@ Namespace SharedLibrary
                 ) As IntPtr
         End Function
 
+        ' Nachricht zum Abfragen der aktuellen Event‑Maske
+        Const EM_GETEVENTMASK As Integer = &H43B
+        Const EM_SETEVENTMASK As Integer = &H44C              ' Nachricht zum Setzen des Event-Mask-Flags
+        Const ENM_LINKS As Integer = &H20                     ' Link‑Events einschalten
+
         Private Const EM_AUTOURLDETECT As Integer = &H45A
 
 
@@ -6243,6 +6248,7 @@ Namespace SharedLibrary
 
             styledForm.MinimumSize = styledForm.Size
 
+
             Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
             bodyTextBox.Rtf = rtf
 
@@ -6250,6 +6256,20 @@ Namespace SharedLibrary
             bodyTextBox.DetectUrls = True
             bodyTextBox.Refresh()
             bodyTextBox.Select(0, 0)
+
+            ' Add the normal LinkClicked handler too
+            AddHandler bodyTextBox.LinkClicked, Sub(sender As Object, e As LinkClickedEventArgs)
+                                                    Try
+                                                        Dim psi As New System.Diagnostics.ProcessStartInfo() With {
+                                                                .FileName = e.LinkText,
+                                                                .UseShellExecute = True
+                                                            }
+                                                        System.Diagnostics.Process.Start(psi)
+                                                    Catch ex As Exception
+                                                        Debug.WriteLine("Cannot open link: " & e.LinkText)
+                                                    End Try
+                                                End Sub
+
             Dim OriginalTextBox As String = bodyTextBox.Text
 
             ' --- Button-Handler (unverändert) ---
@@ -6306,6 +6326,12 @@ Namespace SharedLibrary
             Return returnValue
 
         End Function
+
+
+
+        ' Add this constant for mouse message
+        Private Const WM_LBUTTONDOWN As Integer = &H201
+
 
         Public Shared Property TaskPanes As CustomTaskPaneCollection
 
