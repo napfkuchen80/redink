@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 20.7.2025
+' 22.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -131,7 +131,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.200725 Gen2 Beta Test"
+    Public Const Version As String = "V.220725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1625,6 +1625,9 @@ Public Class ThisAddIn
 
         Try
 
+            InitializeConfig(False, False)
+
+            If GPTSetupError OrElse INIValuesMissing() Or Not INIloaded Then Return
 
             ' Use fully qualified names to avoid ambiguity
             Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
@@ -1652,9 +1655,7 @@ Public Class ThisAddIn
                 Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
                 Dim wordEditor As Microsoft.Office.Interop.Word.Document = DirectCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
 
-                InitializeConfig(False, False)
 
-                If GPTSetupError OrElse INIValuesMissing() Or Not INIloaded Then Return
 
                 Select Case RI_Command
 

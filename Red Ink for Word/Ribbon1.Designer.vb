@@ -660,9 +660,9 @@ Partial Class Ribbon1
         Else
             Me.RI_FreestyleRepeat.Enabled = True
             If My.Settings.LastFreestyleWasAM Then
-                Me.RI_FreestyleRepeat.ScreenTip = My.Settings.LastFreestyleModelConfig.Model & ": " & LastFreestylePrompt
+                Me.RI_FreestyleRepeat.ScreenTip = Left(My.Settings.LastFreestyleModelConfig.Model & ": " & LastFreestylePrompt, 1023)
             Else
-                Me.RI_FreestyleRepeat.ScreenTip = LastFreestylePrompt
+                Me.RI_FreestyleRepeat.ScreenTip = Left(LastFreestylePrompt, 1023)
             End If
         End If
 
