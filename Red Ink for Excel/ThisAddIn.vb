@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.7.2025
+' 27.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -203,7 +203,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.220725 Gen2 Beta Test"
+    Public Const Version As String = "V.270725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -218,6 +218,7 @@ Public Class ThisAddIn
     Private Const PanePrefix As String = "Pane:"
     Private Const BubblesPrefix As String = "Bubbles:"
     Private Const ExtTrigger As String = "{doc}"
+    Private Const ExtWSTrigger As String = "(addws)"
     Private Const ObjectTrigger As String = "(file)"
     Private Const ObjectTrigger2 As String = "(clip)"
     Private Const ColorTrigger As String = "(color)"
@@ -2174,10 +2175,11 @@ Public Class ThisAddIn
         Dim TextInstruct As String = $"use '{TextPrefix}' or '{TextPrefix2}' if the instruction should apply cell-by-cell, but only to text cells"
         Dim BubblesInstruct As String = $"use '{BubblesPrefix}' for inserting comments only"
         Dim PaneInstruct As String = $"use '{PanePrefix}' for using the pane"
-        Dim ExtInstruct As String = $"; insert '{ExtTrigger}' for text of a file (txt, docx, pdf)"
+        Dim ExtInstruct As String = $"; insert '{ExtTrigger}' for text of a file (txt, docx, pdf) or '{ExtWSTrigger}' to add more worksheet(s)"
         Dim AddonInstruct As String = $"; add'{ColorTrigger}' to check for colorcodes"
         Dim ObjectInstruct As String = $"; add '{ObjectTrigger}'/'{ObjectTrigger2}' for adding a file object"
         Dim FileObject As String = ""
+        Dim InsertWS As String = ""
 
         If UseSecondAPI Then
             If Not String.IsNullOrWhiteSpace(INI_APICall_Object_2) Then
@@ -2280,6 +2282,26 @@ Public Class ThisAddIn
             ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
         End If
 
+        If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtWSTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            If Not DoRange Then
+                ShowCustomMessageBox($"{ExtWSTrigger} cannot be combined with cell by cell processing - exiting.")
+                Return False
+            End If
+            InsertWS = GatherSelectedWorksheets()
+            Debug.WriteLine($"GatherSelectedWorksheets returned: {Left(InsertWS, 3000)}")
+            If String.IsNullOrWhiteSpace(InsertWS) Then
+                ShowCustomMessageBox("No content was found or an error occurred in gathering the additional worksheet(s) - exiting.")
+                Return False
+            ElseIf InsertWS.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
+                ShowCustomMessageBox($"An error occured gathering the additional worksheet(s) ({InsertWS.Substring(6).Trim()}) - exiting.")
+                Return False
+            ElseIf InsertWS.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
+                ShowCustomMessageBox($"There are no other worksheets to add - exiting.")
+                Return False
+            End If
+            OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtWSTrigger), "", RegexOptions.IgnoreCase)
+        End If
+
         If DoFileObject Then
             If DoFileObjectClip Then
                 FileObject = "clipboard"
@@ -2298,16 +2320,16 @@ Public Class ThisAddIn
 
         If OtherPrompt.StartsWith(PurePrefix, StringComparison.OrdinalIgnoreCase) Then
             OtherPrompt = OtherPrompt.Substring(PurePrefix.Length).Trim()
-            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
+            Dim result As Boolean = Await ProcessSelectedRange(OtherPrompt, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS)
         Else
             If Not NoSelectedCells Then
                 If DoRange Then
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS)
                 Else
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor, DoPane, FileObject)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor, DoPane, FileObject, InsertWS)
                 End If
             Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject)
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS)
             End If
         End If
 
@@ -2331,7 +2353,7 @@ Public Class ThisAddIn
     ' - Optional: DoPane: A boolean value indicating whether the output should go into the pane
     ' - Optional: FileObject: The name of the file (or clipboard) where to get an object to include in the LLM call
 
-    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False, Optional DoPane As Boolean = False, Optional FileObject As String = "") As Task(Of Boolean)
+    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False, Optional DoPane As Boolean = False, Optional FileObject As String = "", Optional InsertWS As String = "") As Task(Of Boolean)
 
         Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
 
@@ -2551,9 +2573,21 @@ Public Class ThisAddIn
                     SelectedText = ConvertRangeToString(selectedRange, DoFormulas, DoColor)
                 End If
 
-                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                Dim RangeToInsert As String = ""
 
-                LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
+                If InsertWS = "" Then
+                    RangeToInsert = "<RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>"
+                Else
+                    RangeToInsert = "Currently active Worksheet: <RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>  " & InsertWS
+                End If
+
+                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, RangeToInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+
+                If InsertWS = "" Then
+                    LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
+                Else
+                    LLMResult = Regex.Replace(LLMResult, "</?RANGEOFCELLS\d*>", "", RegexOptions.IgnoreCase)
+                End If
 
                 OtherPrompt = ""
 
@@ -2643,33 +2677,125 @@ Public Class ThisAddIn
     End Sub
 
 
+    Public Function GatherSelectedWorksheets() As String
+        Try
+            Dim app As Microsoft.Office.Interop.Excel.Application =
+            Globals.ThisAddIn.Application
+            Dim activeWs As Microsoft.Office.Interop.Excel.Worksheet =
+            TryCast(app.ActiveSheet, Microsoft.Office.Interop.Excel.Worksheet)
+
+            ' build list of all worksheets except the active one
+            Dim sheetList As New List(Of Microsoft.Office.Interop.Excel.Worksheet)()
+            Dim selItems As New List(Of SelectionItem)()
+            For Each wb As Microsoft.Office.Interop.Excel.Workbook In app.Workbooks
+                For Each ws As Microsoft.Office.Interop.Excel.Worksheet In wb.Worksheets
+                    If Not ws Is activeWs Then
+                        sheetList.Add(ws)
+                        selItems.Add(New SelectionItem(
+                        $"{ws.Name} ({wb.FullName})",
+                        sheetList.Count))
+                    End If
+                Next
+            Next
+
+            ' if no other sheets, bail
+            If sheetList.Count = 0 Then Return "NONE"
+
+            ' add “All worksheets, except current”
+            Dim allExceptIndex As Integer = selItems.Count + 1
+            selItems.Add(New SelectionItem("Add all other worksheets", allExceptIndex))
+
+            ' prompt user
+            Dim itemsArray = selItems.ToArray()
+            Dim picked As Integer = SelectValue(itemsArray, allExceptIndex, "Choose worksheet to add …")
+            If picked < 1 Then Return String.Empty
+
+            ' determine targets
+            Dim targets As New List(Of Microsoft.Office.Interop.Excel.Worksheet)()
+            If picked = allExceptIndex Then
+                targets.AddRange(sheetList)
+            Else
+                targets.Add(sheetList(picked - 1))
+            End If
+
+            ' build the result string
+            Dim InsertedWorksheet As String = String.Empty
+            Dim tagIndex As Integer = 2
+            For Each ws In targets
+                InsertedWorksheet &= $"<RANGEOFCELLS{tagIndex}>" & vbCrLf
+
+                ' now just call your converter (which itself inserts the sheet/file header)
+                InsertedWorksheet &= ConvertRangeToString(
+                CellRange:=CType(ws.UsedRange, Microsoft.Office.Interop.Excel.Range),
+                IncludeFormulas:=True,
+                DoColor:=False,
+                TargetWorksheet:=ws
+            ) & vbCrLf
+
+                InsertedWorksheet &= $"</RANGEOFCELLS{tagIndex}>" & vbCrLf
+                tagIndex += 1
+            Next
+
+            If String.IsNullOrEmpty(InsertedWorksheet) Then
+                ShowCustomMessageBox("No content could be retrieved from the selected worksheet(s).")
+                Return String.Empty
+            End If
+
+            Return InsertedWorksheet
+
+        Catch ex As System.Exception
+            Return "ERROR " & ex.Message
+        End Try
+    End Function
+
+
 
     ' Helpers for the Range Functionality
 
     Public Function ConvertRangeToString(
     ByVal CellRange As Excel.Range,
     ByVal IncludeFormulas As Boolean,
-    Optional ByVal DoColor As Boolean = False
+    Optional ByVal DoColor As Boolean = False,
+     Optional ByVal TargetWorksheet As Microsoft.Office.Interop.Excel.Worksheet = Nothing
 ) As String
+
 
         Dim splash As New SplashScreen("Gathering the content from your worksheet...")
         splash.Show()
         splash.Refresh()
 
-        If CellRange Is Nothing Then
+        If CellRange Is Nothing AndAlso TargetWorksheet Is Nothing Then
             splash.Close()
             Return String.Empty
         End If
 
         ' Excel-UI abschalten
         Dim app As Excel.Application = Globals.ThisAddIn.Application
+        Dim origWb As Microsoft.Office.Interop.Excel.Workbook = app.ActiveWorkbook
+        Dim origWs As Microsoft.Office.Interop.Excel.Worksheet = TryCast(app.ActiveSheet, Microsoft.Office.Interop.Excel.Worksheet)
+
+        ' if caller specified a sheet, make sure it’s active
+        If TargetWorksheet IsNot Nothing Then
+            TargetWorksheet.Parent.Activate()
+            TargetWorksheet.Activate()
+        End If
+
+        If CellRange Is Nothing AndAlso TargetWorksheet IsNot Nothing Then
+            CellRange = TargetWorksheet.UsedRange
+        End If
+
+        Dim sb As New System.Text.StringBuilder()
+        If TargetWorksheet IsNot Nothing Then
+            sb.AppendLine($"From Worksheet: {TargetWorksheet.Name}, File: {TargetWorksheet.Parent.FullName}")
+        Else
+            sb.AppendLine($"From Worksheet {CellRange.Worksheet.Name}, File {CellRange.Worksheet.Parent.FullName}")
+        End If
+
         With app
             .ScreenUpdating = False
             .EnableEvents = False
             .Calculation = Excel.XlCalculation.xlCalculationManual
         End With
-
-        Dim sb As New System.Text.StringBuilder()
 
         ' Standardfarben des "Normal"-Styles ermitteln
         Dim normalStyle As Excel.Style = app.ActiveWorkbook.Styles("Normal")
@@ -2746,8 +2872,8 @@ Public Class ThisAddIn
                     If shouldProcess Then
 
                         Try
-                            sb.AppendLine($"Cell {addr} has:")
-                            sb.AppendLine($"- Value: {raw}")
+                            sb.AppendLine($"Cell {addr} has")
+                            sb.AppendLine($"- Value {raw}")
 
                             ' Formeln optional auslesen
                             If IncludeFormulas AndAlso cell.HasFormula Then
@@ -2758,12 +2884,12 @@ Public Class ThisAddIn
                                 When comEx.ErrorCode = &H800A03EC
                                     f = cell.Formula.ToString()
                                 End Try
-                                sb.AppendLine($"- Formula: {If(String.IsNullOrEmpty(f), "none", f)}")
+                                sb.AppendLine($"- Formula {If(String.IsNullOrEmpty(f), "none", f)}")
                             End If
 
                             ' Kommentare (klassisch)
                             If cell.Comment IsNot Nothing Then
-                                sb.AppendLine($"- Comment: {cell.Comment.Text()}")
+                                sb.AppendLine($"- Comment {cell.Comment.Text()}")
                             End If
 
                             ' ThreadedComments per the Excel object model
@@ -2776,11 +2902,11 @@ Public Class ThisAddIn
                                     Dim txt = topObj.Text
                                     ' .Author.Name
                                     Dim authName = topObj.Author.Name
-                                    sb.AppendLine($"- Threaded comment: {txt} (by {authName})")
+                                    sb.AppendLine($"- Threaded comment {txt} (by {authName})")
 
                                     ' now each reply
                                     For Each rep In topObj.Replies  ' an IEnumerable
-                                        sb.AppendLine($"- Reply comment: {rep.Text} (by {rep.Author.Name})")
+                                        sb.AppendLine($"- Reply comment {rep.Text} (by {rep.Author.Name})")
                                     Next
                                 End If
                             Catch ex As System.Runtime.InteropServices.COMException When ex.ErrorCode = &H800A03EC
@@ -2798,7 +2924,7 @@ Public Class ThisAddIn
                                 End Try
 
                                 If hasList Then
-                                    Dim formula1 As String = cell.Validation.Formula1  ' z.B. "=MyList" oder "=Sheet2!$A$1:$A$5"
+                                    Dim formula1 As String = cell.Validation.Formula1  ' z.B. "=MyList" oder "=Sheet2!$A$1$A$5"
                                     If Not String.IsNullOrWhiteSpace(formula1) Then
                                         Dim options As New List(Of String)()
                                         Dim wb As Microsoft.Office.Interop.Excel.Workbook = cell.Worksheet.Parent
@@ -2821,7 +2947,7 @@ Public Class ThisAddIn
                                             Try
                                                 refRange = cell.Worksheet.Range(addrx)
                                             Catch ex1 As COMException
-                                                ' vielleicht sheet-qualifiziert: "Sheet2!$B$1:$B$10"
+                                                ' vielleicht sheet-qualifiziert: "Sheet2!$B$1$B$10"
                                                 Dim parts = addrx.Split("!"c)
                                                 Dim sheetName = parts(0)
                                                 Dim rangeAddr = parts(1)
@@ -2862,22 +2988,22 @@ Public Class ThisAddIn
                                             End If
                                         End If
 
-                                        sb.AppendLine($"- Dropdown options (separated by §): {String.Join("§", options)}")
+                                        sb.AppendLine($"- Dropdown options (separated by §) {String.Join("§", options)}")
                                     End If
                                 End If
 
                             Catch ex As Exception
-                                sb.AppendLine($"- Error reading dropdown: {ex.Message}")
+                                sb.AppendLine($"- Error reading dropdown {ex.Message}")
                             End Try
 
 
                             ' 2) Farben (nur bei Abweichung)
                             If DoColor Then
                                 If cell.Font.Color <> defaultFontColor Then
-                                    sb.AppendLine($"- FontColor: {cell.Font.Color}")
+                                    sb.AppendLine($"- FontColor {cell.Font.Color}")
                                 End If
                                 If cell.Interior.Color <> defaultInteriorColor Then
-                                    sb.AppendLine($"- BackgroundColor: {cell.Interior.Color}")
+                                    sb.AppendLine($"- BackgroundColor {cell.Interior.Color}")
                                 End If
                             End If
 
@@ -2885,9 +3011,9 @@ Public Class ThisAddIn
 
                         Catch ex As System.Runtime.InteropServices.COMException _
                         When ex.ErrorCode = &H800A03EC
-                            sb.AppendLine($"- COM-Error in Cell {addr}: {ex.Message}")
+                            sb.AppendLine($"- COM-Error in Cell {addr} {ex.Message}")
                         Catch ex As System.Exception
-                            sb.AppendLine($"- Error in Cell {addr}: {ex.Message}")
+                            sb.AppendLine($"- Error in Cell {addr} {ex.Message}")
                         Finally
                             Marshal.ReleaseComObject(cell)
                         End Try
@@ -2903,6 +3029,10 @@ Public Class ThisAddIn
                 .EnableEvents = True
                 .Calculation = Excel.XlCalculation.xlCalculationAutomatic
             End With
+
+            If origWb IsNot Nothing Then origWb.Activate()
+            If origWs IsNot Nothing Then origWs.Activate()
+
             splash.Close()
         End Try
 
@@ -2929,8 +3059,8 @@ Public Class ThisAddIn
             If Not File.Exists(filePath) Then
                 ShowCustomMessageBox($"The file '{filePath}' was not found.")
                 Return ""
-            End If
-            Return filePath
+        End If
+        Return filePath
 
         Catch ex As System.Exception
             ShowCustomMessageBox($"An error occurred reading the file '{filePath}': {ex.Message}")

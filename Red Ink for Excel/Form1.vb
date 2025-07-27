@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 14.7.2025
+' 23.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -282,14 +282,14 @@ Public Class frmAIChat
             Dim combinedName As String = workbookName & " - " & worksheetName
 
             If Not String.IsNullOrEmpty(docText) Then
-                fullPrompt.AppendLine("The user's current worksheet is '" & combinedName & "' and has the following content: <RANGEOFCELLS>" & docText & "</RANGEOFCELLS>")
+                fullPrompt.AppendLine("You have access to the user's worksheet. The user's current worksheet is '" & combinedName & "' and has the following content: <RANGEOFCELLS>" & docText & "</RANGEOFCELLS>")
                 If String.IsNullOrEmpty(selectiontext) Then
                     fullPrompt.AppendLine("The user has not selected any cells in this worksheet '" & combinedName & "'.")
                 Else
                     fullPrompt.AppendLine("In the user's current worksheet '" & combinedName & "' the user has selected the following cells: " & selectedcells)
                 End If
             ElseIf Not String.IsNullOrEmpty(selectiontext) Then
-                fullPrompt.AppendLine("The user's current worksheet is '" & combinedName & "' and the user has selected the following cells: <RANGEOFCELLS>" & selectiontext & "</RANGEOFCELLS>")
+                fullPrompt.AppendLine("You have access to the user's worksheet. The user's current worksheet is '" & combinedName & "' and the user has selected the following cells: <RANGEOFCELLS>" & selectiontext & "</RANGEOFCELLS>")
             ElseIf chkIncludeselection.Checked Then
                 fullPrompt.AppendLine("The user has granted you access to a selection of the worksheet '" & combinedName & "' but it is empty.")
             ElseIf chkIncludeDocText.Checked Then

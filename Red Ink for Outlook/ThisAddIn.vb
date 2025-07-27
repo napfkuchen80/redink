@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.7.2025
+' 27.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -25,6 +25,7 @@
 Option Explicit On
 
 Imports System.Diagnostics
+Imports System.Drawing
 Imports System.IO
 Imports System.Net
 Imports System.Runtime.InteropServices
@@ -40,11 +41,12 @@ Imports Microsoft.Office.Interop
 Imports Microsoft.Office.Interop.Outlook
 Imports Microsoft.Office.Interop.Word
 Imports Microsoft.VisualBasic.FileIO
+Imports Nito.AsyncEx
+Imports SharedLibrary.MarkdownToRtf
 Imports SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedContext
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
-Imports Nito.AsyncEx
 
 
 Module Module1
@@ -101,6 +103,7 @@ Public Class ThisAddIn
             mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
             StartupInitialized = True
         End If
+
     End Sub
 
     Private Sub Explorer_Activate()
@@ -131,7 +134,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.220725 Gen2 Beta Test"
+    Public Const Version As String = "V.270725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -154,6 +157,7 @@ Public Class ThisAddIn
     Private Const KPFTrigger As String = "(keepparaformat)"
     Private Const KPFTrigger2 As String = "(kpf)"
     Private Const InPlacePrefix As String = "Replace:"
+    Private Const NewDocPrefix As String = "Newdoc:"
     Private Const ObjectTrigger2 As String = "(clip)"
 
     Private Const ESC_KEY As Integer = &H1B
@@ -810,6 +814,16 @@ Public Class ThisAddIn
             _context.SP_Shorten = value
         End Set
     End Property
+
+    Public Shared Property SP_InsertClipboard As String
+        Get
+            Return _context.SP_InsertClipboard
+        End Get
+        Set(value As String)
+            _context.SP_InsertClipboard = value
+        End Set
+    End Property
+
 
     Public Shared Property SP_Summarize As String
         Get
@@ -1682,7 +1696,7 @@ Public Class ThisAddIn
                         SummaryLength = 0
 
                         Do
-                            UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(SummaryPercent * Textlength / 100)))
+                            UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)))
 
                             If String.IsNullOrEmpty(UserInput) Then
                                 Exit Sub
@@ -1738,6 +1752,8 @@ Public Class ThisAddIn
                         FreeStyle_InsertBefore(SP_MailReply, True)
                     Case "Freestyle"
                         FreeStyle_InsertAfter()
+                    Case "InsertClipboard"
+                        InsertClipboard()
                     Case Else
                         System.Windows.Forms.MessageBox.Show("Error in MainMenu: Invalid internal command.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Select
@@ -1774,6 +1790,9 @@ Public Class ThisAddIn
 
     Public Sub OpenInspectorAndReapplySelection(Command As String)
         Try
+
+            If Command = "InsertClipboard" Then InsertClipboard() : Return
+
             ' Grab Outlook instances
             Dim oApp As Outlook.Application = Globals.ThisAddIn.Application
             Dim oExplorer As Outlook.Explorer = oApp.ActiveExplorer()
@@ -1796,111 +1815,111 @@ Public Class ThisAddIn
             If inlineResponse Is Nothing OrElse Sumup OrElse Translate Then
 
 
-                    ' Get the current selection in the explorer
-                    Dim selection As Outlook.Selection = oExplorer.Selection
+                ' Get the current selection in the explorer
+                Dim selection As Outlook.Selection = oExplorer.Selection
 
-                    ' Check if any item is selected
-                    If selection.Count = 0 Then
-                        ShowCustomMessageBox("No email is selected.")
+                ' Check if any item is selected
+                If selection.Count = 0 Then
+                    ShowCustomMessageBox("No email is selected.")
+                    Return
+                End If
+
+                If selection.Count > 1 Then
+                    If Not Sumup Then
+                        ShowCustomMessageBox("Multiple emails selected. Please select only one email when not using Sumup mode.")
+                        Return
+                    Else
+                        ' Combine texts from all selected emails.
+                        Dim mailItems As New List(Of Microsoft.Office.Interop.Outlook.MailItem)
+                        For Each item As Object In selection
+                            If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
+                                mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
+                            End If
+                        Next
+
+                        If mailItems.Count = 0 Then
+                            ShowCustomMessageBox("None of the selected items are emails.")
+                            Return
+                        End If
+
+                        ' Order the emails: latest email first (descending order by ReceivedTime)
+                        mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
+
+                        Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+
+                        Dim selectedText As String = String.Empty
+                        Dim count As Integer = 1
+                        For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
+
+                            Dim lastVerb As Integer = 0
+
+                            Try
+                                lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
+                            Catch comEx As COMException
+                                ' Property nicht gesetzt → noch nicht beantwortet
+                                lastVerb = 0
+                            Catch ex As System.Exception
+                                ' Sicherstellen, dass System.Exception voll qualifiziert ist
+                                lastVerb = 0
+                            End Try
+
+
+                            If lastVerb <> 102 AndAlso lastVerb <> 103 Then
+                                Dim tag As String = count.ToString("D4") ' Format count with four digits
+                                Dim latestBody As String = GetLatestMailBody(mail.Body)
+                                selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
+                                count += 1
+                            End If
+                        Next
+
+                        ShowSumup2(selectedText)
                         Return
                     End If
-
-                    If selection.Count > 1 Then
-                        If Not Sumup Then
-                            ShowCustomMessageBox("Multiple emails selected. Please select only one email when not using Sumup mode.")
+                Else
+                    ' Only one email is selected.
+                    If Sumup Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
+                            ShowSumup(selectedText)
                             Return
                         Else
-                            ' Combine texts from all selected emails.
-                            Dim mailItems As New List(Of Microsoft.Office.Interop.Outlook.MailItem)
-                            For Each item As Object In selection
-                                If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
-                                    mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
-                                End If
-                            Next
+                            ShowCustomMessageBox("The selected item is not an email.")
+                            Return
+                        End If
+                    ElseIf Translate Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
 
-                            If mailItems.Count = 0 Then
-                                ShowCustomMessageBox("None of the selected items are emails.")
-                                Return
+                            If Command = "Translate" Then
+                                TranslateLanguage = ""
+                                TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
+                                If String.IsNullOrEmpty(TranslateLanguage) Then Return
+                            Else
+                                TranslateLanguage = INI_Language1
                             End If
 
-                            ' Order the emails: latest email first (descending order by ReceivedTime)
-                            mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
 
-                            Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+                            ShowTranslate(selectedText)
+                            Return
 
-                            Dim selectedText As String = String.Empty
-                            Dim count As Integer = 1
-                            For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
-
-                                Dim lastVerb As Integer = 0
-
-                                Try
-                                    lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
-                                Catch comEx As COMException
-                                    ' Property nicht gesetzt → noch nicht beantwortet
-                                    lastVerb = 0
-                                Catch ex As System.Exception
-                                    ' Sicherstellen, dass System.Exception voll qualifiziert ist
-                                    lastVerb = 0
-                                End Try
-
-
-                                If lastVerb <> 102 AndAlso lastVerb <> 103 Then
-                                    Dim tag As String = count.ToString("D4") ' Format count with four digits
-                                    Dim latestBody As String = GetLatestMailBody(mail.Body)
-                                    selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
-                                    count += 1
-                                End If
-                            Next
-
-                            ShowSumup2(selectedText)
+                        Else
+                            ShowCustomMessageBox("The selected item is not an email.")
                             Return
                         End If
                     Else
-                        ' Only one email is selected.
-                        If Sumup Then
-                            Dim selectedItem As Object = selection(1)
-                            If TypeOf selectedItem Is Outlook.MailItem Then
-                                Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
-                                Dim selectedText As String = mail.Body
-                                ShowSumup(selectedText)
-                                Return
-                            Else
-                                ShowCustomMessageBox("The selected item is not an email.")
-                                Return
-                            End If
-                        ElseIf Translate Then
-                            Dim selectedItem As Object = selection(1)
-                            If TypeOf selectedItem Is Outlook.MailItem Then
-
-                                If Command = "Translate" Then
-                                    TranslateLanguage = ""
-                                    TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
-                                    If String.IsNullOrEmpty(TranslateLanguage) Then Return
-                                Else
-                                    TranslateLanguage = INI_Language1
-                                End If
-
-                                Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
-                                Dim selectedText As String = mail.Body
-
-                                ShowTranslate(selectedText)
-                                Return
-
-                            Else
-                                ShowCustomMessageBox("The selected item is not an email.")
-                                Return
-                            End If
-                        Else
-                            ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
-                            Return
-                        End If
+                        ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
+                        Return
                     End If
-
                 End If
 
-                ' Ensure it is a MailItem
-                Dim mailItem As MailItem = TryCast(inlineResponse, MailItem)
+            End If
+
+            ' Ensure it is a MailItem
+            Dim mailItem As MailItem = TryCast(inlineResponse, MailItem)
             If mailItem Is Nothing Then
                 ShowCustomMessageBox("You can only use this function when you are editing an e-mail (currently, there is no valid e-mail item).")
                 Return
@@ -2111,7 +2130,20 @@ Public Class ThisAddIn
 
         Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
 
-        ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up")
+        Dim fullHtml As String =
+              "<!DOCTYPE html>" &
+              "<html><head>" &
+              "  <meta charset=""utf-8"" />" &
+              "  <style>" &
+              "    ul { margin-left: 0.5em; padding-left: 0; list-style-position: outside; }" &
+              "    ul ul { margin-left: 1em; padding-left: 0; list-style-type: circle; }" &
+              "    ul ul ul { margin-left: 1.5em; padding-left: 0; list-style-type: square; }" &
+              "  </style>" &
+              "</head><body>" &
+                htmlText &
+              "</body></html>"
+
+        ShowHTMLCustomMessageBox(fullHtml, $"{AN} Sum-up")
 
     End Sub
 
@@ -2187,7 +2219,81 @@ Public Class ThisAddIn
 
         Dim htmlText As String = Markdown.ToHtml(LLMResult, markdownPipeline)
 
-        ShowHTMLCustomMessageBox(htmlText, $"{AN} Sum-up (of unanswered mails)")
+        Dim fullHtml As String =
+              "<!DOCTYPE html>" &
+              "<html><head>" &
+              "  <meta charset=""utf-8"" />" &
+              "  <style>" &
+              "    ul { margin-left: 0.5em; padding-left: 0; list-style-position: outside; }" &
+              "    ul ul { margin-left: 1em; padding-left: 0; list-style-type: circle; }" &
+              "    ul ul ul { margin-left: 1.5em; padding-left: 0; list-style-type: square; }" &
+              "  </style>" &
+              "</head><body>" &
+                htmlText &
+              "</body></html>"
+
+        ShowHTMLCustomMessageBox(fullHtml, $"{AN} Sum-up (of unanswered mails)")
+
+    End Sub
+
+
+    Private Async Sub InsertClipboard()
+
+        ' 1) Configure check
+        If String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+            SLib.ShowCustomMessageBox($"Your model ({INI_Model}) is not configured to process clipboard data (i.e. binary objects).")
+            Return
+        End If
+
+        ' 2) Call LLM
+        Dim result As String
+
+        result = Await LLM(
+            InterpolateAtRuntime(SP_InsertClipboard),
+            "", "", "", 0, False, False, "", "clipboard"
+        )
+
+        If String.IsNullOrEmpty(result) Then Return
+
+        ' 3) Check for open MailItem
+        Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
+        Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+
+        If inspector Is Nothing _
+       OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+
+            ' No open email: copy to clipboard (cut to 1024 chars + ellipsis)
+            Dim displayText As String = If(result.Length > 1024,
+                                      result.Substring(0, 1024) & "…",
+                                      result)
+            Await SwitchToUi(Sub()
+                                 Dim rtfText As String = MarkdownToRtfConverter.Convert(result)
+                                 Dim dataObj As New DataObject()
+                                 dataObj.SetData(DataFormats.Rtf, rtfText)
+                                 dataObj.SetData(DataFormats.Text, result)
+                                 Clipboard.SetDataObject(dataObj, True)
+                                 SLib.ShowCustomMessageBox($"The content has been copied to the clipboard:{Environment.NewLine}{Environment.NewLine}{displayText}")
+                             End Sub)
+
+            Return
+        End If
+
+        ' 4) Insert into the current email at the cursor
+        Dim wordEditor As Microsoft.Office.Interop.Word.Document =
+        CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+        Dim selection As Microsoft.Office.Interop.Word.Selection =
+        wordEditor.Application.Selection
+
+        ' Collapse any selection
+        If selection.Start <> selection.End Then
+            selection.Collapse(
+            Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd
+        )
+        End If
+
+        ' Add spacing and insert with your markdown helper
+        selection.TypeParagraph()
+        InsertTextWithMarkdown(selection, result)
 
     End Sub
 
@@ -2485,12 +2591,13 @@ Public Class ThisAddIn
             Dim DoKeepParaFormat As Boolean = INI_KeepParaFormatInline ' currently not used
             Dim DoFileObject As Boolean = False
             Dim FileObject As String = ""
+            Dim DoNewDoc As Boolean = False
 
             Dim UseSecondAPI As Boolean = False
 
             Dim MarkupInstruct As String = $"start with '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"use '{InPlacePrefix}' for replacing your current selection"
-            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}'/'{ClipboardPrefix2}' to have the result in a window"
+            Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}'/'{ClipboardPrefix2}' or '{NewDocPrefix}' to have the result in a window or new Word document"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
             Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}", "")
@@ -2584,6 +2691,10 @@ Public Class ThisAddIn
             ElseIf OtherPrompt.StartsWith(ClipboardPrefix2, StringComparison.OrdinalIgnoreCase) Then
                 OtherPrompt = OtherPrompt.Substring(ClipboardPrefix2.Length).Trim()
                 DoClipboard = True
+            ElseIf OtherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) Then
+                OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
+                    DoClipboard = True
+                    DoNewDoc = True
 
                 ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
                     OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
@@ -2687,8 +2798,30 @@ Public Class ThisAddIn
 
             OtherPrompt = ""
 
-            If DoClipboard Then
-                Dim FinalText As String = SLib.ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, True)
+            If DoNewDoc Then
+                Try
+                    ' Create a new instance of Word
+                    Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+                    wordApp.Visible = True
+
+                    ' Add a new document
+                    Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
+
+                    ' Insert your text (LLMResult) at the beginning
+                    Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
+                    InsertTextWithMarkdown(docSelection, LLMResult)
+
+                Catch Ex As System.Exception
+                    Dim FinalText As String = SLib.ShowCustomWindow("The Word document could not be created or the LLM output not inserted. Here is the result of the LLM (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, False)
+
+                    If FinalText <> "" Then
+                        SLib.PutInClipboard(FinalText)
+                    End If
+
+                End Try
+
+            ElseIf DoClipboard Then
+                Dim FinalText As String = SLib.ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, False)
 
                 If FinalText <> "" Then
                     SLib.PutInClipboard(FinalText)
@@ -2910,7 +3043,7 @@ Public Class ThisAddIn
 
         ' Decode escaped characters (e.g., \'xx)
         plainText = Regex.Replace(plainText, "\\'([0-9a-fA-F]{2})", Function(m)
-                                                                        Dim hex = Convert.ToByte(m.Groups(1).Value, 16)
+                                                                        Dim hex = System.Convert.ToByte(m.Groups(1).Value, 16)
                                                                         Return Chr(hex)
                                                                     End Function)
 
@@ -3746,6 +3879,15 @@ Public Class ThisAddIn
                 Dim noText As Boolean = String.IsNullOrWhiteSpace(textBody)
 
                 Dim promptCaption As String = AN & " Freestyle (for Browser)"
+                Dim wordInstalled As Boolean = False
+                Try
+                    Dim wordApp As Object = CreateObject("Word.Application")
+                    wordInstalled = True
+                    wordApp.Quit()
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp)
+                Catch ex As System.Exception
+                    wordInstalled = False
+                End Try
 
                 Dim sb As New System.Text.StringBuilder()
                 If noText Then
@@ -3754,7 +3896,7 @@ Public Class ThisAddIn
                     sb.Append("Please provide the prompt you wish to execute using the selected text ")
                 End If
 
-                sb.Append("(" & MarkupPrefix & " for markups, " & InsertPrefix & " for direct insert)")
+                sb.Append("('" & MarkupPrefix & "' for markups, '" & InsertPrefix & "' for direct insert" & If(wordInstalled, " and '" & NewDocPrefix & "' to put the output in a new Word document)", ")"))
                 If INI_PromptLib Then sb.Append(" or press 'OK' for the prompt library")
                 If INI_SecondAPI Then sb.Append($"; add '{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}")
 
@@ -3769,6 +3911,7 @@ Public Class ThisAddIn
                 Dim doMarkupFlag As Boolean = False
                 Dim doInsertFlag As Boolean = False
                 Dim UseSecondAPI As Boolean = False
+                Dim DoNewDoc As Boolean = False
 
                 '─── prompt library branch ─────────────────────────────────────
                 If String.IsNullOrEmpty(otherPrompt) AndAlso otherPrompt <> "ESC" AndAlso INI_PromptLib Then
@@ -3798,6 +3941,10 @@ Public Class ThisAddIn
                     otherPrompt = otherPrompt.Substring(MarkupPrefix.Length).Trim()
                     doMarkupFlag = True
                     doInsertFlag = True          ' old logic: markup implies insert
+                ElseIf otherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                    OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
+                    DoNewDoc = True
+                    doMarkupFlag = False
                 End If
 
                 If INI_SecondAPI Then
@@ -3855,13 +4002,41 @@ Public Class ThisAddIn
                     Return llmResult                        ' send text back
                 End If
 
+                If DoNewDoc And wordInstalled Then
+
+                    ' Create a new instance of Word
+                    Try
+                        Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+                        wordApp.Visible = True
+
+                        ' Add a new document
+                        Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
+
+                        ' Insert your text (LLMResult) at the beginning
+                        Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
+                        InsertTextWithMarkdown(docSelection, llmResult)
+                        Await SwitchToUi(Sub()
+                                             ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
+                                         End Sub)
+
+                        Return ""
+
+                    Catch ex As System.Exception
+                        '
+                    End Try
+                    Await SwitchToUi(Sub()
+                                         ShowCustomMessageBox("Could not create new Word document and insert the LLM output; providing your output to a separate window.")
+                                     End Sub)
+
+                End If
+
                 ' C) clipboard-only path  --------------------------------------
                 Dim finalTxt As String = Await SwitchToUi(Function()
                                                               Return SLib.ShowCustomWindow(
                                                                   "The LLM has provided the following result (you can edit it):",
                                                                   llmResult,
-                                                                  "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).",
-                                                                  AN, True, True)
+                                                                  "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting). If you select Cancel, nothing will be put into the clipboard (you can yourself copy it to the clipboard).",
+                                                                  AN, False, True)
                                                           End Function)
 
                 If Not String.IsNullOrWhiteSpace(finalTxt) Then
@@ -3874,5 +4049,6 @@ Public Class ThisAddIn
     End Function
 
 
-
 End Class
+
+

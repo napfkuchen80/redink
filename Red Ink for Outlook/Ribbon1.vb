@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 26.7.2025
 
 Imports Microsoft.Office.Tools.Ribbon
 Public Class Ribbon1
@@ -74,6 +74,10 @@ Public Class Ribbon1
     Private Sub RI_Convincing_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Convincing.Click
         Globals.ThisAddIn.MainMenu("Convincing")
     End Sub
+    Private Sub RI_Clipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Clipboard.Click
+        Globals.ThisAddIn.MainMenu("InsertClipboard")
+    End Sub
+
 End Class
 
 Public Class Ribbon2
@@ -145,4 +149,9 @@ Public Class Ribbon2
     Private Sub RI_Convincing_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Convincing.Click
         Globals.ThisAddIn.MainMenu("Convincing")
     End Sub
+
+    Private Sub RI_Clipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Clipboard.Click
+        Globals.ThisAddIn.MainMenu("InsertClipboard")
+    End Sub
+
 End Class

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 21.7.2025
+' 27.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -46,6 +46,9 @@ Imports Markdig.Extensions
 Imports Markdig.Extensions.Emoji
 Imports Markdig.Extensions.Emojis
 Imports Markdig.Extensions.EmphasisExtras
+Imports Markdig.Extensions.Footnotes
+Imports Markdig.Extensions.Footnotes.FootnoteLink
+Imports Markdig.Extensions.Tables
 Imports Markdig.Syntax
 Imports Markdig.Syntax.Inlines
 Imports Microsoft.ML.OnnxRuntime
@@ -1765,6 +1768,10 @@ Namespace SharedLibrary
             selection.SetRange(startPosition, endPosition)
         End Sub
 
+
+
+
+
         Public Shared Sub InsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean)
 
             Try
@@ -1772,6 +1779,8 @@ Namespace SharedLibrary
                 If formattedText Is Nothing OrElse formattedText.Trim() = "" Then
                     Return
                 End If
+
+                Debug.WriteLine("FormattedText=" & formattedText & vbCrLf & vbCrLf)
 
                 Dim htmlHeader As String = "<html><head><meta charset=""UTF-8""></head><body><!--StartFragment-->"
                 Dim htmlFooter As String = "<!--EndFragment--></body></html>"
@@ -1798,6 +1807,8 @@ Namespace SharedLibrary
                                .Replace("EndHTML:00000000", $"EndHTML:{endHtmlOffset:D8}") _
                                .Replace("StartFragment:00000000", $"StartFragment:{startFragmentOffset:D8}") _
                                .Replace("EndFragment:00000000", $"EndFragment:{endFragmentOffset:D8}")
+
+                Debug.WriteLine("FinalHTML=" & finalHtml)
 
                 ' Perform the clipboard operation on an STA thread
                 Dim clipboardThread As New Threading.Thread(Sub()
@@ -1921,8 +1932,97 @@ Namespace SharedLibrary
             End Try
         End Sub
 
-
         Public Shared Function CreateProperHtml(inputHtml As String) As String
+            ' 0) Vorab: Typografische Quotes normalisieren
+            inputHtml = inputHtml.Replace("„", """") _
+                         .Replace("“", """") _
+                         .Replace("”", """")
+
+            ' 1) Entities maskieren: alle &...; Sequenzen merken und Platzhalter einsetzen
+            Dim entityPattern As New System.Text.RegularExpressions.Regex("(&#\d+;|&[A-Za-z]+;)")
+            Dim entities As New List(Of String)
+            inputHtml = entityPattern.Replace(inputHtml,
+        Function(m As System.Text.RegularExpressions.Match)
+            entities.Add(m.Value)
+            Return "###ENTITY" & (entities.Count - 1) & "###"
+        End Function)
+
+            ' 2) <TEXTTOPROCESS>-Wrapper entfernen
+            inputHtml = inputHtml.Replace("<TEXTTOPROCESS>", "") _
+                         .Replace("</TEXTTOPROCESS>", "")
+
+            ' 3) HTML laden
+            Dim htmlDoc As New HtmlAgilityPack.HtmlDocument()
+            htmlDoc.LoadHtml(inputHtml)
+
+            ' 4) <head> sicherstellen
+            Dim headTag = htmlDoc.DocumentNode.SelectSingleNode("//head")
+            If headTag Is Nothing Then
+                headTag = HtmlAgilityPack.HtmlNode.CreateNode("<head></head>")
+                Dim htmlTag = htmlDoc.DocumentNode.SelectSingleNode("//html")
+                If htmlTag Is Nothing Then
+                    htmlTag = HtmlAgilityPack.HtmlNode.CreateNode("<html></html>")
+                    htmlDoc.DocumentNode.AppendChild(htmlTag)
+                End If
+                htmlTag.PrependChild(headTag)
+            End If
+
+            ' 5) <meta charset="UTF-8"> einfügen, falls noch nicht vorhanden
+            If Not headTag.InnerHtml.Contains("charset") Then
+                headTag.InnerHtml = "<meta charset=""UTF-8"">" & headTag.InnerHtml
+            End If
+
+            ' 6) Alle Textknoten encodieren
+            For Each textNode As HtmlAgilityPack.HtmlNode In
+            htmlDoc.DocumentNode.DescendantsAndSelf() _
+                   .Where(Function(n) n.NodeType = HtmlAgilityPack.HtmlNodeType.Text)
+
+                Dim rawText As String = textNode.InnerText
+                ' (falls weitere Normalisierungen nötig sind, hier einfügen)
+                textNode.InnerHtml = HtmlEncodeAll(rawText)
+            Next
+
+            ' 7) Generiertes HTML als String
+            Dim result As String = htmlDoc.DocumentNode.OuterHtml
+
+            ' 8) Platzhalter wieder gegen ursprüngliche Entities tauschen
+            result = System.Text.RegularExpressions.Regex.Replace(result, "###ENTITY(\d+)###",
+        Function(m As System.Text.RegularExpressions.Match)
+            Return entities(Integer.Parse(m.Groups(1).Value))
+        End Function)
+
+            Return result
+        End Function
+
+        ''' <summary>
+        ''' Encodiert alle reservierten HTML‑Zeichen und alle Nicht‑ASCII (>127) in numerische Entities.
+        ''' </summary>
+        Private Shared Function HtmlEncodeAll(s As String) As String
+            Dim sb As New System.Text.StringBuilder()
+            For Each c As Char In s
+                Select Case c
+                    Case "<"c : sb.Append("&lt;")
+                    Case ">"c : sb.Append("&gt;")
+                    Case "&"c : sb.Append("&amp;")
+                    Case """"c : sb.Append("&quot;")
+                    Case "'"c : sb.Append("&#39;")
+                    Case Else
+                        Dim code = AscW(c)
+                        If code > 127 Then
+                            sb.Append("&#" & code & ";")
+                        Else
+                            sb.Append(c)
+                        End If
+                End Select
+            Next
+            Return sb.ToString()
+        End Function
+
+
+
+
+
+        Public Shared Function OldCreateProperHtml(inputHtml As String) As String
             ' Create a new HtmlDocument
 
             inputHtml = inputHtml.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
@@ -4309,8 +4409,8 @@ Namespace SharedLibrary
 
                 Dim currentDict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
                 Dim Description As String = ""
-                For Each line In File.ReadAllLines(iniFilePath)
-                    Dim trimmedLine As String = line.Trim()
+                For Each XLine In File.ReadAllLines(iniFilePath)
+                    Dim trimmedLine As String = XLine.Trim()
                     ' Skip empty lines and comments.
                     If String.IsNullOrEmpty(trimmedLine) OrElse trimmedLine.StartsWith(";") Then
                         Continue For
@@ -9151,7 +9251,22 @@ Namespace SharedLibrary
                                                    ' Check if the text is RTF formatted
                                                    If text.StartsWith("{\rtf") Then
                                                        ' Set RTF content to the clipboard
-                                                       Clipboard.SetData(DataFormats.Rtf, text)
+                                                       'Clipboard.SetData(DataFormats.Rtf, text)
+
+                                                       Dim plainText As String
+
+                                                       ' Convert RTF to plain text using RichTextBox
+                                                       Using rtb As New RichTextBox()
+                                                           rtb.Rtf = text
+                                                           plainText = rtb.Text
+                                                       End Using
+
+                                                       ' Set both RTF and plain text in the clipboard
+                                                       Dim dataObj As New DataObject()
+                                                       dataObj.SetData(DataFormats.Rtf, text)
+                                                       dataObj.SetData(DataFormats.Text, plainText)
+                                                       Clipboard.SetDataObject(dataObj, True)
+
                                                    Else
                                                        ' Set plain text to the clipboard
                                                        Clipboard.SetText(text)
@@ -12761,210 +12876,6 @@ Namespace SharedLibrary
 
 
 
-
-
-    Public Module OldJsonTemplateFormatter
-
-        ''' <summary>
-        ''' Hauptfunktion für JSON-String + Template
-        ''' </summary>
-        Public Function FormatJsonWithTemplate(json As String, ByVal template As String) As String
-            Dim jObj As JObject
-            Try
-                jObj = JObject.Parse(json)
-            Catch ex As Newtonsoft.Json.JsonReaderException
-                Return $"[Fehler beim Parsen des JSON: {ex.Message}]"
-            End Try
-            Return FormatJsonWithTemplate(jObj, template)
-        End Function
-
-        ''' <summary>
-        ''' Hauptfunktion für direkten JObject + Template
-        ''' </summary>
-        Public Function FormatJsonWithTemplate(jObj As JObject, ByVal template As String) As String
-            If String.IsNullOrWhiteSpace(template) Then Return ""
-
-            ' Normalize CRLF / Platzhalter für Zeilenumbruch
-            template = template _
-            .Replace("\N", vbCrLf) _
-            .Replace("\n", vbCrLf) _
-            .Replace("\R", vbCrLf) _
-            .Replace("\r", vbCrLf)
-            template = Regex.Replace(template, "<cr>", vbCrLf, RegexOptions.IgnoreCase)
-
-            Dim hasLoop = Regex.IsMatch(template, "\{\%\s*for\s+([^\s\%]+)\s*\%\}", RegexOptions.Singleline)
-            Dim hasPh = Regex.IsMatch(template, "\{([^}]+)\}")
-
-            ' === Einfache Fallbehandlung ===
-            If Not hasLoop AndAlso Not hasPh Then
-                ' Template enthält keine Platzhalter → als einfacher JSONPath behandeln
-                Return FindJsonProperty(jObj, template)
-            End If
-
-
-            ' === Schleifen-Blöcke ===
-            Dim loopRegex = New Regex("\{\%\s*for\s+([^%\s]+)\s*\%\}(.*?)\{\%\s*endfor\s*\%\}", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
-            Dim mLoop = loopRegex.Match(template)
-            While mLoop.Success
-                Dim fullBlock = mLoop.Value
-                Dim rawPath = mLoop.Groups(1).Value.Trim()
-                Dim innerTpl = mLoop.Groups(2).Value
-
-                Dim path = If(rawPath.StartsWith("$"), rawPath, "$." & rawPath)
-                Dim tokens = jObj.SelectTokens(path)
-                Dim items = tokens.SelectMany(Function(t)
-                                                  If t.Type = JTokenType.Array Then
-                                                      Return CType(t, JArray).OfType(Of JObject)()
-                                                  ElseIf t.Type = JTokenType.Object Then
-                                                      Return {CType(t, JObject)}
-                                                  Else
-                                                      Return Enumerable.Empty(Of JObject)()
-                                                  End If
-                                              End Function)
-
-                Dim rendered = items.Select(Function(o) FormatJsonWithTemplate(o, innerTpl)).ToArray()
-                template = template.Replace(fullBlock, If(rendered.Any, String.Join(vbCrLf & vbCrLf, rendered), ""))
-                mLoop = loopRegex.Match(template)
-            End While
-
-            ' === Platzhalter (non-gierig) ===
-            Dim phRegex = New Regex("\{(.+?)\}", RegexOptions.Singleline)
-            Dim result = template
-
-            For Each mPh As Match In phRegex.Matches(template)
-                Dim fullPh = mPh.Value
-                Dim content = mPh.Groups(1).Value
-
-                ' HTML- oder No-CR-Flag?
-                Dim isHtml As Boolean = False
-                Dim isNoCr As Boolean = False
-
-                If content.StartsWith("htmlnocr:", StringComparison.OrdinalIgnoreCase) Then
-                    isHtml = True
-                    isNoCr = True
-                    content = content.Substring("htmlnocr:".Length)
-                ElseIf content.StartsWith("html:", StringComparison.OrdinalIgnoreCase) Then
-                    isHtml = True
-                    content = content.Substring("html:".Length)
-                ElseIf content.StartsWith("nocr:", StringComparison.OrdinalIgnoreCase) Then
-                    isNoCr = True
-                    content = content.Substring("nocr:".Length)
-                End If
-
-                ' Nur am ersten "|" trennen
-                Dim parts = content.Split(New Char() {"|"c}, 2)
-                Dim pathPh = parts(0).Trim()
-                Dim remainder = If(parts.Length > 1, parts(1), String.Empty)
-
-                ' Separator-Override (z.B. "/") oder Mapping-Definition (enthält "=")
-                Dim sep As String = vbCrLf
-                Dim mappings As Dictionary(Of String, String) = Nothing
-
-                If Not String.IsNullOrEmpty(remainder) Then
-                    If remainder.Contains("="c) Then
-                        mappings = ParseMappings(remainder)
-                    Else
-                        sep = remainder.Replace("\n", vbCrLf)
-                    End If
-                End If
-
-                Dim replacement = RenderTokens(jObj, pathPh, sep, isHtml, isNoCr, mappings)
-                result = result.Replace(fullPh, replacement)
-            Next
-
-            Return result
-        End Function
-
-        ''' <summary>
-        ''' Wandelt ausgewählte Tokens in einen String um, wendet Mapping, HTML→Markdown und No-CR an.
-        ''' </summary>
-        Private Function RenderTokens(
-            jObj As JObject,
-            path As String,
-            sep As String,
-            isHtml As Boolean,
-            isNoCr As Boolean,
-            mappings As Dictionary(Of String, String)
-        ) As String
-
-            Try
-                If Not path.StartsWith("$") AndAlso Not path.StartsWith("@") Then
-                    path = "$." & path
-                End If
-                Dim tokens = jObj.SelectTokens(path)
-                Dim list As New List(Of String)
-
-                For Each t In tokens
-                    Dim raw = t.ToString()
-                    ' Mapping anwenden, falls definiert
-                    If mappings IsNot Nothing AndAlso mappings.ContainsKey(raw) Then raw = mappings(raw)
-                    ' HTML→Markdown, falls gewünscht
-                    If isHtml Then raw = HtmlToMarkdownSimple(raw)
-                    ' No-CR: alle Zeilenumbrüche durch Leerzeichen
-                    'If isNoCr Then raw = Regex.Replace(raw, "[\r\n]+", " ").Trim()
-                    If isNoCr Then
-                        ' 1) Turn all line-breaks into single spaces
-                        raw = Regex.Replace(raw, "[\r\n]+", " ")
-
-                        ' 2) Collapse any run of whitespace into one space
-                        raw = Regex.Replace(raw, "\s{2,}", " ")
-
-                        ' 3) Remove common Unicode bullet characters only
-                        raw = Regex.Replace(raw, "[\u2022\u2023\u25E6]", String.Empty)
-
-                        ' 4) Trim leading/trailing spaces
-                        raw = raw.Trim()
-                    End If
-
-
-                    list.Add(raw)
-                Next
-
-                Return If(list.Count = 0, "", String.Join(sep, list))
-            Catch ex As System.Exception
-                Return ""
-            End Try
-        End Function
-
-        ''' <summary>
-        ''' Parst Mapping-Definitionen der Form "key1=Text1;key2=Text2;…"
-        ''' </summary>
-        Private Function ParseMappings(defs As String) As Dictionary(Of String, String)
-            Dim dict As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
-            For Each pair In defs.Split(";"c)
-                Dim kv = pair.Split(New Char() {"="c}, 2)
-                If kv.Length = 2 Then dict(kv(0).Trim()) = kv(1).Trim()
-            Next
-            Return dict
-        End Function
-
-        ''' <summary>
-        ''' Einfacher HTML→Markdown-Konverter (inkl. SPAN → *italic*)
-        ''' </summary>
-        Public Function HtmlToMarkdownSimple(html As String) As String
-            Dim s = WebUtility.HtmlDecode(html)
-            ' Absätze → zwei Zeilenumbrüche
-            s = Regex.Replace(s, "</?p\s*/?>", vbCrLf & vbCrLf, RegexOptions.IgnoreCase)
-            ' Zeilenumbruch-Tags
-            s = Regex.Replace(s, "<br\s*/?>", vbCrLf, RegexOptions.IgnoreCase)
-            ' Fett/strong → **text**
-            s = Regex.Replace(s, "<strong>(.*?)</strong>", "**$1**", RegexOptions.IgnoreCase)
-            ' Kursiv/em → *text*
-            s = Regex.Replace(s, "<em>(.*?)</em>", "*$1*", RegexOptions.IgnoreCase)
-            ' SPAN-Tags → *text*
-            s = Regex.Replace(s, "<span\b[^>]*>(.*?)</span>", "*$1*", RegexOptions.IgnoreCase)
-            ' Listenpunkte <li> → "- text"
-            s = Regex.Replace(s, "<li>(.*?)</li>", "- $1" & vbCrLf, RegexOptions.IgnoreCase)
-            ' Alle übrigen Tags entfernen
-            s = Regex.Replace(s, "<[^>]+>", String.Empty)
-            ' Mehrfache Zeilenumbrüche aufräumen
-            s = Regex.Replace(s, "(" & vbCrLf & "){3,}", vbCrLf & vbCrLf)
-            Return s.Trim()
-        End Function
-
-    End Module
-
-
 End Namespace
 
 
@@ -12981,13 +12892,36 @@ Namespace MarkdownToRtf
         ''' <param name="markdownText">Eine Zeichenfolge mit Markdown-Markup.</param>
         ''' <returns>RTF-formatierte Zeichenfolge.</returns>
         Public Function Convert(markdownText As String) As String
+
+            markdownText = System.Text.RegularExpressions.Regex.Unescape(markdownText)
+            markdownText = System.Text.RegularExpressions.Regex.Replace(
+                        markdownText,
+                        "^[ \t]+(?=>)",       ' „jede Folge von Leerzeichen/Tabs direkt vor einem >“
+                        String.Empty,
+                        System.Text.RegularExpressions.RegexOptions.Multiline)
+
+            Debug.WriteLine("MarkdownToRtfConverter.Convert: " & markdownText)
+
             ' 1) Markdown parsen
             'Dim pipeline = New Markdig.MarkdownPipelineBuilder().Build()
             Dim pipeline = New Markdig.MarkdownPipelineBuilder() _
                   .UseAdvancedExtensions() _
+                        .UsePipeTables() _
+            .UseGridTables() _
+            .UseFootnotes() _
                   .UseEmojiAndSmiley() _
                   .Build()
             Dim document = Markdig.Markdown.Parse(markdownText, pipeline)
+
+            Dim fnDefs As New Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)()
+            For Each block In document
+                If TypeOf block Is FootnoteGroup Then
+                    ' Gruppe überspringen, die eigentlichen Footnote‑Blöcke liegen darin
+                    For Each fn As Markdig.Extensions.Footnotes.Footnote In CType(block, FootnoteGroup)
+                        fnDefs(fn.Label) = fn
+                    Next
+                End If
+            Next
 
             ' 2) RTF aufbauen
             Dim rtfBuilder As New System.Text.StringBuilder()
@@ -12995,12 +12929,22 @@ Namespace MarkdownToRtf
 
             ' 3) Blöcke verarbeiten
             For Each block In document
-                If TypeOf block Is Markdig.Syntax.HeadingBlock Then
-                    ConvertHeadingBlock(rtfBuilder, CType(block, Markdig.Syntax.HeadingBlock))
+                If TypeOf block Is Markdig.Extensions.Tables.Table Then
+                    ConvertTableBlock(rtfBuilder, CType(block, Markdig.Extensions.Tables.Table), fnDefs)
+                ElseIf TypeOf block Is Markdig.Syntax.HeadingBlock Then
+                    ConvertHeadingBlock(rtfBuilder, CType(block, Markdig.Syntax.HeadingBlock), fnDefs)
                 ElseIf TypeOf block Is Markdig.Syntax.ParagraphBlock Then
-                    ConvertParagraphBlock(rtfBuilder, CType(block, Markdig.Syntax.ParagraphBlock))
+                    ConvertParagraphBlock(rtfBuilder, CType(block, Markdig.Syntax.ParagraphBlock), fnDefs)
                 ElseIf TypeOf block Is Markdig.Syntax.ListBlock Then
-                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock), 0)
+                    ConvertListBlock(rtfBuilder, CType(block, Markdig.Syntax.ListBlock), 0, fnDefs)
+                ElseIf TypeOf block Is Markdig.Syntax.QuoteBlock Then
+                    ConvertQuoteBlock(rtfBuilder, CType(block, Markdig.Syntax.QuoteBlock), 1, fnDefs)
+                ElseIf TypeOf block Is Markdig.Syntax.FencedCodeBlock Then
+                    ConvertCodeBlock(rtfBuilder, CType(block, Markdig.Syntax.FencedCodeBlock), fnDefs)
+                ElseIf TypeOf block Is Markdig.Syntax.ThematicBreakBlock Then
+                    ConvertThematicBreakBlock(rtfBuilder)
+                ElseIf TypeOf block Is FootnoteGroup Then
+                    ' 
                 End If
             Next
 
@@ -13009,26 +12953,105 @@ Namespace MarkdownToRtf
             Return rtfBuilder.ToString()
         End Function
 
-        Private Sub ConvertHeadingBlock(rtf As System.Text.StringBuilder, headingBlock As Markdig.Syntax.HeadingBlock)
+
+        Private Sub ConvertThematicBreakBlock(rtf As System.Text.StringBuilder)
+            ' Neuen Absatz + HRule + neuer Absatz
+            rtf.AppendLine("\par")
+            rtf.AppendLine("\pard\brdrb\brdrs\brdrw10\par")
+        End Sub
+
+        Private Sub ConvertCodeBlock(
+    rtf As System.Text.StringBuilder,
+    codeBlock As Markdig.Syntax.FencedCodeBlock,
+    fnDefs As System.Collections.Generic.Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)
+)
+            ' 1) Monospace aktivieren (\f1) und kleinere Schrift (\fs18)
+            rtf.Append("\par\f1\fs18 ")
+
+            ' 2) alle Zeilen des Codeblocks
+            For Each lineInfo In codeBlock.Lines.Lines
+                Dim slice = lineInfo.Slice
+
+                ' --> hier die Null‐Checks
+                If slice.Text Is Nothing Then
+                    ' Das ist der “Sentinel” – wenn Du eine leere Zeile willst:
+                    ' rtf.Append("\line ")
+                    Continue For
+                End If
+
+                ' Jetzt ist slice.Text garantiert nicht Nothing
+                Dim raw As String = slice.Text.Substring(slice.Start, slice.Length)
+                Dim esc As String = EscapeRtf(raw)
+                rtf.Append(esc)
+                rtf.Append("\line ")
+            Next
+
+            ' 3) zurück zur Standard‑Schrift (\f0) und ‑größe (\fs20)
+            rtf.Append("\f0\fs20\par")
+        End Sub
+
+        Private Sub ConvertTableBlock(
+    rtf As StringBuilder,
+    table As Markdig.Extensions.Tables.Table,
+    fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)
+)
+            ' Für gleichlange Zeilen sorgen
+            table.NormalizeUsingMaxWidth()
+
+            For Each row As Markdig.Extensions.Tables.TableRow In table
+                rtf.Append("\pard\sa100\fs20 ")
+
+                For Each cell As Markdig.Extensions.Tables.TableCell In row
+                    ' In jeder Zelle alle enthaltenen Blocks verarbeiten
+                    For Each subBlock As Markdig.Syntax.Block In cell
+                        Select Case True
+                            Case TypeOf subBlock Is Markdig.Syntax.ParagraphBlock
+                                Dim p As Markdig.Syntax.ParagraphBlock =
+                            CType(subBlock, Markdig.Syntax.ParagraphBlock)
+                                ConvertInline(rtf, p.Inline, fnDefs)
+
+                            Case TypeOf subBlock Is Markdig.Syntax.ListBlock
+                                ConvertListBlock(rtf:=rtf,
+                listBlock:=CType(subBlock, Markdig.Syntax.ListBlock),
+                level:=0,
+                fnDefs:=fnDefs)
+
+                                ' → weitere Fälle: QuoteBlock, CodeBlock, etc.
+                        End Select
+                    Next
+
+                    ' Zellen‑Trenner
+                    rtf.Append("\tab ")
+                Next
+
+                rtf.AppendLine("\par")
+            Next
+        End Sub
+
+
+
+
+        Private Sub ConvertHeadingBlock(rtf As System.Text.StringBuilder, headingBlock As Markdig.Syntax.HeadingBlock, fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote))
             Dim headingSizes() As Integer = {30, 28, 26, 24, 22, 20}
             Dim level As Integer = headingBlock.Level
             Dim size As Integer = headingSizes(System.Math.Min(level, headingSizes.Length) - 1)
 
             rtf.Append($"\pard\sa180\fs{size} \b ")
-            ConvertInline(rtf, headingBlock.Inline)
+            ConvertInline(rtf, headingBlock.Inline, fnDefs)
             rtf.AppendLine(" \b0\par")
         End Sub
 
-        Private Sub ConvertParagraphBlock(rtf As System.Text.StringBuilder, paragraphBlock As Markdig.Syntax.ParagraphBlock)
+        Private Sub ConvertParagraphBlock(rtf As System.Text.StringBuilder, paragraphBlock As Markdig.Syntax.ParagraphBlock, fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote))
             rtf.Append("\pard\sa180\fs20 ")
-            ConvertInline(rtf, paragraphBlock.Inline)
+            ConvertInline(rtf, paragraphBlock.Inline, fnDefs)
             rtf.AppendLine("\par")
         End Sub
 
 
         Private Sub ConvertListBlock(rtf As System.Text.StringBuilder,
                              listBlock As Markdig.Syntax.ListBlock,
-                             Optional level As Integer = 0)
+                             Optional level As Integer = 0,
+                                     Optional fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote) = Nothing)
 
             Dim isOrdered As Boolean = listBlock.IsOrdered
             Dim indent As Integer = level * 360            ' 360 twips ≈ 0,25 "
@@ -13051,15 +13074,6 @@ Namespace MarkdownToRtf
                     Dim li = CType(item, Markdig.Syntax.ListItemBlock)
                     itemIndex += 1
 
-                    'Dim prefix = If(isOrdered, $"{startNumber + itemIndex - 1}. ", "\u8226? ")
-
-                    ''Dim prefix As String = If(isOrdered, $"{startNumber + itemIndex - 1}. ", "\u8226?\tab ")               ' •\t (Bullet)
-                    '
-                    '                 rtf.Append($"\pard\li{indent}\sa100\fs20 ")
-                    '                  ' \li = linker Rand, \fi = negative Erstzeileneinzug, \tx = Tab‑Stopp
-                    '                   rtf.Append($"\pard\li{indent}\fi-200\tx{indent + 200}\sa50\fs20 ")
-                    '                    rtf.Append(prefix)
-
                     ' Bullet + ein Tab, damit der Text zum Tab-Stop springt
                     Dim prefix = If(isOrdered,
                            $"{startNumber + itemIndex - 1}. ",
@@ -13073,13 +13087,13 @@ Namespace MarkdownToRtf
                     For Each sb In li
                         Select Case True
                             Case TypeOf sb Is Markdig.Syntax.ParagraphBlock
-                                ConvertInline(rtf, CType(sb, Markdig.Syntax.ParagraphBlock).Inline)
+                                ConvertInline(rtf, CType(sb, Markdig.Syntax.ParagraphBlock).Inline, fnDefs)
 
                             Case TypeOf sb Is Markdig.Syntax.ListBlock
                                 rtf.AppendLine("\par")    ' Leerzeile vor Unterliste
                                 ConvertListBlock(rtf,
                                          CType(sb, Markdig.Syntax.ListBlock),
-                                         level + 1)
+                                         level + 1, fnDefs)
                         End Select
                     Next
 
@@ -13088,20 +13102,176 @@ Namespace MarkdownToRtf
             Next
         End Sub
 
+        ''' <summary>
+        ''' Renders a Markdown QuoteBlock with indentation.
+        ''' </summary>
+        Private Sub ConvertQuoteBlock(
+    rtf As System.Text.StringBuilder,
+    quoteBlock As Markdig.Syntax.QuoteBlock,
+    Optional level As Integer = 1,
+    Optional fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote) = Nothing
+)
+            ' 1) Links‑Einzug je Ebene: 360 Twips ≈ 0,25 cm
+            Dim indentPerLevel As Integer = 360
+            Dim indent As Integer = level * indentPerLevel
+
+            ' \pard beginnt einen neuen Absatz:
+            rtf.Append($"\pard\li{indent}\sa180\fs20 ")
+
+            ' 2) Jedes Kind‑Block (normalerweise ParagraphBlock) im Zitat verarbeiten
+            For Each inner In quoteBlock
+                If TypeOf inner Is Markdig.Syntax.ParagraphBlock Then
+                    ConvertInline(rtf, CType(inner, Markdig.Syntax.ParagraphBlock).Inline, fnDefs)
+                    rtf.AppendLine("\par")
+                ElseIf TypeOf inner Is Markdig.Syntax.ListBlock Then
+                    ' verschachtelte Liste innerhalb des Zitats
+                    ConvertListBlock(rtf, CType(inner, Markdig.Syntax.ListBlock), level, fnDefs)
+                ElseIf TypeOf inner Is Markdig.Syntax.QuoteBlock Then
+                    ' verschachtetes Zitat → eine Ebene tiefer
+                    ConvertQuoteBlock(rtf, CType(inner, Markdig.Syntax.QuoteBlock), level + 1, fnDefs)
+                End If
+            Next
+
+            ' 3) Am Ende des Zitats sicherheitshalber Absatz abschließen
+            rtf.AppendLine("\par")
+        End Sub
+
+
+        ''' <summary>
+        ''' Rendert alle Inline‑Elemente eines ContainerInline in RTF.
+        ''' </summary>
+        Private Sub ConvertInline(
+    rtf As System.Text.StringBuilder,
+    container As Markdig.Syntax.Inlines.ContainerInline,
+    Optional fnDefs As System.Collections.Generic.Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote) = Nothing,
+    Optional visitedFootnotes As System.Collections.Generic.HashSet(Of String) = Nothing
+)
+            If visitedFootnotes Is Nothing Then
+                visitedFootnotes = New System.Collections.Generic.HashSet(Of String)()
+            End If
+
+            For Each inline In container
+                Select Case True
+
+            ' Literal‑Text
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LiteralInline
+                        Dim lit = CType(inline, Markdig.Syntax.Inlines.LiteralInline)
+                        rtf.Append(EscapeRtf(lit.Content.ToString()))
+
+            ' Betonung / Emphasis (Fett/Kursiv/Strikethrough/Sub/Superscript)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.EmphasisInline
+                        Dim emp = CType(inline, Markdig.Syntax.Inlines.EmphasisInline)
+                        Select Case True
+                            Case emp.DelimiterChar = "~"c AndAlso emp.DelimiterCount = 2
+                                rtf.Append("\strike ")
+                                ConvertInline(rtf, emp, fnDefs, visitedFootnotes)
+                                rtf.Append("\strike0 ")
+                            Case emp.DelimiterChar = "~"c AndAlso emp.DelimiterCount = 1
+                                rtf.Append("{\sub ")
+                                ConvertInline(rtf, emp, fnDefs, visitedFootnotes)
+                                rtf.Append("\nosupersub} ")
+                            Case emp.DelimiterChar = "^"c AndAlso emp.DelimiterCount = 1
+                                rtf.Append("{\super ")
+                                ConvertInline(rtf, emp, fnDefs, visitedFootnotes)
+                                rtf.Append("\nosupersub} ")
+                            Case Else
+                                HandleEmphasis(rtf, emp)
+                        End Select
+
+            ' Inline‑Code
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.CodeInline
+                        Dim ci = CType(inline, Markdig.Syntax.Inlines.CodeInline)
+                        rtf.Append("\f1 ")                               ' Monospace‑Font
+                        rtf.Append(EscapeRtf(ci.Content))
+                        rtf.Append("\f0 ")                               ' zurück zur Standard‑Font
+
+            ' Zeilenumbruch (hart oder weich)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LineBreakInline
+                        rtf.Append("\line ")
+
+            ' Link oder Bild
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LinkInline
+                        Dim link = CType(inline, Markdig.Syntax.Inlines.LinkInline)
+                        If link.IsImage Then
+                            ' Bild → nur Alt‑Text anzeigen
+                            Dim alt As String = ""
+                            If link.FirstChild IsNot Nothing AndAlso TypeOf link.FirstChild Is Markdig.Syntax.Inlines.LiteralInline Then
+                                alt = CType(link.FirstChild, Markdig.Syntax.Inlines.LiteralInline).Content.ToString()
+                            End If
+                            rtf.Append("[Image: " & EscapeRtf(alt) & "] ")
+                        Else
+                            ' Hyperlink
+                            If link.FirstChild Is Nothing Then
+                                rtf.Append("{\field{\*\fldinst HYPERLINK """ & EscapeRtf(link.Url) & """}{\fldrslt " & EscapeRtf(link.Url) & "}}")
+                            Else
+                                rtf.Append("{\field{\*\fldinst HYPERLINK """ & EscapeRtf(link.Url) & """}{\fldrslt ")
+                                ConvertInline(rtf, link, fnDefs, visitedFootnotes)
+                                rtf.Append("}}")
+                            End If
+                        End If
+
+            ' HTML‑Inline (<u>, <sup>, <sub>, sonst escapen)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.HtmlInline
+                        Dim html = CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag.Trim()
+                        Select Case True
+                            Case html.StartsWith("<u", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("\ul ")
+                            Case html.StartsWith("</u", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("\ulnone ")
+                            Case html.StartsWith("<sup", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("{\super ")
+                            Case html.StartsWith("</sup", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("\nosupersub} ")
+                            Case html.StartsWith("<sub", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("{\sub ")
+                            Case html.StartsWith("</sub", StringComparison.OrdinalIgnoreCase)
+                                rtf.Append("\nosupersub} ")
+                            Case Else
+                                rtf.Append(EscapeRtf(html))
+                        End Select
+
+            ' EmojiInline
+                    Case TypeOf inline Is Markdig.Extensions.Emoji.EmojiInline
+                        Dim emo = CType(inline, Markdig.Extensions.Emoji.EmojiInline)
+                        rtf.Append(EscapeRtf(emo.Content.ToString()))
+
+            ' Fußnoten‑Link
+                    Case TypeOf inline Is Markdig.Extensions.Footnotes.FootnoteLink
+                        Dim fl = CType(inline, Markdig.Extensions.Footnotes.FootnoteLink)
+                        HandleFootnoteLink(rtf, fl, fnDefs, visitedFootnotes)
+
+                        ' Alles andere (rekursiv oder ToString())
+                    Case Else
+                        If TypeOf inline Is Markdig.Syntax.Inlines.ContainerInline Then
+                            ConvertInline(rtf, CType(inline, Markdig.Syntax.Inlines.ContainerInline), fnDefs, visitedFootnotes)
+                        Else
+                            rtf.Append(EscapeRtf(inline.ToString()))
+                        End If
+                End Select
+            Next
+        End Sub
+
+
 
         ''' <summary>
         ''' Rekursiv Inlines verarbeiten, inkl. Hyperlinks.
         ''' </summary>
-        Private Sub ConvertInline(rtf As System.Text.StringBuilder, container As Markdig.Syntax.Inlines.ContainerInline)
+        Private Sub xxxxConvertInline(rtf As System.Text.StringBuilder, container As Markdig.Syntax.Inlines.ContainerInline, Optional fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote) = Nothing, Optional visitedFootnotes As HashSet(Of String) = Nothing)
+
+            If visitedFootnotes Is Nothing Then
+                visitedFootnotes = New HashSet(Of String)()
+            End If
+
             For Each inline In container
-                Select Case inline.GetType().Name
-                    Case NameOf(Markdig.Syntax.Inlines.EmphasisInline)
+                'Select Case inline.GetType().Name
+                Select Case True
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.EmphasisInline
                         HandleEmphasis(rtf, CType(inline, Markdig.Syntax.Inlines.EmphasisInline))
 
-                    Case NameOf(Markdig.Syntax.Inlines.LineBreakInline)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LineBreakInline
                         rtf.Append("\line ")
 
-                    Case NameOf(Markdig.Syntax.Inlines.CodeInline)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.CodeInline
                         rtf.Append("\f1 ")
                         rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.CodeInline).Content))
                         rtf.Append("\f0 ")
@@ -13109,7 +13279,7 @@ Namespace MarkdownToRtf
                         'Case NameOf(Markdig.Syntax.Inlines.HtmlInline)
                      '   rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag))
 
-                    Case NameOf(Markdig.Syntax.Inlines.LinkInline)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LinkInline
                         Dim link = CType(inline, Markdig.Syntax.Inlines.LinkInline)
                         ' Sonderfall: kein sichtbarer Text => URL anzeigen
                         If link.FirstChild Is Nothing Then
@@ -13117,11 +13287,11 @@ Namespace MarkdownToRtf
                         Else
                             ' Link mit Text: Text als unsichtbare Feldergebnis anzeigen
                             rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt ")
-                            ConvertInline(rtf, link)
+                            ConvertInline(rtf, link, fnDefs, visitedFootnotes)
                             rtf.Append("}}")
                         End If
 
-                    Case NameOf(Markdig.Syntax.Inlines.HtmlInline)
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.HtmlInline
                         Dim html = CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag.Trim()
                         Select Case True
                             Case html.StartsWith("<u", StringComparison.OrdinalIgnoreCase)
@@ -13149,37 +13319,43 @@ Namespace MarkdownToRtf
                         Dim emo = CType(inline, EmojiInline)
                         ' Entweder direkt das Unicode-Zeichen …
                         rtf.Append(EscapeRtf(emo.Content.ToString()))
-                ' … oder über emo.Match / emo.Emoji je nach Version
+                          ' … oder über emo.Match / emo.Emoji je nach Version
 
-            ' → Alle Extra‑Emphasis‑Fälle in einer Methode
+                  ' → Alle Extra‑Emphasis‑Fälle in einer Methode
                     Case TypeOf inline Is EmphasisInline
                         Dim e = CType(inline, EmphasisInline)
                         Select Case True
                             Case e.DelimiterChar = "~"c AndAlso e.DelimiterCount = 2
                                 ' ~~text~~ → \strike … \strike0
                                 rtf.Append("\strike ")
-                                ConvertInline(rtf, e)
+                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
                                 rtf.Append(" \strike0")
 
                             Case e.DelimiterChar = "~"c AndAlso e.DelimiterCount = 1
                                 ' ~text~ → {\sub …\nosupersub}
                                 rtf.Append("{\sub ")
-                                ConvertInline(rtf, e)
+                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
                                 rtf.Append("\nosupersub}")
 
                             Case e.DelimiterChar = "^"c AndAlso e.DelimiterCount = 1
                                 ' ^text^ → {\super …\nosupersub}
                                 rtf.Append("{\super ")
-                                ConvertInline(rtf, e)
+                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
                                 rtf.Append("\nosupersub}")
 
                             Case Else
                                 HandleEmphasis(rtf, e)
                         End Select
 
+                    Case TypeOf inline Is FootnoteLink
+                        Dim fl = CType(inline, FootnoteLink)
+                        HandleFootnoteLink(rtf, fl, fnDefs, visitedFootnotes)
 
-                    Case NameOf(Markdig.Syntax.Inlines.LiteralInline)
+
+                    Case TypeOf inline Is Markdig.Syntax.Inlines.LiteralInline
+
                         rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.LiteralInline).Content.ToString()))
+
                 End Select
             Next
         End Sub
@@ -13223,22 +13399,38 @@ Namespace MarkdownToRtf
             If bold Then rtf.Append(" \b0")
         End Sub
 
-        ''' <summary>
-        ''' Maskierung spezieller Zeichen.
-        ''' </summary>
-        Private Function OldEscapeRtf(text As String) As String
-            If String.IsNullOrEmpty(text) Then Return String.Empty
-            Dim sb As New System.Text.StringBuilder()
-            For Each c As Char In text
-                Select Case c
-                    Case "\"c : sb.Append("\\")
-                    Case "{"c : sb.Append("\{")
-                    Case "}"c : sb.Append("\}")
-                    Case Else : sb.Append(c)
-                End Select
+        ' Add a parameter to track visited footnotes
+
+        Private Sub HandleFootnoteLink(
+        rtf As System.Text.StringBuilder,
+        fl As FootnoteLink,
+        fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote),
+        visited As HashSet(Of String)
+    )
+            Dim label = fl.Footnote.Label
+            ' 1) Endlosschleife verhindern:
+            If visited.Contains(label) Then
+                Return
+            End If
+            visited.Add(label)
+
+            ' 2) Footnote in RTF schreiben
+            rtf.Append("{\footnote ")
+            Dim def = fnDefs(label)
+            For Each subBlk In def
+                If TypeOf subBlk Is ParagraphBlock Then
+                    ConvertInline(
+                    rtf,
+                    CType(subBlk, ParagraphBlock).Inline,
+                    fnDefs,
+                    visited)    ' visited weiterreichen!
+                End If
             Next
-            Return sb.ToString()
-        End Function
+            rtf.Append("}")
+
+            ' 3) Cleanup, falls später nochmal anderswo dieselbe Footnote auftaucht
+            visited.Remove(label)
+        End Sub
 
     End Module
 End Namespace
