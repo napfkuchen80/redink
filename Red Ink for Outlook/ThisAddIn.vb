@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.7.2025
+' 28.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -134,7 +134,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.270725 Gen2 Beta Test"
+    Public Const Version As String = "V.280725 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -2263,8 +2263,8 @@ Public Class ThisAddIn
        OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
 
             ' No open email: copy to clipboard (cut to 1024 chars + ellipsis)
-            Dim displayText As String = If(result.Length > 1024,
-                                      result.Substring(0, 1024) & "…",
+            Dim displayText As String = If(result.Length > 6000,
+                                      result.Substring(0, 6000) & "…",
                                       result)
             Await SwitchToUi(Sub()
                                  Dim rtfText As String = MarkdownToRtfConverter.Convert(result)
@@ -2338,7 +2338,7 @@ Public Class ThisAddIn
             If AskForPrompt Then
                 ' Prompt for additional instructions
                 OtherPrompt = SLib.ShowCustomInputBox("Please provide additional instructions for drafting an answer (or leave it empty for the most likely substantive response):", $"{AN} Answers", False)
-
+                If OtherPrompt = "ESC" Then Return
                 ' Call your LLM function with the selected text
                 LLMResult = Await LLM(InterpolateAtRuntime(SP_MailReply), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)
             Else

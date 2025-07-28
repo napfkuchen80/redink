@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.7.2025
+' 28.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -826,7 +826,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.270725 Gen2 Beta Test"
+    Public Const Version As String = "V.280725 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -5478,7 +5478,7 @@ Public Class ThisAddIn
 
 
                         If TTSAvailable Then
-                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, "The next step Is the production of an audio file. You can choose whether you want to use the original text or your text with any changes you have made. The text will also be put in the clipboard. If you select Cancel, the original text will only be put into the clipboard.", AN, False)
+                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, "The next step Is the production of an audio file. You can choose whether you want to use the original text or your text with any changes you have made. The text will also be put in the clipboard. If you select Cancel, the original text will only be put into the clipboard.", AN, True)
 
                             If FinalText = "" Then
                                 SLib.PutInClipboard(MarkdownToRtfConverter.Convert(LLMResult))
@@ -5488,7 +5488,7 @@ Public Class ThisAddIn
                                 If FinalText.Contains("H: ") AndAlso FinalText.Contains("G: ") Then ReadPodcast(FinalText)
                             End If
                         Else
-                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, $"The next step Is the production of an audio file. Since you have not configured {AN} for Google, you unfortunately cannot do that here. However, you can choose whether you want the original text Or the text with your changes to put in the clipboard for further use. If you select Cancel, no text will be put in the clipboard.", AN, False)
+                            Dim FinalText = ShowCustomWindow("The LLM has created the following podcast script for you (you can edit it; you do Not have to manually remove the SSML codes, if you do Not Like them)", LLMResult, $"The next step Is the production of an audio file. Since you have not configured {AN} for Google, you unfortunately cannot do that here. However, you can choose whether you want the original text Or the text with your changes to put in the clipboard for further use. If you select Cancel, no text will be put in the clipboard.", AN, True)
 
                             If FinalText <> "" Then
                                 SLib.PutInClipboard(MarkdownToRtfConverter.Convert(LLMResult))
@@ -9211,7 +9211,48 @@ Public Class ThisAddIn
         Catch ex As System.Exception
             Debug.WriteLine("InsertMarkupText error: " & ex.Message & vbCrLf & inputText)
         Finally
+
+            ' --- Final-View Replace Test (Space-Bereinigung) ---
+
+            ' 2) Final-View aktivieren
+            With wordApp.ActiveWindow.View
+                .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                .ShowRevisionsAndComments = False
+            End With
+            ' 3) Replace doppelte Spaces
+            ' Temporär Revisionen ausschalten, damit die Ersetzungen nicht als Änderungen protokolliert werden
+            doc.TrackRevisions = False
+
+            Dim endPosInserted2 As Integer = targetRange.End
+            Dim insertedRange As Microsoft.Office.Interop.Word.Range =
+                doc.Range(startPos, endPosInserted2)
+
+
+            ' Find/Replace für zwei Leerzeichen → ein Leerzeichen
+            With insertedRange.Find
+                .ClearFormatting()
+                .Replacement.ClearFormatting()
+                .Text = "  "    ' genau zwei Leerzeichen
+                .Replacement.Text = " "
+                .Forward = True
+                .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                .Format = False
+                .MatchWildcards = False
+            End With
+
+            ' Solange noch ein Replace stattfindet, wiederholen
+            Do
+                ' Execute gibt True zurück, wenn etwas ersetzt wurde
+            Loop While insertedRange.Find.Execute(Replace:=Microsoft.Office.Interop.Word.WdReplace.wdReplaceAll)
+
+            With wordApp.ActiveWindow.View
+                .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                .ShowRevisionsAndComments = True
+            End With
+
+            ' Tracking wieder in den Ursprungszustand versetzen
             doc.TrackRevisions = originalTrack
+
             wordApp.ScreenUpdating = originalUpdate
 
             ' Range auf die volle eingefügte Länge setzen
