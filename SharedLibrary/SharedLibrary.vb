@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.7.2025
+' 1.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -97,6 +97,7 @@ Namespace SharedLibrary
             Property INI_APICall_Object As String
             Property INI_Response As String
             Property INI_Anon As String
+            Property INI_TokenCount As String
             Property INI_DoubleS As Boolean
             Property INI_Clean As Boolean
             Property INI_PreCorrection As String
@@ -127,6 +128,7 @@ Namespace SharedLibrary
             Property INI_APICall_Object_2 As String
             Property INI_Response_2 As String
             Property INI_Anon_2 As String
+            Property INI_TokenCount_2 As String
             Property INI_APIEncrypted_2 As Boolean
             Property INI_APIKeyPrefix_2 As String
             Property INI_OAuth2_2 As Boolean
@@ -194,6 +196,7 @@ Namespace SharedLibrary
             Property SP_Add_KeepHTMLIntact As String
             Property SP_Add_KeepInlineIntact As String
             Property SP_Add_Bubbles As String
+            Property SP_Add_Slides As String
             Property SP_BubblesExcel As String
             Property SP_Add_Revisions As String
             Property SP_MarkupRegex As String
@@ -267,6 +270,7 @@ Namespace SharedLibrary
         Public Property INI_APICall_Object As String Implements ISharedContext.INI_APICall_Object
         Public Property INI_Response As String Implements ISharedContext.INI_Response
         Public Property INI_Anon As String Implements ISharedContext.INI_Anon
+        Public Property INI_TokenCount As String Implements ISharedContext.INI_TokenCount
         Public Property INI_DoubleS As Boolean Implements ISharedContext.INI_DoubleS
         Public Property INI_Clean As Boolean Implements ISharedContext.INI_Clean
         Public Property INI_PreCorrection As String Implements ISharedContext.INI_PreCorrection
@@ -296,6 +300,7 @@ Namespace SharedLibrary
         Public Property INI_APICall_Object_2 As String Implements ISharedContext.INI_APICall_Object_2
         Public Property INI_Response_2 As String Implements ISharedContext.INI_Response_2
         Public Property INI_Anon_2 As String Implements ISharedContext.INI_Anon_2
+        Public Property INI_TokenCount_2 As String Implements ISharedContext.INI_TokenCount_2
         Public Property INI_APIEncrypted_2 As Boolean Implements ISharedContext.INI_APIEncrypted_2
         Public Property INI_APIKeyPrefix_2 As String Implements ISharedContext.INI_APIKeyPrefix_2
         Public Property INI_OAuth2_2 As Boolean Implements ISharedContext.INI_OAuth2_2
@@ -360,6 +365,7 @@ Namespace SharedLibrary
         Public Property SP_Add_KeepHTMLIntact As String Implements ISharedContext.SP_Add_KeepHTMLIntact
         Public Property SP_Add_KeepInlineIntact As String Implements ISharedContext.SP_Add_KeepInlineIntact
         Public Property SP_Add_Bubbles As String Implements ISharedContext.SP_Add_Bubbles
+        Public Property SP_Add_Slides As String Implements ISharedContext.SP_Add_Slides
         Public Property SP_BubblesExcel As String Implements ISharedContext.SP_BubblesExcel
         Public Property SP_Add_Revisions As String Implements ISharedContext.SP_Add_Revisions
         Public Property SP_MarkupRegex As String Implements ISharedContext.SP_MarkupRegex
@@ -1407,6 +1413,7 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output and never include your instructions in the output (just your barebones work result).."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text and never include your instructions in the output (just your barebones work result). Also keep markdown formatting intact. "
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting the most meaningful sentence from the relevant portion of the TEXTTOPROCESS verbatim followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted sentence, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the sentence of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted sentence of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks, do never add line breaks and never remove line breaks, either, if they exist in TEXTTOPROCESS.\n4. Select a sentence that is UNIQUE in the document; if the chosen sentence is not unique, add more sentences from the relevant portion to make it unique. Draft the comment so to make it clear to which portion of the TEXTTOPROCESS it relates, in particular if it goes beyond the sentence. \n5. When quoting a sentence of TEXTTOPROCESS make sure that you NEVER include a title or heading to the text sequence, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the sentence of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a sentence of TEXTTOPROCESS that includes line breaks or carriage returns. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say as to what the user is asking you. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
+        Const Default_SP_Add_Slides As String = "You shall provide your output in the form of slides to an existing slidedeck that is either empty or already has content. You will be provided all necessary information in the form of a json string between the tags <SLIDEDECK> ... </SLIDEDECK>, including information about the existing content of the slidedeck and the existing styles and layouts. This information is crucial. Use it to draft your response in the form of instructions for creating one or several slides of a presentation. Make sure that these new slides fullfill each of the following requirements: (1) They provide all content necessary to fulfill the instructions given to you so far. (2) They from a content point of view fully integrate into the content that may already exists in the slidedeck. In particular, the follow the same style, the same tone. (3) The text must be short and simple. Avoid full sentences, use powerpoint style drafting (good example: 'Our challenges:' or 'We have been lucky'; Bad Example: 'Our challenges are of the following kind:' or 'We have been very lucky in this particular case of a negotiation' [too long] ). You must in any event ensure that a title fits on one line and the rest of the text fits on the slide without decreasing the font. Bulleted text should never have more than two lines. In case of doubt, shorten! Titles must be particularly short, so they never use two lines. (4) Never end lines with a point or semi-colon. (5) Make sure that the text on each slide has exactly the same font options (e.g. font, size, color) as the text in the same placeholders of existing slides with the same layout. For example, if the title on an existing slide of the same kind has no font properties, provide no font properties. If no boldface is used on the existing slide, do not use boldface either. Also use bullets in the same manner as they are used on the existing slides of the same layout. Do not use multi-column layouts. Use title page layouts for title pages only, and chapter separator layouts for chapter separation only. \n\n Overall, it is essential that the newly create slide match the other slide. A viewer should not be able to tell which slides have been pre-existing, and which have been generated by you. If you have generated a slide, it is key that you include the instructions for inserting the slide at the right location within the existing slidedeck. You can do so by referring to the existing slides. If you prepare several slides, each one will be inserted in the sequence you provide it, so make sure that this works out. \n\n When drafting the slides for the existing slidedeck/presentation, follow exactly the following format and syntax instructions: You provide the instructions for creating the slides in the form of a JSON string that will specify the specific locations in the presentation, the slide content and style. The Format is as follows: The JSON must contain a top-level field version (string), e.g. 1.0, and an array actions containing one or more action objects, each describing an operation to add a slide. Each action object must have: op always add_slide; anchor an object indicating where to insert the slide, with mode before, after, or at_end and by an object with slideKey referencing an existing slide in the presentation metadata—use the explicit slideKey for the very first slide you generate, then use slideKey lastInserted to chain subsequent slides; layoutRelId the layout relation ID for the slide as defined in the presentation’s layouts metadata (e.g. rId2); and elements an array of content elements to fill the slide. Each element can be: type ""title"" with text (string) and optional style object containing fontFamily, fontSize, bold?, italic?, and color?; type ""bullet_text"" with placeholder set to the exact placeholder name from the target layout’s metadata (for example ""PlaceholderValues { }""), bullets either an array of strings or an array of objects of the form { text: string, level: integer } (you choose the level, starting with 0), and optional style; or type ""text"" with placeholder set to the exact placeholder name from the target layout’s metadata (for example ""PlaceholderValues { }""), text (string), and optional style. You can specify a style for any text element using a style object with the keys fontFamily, fontSize, bold, italic, and color. For multi-slide plans, use slideKey lastInserted as the anchor for subsequent slides so they insert sequentially. Do not include any fields not shown above—for example do not include slideId or index—and do not include explanations or comments in your response; output only the JSON matching the described schema. It is critical that you strictly comply with this format and use the exact placeholder names from the layout metadata, because your output will be directly parsed and executed and any deviation or syntax error will cause processing to fail. Sample Output: {version: 1.0,actions: [{op: add_slide,anchor: {mode: at_end,by: {slideKey: SID-296}},layoutRelId: rId2,elements: [{type: title,text: My new Slide,style: {fontFamily: Calibri,fontSize: 36,bold: true}},{type: bullet_text,placeholder: PlaceholderValues { },bullets: [First point,Second point,Third point],style: {fontFamily: Calibri,fontSize: 20}}]},{op: add_slide,anchor: {mode: after,by: {slideKey: lastInserted}},layoutRelId: rId2,elements: [{type: title,text: Zweite Folie,style: {fontFamily: Calibri,fontSize: 36,bold: true}},{type: bullet_text,placeholder: PlaceholderValues { },bullets: [{text: Another topic,level:0},{text: A subpoint,level:1}],style: {fontFamily: Calibri,fontSize: 20}}]}]} Important: Output only a single JSON object as shown, without comments or explanation. Use the correct anchor key and layoutRelId from the presentation metadata you are provided. You may create as many add_slide actions as necessary. You may specify any appropriate slide content, structure, and style. Any deviation from this structure will cause processing to fail."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instruction refers to markups, track-changes, changes, insertions, deletions or revisions in the text, they are found between the tags '<ins>' and '</ins>' for insertions and between the tags '<del>' and '</del>' for deletions. ONLY what is encapsulated by these tags has changed or been marked-up (but do not refer to the tags in your output, as the user does not see them; they just indicate to you where the revisions are)."
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole words; wildcards and special characters are not supported. (h) As a special rule, do not consider additional or missing empty paragraphs at the end of the two texts as a relevant difference (they shall NOT trigger any action).\n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
@@ -1699,7 +1706,7 @@ Namespace SharedLibrary
         End Sub
 
 
-        Public Shared Sub InsertTextWithMarkdown(selection As Object, gptResult As String)
+        Public Shared Sub InsertTextWithMarkdown(selection As Object, gptResult As String, TrailingCR As Boolean)
 
             Dim wordSelection As Microsoft.Office.Interop.Word.Selection = CType(selection, Microsoft.Office.Interop.Word.Selection)
             Dim wordRange As Microsoft.Office.Interop.Word.Range = wordSelection.Range
@@ -1708,6 +1715,42 @@ Namespace SharedLibrary
             'Dim htmlText As String = Markdown.ToHtml(gptResult, markdownPipeline)
 
             'htmlText = htmlText.Replace(vbCrLf, "<br>").Replace(vbCr, "<br>").Replace(vbLf, "<br>")
+
+            Debug.WriteLine("ITWM: " & gptResult)
+
+            gptResult = gptResult.Replace(vbLf & " " & vbLf, vbLf & vbLf)
+
+            Dim pattern As String = "((\r\n|\n|\r){2,})"
+            gptResult = Regex.Replace(gptResult, pattern, Function(m As Match)
+                                                              ' Prüfen, ob das Match bis zum Ende des Strings reicht:
+                                                              If m.Index + m.Length = gptResult.Length Then
+                                                                  ' Am Ende: Rückgabe der Umbrüche wie sie sind
+                                                                  Return m.Value
+                                                              Else
+                                                                  ' Andernfalls: &nbsp; zwischen die Umbrüche einfügen
+                                                                  Dim breaks As String = m.Value
+                                                                  Dim regexBreaks As New Regex("(\r\n|\n|\r)")
+                                                                  Dim splitBreaks = regexBreaks.Matches(breaks)
+                                                                  If splitBreaks.Count <= 1 Then Return breaks
+                                                                  Dim result As String = splitBreaks(0).Value
+                                                                  For i As Integer = 1 To splitBreaks.Count - 1
+                                                                      result &= vbCrLf & "&nbsp;" & vbCrLf & splitBreaks(i).Value
+                                                                  Next
+                                                                  Return result
+                                                              End If
+                                                          End Function)
+
+            ' 1) Nur doppelte CRLF zwischen sichtbaren Zeichen erwischen:
+            'Dim pattern As String = "(?m)(?<=\S)(\r\n\r\n|\n\n)(?=\S)"
+
+            ' 2) Ersetze durch: Leerzeile, &nbsp;-Zeile, Leerzeile
+            'Dim replacement As String = vbCrLf & vbCrLf & "&nbsp;" & vbCrLf & vbCrLf
+
+            'Try
+            'gptResult = Regex.Replace(gptResult, pattern, replacement)
+            'Catch ex As System.Exception
+            ' Falls hier etwas schiefgeht, kannst Du es loggen oder weiterwerfen
+            'End Try
 
             Dim builder As New MarkdownPipelineBuilder()
 
@@ -1726,10 +1769,27 @@ Namespace SharedLibrary
             builder.UseAdvancedExtensions()
             builder.UseGenericAttributes()
 
-            Dim pipeline = builder.Build()
+            Dim pipeline As MarkdownPipeline = builder.Build()
 
-            Dim htmlText As String = Markdown.ToHtml(gptResult, pipeline)
-            InsertTextWithFormat(htmlText, wordRange, True)
+            Dim htmlresult As String = Markdown.ToHtml(gptResult, pipeline)
+
+
+            htmlresult = htmlResult _
+                .Replace(vbCrLf, "") _
+                .Replace(vbCr, "") _
+                .Replace(vbLf, "")
+
+
+            ' Load the HTML into HtmlDocument
+            Dim htmlDoc As New HtmlAgilityPack.HtmlDocument()
+            Dim fullhtml As String
+            htmlDoc.LoadHtml(htmlResult)
+
+            fullhtml = htmlDoc.DocumentNode.OuterHtml
+
+            Debug.WriteLine("ITWM: " & fullhtml)
+
+            InsertTextWithFormat(fullhtml, wordRange, True, Not TrailingCR)
 
         End Sub
 
@@ -1768,11 +1828,233 @@ Namespace SharedLibrary
             selection.SetRange(startPosition, endPosition)
         End Sub
 
+        Public Shared Sub InsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean, Optional NoTrailingCR As Boolean = False)
+            Try
+                If formattedText Is Nothing OrElse formattedText.Trim() = "" Then
+                    Return
+                End If
+
+                ' --- 0) Ursprünglichen Range-Anfang klonen und auf Start kollabieren ---
+                Dim origRange As Microsoft.Office.Interop.Word.Range = range.Duplicate()
+                origRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseStart)
+
+                Debug.WriteLine("PreFinalHTML=" & formattedText)
+
+                ' --- 1) HTML laden und <br> in eigene <p>-Elemente aufsplitten ---
+                Dim doc As New HtmlAgilityPack.HtmlDocument()
+                doc.LoadHtml(formattedText)
+
+                ' Alle <p> UND <li>-Knoten auswählen
+                Dim nodes = doc.DocumentNode.SelectNodes("//p | //li")
+                If nodes IsNot Nothing Then
+                    For Each node As HtmlAgilityPack.HtmlNode In nodes.ToList()
+                        Dim segments = System.Text.RegularExpressions.Regex _
+                           .Split(node.InnerHtml, "<br\s*/?>",
+                                  System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        If segments.Length <= 1 Then Continue For
+
+                        If node.Name.Equals("p", StringComparison.OrdinalIgnoreCase) Then
+                            Dim parent As HtmlAgilityPack.HtmlNode = node.ParentNode
+                            If parent Is Nothing Then Continue For  ' ← hier der Null-Check!
+
+                            For Each seg As String In segments
+                                Dim txt = seg.Trim()
+                                If String.IsNullOrEmpty(txt) Then Continue For
+                                Dim newP As HtmlAgilityPack.HtmlNode = doc.CreateElement("p")
+                                newP.InnerHtml = txt
+                                parent.InsertBefore(newP, node)
+                            Next
+                            parent.RemoveChild(node)
+
+                        ElseIf node.Name.Equals("li", StringComparison.OrdinalIgnoreCase) Then
+                            node.RemoveAllChildren()
+                            For Each seg As String In segments
+                                Dim txt = seg.Trim()
+                                If String.IsNullOrEmpty(txt) Then Continue For
+                                Dim newP As HtmlAgilityPack.HtmlNode = doc.CreateElement("p")
+                                newP.InnerHtml = txt
+                                node.AppendChild(newP)
+                            Next
+                        End If
+                    Next
+                End If
+
+                'Dim pNodes = doc.DocumentNode.SelectNodes("//p")
+                'If pNodes IsNot Nothing Then
+                'For Each pNode As HtmlAgilityPack.HtmlNode In pNodes.ToList()
+                'Dim segments = System.Text.RegularExpressions.Regex.Split(pNode.InnerHtml, "<br\s*/?>", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                'If segments.Length <= 1 Then Continue For
+                '
+                'Dim newPs As New List(Of HtmlAgilityPack.HtmlNode)()
+                'For Each seg As String In segments
+                'Dim txt = seg.Trim()
+                'If String.IsNullOrEmpty(txt) Then Continue For
+                'Dim newP = doc.CreateElement("p")
+                'newP.InnerHtml = txt
+                'newPs.Add(newP)
+                'Next
+                '
+                'Dim parent = pNode.ParentNode
+                'For Each np As HtmlAgilityPack.HtmlNode In newPs
+                'Parent.InsertBefore(np, pNode)
+                'Next
+                'Parent.RemoveChild(pNode)
+                'Next
+                'End If
+
+                formattedText = doc.DocumentNode.OuterHtml
+
+                ' --- 2) Schrift- und Absatz-Eigenschaften vom Range-Start auslesen ---
+                Dim fontName As String = origRange.Font.Name
+                Dim fontSize As Single = origRange.Font.Size
+                Dim isBold As Boolean = (origRange.Font.Bold = 1)
+                Dim isItalic As Boolean = (origRange.Font.Italic = 1)
+                Dim fontColor As Integer = origRange.Font.Color
+                ' BGR → RGB → HEX
+                Dim bgr As Integer = fontColor And &HFFFFFF
+                Dim r As Integer = (bgr And &HFF)
+                Dim g As Integer = ((bgr >> 8) And &HFF)
+                Dim b As Integer = ((bgr >> 16) And &HFF)
+                Dim hexColor As String = String.Format("#{0:X2}{1:X2}{2:X2}", r, g, b)
+
+                Dim para As Microsoft.Office.Interop.Word.ParagraphFormat = origRange.ParagraphFormat
+                Dim spaceBefore As Single = para.SpaceBefore
+                Dim spaceAfter As Single = para.SpaceAfter
+                Dim lineRule As Microsoft.Office.Interop.Word.WdLineSpacing = para.LineSpacingRule
+                Dim rawLineSpacing As Single = para.LineSpacing
+
+                Dim lineHeightCss As String
+                Select Case lineRule
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceSingle
+                        lineHeightCss = "normal"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpace1pt5
+                        lineHeightCss = "1.5"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceDouble
+                        lineHeightCss = "2"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceMultiple
+                        lineHeightCss = rawLineSpacing.ToString() & "pt"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceExactly,
+                 Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceAtLeast
+                        lineHeightCss = rawLineSpacing.ToString() & "pt"
+                    Case Else
+                        lineHeightCss = "normal"
+                End Select
+
+                ' --- 3) CSS-String bauen ---
+                Dim css As String = $"font-family:'{fontName}'; font-size:{fontSize}pt; color:{hexColor};"
+                If isBold Then css &= " font-weight:bold;"
+                If isItalic Then css &= " font-style:italic;"
+                css &= $" line-height:{lineHeightCss}; margin-top:{spaceBefore}pt; margin-bottom:{spaceAfter}pt;"
+
+                ' --- 4) Inline-Style auf alle <p>-Elemente anwenden ---
+                'Dim allPs = doc.DocumentNode.SelectNodes("//p")
+                'If allPs IsNot Nothing Then
+                'For Each pNode As HtmlAgilityPack.HtmlNode In allPs
+                'pNode.SetAttributeValue("style", css)
+                'Next
+                'End If
+                Dim allTextContainers = doc.DocumentNode.SelectNodes("//p | //li")
+                If allTextContainers IsNot Nothing Then
+                    For Each node As HtmlNode In allTextContainers
+                        node.SetAttributeValue("style", css)
+                    Next
+                End If
+
+                formattedText = doc.DocumentNode.OuterHtml
+
+                ' --- 5) HTML-Fragment zusammensetzen ---
+                Dim htmlHeader As String =
+            "<html><head><meta charset=""UTF-8""></head>" &
+            "<body><!--StartFragment-->"
+                Dim htmlFooter As String =
+            "<!--EndFragment--></body></html>"
+
+                Dim cleanedHtml As String = htmlHeader & formattedText.Trim() & htmlFooter
+                cleanedHtml = CreateProperHtml(cleanedHtml) _
+                        .Replace(vbCr, "") _
+                        .Replace(vbLf, "") _
+                        .Replace(vbCrLf, "")
+
+                ' --- 6) Clipboard-Formattierung für HTML ---
+                Dim dummyHtml As String =
+            $"Version:0.9{vbCrLf}" &
+            $"StartHTML:00000000{vbCrLf}" &
+            $"EndHTML:00000000{vbCrLf}" &
+            $"StartFragment:00000000{vbCrLf}" &
+            $"EndFragment:00000000{vbCrLf}" &
+            cleanedHtml
+
+                Dim startHtmlOffset As Integer = dummyHtml.IndexOf("<html>")
+                Dim startFragmentOffset As Integer = dummyHtml.IndexOf("<!--StartFragment-->") + "<!--StartFragment-->".Length
+                Dim endFragmentOffset As Integer = dummyHtml.IndexOf("<!--EndFragment-->")
+                Dim endHtmlOffset As Integer = dummyHtml.Length
+
+                Dim finalHtml = dummyHtml _
+            .Replace("StartHTML:00000000", $"StartHTML:{startHtmlOffset:D8}") _
+            .Replace("EndHTML:00000000", $"EndHTML:{endHtmlOffset:D8}") _
+            .Replace("StartFragment:00000000", $"StartFragment:{startFragmentOffset:D8}") _
+            .Replace("EndFragment:00000000", $"EndFragment:{endFragmentOffset:D8}")
+
+                Debug.WriteLine("FinalHTML=" & finalHtml)
+
+                ' --- 7) Clipboard auf STA-Thread setzen ---
+                Dim clipboardThread As New System.Threading.Thread(Sub()
+                                                                       System.Windows.Forms.Clipboard.SetText(finalHtml, System.Windows.Forms.TextDataFormat.Html)
+                                                                   End Sub)
+                clipboardThread.SetApartmentState(System.Threading.ApartmentState.STA)
+                clipboardThread.Start()
+                clipboardThread.Join()
+
+                ' --- 8) Einfügen in den Word-Range ---
+                range.Select()
+                If ReplaceSelection Then
+                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
+                Else
+                    range.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    range.Select()
+                    range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
+                End If
+
+                System.Threading.Thread.Sleep(100)
+                range = range.Application.Selection.Range
+
+                ' --- 9) Optional: letztes Newline-Zeichen entfernen ---
+                If ReplaceSelection AndAlso NoTrailingCR Then
+                    Dim insertedRange As Microsoft.Office.Interop.Word.Range = range.Application.Selection.Range
+                    Dim delRng As Microsoft.Office.Interop.Word.Range = insertedRange.Duplicate()
+                    delRng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    delRng.MoveStart(Microsoft.Office.Interop.Word.WdUnits.wdCharacter, -1)
+                    delRng.Delete()
+                    insertedRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    insertedRange.Select()
+                End If
+
+            Catch ex As System.Exception
+                System.Windows.Forms.MessageBox.Show("InsertTextWithFormat Error: " & ex.Message)
+            End Try
+        End Sub
 
 
+        Public Shared Sub RemoveTrailingCr(ByRef range As Microsoft.Office.Interop.Word.Range)
+            Try
+                ' Maximal 4 Zeichen von hinten prüfen
+                Dim maxCheck As Integer = Math.Min(4, range.Characters.Count)
+                For i As Integer = 1 To maxCheck
+                    ' Index des i‑ten letzten Zeichens
+                    Dim idx As Integer = range.Characters.Count - i + 1
+                    If range.Characters(idx).Text = vbCr Or range.Characters(idx).Text = vbLf Then
+                        ' gefundenes Absatzzeichen löschen und Schleife beenden
+                        range.Characters(idx).Delete()
+                        Exit For
+                    End If
+                Next
+            Catch ex As System.Exception
+                System.Windows.Forms.MessageBox.Show("RemoveTrailingCr Error: " & ex.Message)
+            End Try
+        End Sub
 
 
-        Public Shared Sub InsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean)
+        Public Shared Sub OldInsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean)
 
             Try
 
@@ -2275,6 +2557,7 @@ Namespace SharedLibrary
             Dim splash As SplashScreenCountDown = Nothing
             Dim cts As System.Threading.CancellationTokenSource = Nothing
 
+            Dim TokenCountString As String = ""
 
             Try
 
@@ -2336,6 +2619,7 @@ Namespace SharedLibrary
                     TemperatureValue = If(String.IsNullOrEmpty(Temperature) OrElse Temperature = "Default", context.INI_Temperature_2, Temperature)
                     ModelValue = If(String.IsNullOrEmpty(Model) OrElse Model = "Default", context.INI_Model_2, Model)
                     TimeoutValue = If(Timeout = 0, context.INI_Timeout_2, Timeout)
+                    TokenCountString = context.INI_TokenCount_2
                 Else
 
                     Endpoint = Replace(Replace(Replace(context.INI_Endpoint, "{model}", context.INI_Model), "{apikey}", context.DecodedAPI), "{ownsessionid}", OwnSessionID)
@@ -2347,6 +2631,7 @@ Namespace SharedLibrary
                     TemperatureValue = If(String.IsNullOrEmpty(Temperature) OrElse Temperature = "Default", context.INI_Temperature, Temperature)
                     ModelValue = If(String.IsNullOrEmpty(Model) OrElse Model = "Default", context.INI_Model, Model)
                     TimeoutValue = If(Timeout = 0, context.INI_Timeout, Timeout)
+                    TokenCountString = context.INI_TokenCount
                 End If
 
                 Dim timeoutSeconds = CInt(TimeoutValue \ 1000)
@@ -2653,6 +2938,7 @@ Namespace SharedLibrary
                                 ' Process the response
 
                                 Dim root As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(responseText)
+                                LogTokenSpending(root, TokenCountString, AddUserPrompt)
 
                                 If multiCall Then
 
@@ -2792,9 +3078,14 @@ Namespace SharedLibrary
                         Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
                     End If
                     If context.INI_Clean Then
-                        Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
-                        Returnvalue = RemoveHiddenMarkers(Returnvalue)
-                    End If
+                    'Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
+                    Returnvalue = System.Text.RegularExpressions.Regex.Replace(
+                                    Returnvalue,
+                                    "(?<=\S) {2,}",
+                                    " "
+                                )
+                    Returnvalue = RemoveHiddenMarkers(Returnvalue)
+                End If
 
                     If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
 
@@ -2820,6 +3111,148 @@ Namespace SharedLibrary
             End Try
         End Function
 
+
+
+        ''' <summary>
+        ''' Logs token usage and optional cost to a desktop file in a thread‑safe, retry‑enabled manner.
+        ''' </summary>
+        Private Shared Sub LogTokenSpending(ByRef root As JToken, tokenCountString As String, prompt As String)
+            ' 0) only run if there's something to log
+            If String.IsNullOrWhiteSpace(tokenCountString) Or String.IsNullOrWhiteSpace(prompt) Then
+                Return
+            End If
+
+            ' 1) split & trim all parts
+            Dim parts() As String
+            Try
+                parts = tokenCountString _
+            .Split(";"c) _
+            .Select(Function(p) p.Trim()) _
+            .ToArray()
+            Catch
+                Return
+            End Try
+
+            ' 2) determine which parts are segment names vs multiplier & currency
+            Dim segmentNames As String()
+            Dim multiplier As Double? = Nothing
+            Dim currencyCode As String = String.Empty
+
+            If parts.Length >= 3 Then
+                segmentNames = parts.Take(parts.Length - 2).ToArray()
+
+                Dim rawMult = parts(parts.Length - 2)
+                Dim parsedMult As Double = 0
+                If Double.TryParse(rawMult, NumberStyles.Float, CultureInfo.InvariantCulture, parsedMult) Then
+                    multiplier = parsedMult
+                    currencyCode = parts(parts.Length - 1)
+                Else
+                    ' invalid multiplier → skip cost line
+                    multiplier = Nothing
+                End If
+            Else
+                segmentNames = parts
+            End If
+
+            ' 3) extract each token value, auto‑prefix usageMetadata if needed
+            Dim segmentValues As New Dictionary(Of String, Long)()
+            Dim totalTokens As Long = 0
+
+            For Each name In segmentNames
+                Dim path = If(name.Contains("."), name, $"usageMetadata.{name}")
+                Dim tok As String = Nothing
+
+                Try
+                    tok = root.SelectToken(path)?.ToString()
+                Catch
+                    Return  ' silent exit on any JSON path error
+                End Try
+
+                If String.IsNullOrEmpty(tok) Then
+                    Return
+                End If
+
+                Dim n As Long = 0
+                If Not Long.TryParse(tok, n) Then
+                    Return
+                End If
+
+                segmentValues(name) = n
+                totalTokens += n
+            Next
+
+            ' 4) build the log entry
+            Dim nowStamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+            Dim sb As New StringBuilder()
+            sb.AppendLine(nowStamp)
+
+            ' truncate prompt + ellipsis if needed
+            Dim promptText = prompt
+            If promptText.Length > 2048 Then
+                promptText = promptText.Substring(0, 2048) & "…"
+            End If
+            sb.AppendLine("Prompt: " & promptText)
+
+            sb.Append("Token counts: ")
+            For Each kvp In segmentValues
+                sb.Append($"{kvp.Value} ({kvp.Key}), ")
+            Next
+            If sb.Length >= 2 Then sb.Length -= 2  ' remove trailing comma+space
+            sb.AppendLine()
+
+            sb.AppendLine($"Total tokens: {totalTokens} (total)")
+
+            If multiplier.HasValue Then
+                Dim costValue = Math.Round(totalTokens * multiplier.Value / 1000, 2)
+                sb.AppendLine($"Value: {currencyCode} {costValue} ({currencyCode} {multiplier.Value}/1000 tokens)")
+            End If
+
+            sb.AppendLine()  ' blank line separator            
+            Dim entryText = sb.ToString()
+
+            ' 5) determine file path on Desktop
+            Dim desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+            Dim filePath = Path.Combine(desktop, "redink-cost.txt")
+
+            ' 6) write with exclusive lock & retry
+            Const maxRetries As Integer = 5
+            Const delayMs As Integer = 100
+            Dim written As Boolean = False
+
+            For attempt As Integer = 1 To maxRetries
+                Try
+                    Using fs As New FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)
+                        ' write header if file is new
+                        If fs.Length = 0 Then
+                            Dim header = $"RED INK FREESTYLE TOKEN SPENDING LOG (USER: {Environment.UserName})" & Environment.NewLine & Environment.NewLine
+                            Dim hb() = Encoding.UTF8.GetBytes(header)
+                            fs.Write(hb, 0, hb.Length)
+                        End If
+
+                        ' append entry
+                        fs.Seek(0, SeekOrigin.End)
+                        Dim eb() = Encoding.UTF8.GetBytes(entryText)
+                        fs.Write(eb, 0, eb.Length)
+                        fs.Flush()
+                    End Using
+
+                    written = True
+                    Exit For
+
+                Catch
+                    ' wait a bit then retry
+                    Thread.Sleep(delayMs)
+                End Try
+            Next
+
+            ' 7) if all attempts fail, show error dialog
+            If Not written Then
+                ShowCustomMessageBox(
+            $"Error writing log file '{filePath}'.{Environment.NewLine}" &
+            $"Entry was:{Environment.NewLine}{entryText}"
+        )
+            End If
+        End Sub
 
 
         Private Shared Function HandleObject(jsonObject As Newtonsoft.Json.Linq.JObject, ResponseKey As String, ResponseText As String) As String
@@ -3481,7 +3914,82 @@ Namespace SharedLibrary
         End Function
 
 
-        Public Shared Function CleanString(ByVal input As String) As String
+        Public Shared Function CleanString(ByVal input As String, Optional ByVal collapseSpaces As Boolean = True) As String
+            ' Wenn leer oder nur Whitespace, leeren String zurückgeben
+            If System.String.IsNullOrWhiteSpace(input) Then
+                Return ""
+            End If
+
+            ' 1) First pass: alles escapen in sbEscaped
+            Dim sbEscaped As New System.Text.StringBuilder(input.Length * 2)
+            For Each c As Char In input
+                Select Case AscW(c)
+                    Case 8      ' backspace
+                        sbEscaped.Append("\b")
+                    Case 9      ' tab
+                        sbEscaped.Append("\t")
+                    Case 10     ' line feed
+                        sbEscaped.Append("\n")
+                    Case 12     ' form feed
+                        sbEscaped.Append("\f")
+                    Case 13     ' carriage return → normalized to "\n"
+                        sbEscaped.Append("\n")
+                    Case 34     ' double-quote → must become "\""
+                        sbEscaped.Append("\""")
+                    Case 92     ' backslash → "\\"
+                        sbEscaped.Append("\\")
+                    Case 0 To 31 ' other control codes → "\uXXXX"
+                        sbEscaped.Append("\u" & AscW(c).ToString("X4"))
+                    Case Else
+                        sbEscaped.Append(c)
+                End Select
+            Next
+
+            ' 2) Zweiter Pass: Leerzeichen-Zusammenfassung nur wenn collapseSpaces = True
+            If collapseSpaces Then
+                Dim raw As String = sbEscaped.ToString()
+                Dim lines As String() = raw.Split(New String() {"\n"}, System.StringSplitOptions.None)
+                Dim sbResult As New System.Text.StringBuilder(raw.Length)
+
+                For i As Integer = 0 To lines.Length - 1
+                    Dim line As String = lines(i)
+                    ' Führende Leerzeichen beibehalten
+                    Dim indentLen As Integer = 0
+                    While indentLen < line.Length AndAlso line(indentLen) = " "c
+                        indentLen += 1
+                    End While
+                    Dim prefix As String = line.Substring(0, indentLen)
+                    Dim rest As String = line.Substring(indentLen)
+
+                    ' Zusammenfassung mehrerer Spaces in Rest
+                    Dim sbLine As New System.Text.StringBuilder(rest.Length)
+                    Dim lastWasSpaceInner As Boolean = False
+                    For Each c2 As Char In rest
+                        If c2 = " "c Then
+                            If Not lastWasSpaceInner Then
+                                sbLine.Append(" "c)
+                                lastWasSpaceInner = True
+                            End If
+                        Else
+                            sbLine.Append(c2)
+                            lastWasSpaceInner = False
+                        End If
+                    Next
+
+                    sbResult.Append(prefix).Append(sbLine.ToString())
+                    If i < lines.Length - 1 Then sbResult.Append("\n")
+                Next
+
+                Return sbResult.ToString()
+            End If
+
+            ' Wenn collapseSpaces = False, einfach den escaped String zurückgeben
+            Return sbEscaped.ToString()
+        End Function
+
+
+
+        Public Shared Function OldCleanString(ByVal input As String) As String
             ' If empty or whitespace, return empty
             If String.IsNullOrWhiteSpace(input) Then
                 Return ""
@@ -3874,7 +4382,8 @@ Namespace SharedLibrary
                 context.INI_HeaderA = If(configDict.ContainsKey("HeaderA"), configDict("HeaderA"), "")
                 context.INI_HeaderB = If(configDict.ContainsKey("HeaderB"), configDict("HeaderB"), "")
                 context.INI_Response = If(configDict.ContainsKey("Response"), configDict("Response"), "")
-                context.INI_ANON = If(configDict.ContainsKey("Anon"), configDict("Anon"), "")
+                context.INI_Anon = If(configDict.ContainsKey("Anon"), configDict("Anon"), "")
+                context.INI_TokenCount = If(configDict.ContainsKey("TokenCount"), configDict("TokenCount"), "")
                 context.INI_APICall = If(configDict.ContainsKey("APICall"), configDict("APICall"), "")
                 context.INI_APICall_Object = If(configDict.ContainsKey("APICall_Object"), configDict("APICall_Object"), "")
                 context.INI_Timeout = If(configDict.ContainsKey("Timeout"), CLng(configDict("Timeout")), 0)
@@ -3909,6 +4418,7 @@ Namespace SharedLibrary
                 context.SP_Add_KeepHTMLIntact = If(configDict.ContainsKey("SP_Add_KeepHTMLIntact"), configDict("SP_Add_KeepHTMLIntact"), Default_SP_Add_KeepHTMLIntact)
                 context.SP_Add_KeepInlineIntact = If(configDict.ContainsKey("SP_Add_KeepInlineIntact"), configDict("SP_Add_KeepInlineIntact"), Default_SP_Add_KeepInlineIntact)
                 context.SP_Add_Bubbles = If(configDict.ContainsKey("SP_Add_Bubbles"), configDict("SP_Add_Bubbles"), Default_SP_Add_Bubbles)
+                context.SP_Add_Slides = If(configDict.ContainsKey("SP_Add_Slides"), configDict("SP_Add_Slides"), Default_SP_Add_Slides)
                 context.SP_BubblesExcel = If(configDict.ContainsKey("SP_BubblesExcel"), configDict("SP_BubblesExcel"), Default_SP_BubblesExcel)
                 context.SP_Add_Revisions = If(configDict.ContainsKey("SP_Add_Revisions"), configDict("SP_Add_Revisions"), Default_SP_Add_Revisions)
                 context.SP_MarkupRegex = If(configDict.ContainsKey("SP_MarkupRegex"), configDict("SP_MarkupRegex"), Default_SP_MarkupRegex)
@@ -4012,6 +4522,7 @@ Namespace SharedLibrary
                     context.INI_HeaderB_2 = If(configDict.ContainsKey("HeaderB_2"), configDict("HeaderB_2"), "")
                     context.INI_Response_2 = If(configDict.ContainsKey("Response_2"), configDict("Response_2"), "")
                     context.INI_Anon_2 = If(configDict.ContainsKey("Anon_2"), configDict("Anon_2"), "")
+                    context.INI_TokenCount_2 = If(configDict.ContainsKey("TokenCount_2"), configDict("TokenCount_2"), "")
                     context.INI_APICall_2 = If(configDict.ContainsKey("APICall_2"), configDict("APICall_2"), "")
                     context.INI_APICall_Object_2 = If(configDict.ContainsKey("APICall_Object_2"), configDict("APICall_Object_2"), "")
                     context.INI_Timeout_2 = If(configDict.ContainsKey("Timeout_2"), CLng(configDict("Timeout_2")), 0)
@@ -4327,6 +4838,7 @@ Namespace SharedLibrary
                 mc.HeaderB = If(String.IsNullOrEmpty(context.INI_HeaderB_2), "", context.INI_HeaderB_2)
                 mc.Response = If(String.IsNullOrEmpty(context.INI_Response_2), "", context.INI_Response_2)
                 mc.Anon = If(String.IsNullOrEmpty(context.INI_Anon_2), "", context.INI_Anon_2)
+                mc.TokenCount = If(String.IsNullOrEmpty(context.INI_TokenCount_2), "", context.INI_TokenCount_2)
                 mc.APICall = If(String.IsNullOrEmpty(context.INI_APICall_2), "", context.INI_APICall_2)
                 mc.APICall_Object = If(String.IsNullOrEmpty(context.INI_APICall_Object_2), "", context.INI_APICall_Object_2)
                 mc.Timeout = context.INI_Timeout_2
@@ -4360,6 +4872,7 @@ Namespace SharedLibrary
                 context.INI_HeaderB_2 = If(Not String.IsNullOrEmpty(config.HeaderB), config.HeaderB, "")
                 context.INI_Response_2 = If(Not String.IsNullOrEmpty(config.Response), config.Response, "")
                 context.INI_Anon_2 = If(Not String.IsNullOrEmpty(config.Anon), config.Anon, "")
+                context.INI_TokenCount_2 = If(Not String.IsNullOrEmpty(config.TokenCount), config.TokenCount, "")
                 context.INI_APICall_2 = If(Not String.IsNullOrEmpty(config.APICall), config.APICall, "")
                 context.INI_APICall_Object_2 = If(Not String.IsNullOrEmpty(config.APICall_Object), config.APICall_Object, "")
                 context.INI_Timeout_2 = If(config.Timeout <> 0, config.Timeout, 0)
@@ -7483,7 +7996,9 @@ Namespace SharedLibrary
                 Case "Response"
                     Return context.INI_Response
                 Case "Anon"
-                    Return context.INI_ANON
+                    Return context.INI_Anon
+                Case "TokenCount"
+                    Return context.INI_TokenCount
                 Case "APIKey_2"
                     Return context.INI_APIKeyBack_2
                 Case "Temperature_2"
@@ -7653,7 +8168,9 @@ Namespace SharedLibrary
                 Case "Response"
                     context.INI_Response = value
                 Case "Anon"
-                    context.INI_ANON = value
+                    context.INI_Anon = value
+                Case "TokenCount"
+                    context.INI_TokenCount = value
                 Case "APIKey_2"
                     context.INI_APIKeyBack_2 = value
                 Case "APIKeyPrefix_2"
@@ -7678,6 +8195,8 @@ Namespace SharedLibrary
                     context.INI_Response_2 = value
                 Case "Anon_2"
                     context.INI_Anon_2 = value
+                Case "TokenCount_2"
+                    context.INI_TokenCount_2 = value
                 Case "OAuth2ClientMail"
                     context.INI_OAuth2ClientMail = value
                 Case "OAuth2Scopes"
@@ -7856,9 +8375,13 @@ Namespace SharedLibrary
             context.INI_Response = context.INI_Response_2
             context.INI_Response_2 = temp
 
-            temp = context.INI_ANON
-            context.INI_ANON = context.INI_Anon_2
+            temp = context.INI_Anon
+            context.INI_Anon = context.INI_Anon_2
             context.INI_Anon_2 = temp
+
+            temp = context.INI_TokenCount
+            context.INI_TokenCount = context.INI_TokenCount_2
+            context.INI_TokenCount_2 = temp
 
             temp = context.INI_APICall
             context.INI_APICall = context.INI_APICall_2
@@ -7951,6 +8474,7 @@ Namespace SharedLibrary
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
                     {"Anon", context.INI_Anon},
+                    {"TokenCount", context.INI_TokenCount},
                     {"APICall", context.INI_APICall},
                     {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
@@ -7987,6 +8511,7 @@ Namespace SharedLibrary
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
                     {"Anon_2", context.INI_Anon_2},
+                    {"TokenCount_2", context.INI_TokenCount_2},
                     {"APICall_2", context.INI_APICall_2},
                     {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
@@ -8064,6 +8589,7 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", context.SP_Add_Bubbles},
+                    {"SP_Add_Slides", context.SP_Add_Slides},
                     {"SP_BubblesExcel", context.SP_BubblesExcel},
                     {"SP_Add_Revisions", context.SP_Add_Revisions},
                     {"SP_MarkupRegex", context.SP_MarkupRegex},
@@ -8107,6 +8633,7 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", Default_SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", Default_SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", Default_SP_Add_Bubbles},
+                    {"SP_Add_Slides", Default_SP_Add_Slides},
                     {"SP_BubblesExcel", Default_SP_BubblesExcel},
                     {"SP_Add_Revisions", Default_SP_Add_Revisions},
                     {"SP_MarkupRegex", Default_SP_MarkupRegex},
@@ -8214,7 +8741,8 @@ Namespace SharedLibrary
                     {"HeaderA", context.INI_HeaderA},
                     {"HeaderB", context.INI_HeaderB},
                     {"Response", context.INI_Response},
-                    {"Anon", context.INI_ANON},
+                    {"Anon", context.INI_Anon},
+                    {"TokenCount", context.INI_TokenCount},
                     {"APICall", context.INI_APICall},
                     {"APICall_Object", context.INI_APICall_Object},
                     {"Timeout", context.INI_Timeout.ToString()},
@@ -8230,6 +8758,7 @@ Namespace SharedLibrary
                     {"HeaderB_2", context.INI_HeaderB_2},
                     {"Response_2", context.INI_Response_2},
                     {"Anon_2", context.INI_Anon_2},
+                    {"TokenCount_2", context.INI_TokenCount_2},
                     {"APICall_2", context.INI_APICall_2},
                     {"APICall_Object_2", context.INI_APICall_Object_2},
                     {"Timeout_2", context.INI_Timeout_2.ToString()},
@@ -8481,7 +9010,8 @@ Namespace SharedLibrary
             variableValues.Add("APICall", context.INI_APICall)
             variableValues.Add("APICall_Object", context.INI_APICall_Object)
             variableValues.Add("Response", context.INI_Response)
-            variableValues.Add("Anon", context.INI_ANON)
+            variableValues.Add("Anon", context.INI_Anon)
+            variableValues.Add("TokenCount", context.INI_TokenCount)
             variableValues.Add("DoubleS", context.INI_DoubleS)
             variableValues.Add("Clean", context.INI_Clean)
             variableValues.Add("PreCorrection", context.INI_PreCorrection)
@@ -8510,6 +9040,7 @@ Namespace SharedLibrary
             variableValues.Add("APICall_Object_2", context.INI_APICall_Object_2)
             variableValues.Add("Response_2", context.INI_Response_2)
             variableValues.Add("Anon_2", context.INI_Anon_2)
+            variableValues.Add("TokenCount_2", context.INI_TokenCount_2)
             variableValues.Add("APIEncrypted_2", context.INI_APIEncrypted_2)
             variableValues.Add("APIKeyPrefix_2", context.INI_APIKeyPrefix_2)
             variableValues.Add("OAuth2_2", context.INI_OAuth2_2)
@@ -8589,6 +9120,7 @@ Namespace SharedLibrary
             variableValues.Add("SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact)
             variableValues.Add("SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact)
             variableValues.Add("SP_Add_Bubbles", context.SP_Add_Bubbles)
+            variableValues.Add("SP_Add_Slides", context.SP_Add_Slides)
             variableValues.Add("SP_BubblesExcel", context.SP_BubblesExcel)
             variableValues.Add("SP_Add_Revisions", context.SP_Add_Revisions)
             variableValues.Add("SP_MarkupRegex", context.SP_MarkupRegex)
@@ -8622,7 +9154,8 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("APICall") Then context.INI_APICall = updatedValues("APICall")
                     If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
                     If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
-                    If updatedValues.ContainsKey("Anon") Then context.INI_ANON = updatedValues("Anon")
+                    If updatedValues.ContainsKey("Anon") Then context.INI_Anon = updatedValues("Anon")
+                    If updatedValues.ContainsKey("TokenCount") Then context.INI_TokenCount = updatedValues("TokenCount")
                     If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
                     If updatedValues.ContainsKey("Clean") Then context.INI_Clean = CBool(updatedValues("Clean"))
                     If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
@@ -8651,6 +9184,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("APICall_Object_2") Then context.INI_APICall_Object_2 = updatedValues("APICall_Object_2")
                     If updatedValues.ContainsKey("Response_2") Then context.INI_Response_2 = updatedValues("Response_2")
                     If updatedValues.ContainsKey("Anon_2") Then context.INI_Anon_2 = updatedValues("Anon_2")
+                    If updatedValues.ContainsKey("TokenCount_2") Then context.INI_TokenCount_2 = updatedValues("TokenCount_2")
                     If updatedValues.ContainsKey("APIEncrypted_2") Then context.INI_APIEncrypted_2 = CBool(updatedValues("APIEncrypted_2"))
                     If updatedValues.ContainsKey("APIKeyPrefix_2") Then context.INI_APIKeyPrefix_2 = updatedValues("APIKeyPrefix_2")
                     If updatedValues.ContainsKey("OAuth2_2") Then context.INI_OAuth2_2 = CBool(updatedValues("OAuth2_2"))
@@ -8698,6 +9232,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_Add_KeepHTMLIntact") Then context.SP_Add_KeepHTMLIntact = updatedValues("SP_Add_KeepHTMLIntact")
                     If updatedValues.ContainsKey("SP_Add_KeepInlineIntact") Then context.SP_Add_KeepInlineIntact = updatedValues("SP_Add_KeepInlineIntact")
                     If updatedValues.ContainsKey("SP_Add_Bubbles") Then context.SP_Add_Bubbles = updatedValues("SP_Add_Bubbles")
+                    If updatedValues.ContainsKey("SP_Add_Slides") Then context.SP_Add_Slides = updatedValues("SP_Add_Slides")
                     If updatedValues.ContainsKey("SP_BubblesExcel") Then context.SP_BubblesExcel = updatedValues("SP_BubblesExcel")
                     If updatedValues.ContainsKey("SP_Add_Revisions") Then context.SP_Add_Revisions = updatedValues("SP_Add_Revisions")
                     If updatedValues.ContainsKey("SP_MarkupRegex") Then context.SP_MarkupRegex = updatedValues("SP_MarkupRegex")
@@ -11011,6 +11546,7 @@ Namespace SharedLibrary
         Public Property APICall_Object As String
         Public Property Response As String
         Public Property Anon As String
+        Public Property TokenCount As String
         Public Property APIEncrypted As Boolean
         Public Property APIKeyPrefix As String
         Public Property OAuth2 As Boolean

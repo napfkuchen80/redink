@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 28.7.2025
+' 1.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -26,6 +26,7 @@ Option Explicit On
 
 Imports System.Collections.Concurrent
 Imports System.Data
+Imports System.Data.SqlTypes
 Imports System.Diagnostics
 Imports System.Drawing
 Imports System.Globalization
@@ -36,8 +37,11 @@ Imports System.Net.Http
 Imports System.Net.WebSockets
 Imports System.Runtime.CompilerServices
 Imports System.Runtime.InteropServices
+Imports System.Security.Cryptography
 Imports System.Security.Policy
 Imports System.Speech.Synthesis
+Imports System.Text.Json
+Imports System.Text.Json.Serialization
 Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports System.Threading.Tasks
@@ -48,6 +52,11 @@ Imports System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
+Imports DocumentFormat.OpenXml
+Imports DocumentFormat.OpenXml.Drawing
+Imports DocumentFormat.OpenXml.Packaging
+Imports DocumentFormat.OpenXml.Presentation
+Imports DocumentFormat.OpenXml.Wordprocessing
 Imports Google.Api.Gax.Grpc
 Imports Google.Cloud.Speech.V1
 Imports Google.Cloud.Speech.V1.LanguageCodes
@@ -57,6 +66,7 @@ Imports Grpc.Core
 Imports HtmlAgilityPack
 Imports Markdig
 Imports Microsoft.Office.Core
+Imports Microsoft.Office.Interop.PowerPoint
 Imports Microsoft.Office.Interop.Word
 Imports NAudio
 Imports NAudio.CoreAudioApi
@@ -72,7 +82,6 @@ Imports Vosk
 Imports Whisper.net
 Imports Whisper.net.LibraryLoader
 Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
-
 
 Public Class StopForm
     Inherits Form
@@ -783,14 +792,14 @@ Public Class ThisAddIn
 
     ' Fires when a file opens in Protected View.
     Private Sub WordApp_ProtectedViewWindowOpen(
-            pvWin As ProtectedViewWindow)
+            pvWin As Microsoft.Office.Interop.Word.ProtectedViewWindow)
         RemoveStartupHandlers()
         DelayedStartupTasks()
     End Sub
 
     ' Fires just before the user clicks “Edit” in Protected View.
     Private Sub WordApp_ProtectedViewWindowBeforeEdit(
-            pvWin As ProtectedViewWindow,
+            pvWin As Microsoft.Office.Interop.Word.ProtectedViewWindow,
             ByRef Cancel As Boolean)
         RemoveStartupHandlers()
         DelayedStartupTasks()
@@ -798,7 +807,7 @@ Public Class ThisAddIn
 
     ' Fires when the Protected View window is activated.
     Private Sub WordApp_ProtectedViewWindowActivate(
-            pvWin As ProtectedViewWindow)
+            pvWin As Microsoft.Office.Interop.Word.ProtectedViewWindow)
         RemoveStartupHandlers()
         DelayedStartupTasks()
     End Sub
@@ -826,7 +835,8 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.280725 Gen2 Beta Test"
+    Public Const Version As String = "V.010825 Gen2 Beta Test"
+
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -870,6 +880,7 @@ Public Class ThisAddIn
     Private Const ClipboardPrefix2 As String = "Clip:"
     Private Const PanePrefix As String = "Pane:"
     Private Const BubblesPrefix As String = "Bubbles:"
+    Private Const SlidesPrefix As String = "Slides:"
     Private Const BubbleCutText As String = " (" & ChrW(&H2702) & ")"
     Private Const SearchNextTrigger As String = "Next:"
     Private Const BoWTrigger As String = "(bow)"
@@ -1124,6 +1135,25 @@ Public Class ThisAddIn
             _context.INI_Anon = value
         End Set
     End Property
+
+    Public Shared Property INI_TokenCount As String
+        Get
+            Return _context.INI_TokenCount
+        End Get
+        Set(value As String)
+            _context.INI_TokenCount = value
+        End Set
+    End Property
+
+    Public Shared Property INI_TokenCount_2 As String
+        Get
+            Return _context.INI_TokenCount_2
+        End Get
+        Set(value As String)
+            _context.INI_TokenCount_2 = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_DoubleS As Boolean
         Get
@@ -1821,6 +1851,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Add_Bubbles = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Add_Slides As String
+        Get
+            Return _context.SP_Add_Slides
+        End Get
+        Set(value As String)
+            _context.SP_Add_Slides = value
         End Set
     End Property
 
@@ -3024,7 +3063,7 @@ Public Class ThisAddIn
             chatForm = New frmAIChat(_context)
 
             ' Set the location and size before showing the form
-            If My.Settings.FormLocation <> System.Drawing.Point.Empty AndAlso My.Settings.FormSize <> Size.Empty Then
+            If My.Settings.FormLocation <> System.Drawing.Point.Empty AndAlso My.Settings.FormSize <> System.Drawing.Size.Empty Then
                 chatForm.StartPosition = FormStartPosition.Manual
                 chatForm.Location = My.Settings.FormLocation
                 chatForm.Size = My.Settings.FormSize
@@ -3033,7 +3072,7 @@ Public Class ThisAddIn
                 chatForm.StartPosition = FormStartPosition.Manual
                 Dim screenBounds As System.Drawing.Rectangle = Screen.PrimaryScreen.WorkingArea
                 chatForm.Location = New System.Drawing.Point((screenBounds.Width - chatForm.Width) \ 2, (screenBounds.Height - chatForm.Height) \ 2)
-                chatForm.Size = New Size(650, 500) ' Set default size if needed
+                chatForm.Size = New System.Drawing.Size(650, 500) ' Set default size if needed
             End If
         End If
 
@@ -3077,41 +3116,6 @@ Public Class ThisAddIn
     End Sub
 
     Public Async Sub InLanguage1()
-
-#If False Then
-
-        Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-        Dim filePath As String = Path.Combine(desktopPath, "redinktest.txt")
-        If File.Exists(filePath) Then
-            Dim testtextorig As String = File.ReadAllText(filePath).Replace("\n", vbCrLf)
-            Dim testtext As String = SLib.ShowCustomWindow("Testfile content:", testtextorig, "", AN, True, True, True, True)
-            If testtext <> "" And testtext <> "Pane" Then
-                If testtext = "Markdown" Then
-                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
-                    InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & testtextorig, False)
-                Else
-                    SLib.PutInClipboard(testtext)
-                End If
-            ElseIf testtext = "Pane" Then
-                SP_MergePrompt_Cached = SP_MergePrompt
-                ShowPaneAsync(
-                                                                            "Test Pane",
-                                                                            testtextorig,
-                                                                            "",
-                                                                            AN,
-                                                                            noRTF:=False,
-                                                                            insertMarkdown:=True
-                                                                            )
-            End If
-            Return
-        Else
-            Return
-        End If
-
-#End If
-
         If INILoadFail() Then Return
         TranslateLanguage = INI_Language1
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Translate), True, INI_KeepFormat1, INI_KeepParaFormatInline, INI_ReplaceText1, False, False, False, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText1)
@@ -3223,9 +3227,9 @@ Public Class ThisAddIn
 
         If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim Selection As Microsoft.Office.Interop.Word.Selection = application.Selection
 
-        If selection.Type = WdSelectionType.wdSelectionIP Then
+        If Selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
             Return
         End If
@@ -3304,7 +3308,7 @@ Public Class ThisAddIn
     Public Async Sub Summarize()
         If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim Selection As Microsoft.Office.Interop.Word.Selection = application.Selection
 
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
@@ -3317,7 +3321,7 @@ Public Class ThisAddIn
         SummaryLength = 0
 
         Do
-            UserInput = SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)).Trim()
+            UserInput = SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(System.Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)).Trim()
 
             If String.IsNullOrEmpty(UserInput) Then
                 Return
@@ -3337,7 +3341,7 @@ Public Class ThisAddIn
     Public Async Sub CreatePodcast()
         If INILoadFail() Then Return
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
 
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
@@ -3399,7 +3403,7 @@ Public Class ThisAddIn
 
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text to be processed.")
             Return
@@ -3409,32 +3413,32 @@ Public Class ThisAddIn
             ReadPodcast(SelectedText)
         Else
             If selection.Text.Trim().StartsWith("{") Then
-                Dim selectedoutputpath As String = (If(String.IsNullOrEmpty(My.Settings.TTSOutputPath), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile), My.Settings.TTSOutputPath))
+                Dim selectedoutputpath As String = (If(String.IsNullOrEmpty(My.Settings.TTSOutputPath), System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile), My.Settings.TTSOutputPath))
                 selectedoutputpath = ShowCustomInputBox("Where should the audio generated from your JSON TTS file be saved to?", $"{AN} Create Audiobook", True, selectedoutputpath)
                 If String.IsNullOrWhiteSpace(selectedoutputpath) Then
                     ' Use default path (Desktop) with default filename
-                    selectedoutputpath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
+                    selectedoutputpath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
                 ElseIf selectedoutputpath.EndsWith("\") OrElse selectedoutputpath.EndsWith("/") Then
                     ' If only a folder is given, append default filename
-                    selectedoutputpath = Path.Combine(selectedoutputpath, TTSDefaultFile)
+                    selectedoutputpath = System.IO.Path.Combine(selectedoutputpath, TTSDefaultFile)
                 Else
-                    Dim dir As String = Path.GetDirectoryName(selectedoutputpath)
-                    Dim fileName As String = Path.GetFileName(selectedoutputpath)
+                    Dim dir As String = System.IO.Path.GetDirectoryName(selectedoutputpath)
+                    Dim fileName As String = System.IO.Path.GetFileName(selectedoutputpath)
 
                     ' If no directory is found, assume Desktop as the base
                     If String.IsNullOrWhiteSpace(dir) Then
-                        selectedoutputpath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName)
+                        selectedoutputpath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName)
                         dir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
                     End If
 
                     ' If no filename is given, use the default filename
                     If String.IsNullOrWhiteSpace(fileName) Then
-                        selectedoutputpath = Path.Combine(dir, TTSDefaultFile)
+                        selectedoutputpath = System.IO.Path.Combine(dir, TTSDefaultFile)
                     End If
 
                     ' Ensure the filename has ".mp3" extension
                     If Not fileName.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) Then
-                        selectedoutputpath = Path.Combine(dir, fileName & ".mp3")
+                        selectedoutputpath = System.IO.Path.Combine(dir, fileName & ".mp3")
                     End If
                 End If
                 GenerateAndPlayAudio(selection.Text, selectedoutputpath, "", "")
@@ -3707,11 +3711,11 @@ Public Class ThisAddIn
                                 Dim num As Double
                                 If Double.TryParse(rawValue, num) Then
                                     ' Clamp auf [Min;Max]
-                                    num = Math.Max(range.Item1, Math.Min(range.Item2, num))
+                                    num = System.Math.Max(range.Item1, System.Math.Min(range.Item2, num))
 
                                     ' Für Integer/Long als Ganzzahl zurückgeben
                                     If t = "integer" OrElse t = "long" Then
-                                        rawValue = CInt(Math.Round(num)).ToString()
+                                        rawValue = CInt(System.Math.Round(num)).ToString()
                                     Else
                                         rawValue = num.ToString()
                                     End If
@@ -3737,14 +3741,14 @@ Public Class ThisAddIn
                                 If rvLower.StartsWith("(keine Auswahl)") OrElse rvLower.StartsWith("(no selection)") OrElse rawValue.StartsWith("---") Then
                                     rawValue = ""
                                 End If
-                                paramValue = UnhideEscape(rawValue)
+                                paramValue = UnHideEscape(rawValue)
 
                             End If
                         End If
 
                         ' 5) Sonderfall Prompt
                         If p.Name.ToLowerInvariant().Contains("prompt") Then
-                            OtherPrompt = UnhideEscape(paramValue)
+                            OtherPrompt = UnHideEscape(paramValue)
                         End If
 
                         ' 6) Platzhalter ersetzen
@@ -3982,10 +3986,12 @@ Public Class ThisAddIn
             Dim DoChunks As Boolean = False
             Dim ChunkSize As Integer = 1
             Dim NoFormatAndFieldSaving As Boolean = False
+            Dim DoSlides As Boolean = False
 
             Dim MarkupInstruct As String = $"start With '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"with '{InPlacePrefix}'/'{AddPrefix} for replacing/adding to the selection"
             Dim BubblesInstruct As String = $"with '{BubblesPrefix}' for having your text commented"
+            Dim SlidesInstruct As String = $"with '{SlidesPrefix}' for adding to a Powerpoint file"
             Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}', '{NewdocPrefix}' or '{PanePrefix}' for separate output"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf)"
@@ -3999,9 +4005,10 @@ Public Class ThisAddIn
             Dim ObjectInstruct As String = $"; add '{ObjectTrigger}'/'{ObjectTrigger2}' for adding a file object"
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
             Dim FileObject As String = ""
+            Dim SlideDeck As String = ""
 
             Dim application As Word.Application = Globals.ThisAddIn.Application
-            Dim selection As Selection = application.Selection
+            Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
 
             If selection.Type = WdSelectionType.wdSelectionIP Then NoText = True
 
@@ -4037,9 +4044,9 @@ Public Class ThisAddIn
 
             If LastPrompt.Trim() = "" Then
                 If Not NoText Then
-                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct}, {BubblesInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
                 Else
-                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {BubblesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
                 End If
             Else
                 OtherPrompt = LastPrompt
@@ -4086,7 +4093,7 @@ Public Class ThisAddIn
                 Return
             End If
             If OtherPrompt.StartsWith("model", StringComparison.OrdinalIgnoreCase) Then
-                ShowCustomMessageBox("I am using the " & INI_Model & " model as my primary model with a default timeout of " & (INI_Timeout / 1000) & " seconds (" & Format(INI_Timeout / 60000, "0.00") & " minutes)." & If(INI_MaxOutputToken > 0, "The maximum output token length is " & INI_MaxOutputToken & ".", ""))
+                ShowCustomMessageBox("I am using the " & INI_Model & " model as my primary model with a default timeout of " & (INI_Timeout / 1000) & " seconds (" & Microsoft.VisualBasic.Strings.Format(INI_Timeout / 60000, "0.00") & " minutes)." & If(INI_MaxOutputToken > 0, "The maximum output token length is " & INI_MaxOutputToken & ".", ""))
                 Return
             End If
             If OtherPrompt.StartsWith("terms", StringComparison.OrdinalIgnoreCase) Then
@@ -4118,10 +4125,31 @@ Public Class ThisAddIn
                 Return
             End If
 
+            If OtherPrompt.StartsWith("slidetest", StringComparison.OrdinalIgnoreCase) Then
+                Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+                Dim filePath As String = System.IO.Path.Combine(desktopPath, "redinktest.pptx")
+                Dim filePath2 As String = System.IO.Path.Combine(desktopPath, "redinktestslides.txt")
+
+                If File.Exists(filePath) Then
+                    Dim presentation As String = GetPresentationJson(filePath)
+                    Globals.ThisAddIn.Application.Selection.TypeText(presentation)
+                    If presentation <> "" Then
+                        If File.Exists(filePath2) Then
+                            Dim jsonString As String = File.ReadAllText(filePath2)
+                            ApplyPlanToPresentation(filePath, jsonString)
+                        Else
+                            ShowCustomMessageBox("The file 'redinktestslides.txt' does not exist on your desktop. Please create it with the JSON content you want to apply to the presentation.")
+                        End If
+                    End If
+                End If
+
+                Return
+            End If
+
             If OtherPrompt.StartsWith("redinktest", StringComparison.OrdinalIgnoreCase) Then
 
                 Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-                Dim filePath As String = Path.Combine(desktopPath, "redinktest.txt")
+                Dim filePath As String = System.IO.Path.Combine(desktopPath, "redinktest.txt")
                 If File.Exists(filePath) Then
                     Dim testtextorig As String = File.ReadAllText(filePath).Replace("\n", vbCrLf)
                     Dim testtext As String = SLib.ShowCustomWindow("Testfile content:", testtextorig, "", AN, False, True, True, True)
@@ -4409,6 +4437,11 @@ Public Class ThisAddIn
             ElseIf OtherPrompt.StartsWith(BubblesPrefix, StringComparison.OrdinalIgnoreCase) Then
                 OtherPrompt = OtherPrompt.Substring(BubblesPrefix.Length).Trim()
                 DoBubbles = True
+            ElseIf OtherPrompt.StartsWith(SlidesPrefix, StringComparison.OrdinalIgnoreCase) Then
+                OtherPrompt = OtherPrompt.Substring(SlidesPrefix.Length).Trim()
+                DoSlides = True
+                DoClipboard = True
+                DoChunks = False
             ElseIf OtherPrompt.StartsWith(InPlacePrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
                 OtherPrompt = OtherPrompt.Substring(InPlacePrefix.Length).Trim()
                 DoInplace = True
@@ -4479,6 +4512,18 @@ Public Class ThisAddIn
                 End If
             End If
 
+            If DoSlides Then
+                DragDropFormLabel = "A Powerpoint (pptx) file."
+                DragDropFormFilter = "Supported Files|*.pptx"
+                SlideDeck = GetFileName()
+                DragDropFormLabel = ""
+                DragDropFormFilter = ""
+                If String.IsNullOrWhiteSpace(Slidedeck) Then
+                    ShowCustomMessageBox("No Powerpoint file has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
+                    Return
+                End If
+            End If
+
 
             If NoText AndAlso (DoBubbles Or DoChunks) Then
                 Dim FullDocument As Integer = ShowCustomYesNoBox("You have not selected text. Ask the LLM to comment on the full document?", "Yes", "No, abort")
@@ -4539,7 +4584,7 @@ Public Class ThisAddIn
                 ChunkSize = 0
             End If
 
-            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc)
+            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck)
 
             If UseSecondAPI And originalConfigLoaded Then
                 RestoreDefaults(_context, originalConfig)
@@ -4652,12 +4697,12 @@ Public Class ThisAddIn
 
     Public Async Sub EasterEgg()
 
-        Dim splash As New SplashScreen($"{AN6} is preparing to tickle{If(INI_RoastMe, " (inofficial version)", "")}...")
+        Dim splash As New SLib.SplashScreen($"{AN6} is preparing to tickle{If(INI_RoastMe, " (inofficial version)", "")}...")
         splash.Show()
         splash.Refresh()
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
         Dim inputtext As String = Nothing
         Dim result As String
         Dim UserLanguage As String = Globals.ThisAddIn.GetWordDefaultInterfaceLanguage()
@@ -4759,10 +4804,10 @@ Public Class ThisAddIn
     Dim paragraphFormat() As ParagraphFormatStructure
     Dim paraCount As Integer
 
-    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False) As Task(Of String)
+    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "") As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
 
         If SysCommand = "" Then
             ShowCustomMessageBox("The (system-)prompt for the LLM is missing.")
@@ -4776,7 +4821,7 @@ Public Class ThisAddIn
 
         If selection.Type = WdSelectionType.wdSelectionIP Or selection.Tables.Count = 0 Or PutInClipboard Or PutInBubbles Then
 
-            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc)
+            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck)
 
         Else
 
@@ -4796,7 +4841,7 @@ Public Class ThisAddIn
                 Dim isPartialTableSelection As Boolean = False
 
                 If selection.Tables.Count = 1 Then
-                    Dim tbl As Table = selRange.Tables(1)
+                    Dim tbl As Microsoft.Office.Interop.Word.Table = selRange.Tables(1)
                     Dim tblRange As Range = tbl.Range
 
                     ' Check if the selection is entirely within the table boundaries.
@@ -4858,7 +4903,7 @@ Public Class ThisAddIn
                 Else
 
                     ' Sort tables by their start positions in the selection
-                    Dim tableList As New List(Of Table)
+                    Dim tableList As New List(Of Microsoft.Office.Interop.Word.Table)
                     For i As Integer = 1 To docTables.Count
                         tableList.Add(docTables(i))
                     Next
@@ -4866,13 +4911,13 @@ Public Class ThisAddIn
 
                     Dim lastPos As Integer = selRange.Start
 
-                    Dim splash As New SplashScreen("Processing table(s)... press 'Esc' to abort")
+                    Dim splash As New SLib.SplashScreen("Processing table(s)... press 'Esc' to abort")
                     splash.Show()
                     splash.Refresh()
 
                     Dim IsExit As Boolean = False
 
-                    For Each tbl As Table In tableList
+                    For Each tbl As Microsoft.Office.Interop.Word.Table In tableList
 
                         System.Windows.Forms.Application.DoEvents()
 
@@ -4917,7 +4962,7 @@ Public Class ThisAddIn
                         End If
 
                         ' Process the table itself (cells)
-                        For Each row As Row In tbl.Rows
+                        For Each row As Microsoft.Office.Interop.Word.Row In tbl.Rows
                             System.Windows.Forms.Application.DoEvents()
 
                             If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
@@ -4927,7 +4972,7 @@ Public Class ThisAddIn
                             If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
                                 Exit For
                             End If
-                            For Each cell As Cell In row.Cells
+                            For Each cell As Microsoft.Office.Interop.Word.Cell In row.Cells
                                 System.Windows.Forms.Application.DoEvents()
 
                                 If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
@@ -5000,10 +5045,10 @@ Public Class ThisAddIn
 
 
 
-    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False) As Task(Of String)
+    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "") As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
         Dim currentdoc As Word.Document = selection.Document
 
         Debug.WriteLine(
@@ -5021,7 +5066,8 @@ Public Class ThisAddIn
                     vbCrLf & "DoPane=" & DoPane &
                     vbCrLf & "DoNewDoc=" & DoNewDoc &
                     vbCrLf & "Chunksize=" & ChunkSize &
-                    vbCrLf & "Chunksize=" & FileObject &
+                    vbCrLf & "Fileobject=" & FileObject &
+                    vbCrLf & "Slidedeck=" & SlideDeck &
                     vbCrLf & "NoFormatAndFieldSaving=" & NoFormatAndFieldSaving
                 )
 
@@ -5059,7 +5105,7 @@ Public Class ThisAddIn
             If Not NoSelectedText Then
 
                 If rng.Text.Length = 0 Then NoSelectedText = True
-                If Not NoSelectedText And FormattingCap > 0 And rng.Text.Length > FormattingCap Then NoFormatting = True
+                If Not NoSelectedText And (KeepFormat Or ParaFormatInline) And FormattingCap > 0 And rng.Text.Length > FormattingCap Then NoFormatting = True
 
             End If
 
@@ -5074,7 +5120,7 @@ Public Class ThisAddIn
 
             If DoTPMarkup Then NoFormatting = True
 
-            If MarkupMethod = 4 Then NoFormatting = True
+            If MarkupMethod = 4 And DoMarkup Then NoFormatting = True
 
             If ChunkSize > 0 Then
                 DoSilent = True
@@ -5202,7 +5248,7 @@ Public Class ThisAddIn
 
                         ' Grenzen sichern, um Range-Fehler zu vermeiden
                         If chunkEnd > docEnd Then chunkEnd = docEnd
-                        If chunkEnd <= curStart Then chunkEnd = Math.Min(curStart + 1, docEnd)
+                        If chunkEnd <= curStart Then chunkEnd = System.Math.Min(curStart + 1, docEnd)
 
                         ' ---- 2.2  Selection auf diesen Chunk ----------------------
                         selection.SetRange(Start:=curStart, End:=chunkEnd)
@@ -5325,7 +5371,7 @@ Public Class ThisAddIn
                                 If Not String.IsNullOrWhiteSpace(raw) Then SelectedText = raw
                             End If
                         Else
-                            If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse (MarkupMethod = 3 Or MarkupMethod = 2)) AndAlso rng.Text.Length < INI_MarkupDiffCap AndAlso InPlace Then
+                            If INI_MarkdownConvert AndAlso Not KeepFormat AndAlso (Not DoMarkup OrElse (MarkupMethod = 3 Or MarkupMethod = 2)) AndAlso InPlace Then  ' AndAlso rng.Text.Length < INI_MarkupDiffCap 
 
                                 Debug.WriteLine($"4bRange Start = {rng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
@@ -5404,7 +5450,19 @@ Public Class ThisAddIn
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
                 Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
 
-                Dim LLMResult = Await LLM(SysCommand & If(DoTPMarkup, " " & SP_Add_Revisions, "") & " " & If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), If(NoSelectedText, "", "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>"), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                Dim SlideInsert As String = ""
+
+                If SlideDeck <> "" Then
+                    SlideInsert = GetPresentationJson(SlideDeck)
+                    Debug.WriteLine("SlideInsert = " & SlideInsert)
+                    If SlideDeck = "" Then
+                        Return ""
+                    Else
+                        SlideInsert = " <SLIDEDECK>" & SlideInsert & "</SLIDEDECK>"
+                    End If
+                End If
+
+                Dim LLMResult = Await LLM(SysCommand & If(DoTPMarkup, " " & SP_Add_Revisions, "") & " " & If(SlideDeck = "", If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), " " & SP_Add_Slides), If(NoSelectedText, "" & SlideInsert, "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>" & SlideInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 OtherPrompt = ""
 
@@ -5457,6 +5515,9 @@ Public Class ThisAddIn
                                 vbCrLf & "DoNewDoc=" & DoNewDoc &
                                 vbCrLf & "PutInBubbles=" & PutInBubbles &
                                 vbCrLf & "NoSelectedText=" & NoSelectedText &
+                                vbCrLf & "ParaFormatInline=" & ParaFormatInline &
+                                vbCrLf & "NoFormatting=" & NoFormatting &
+                                vbCrLf & "NoFormatAndFieldSaving=" & NoFormatAndFieldSaving &
                                 vbCrLf & "KeepFormat=" & KeepFormat &
                                 vbCrLf & "Inplace=" & InPlace
                             )
@@ -5497,6 +5558,21 @@ Public Class ThisAddIn
                                 SLib.PutInClipboard(FinalText)
                             End If
                         End If
+                    ElseIf SlideInsert <> "" Then
+
+                        Dim Jsonstring As String = CleanJsonString(LLMResult)
+
+                        Debug.WriteLine("JsonString=" & Jsonstring)
+
+                        If Not String.IsNullOrEmpty(Jsonstring) Then
+
+                            ApplyPlanToPresentation(SlideDeck, Jsonstring)
+
+                            ShowCustomMessageBox($"Your slide deck at '{SlideDeck}' has been amended, where this has been possible. Check it out.")
+                        Else
+                            ShowCustomMessageBox($"There was a problem converting the AI response. You may want to retry.")
+                        End If
+
 
                     ElseIf DoPane AndAlso Not DoSilent Then
 
@@ -5648,7 +5724,7 @@ Public Class ThisAddIn
                             If Not DoSilent Then ShowCustomMessageBox($"The bubble command did Not result in any comment(s) by the LLM.")
                         Else
 
-                            Dim splash As New SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
+                            Dim splash As New SLib.SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
                             splash.Show()
                             splash.Refresh()
 
@@ -5831,7 +5907,7 @@ Public Class ThisAddIn
 
                                 rng = selection.Range
                                 Dim SaveRng As Range = rng.Duplicate
-                                If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoFormatAndFieldSaving Then
+                                If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoFormatAndFieldSaving Then   '  xxxxx 
                                     Debug.WriteLine($"9Range Start = {rng.Start} Selection Start = {selection.Start}")
                                     Debug.WriteLine($"Range End = {rng.End} Selection End = {selection.End}")
                                     Debug.WriteLine(vbCrLf & Left(rng.Text, 400) & vbCrLf)
@@ -6351,7 +6427,7 @@ Public Class ThisAddIn
 
             ' Alternative approach: use Word's built-in view settings
             Try
-                Dim doc As Document = src.Document
+                Dim doc As Microsoft.Office.Interop.Word.Document = src.Document
                 Dim origShowRevs As Boolean = doc.ShowRevisions
                 Dim origPrintRevs As Boolean = doc.PrintRevisions
 
@@ -6389,8 +6465,8 @@ Public Class ThisAddIn
                     End If
 
                     Dim revRange As Range = rev.Range
-                    Dim fromPos As Integer = Math.Max(revRange.Start, sliceStart)
-                    Dim toPos As Integer = Math.Min(revRange.End, sliceEnd)
+                    Dim fromPos As Integer = system.math.max(revRange.Start, sliceStart)
+                    Dim toPos As Integer = system.math.min(revRange.End, sliceEnd)
                     If fromPos < toPos Then
                         skips.Add((fromPos, toPos))
                     End If
@@ -6411,7 +6487,7 @@ Public Class ThisAddIn
                 If iv.s > pos Then
                     keep.Add((pos, iv.s))
                 End If
-                pos = Math.Max(pos, iv.e)
+                pos = system.math.max(pos, iv.e)
             Next
             If pos < sliceEnd Then
                 keep.Add((pos, sliceEnd))
@@ -6458,7 +6534,7 @@ Public Class ThisAddIn
         For i As Integer = 1 To intervals.Count - 1
             Dim nxt = intervals(i)
             If nxt.s <= cur.e Then
-                cur.e = Math.Max(cur.e, nxt.e)
+                cur.e = system.math.max(cur.e, nxt.e)
             Else
                 result.Add(cur)
                 cur = nxt
@@ -6496,8 +6572,8 @@ Public Class ThisAddIn
             If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
                 OrElse rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo Then Continue For
 
-            Dim fromPos As Integer = Math.Max(rev.Range.Start, sliceStart)
-            Dim toPos As Integer = Math.Min(rev.Range.End, sliceEnd)
+            Dim fromPos As Integer = system.math.max(rev.Range.Start, sliceStart)
+            Dim toPos As Integer = system.math.min(rev.Range.End, sliceEnd)
             skip.Add((fromPos, toPos))
         Next
 
@@ -6508,7 +6584,7 @@ Public Class ThisAddIn
             Dim cur = skip(0)
             For i As Integer = 1 To skip.Count - 1
                 If skip(i).s <= cur.e Then
-                    cur.e = Math.Max(cur.e, skip(i).e)
+                    cur.e = system.math.max(cur.e, skip(i).e)
                 Else
                     merged.Add(cur)
                     cur = skip(i)
@@ -6533,7 +6609,7 @@ Public Class ThisAddIn
             End If
 
             ' Skip over deleted segment
-            relPos = Math.Max(relPos, delEndRel)
+            relPos = system.math.max(relPos, delEndRel)
         Next
 
         ' Append remaining tail after last deletion
@@ -6567,7 +6643,7 @@ Public Class ThisAddIn
         Dim chunks As New List(Of String)
         Dim startIndex As Integer = 0
         While startIndex < findText.Length
-            Dim length As Integer = Math.Min(chunkSize, findText.Length - startIndex)
+            Dim length As Integer = system.math.min(chunkSize, findText.Length - startIndex)
             chunks.Add(findText.Substring(startIndex, length))
             startIndex += length
         End While
@@ -6666,14 +6742,14 @@ Public Class ThisAddIn
 
         Try
             Dim app As Word.Application = Globals.ThisAddIn.Application
-            Dim selection As Selection = app.Selection
+            Dim selection As Microsoft.Office.Interop.Word.Selection = app.Selection
 
             If selection Is Nothing OrElse selection.Range Is Nothing Then
                 MessageBox.Show("Error in MarkupSelectedTextWithRegex: No text selected (anymore). Can't proceed.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 Return
             End If
 
-            'Dim splash As New SplashScreen("Applying changes... press 'Esc' to abort") 
+            'Dim splash As New Slib.Splashscreen("Applying changes... press 'Esc' to abort") 
             'splash.Show()
             'splash.Refresh()
 
@@ -7142,11 +7218,13 @@ Public Class ThisAddIn
                 Dim beforerange As Range = range.Document.Range(range.Start - 1, range.Start)
 
                 ' Ein 1‐Zeichen‐Range nach range
-                Dim afterrange As Range = range.Document.Range(range.End - 1, range.End + 1)
+                'Dim afterrange As Range = range.Document.Range(range.End - 1, range.End + 1)
+                Dim afterrange As Range = range.Document.Range(range.End - 1, range.End)
 
                 'If beforerange.Text = " " AndAlso afterrange.Text = " " Then
                 Debug.WriteLine($"Beforetext='{beforerange.Text}'")
                 Debug.WriteLine($"Aftertext='{afterrange.Text}'")
+                'If afterrange.Text.EndsWith(" "c) OrElse afterrange.Text.StartsWith(" "c) Then
                 If afterrange.Text.EndsWith(" "c) OrElse afterrange.Text.StartsWith(" "c) Then
                     LeadingTrailingSpace = True
                 Else
@@ -7158,21 +7236,21 @@ Public Class ThisAddIn
         End If
 
 
-        If range.Start < range.End Then
-            If TrailingCR Then
-                range.End = range.End - 1
-            End If
+        'If range.Start < range.End Then
+        'If TrailingCR Then
+        'range.End = range.End - 1
+        'End If
 
-            range.Delete()
+        'range.Delete()
 
-        End If
+        'End If
 
         Dim insertionStart As Integer = selection.Range.Start
 
-        Debug.WriteLine($"IM2-Range Start = {selection.Start}")
-        Debug.WriteLine($"Range End = {selection.End}")
-        Debug.WriteLine("TrailingCR = " & TrailingCR)
-        Debug.WriteLine(selection.Text)
+        'Debug.WriteLine($"IM2-Range Start = {selection.Start}")
+        'Debug.WriteLine($"Range End = {selection.End}")
+        'Debug.WriteLine("TrailingCR = " & TrailingCR)
+        'Debug.WriteLine(selection.Text)
 
         Dim ResultBack As String = Result
         Try
@@ -7183,7 +7261,34 @@ Public Class ThisAddIn
         End Try
 
         Dim markdownSource As String = Result
-        emojiSet = New HashSet(Of String)()
+
+        'emojiSet = New HashSet(Of String)()
+
+        For i As Integer = 0 To Result.Length - 1
+            Debug.WriteLine($"Char: '{Result(i)}'  ASCII: {Asc(Result(i))}")
+        Next
+
+        Result = Result.Replace(vbLf & " " & vbLf, vbLf & vbLf)
+
+        Dim pattern As String = "((\r\n|\n|\r){2,})"
+        Result = Regex.Replace(Result, pattern, Function(m As Match)
+                                                    ' Prüfen, ob das Match bis zum Ende des Strings reicht:
+                                                    If m.Index + m.Length = Result.Length Then
+                                                        ' Am Ende: Rückgabe der Umbrüche wie sie sind
+                                                        Return m.Value
+                                                    Else
+                                                        ' Andernfalls: &nbsp; zwischen die Umbrüche einfügen
+                                                        Dim breaks As String = m.Value
+                                                        Dim regexBreaks As New Regex("(\r\n|\n|\r)")
+                                                        Dim splitBreaks = regexBreaks.Matches(breaks)
+                                                        If splitBreaks.Count <= 1 Then Return breaks
+                                                        Dim resultx As String = splitBreaks(0).Value
+                                                        For i As Integer = 1 To splitBreaks.Count - 1
+                                                            resultx &= vbCrLf & "&nbsp;" & vbCrLf & splitBreaks(i).Value
+                                                        Next
+                                                        Return resultx
+                                                    End If
+                                                End Function)
 
 
         Dim builder As New MarkdownPipelineBuilder()
@@ -7207,21 +7312,21 @@ Public Class ThisAddIn
 
         Debug.WriteLine("Result=" & Result)
 
-        Dim htmlResult As String = Markdown.ToHtml(Result, markdownpipeline).Trim
+        Dim htmlResult As String = Markdown.ToHtml(Result, markdownPipeline).Trim
+
 
         ' ─── alle echten Newlines raus, damit sie nicht als Text umgewandelt werden ───
         htmlResult = htmlResult _
-    .Replace(vbCrLf, "") _
-    .Replace(vbCr, "") _
-    .Replace(vbLf, "")
+                .Replace(vbCrLf, "") _
+                .Replace(vbCr, "") _
+                .Replace(vbLf, "")
 
-
-        emojiSet = New HashSet(Of String)(
-                    System.Text.RegularExpressions.Regex _
-                        .Matches(htmlResult, "[\uD83C-\uDBFF][\uDC00-\uDFFF]") _
-                        .Cast(Of System.Text.RegularExpressions.Match)() _
-                        .Select(Function(m) m.Value)
-                )
+        'emojiSet = New HashSet(Of String)(
+        'System.Text.RegularExpressions.Regex _
+        '.Matches(htmlResult, "[\uD83C-\uDBFF][\uDC00-\uDFFF]") _
+        '.Cast(Of System.Text.RegularExpressions.Match)() _
+        '.Select(Function(m) m.Value)
+        '       )
 
         ' Load the HTML into HtmlDocument
         Dim htmlDoc As New HtmlAgilityPack.HtmlDocument()
@@ -7236,9 +7341,19 @@ Public Class ThisAddIn
         'fullhtml = htmlDoc.DocumentNode.OuterHtml
         'Debug.WriteLine("HTML3=" & fullhtml)
 
-        ParseHtmlNode(htmlDoc.DocumentNode, range)
+        SLib.InsertTextWithFormat(fullhtml, range, True, Not TrailingCR)
 
-        emojiSet = Nothing
+        ' Nach dem Paste und Sleep …
+        range = range.Application.Selection.Range
+
+        ' Wenn das letzte Zeichen ein Absatzmarke (vbCr) ist, lösche es
+        'If range.Characters.Last.Text = vbCr Then
+        'range.Characters.Last.Delete()
+        'End If
+
+        'ParseHtmlNode(htmlDoc.DocumentNode, range)
+
+        'emojiSet = Nothing
 
         Debug.WriteLine($"IM3-Range Start = {selection.Start}")
         Debug.WriteLine($"Range End = {selection.End}")
@@ -7251,11 +7366,11 @@ Public Class ThisAddIn
             range.InsertAfter(" ")
         End If
 
-        If TrailingCR AndAlso AddTrailingIfNeeded Then
-            range.Collapse(WdCollapseDirection.wdCollapseEnd)
-            range.InsertParagraphAfter()
-            range.Collapse(WdCollapseDirection.wdCollapseEnd)
-        End If
+        'If TrailingCR AndAlso AddTrailingIfNeeded Then
+        'range.Collapse(WdCollapseDirection.wdCollapseEnd)
+        'range.InsertParagraphAfter()
+        'range.Collapse(WdCollapseDirection.wdCollapseEnd)
+        'End If
 
         Dim InsertionEnd As Integer = range.End
 
@@ -7351,9 +7466,17 @@ Public Class ThisAddIn
 
 
         ' ------------------------------------------------- Leaf: <br> --------------
+        'If node.Name.Equals("br", StringComparison.OrdinalIgnoreCase) Then
+        'rng.Font.Reset()
+        'rng.Text = vbCr
+        'rng.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+        'Return
+        'End If
+
         If node.Name.Equals("br", StringComparison.OrdinalIgnoreCase) Then
-            rng.Font.Reset()
-            rng.Text = vbCr
+            ' Soft line break in Word (Shift+Enter) statt harter Absatz
+            rng.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+            rng.InsertAfter(ChrW(11))  ' manueller Zeilenumbruch
             rng.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
             Return
         End If
@@ -7827,21 +7950,21 @@ Public Class ThisAddIn
                 range.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
             End If
             If nestedUl IsNot Nothing Then
-                    ParseHtmlNode(nestedUl, range, currentLevel + 1)
-                ElseIf nestedOl IsNot Nothing Then
-                    ParseHtmlNode(nestedOl, range, currentLevel + 1)
-                End If
-
-                If isFootnoteEntry Then
-                    range.InsertParagraphAfter()
-                    range.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                End If
-
-                Return
+                ParseHtmlNode(nestedUl, range, currentLevel + 1)
+            ElseIf nestedOl IsNot Nothing Then
+                ParseHtmlNode(nestedOl, range, currentLevel + 1)
             End If
 
+            If isFootnoteEntry Then
+                range.InsertParagraphAfter()
+                range.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+            End If
 
-            Debug.WriteLine($"[ParseHtmlNode] Enter node=<{node.Name}> Range=({range.Start},{range.End})")
+            Return
+        End If
+
+
+        Debug.WriteLine($"[ParseHtmlNode] Enter node=<{node.Name}> Range=({range.Start},{range.End})")
 
         ' -------------------------------- Haupt, und Kindknoten‑Schleife ---------------------
         For Each childNode As HtmlAgilityPack.HtmlNode In node.ChildNodes
@@ -8108,7 +8231,7 @@ Public Class ThisAddIn
                             Debug.WriteLine($"[ul] Levels array: {String.Join(",", ulLevels)}")
 
                             Dim paras = ulRange.Paragraphs
-                            Dim maxItems = Math.Min(paras.Count, ulLevels.Count)
+                            Dim maxItems = system.math.min(paras.Count, ulLevels.Count)
                             For i = 1 To maxItems
                                 Dim p = paras(i)
                                 Dim lvl = ulLevels(i - 1)
@@ -8449,7 +8572,7 @@ Public Class ThisAddIn
 
     Public Function AddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
 
-        Dim splash As New SplashScreen("Coding markups...  counting")
+        Dim splash As New SLib.SplashScreen("Coding markups...  counting")
         splash.Show()
         splash.Refresh()
 
@@ -8707,7 +8830,7 @@ Public Class ThisAddIn
 
     Private Sub CompareAndInsertComparedoc(originalText As String, newText As String, targetrange As Range, Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
 
-        Dim splash As New SplashScreen("Creating markup using the Word compare functionality (ignore any flickering and press 'No' if prompted) ...")
+        Dim splash As New SLib.SplashScreen("Creating markup using the Word compare functionality (ignore any flickering and press 'No' if prompted) ...")
         splash.Show()
         splash.Refresh()
 
@@ -9531,7 +9654,7 @@ Public Class ThisAddIn
         ByVal workingrange As Word.Range,
         PreserveParagraphFormatInline As Boolean, DoMarkdown As Boolean) As String
 
-        Dim splash As New SplashScreen("Extracting text and format ...")
+        Dim splash As New Slib.Splashscreen("Extracting text and format ...")
         splash.Show()
         splash.Refresh()
 
@@ -9736,10 +9859,10 @@ Public Class ThisAddIn
             Dim placeholders As New List(Of PlaceholderInfo)
 
             '──────────── Fuß- & Endnoten sammeln ────────────────────────────
-            For Each fn As Footnote In rng.Document.Footnotes
+            For Each fn As Microsoft.Office.Interop.Word.Footnote In rng.Document.Footnotes
                 If fn.Reference.Start >= rng.Start AndAlso fn.Reference.Start < rng.End Then
-                    Dim s As Integer = Math.Max(fn.Reference.Start, rng.Start)
-                    Dim e As Integer = Math.Min(fn.Reference.End, rng.End)
+                    Dim s As Integer = system.math.max(fn.Reference.Start, rng.Start)
+                    Dim e As Integer = system.math.min(fn.Reference.End, rng.End)
                     placeholders.Add(New PlaceholderInfo With {
                     .Offset = s - rng.Start,
                     .Length = e - s,
@@ -9748,10 +9871,10 @@ Public Class ThisAddIn
                 End If
             Next
 
-            For Each en As Endnote In rng.Document.Endnotes
+            For Each en As Microsoft.Office.Interop.Word.Endnote In rng.Document.Endnotes
                 If en.Reference.Start >= rng.Start AndAlso en.Reference.Start < rng.End Then
-                    Dim s As Integer = Math.Max(en.Reference.Start, rng.Start)
-                    Dim e As Integer = Math.Min(en.Reference.End, rng.End)
+                    Dim s As Integer = system.math.max(en.Reference.Start, rng.Start)
+                    Dim e As Integer = system.math.min(en.Reference.End, rng.End)
                     placeholders.Add(New PlaceholderInfo With {
                     .Offset = s - rng.Start,
                     .Length = e - s,
@@ -10321,7 +10444,7 @@ Public Class ThisAddIn
             Return
         End If
 
-        Dim splash As New SplashScreen("Accepting revisions related to formatting... press 'Esc' to abort")
+        Dim splash As New Slib.Splashscreen("Accepting revisions related to formatting... press 'Esc' to abort")
         splash.Show()
         splash.Refresh()
 
@@ -10415,7 +10538,7 @@ Public Class ThisAddIn
 
     Public Async Sub IntelligentMerge(newtext As String)
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text in your document with which your selection in the pane shall be merged.")
             Return
@@ -10434,23 +10557,23 @@ Public Class ThisAddIn
         ByVal selectWholeParagraph As Boolean, Silent As Boolean) As System.Threading.Tasks.Task
 
         Dim app As Word.Application = Globals.ThisAddIn.Application
-        Dim sel As Selection = app.Selection
-        Dim doc As Document = app.ActiveDocument
+        Dim sel As Microsoft.Office.Interop.Word.Selection = app.Selection
+        Dim doc As Microsoft.Office.Interop.Word.Document = app.ActiveDocument
 
-        Dim activeComment As Comment = Nothing
+        Dim activeComment As Microsoft.Office.Interop.Word.Comment = Nothing
         Dim newtext As String = String.Empty
 
         Try
             '------------ 1) Find the comment the caret belongs to ------------------------
             If sel.StoryType = WdStoryType.wdCommentsStory Then
-                For Each c As Comment In doc.Comments
+                For Each c As Microsoft.Office.Interop.Word.Comment In doc.Comments
                     If sel.Range.Start >= c.Range.Start AndAlso
                    sel.Range.End <= c.Range.End Then
                         activeComment = c : Exit For
                     End If
                 Next
             Else
-                For Each c As Comment In doc.Comments
+                For Each c As Microsoft.Office.Interop.Word.Comment In doc.Comments
                     Dim anchor As Range = c.Scope
                     If sel.Range.End > anchor.Start AndAlso
                    sel.Range.Start < anchor.End Then
@@ -10564,7 +10687,7 @@ Public Class ThisAddIn
 
     Public Async Sub IntelligentMergeBalloon(newtext As String)
         Dim application As Word.Application = Globals.ThisAddIn.Application
-        Dim selection As Selection = application.Selection
+        Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
         If selection.Type = WdSelectionType.wdSelectionIP Then
             ShowCustomMessageBox("Please select the text in your document with which your selection in the pane shall be merged.")
             Return
@@ -10774,7 +10897,7 @@ Public Class ThisAddIn
             Dim lastTimestamp As Date
             Dim found As Boolean
             Dim userInput As String
-            Dim userNames As New Collection
+            Dim userNames As New Microsoft.VisualBasic.Collection
             Dim selRange As Word.Range
             Dim outputUserNames As String
             Dim DocRef As String = "in the selected text"
@@ -10884,7 +11007,7 @@ Public Class ThisAddIn
                 Dim timeSpan As String
                 Dim timeDiff As Double
                 timeDiff = DateDiff(DateInterval.Minute, firstTimestamp, lastTimestamp) ' Time difference in minutes
-                timeSpan = Math.Floor(timeDiff / 1440).ToString() & " days, " &
+                timeSpan = System.Math.Floor(timeDiff / 1440).ToString() & " days, " &
                        ((timeDiff Mod 1440) \ 60).ToString("00") & " hours, " &
                        (timeDiff Mod 60).ToString("00") & " minutes"
 
@@ -11064,7 +11187,7 @@ Public Class ThisAddIn
 
             If parts.Count > 0 Then
 
-                Dim splash As New SplashScreen($"Highlighting {parts.Count} hits... Press 'Esc' to abort")
+                Dim splash As New Slib.Splashscreen($"Highlighting {parts.Count} hits... Press 'Esc' to abort")
                 splash.Show()
                 splash.Refresh()
 
@@ -11656,6 +11779,7 @@ Public Class ThisAddIn
                 {"Temperature_2", "Temperature of {model2}"},
                 {"Timeout_2", "Timeout of {model2}"},
                 {"DoubleS", "Convert '" & ChrW(223) & "' to 'ss'"},
+                {"Clean", "Clean the LLM response"},
                 {"MarkdownConvert", "Keep character formatting"},
                 {"KeepFormat1", "Keep format (translations)"},
                 {"ReplaceText1", "Replace text (translations)"},
@@ -11684,6 +11808,7 @@ Public Class ThisAddIn
                 {"Temperature_2", "The higher, the more creative the LLM will be (0.0-2.0)"},
                 {"Timeout_2", "In milliseconds"},
                 {"DoubleS", "For Switzerland"},
+                {"Clean", "To remove double-spaces and hidden markers that may have been inserted by the LLM"},
                 {"MarkdownConvert", "If selected, bold, italic, underline and some more formatting will be preserved converting it to Markdown coding before passing it to the LLM (most LLM support it)"},
                 {"KeepFormat1", "If selected, the original's text basic character and paragraph formatting of a translated text will be retained (by HTML encoding, takes time!)"},
                 {"ReplaceText1", "If selected, the response of the LLM for translations will replace the original text"},
@@ -11709,7 +11834,7 @@ Public Class ThisAddIn
 
         ShowSettingsWindow(Settings, SettingsTips)
 
-        Dim splash As New SplashScreen("Updating menu following your changes ...")
+        Dim splash As New Slib.Splashscreen("Updating menu following your changes ...")
         splash.Show()
         splash.Refresh()
 
@@ -11838,7 +11963,7 @@ Public Class ThisAddIn
             End If
 
             filePath = RemoveCR(filePath.Trim())
-            filePath = Path.GetFullPath(filePath)
+            filePath = System.IO.Path.GetFullPath(filePath)
             If Not File.Exists(filePath) Then
                 If Not Silent Then ShowCustomMessageBox($"The file '{filePath}' was not found.")
                 Return ""
@@ -11887,7 +12012,7 @@ Public Class ThisAddIn
             End If
 
             filePath = RemoveCR(filePath.Trim())
-            filePath = Path.GetFullPath(filePath)
+            filePath = System.IO.Path.GetFullPath(filePath)
             If Not File.Exists(filePath) Then
                 ShowCustomMessageBox($"The file '{filePath}' was not found.")
                 Return ""
@@ -12552,7 +12677,7 @@ Public Class ThisAddIn
 
             If Directory.Exists(modelPath) Then
                 For Each dir As String In Directory.GetDirectories(modelPath)
-                    Dim dirName As String = Path.GetFileName(dir)
+                    Dim dirName As String = System.IO.Path.GetFileName(dir)
                     If dirName.StartsWith("vosk-model") Then
                         cultureComboBox.Items.Add(dirName)
                         modelsexist = True
@@ -12560,7 +12685,7 @@ Public Class ThisAddIn
                 Next
 
                 For Each file As String In Directory.GetFiles(modelPath)
-                    Dim fileName As String = Path.GetFileName(file)
+                    Dim fileName As String = System.IO.Path.GetFileName(file)
                     If fileName.StartsWith("ggml") Then
                         cultureComboBox.Items.Add(fileName)
                         modelsexist = True
@@ -12613,7 +12738,7 @@ Public Class ThisAddIn
             AddHandler ProcessButton.Click, AddressOf ProcessButton_Click
 
             ' Make window resizable
-            Me.MinimumSize = New Size(800, 440)
+            Me.MinimumSize = New System.Drawing.Size(800, 440)
 
             If Not modelsexist Then
                 ShowCustomMessageBox($"No Vosk or Whisper models have been found at the configured path ('{modelPath}'). A model is necessary for transcribing. You can download models for free at {VoskSource} and {WhisperSource}.", $"{AN} Transcriptor")
@@ -13118,7 +13243,7 @@ Public Class ThisAddIn
             DragDropFormLabel = ""
             DragDropFormFilter = ""
 
-            Dim splash As New SplashScreen($"Loading model...")
+            Dim splash As New Slib.Splashscreen($"Loading model...")
             splash.Show()
             splash.Refresh()
 
@@ -13231,7 +13356,7 @@ Public Class ThisAddIn
                         ' Splash schließen, UI ist bereits deaktiviert
                         splash.Close()
 
-                        splash = New SplashScreen($"Transcribing file ...")
+                        splash = New Slib.Splashscreen($"Transcribing file ...")
                         splash.Show()
                         splash.Refresh()
 
@@ -13448,8 +13573,8 @@ Public Class ThisAddIn
                     End Try
 
                     ' Die Werte auf den von Google unterstützten Bereich begrenzen
-                    minSpeakers = Math.Max(2, minSpeakers)
-                    maxSpeakers = Math.Max(minSpeakers, maxSpeakers)
+                    minSpeakers = system.math.max(2, minSpeakers)
+                    maxSpeakers = system.math.max(minSpeakers, maxSpeakers)
 
                     _stream = client.StreamingRecognize()
                     Dim streamingConfig As New StreamingRecognitionConfig With {
@@ -13521,7 +13646,7 @@ Public Class ThisAddIn
                 Return
             End If
 
-            Dim splash As New SplashScreen($"Loading model...")
+            Dim splash As New Slib.Splashscreen($"Loading model...")
             splash.Show()
             splash.Refresh()
 
@@ -14330,7 +14455,7 @@ Public Class ThisAddIn
             Next
 
             ' **Normalize Samples**
-            Dim maxSample As Single = samples.Max(Function(x) Math.Abs(x))
+            Dim maxSample As Single = samples.Max(Function(x) System.Math.Abs(x))
             If maxSample > 0 Then
                 Dim gain As Single = 1.0F / maxSample ' Compute normalization factor
                 For i As Integer = 0 To sampleCount - 1
@@ -14381,7 +14506,7 @@ Public Class ThisAddIn
 
         End Sub
 
-        Private Async Function ProcessWhisper(samples As Single()) As Threading.Tasks.Task
+        Private Async Function ProcessWhisper(samples As Single()) As System.Threading.Tasks.Task
             Try
                 If STTCanceled Then Return
 
@@ -14413,7 +14538,7 @@ Public Class ThisAddIn
             End Try
         End Function
 
-        Public Async Function WhisperTranscribeAudioFile(filepath As String) As Threading.Tasks.Task
+        Public Async Function WhisperTranscribeAudioFile(filepath As String) As System.Threading.Tasks.Task
 
             Try
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Whisper is reading and transcribing your file...")
@@ -14543,7 +14668,7 @@ Public Class ThisAddIn
 
             ' ─── 3) Schleife über alle Slices ───
             While offset < pcmData.Length AndAlso Not STTCanceled
-                Dim endPos = Math.Min(offset + sliceSize, pcmData.Length)
+                Dim endPos = system.math.min(offset + sliceSize, pcmData.Length)
                 Dim slice(endPos - offset - 1) As Byte
                 Array.Copy(pcmData, offset, slice, 0, endPos - offset)
 
@@ -14621,7 +14746,7 @@ Public Class ThisAddIn
             Dim pos As Integer = 0
 
             While pos < pcmData.Length AndAlso Not STTCanceled
-                Dim len = Math.Min(chunkSize, pcmData.Length - pos)
+                Dim len = system.math.min(chunkSize, pcmData.Length - pos)
                 Dim chunk = Google.Protobuf.ByteString.CopyFrom(pcmData, pos, len)
                 audioQueue.Add(chunk)
 
@@ -14657,7 +14782,7 @@ Public Class ThisAddIn
         End Function
 
 
-        Public Async Function VoskTranscribeAudioFile(filepath As String) As Threading.Tasks.Task
+        Public Async Function VoskTranscribeAudioFile(filepath As String) As System.Threading.Tasks.Task
             Try
                 PartialTextLabel.Invoke(Sub() PartialTextLabel.Text = "Vosk is reading and transcribing your file... press 'Esc' to abort")
 
@@ -14688,7 +14813,7 @@ Public Class ThisAddIn
                         Exit While
                     End If
 
-                    Dim chunkLength As Integer = Math.Min(chunkSize, pcmData.Length - offset)
+                    Dim chunkLength As Integer = system.math.min(chunkSize, pcmData.Length - offset)
                     Dim chunk As Byte() = pcmData.Skip(offset).Take(chunkLength).ToArray()
 
                     ' Feed the chunk into the recognizer
@@ -14875,7 +15000,7 @@ Public Class ThisAddIn
 
         ' Normalize the embedding (ensures embeddings are comparable)
         Private Function NormalizeEmbedding(embedding As List(Of Double)) As List(Of Double)
-            Dim norm As Double = Math.Sqrt(embedding.Sum(Function(x) x * x))
+            Dim norm As Double = System.Math.Sqrt(embedding.Sum(Function(x) x * x))
             If norm = 0 Then Return embedding
             Return embedding.Select(Function(x) x / norm).ToList()
         End Function
@@ -14906,15 +15031,15 @@ Public Class ThisAddIn
             For i As Integer = 0 To vec1.Count - 1
                 sum += (vec1(i) - vec2(i)) ^ 2
             Next
-            Return Math.Sqrt(sum)
+            Return System.Math.Sqrt(sum)
         End Function
 
 
         ' Function to compute cosine similarity between two speaker embeddings
         Private Function CosineSimilarity(vec1 As List(Of Double), vec2 As List(Of Double)) As Double
             Dim dotProduct As Double = vec1.Zip(vec2, Function(a, b) a * b).Sum()
-            Dim magnitude1 As Double = Math.Sqrt(vec1.Sum(Function(a) a * a))
-            Dim magnitude2 As Double = Math.Sqrt(vec2.Sum(Function(b) b * b))
+            Dim magnitude1 As Double = System.Math.Sqrt(vec1.Sum(Function(a) a * a))
+            Dim magnitude2 As Double = System.Math.Sqrt(vec2.Sum(Function(b) b * b))
 
             If magnitude1 = 0 OrElse magnitude2 = 0 Then
                 Return 0
@@ -15560,7 +15685,7 @@ Public Class ThisAddIn
 
             ' ensure a valid output path
             If String.IsNullOrWhiteSpace(filepath) Then
-                filepath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
+                filepath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
             End If
 
             ' defaults
@@ -15661,7 +15786,7 @@ Public Class ThisAddIn
                     Debug.WriteLine($"Generated audio of {audioBytes.Length} for speaker {speaker} ({voice}) with text length {text.Length} characters.")
 
                     ' save snippet
-                    Dim tempFile = Path.Combine(Path.GetTempPath(), $"{AN2}_podcast_temp_{i}.mp3")
+                    Dim tempFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{AN2}_podcast_temp_{i}.mp3")
                     File.WriteAllBytes(tempFile, audioBytes)
                     outputFiles.Add(tempFile)
 
@@ -15724,7 +15849,7 @@ Public Class ThisAddIn
     Public Shared Sub PlayAudio(filePath As String)
 
 
-        Dim splash As New SplashScreen($"Playing MP3... press 'Esc' to abort")
+        Dim splash As New Slib.Splashscreen($"Playing MP3... press 'Esc' to abort")
         If File.Exists(filePath) Then
             splash.Show()
             splash.Refresh()
@@ -15866,7 +15991,7 @@ Public Class ThisAddIn
 
             ' Get the current Word selection.
             Dim app As Word.Application = Globals.ThisAddIn.Application
-            Dim selection As Selection = app.Selection
+            Dim selection As Microsoft.Office.Interop.Word.Selection = app.Selection
             If selection Is Nothing OrElse selection.Paragraphs.Count = 0 Then
                 ShowCustomMessageBox("No text selected.")
                 Return
@@ -15930,7 +16055,7 @@ Public Class ThisAddIn
             ProgressBarModule.CancelOperation = False
 
             ' Process each paragraph in the selection.
-            For Each para As Paragraph In selection.Paragraphs
+            For Each para As Microsoft.Office.Interop.Word.Paragraph In selection.Paragraphs
                 ' Allow the user to abort by pressing Escape.
                 If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Or (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or ProgressBarModule.CancelOperation Then
                     For Each file In tempFiles
@@ -16048,7 +16173,7 @@ Public Class ThisAddIn
                 CurrentPara = ""
 
                 If paragraphAudioBytes IsNot Nothing Then
-                    Dim tempParaFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
+                    Dim tempParaFile As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
                     File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
                     tempFiles.Add(tempParaFile)
                 Else
@@ -16136,7 +16261,7 @@ Public Class ThisAddIn
             ' (The array is automatically initialized to zeros.)
 
             ' Generate a temporary file name.
-            Dim tempFile As String = Path.Combine(Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
+            Dim tempFile As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{AN2}_silence_{CInt(durationSeconds * 1000)}ms.mp3")
 
             ' Wrap the silence buffer in a MemoryStream and then a RawSourceWaveStream.
             Using ms As New MemoryStream(silenceBytes)
@@ -16825,7 +16950,7 @@ Public Class ThisAddIn
             End Try
         End Function
 
-        Private Async Function GetVoicesByLanguageAsync(languageCode As String) As Threading.Tasks.Task(Of List(Of GoogleVoice))
+        Private Async Function GetVoicesByLanguageAsync(languageCode As String) As System.Threading.Tasks.Task(Of List(Of GoogleVoice))
             If voiceCache.ContainsKey(languageCode) Then
                 Return voiceCache(languageCode)
             End If
@@ -16876,7 +17001,7 @@ Public Class ThisAddIn
             Await PlaySelectedVoiceAsync(cmbLanguage2, cmbVoice2B)
         End Sub
 
-        Private Async Function PlaySelectedVoiceAsync(cmbLang As Forms.ComboBox, cmbVoice As Forms.ComboBox) As Threading.Tasks.Task
+        Private Async Function PlaySelectedVoiceAsync(cmbLang As Forms.ComboBox, cmbVoice As Forms.ComboBox) As System.Threading.Tasks.Task
             Try
                 Dim lang As String = TryCast(cmbLang.SelectedItem, String)
                 Dim voiceName As String = TryCast(cmbVoice.SelectedItem, String)
@@ -16891,9 +17016,9 @@ Public Class ThisAddIn
                     ' remove “ — Beschreibung”
                     voiceName = voiceName.Split(" "c)(0)
                 End If
-                Await Threading.Tasks.Task.Run(Sub()
-                                                   GenerateAndPlayAudio(sampleText, "", lang, voiceName)
-                                               End Sub)
+                Await System.Threading.Tasks.Task.Run(Sub()
+                                                          GenerateAndPlayAudio(sampleText, "", lang, voiceName)
+                                                      End Sub)
             Catch ex As System.Exception
                 ShowCustomMessageBox("When trying to play the voice, an error occurred: " & ex.Message)
             End Try
@@ -17034,28 +17159,28 @@ Public Class ThisAddIn
 
             If String.IsNullOrWhiteSpace(SelectedOutputPath) Then
                 ' Use default path (Desktop) with default filename
-                SelectedOutputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
+                SelectedOutputPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
             ElseIf SelectedOutputPath.EndsWith("\") OrElse SelectedOutputPath.EndsWith("/") Then
                 ' If only a folder is given, append default filename
-                SelectedOutputPath = Path.Combine(SelectedOutputPath, TTSDefaultFile)
+                SelectedOutputPath = System.IO.Path.Combine(SelectedOutputPath, TTSDefaultFile)
             Else
-                Dim dir As String = Path.GetDirectoryName(SelectedOutputPath)
-                Dim fileName As String = Path.GetFileName(SelectedOutputPath)
+                Dim dir As String = System.IO.Path.GetDirectoryName(SelectedOutputPath)
+                Dim fileName As String = System.IO.Path.GetFileName(SelectedOutputPath)
 
                 ' If no directory is found, assume Desktop as the base
                 If String.IsNullOrWhiteSpace(dir) Then
-                    SelectedOutputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName)
+                    SelectedOutputPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName)
                     dir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
                 End If
 
                 ' If no filename is given, use the default filename
                 If String.IsNullOrWhiteSpace(fileName) Then
-                    SelectedOutputPath = Path.Combine(dir, TTSDefaultFile)
+                    SelectedOutputPath = System.IO.Path.Combine(dir, TTSDefaultFile)
                 End If
 
                 ' Ensure the filename has ".mp3" extension
                 If Not fileName.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) Then
-                    SelectedOutputPath = Path.Combine(dir, fileName & ".mp3")
+                    SelectedOutputPath = System.IO.Path.Combine(dir, fileName & ".mp3")
                 End If
             End If
 
@@ -17101,18 +17226,1040 @@ Public Class ThisAddIn
 
         Private Sub btnDesktop_Click(sender As Object, e As EventArgs)
             ' Get the filename
-            Dim fileName As String = Path.GetFileName(txtOutputPath.Text)
+            Dim fileName As String = System.IO.Path.GetFileName(txtOutputPath.Text)
 
             ' Get the user's Desktop path
             Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
 
             ' Construct new file path
-            txtOutputPath.Text = Path.Combine(desktopPath, fileName)
+            txtOutputPath.Text = System.IO.Path.Combine(desktopPath, fileName)
 
         End Sub
 
     End Class
 
+
+    Public Function GetPresentationJson(pptxPath As String) As String
+        ' 0) Path check
+        If Not System.IO.File.Exists(pptxPath) Then
+            ShowCustomMessageBox($"File not found: {pptxPath}")
+            Return String.Empty
+        End If
+
+        Try
+            ' 1) Try to open the presentation
+            Using presDoc As DocumentFormat.OpenXml.Packaging.PresentationDocument =
+              DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxPath, False)
+
+                Dim presPart As PresentationPart = presDoc.PresentationPart
+                If presPart Is Nothing OrElse presPart.Presentation Is Nothing Then
+                    ShowCustomMessageBox("Invalid or corrupted presentation.")
+                    Return String.Empty
+                End If
+
+                Dim result As New PresentationJson With {
+                .Title = presDoc.PackageProperties.Title,
+                .Slides = New List(Of SlideJson)(),
+                .Layouts = New List(Of LayoutJson)()
+            }
+
+                ' 2) Extract slides
+                Dim slideIdList = presPart.Presentation.SlideIdList
+                If slideIdList IsNot Nothing Then
+                    Dim idx As Integer = 0
+                    For Each sid As DocumentFormat.OpenXml.Presentation.SlideId In slideIdList.Elements(Of DocumentFormat.OpenXml.Presentation.SlideId)()
+                        Dim sp As SlidePart =
+                        CType(presPart.GetPartById(sid.RelationshipId), SlidePart)
+
+                        Dim title As String = GetSlideTitle(sp)
+                        Dim key As String = If(
+                        String.IsNullOrWhiteSpace(title),
+                        $"SID-{sid.Id.Value}",
+                        $"{SanitizeKey(title)}-{sid.Id.Value}"
+                    )
+
+                        Dim layoutPart As SlideLayoutPart = sp.SlideLayoutPart
+                        Dim layoutName As String = GetLayoutName(layoutPart)
+                        Dim masterName As String = If(
+                        layoutPart IsNot Nothing,
+                        GetMasterName(layoutPart.SlideMasterPart),
+                        String.Empty
+                    )
+
+                        Dim placeholders As New List(Of String)
+                        Dim content As New List(Of String)
+                        If sp.Slide IsNot Nothing AndAlso
+                       sp.Slide.CommonSlideData IsNot Nothing AndAlso
+                       sp.Slide.CommonSlideData.ShapeTree IsNot Nothing Then
+
+                            For Each shp As DocumentFormat.OpenXml.Presentation.Shape In
+                            sp.Slide.CommonSlideData.ShapeTree.OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+                                If shp.TextBody IsNot Nothing Then
+                                    content.Add(shp.TextBody.InnerText.Trim())
+                                End If
+
+                                Dim nv = shp.NonVisualShapeProperties
+                                If nv IsNot Nothing AndAlso nv.ApplicationNonVisualDrawingProperties IsNot Nothing Then
+                                    Dim ph = nv.ApplicationNonVisualDrawingProperties.PlaceholderShape
+                                    If ph IsNot Nothing AndAlso ph.Type IsNot Nothing Then
+                                        placeholders.Add(ph.Type.Value.ToString())
+                                    End If
+                                End If
+                            Next
+                        End If
+
+                        result.Slides.Add(New SlideJson With {
+                        .SlideKey = key,
+                        .SlideId = sid.Id.Value,
+                        .Index = idx,
+                        .Title = title,
+                        .Layout = layoutName,
+                        .Master = masterName,
+                        .Placeholders = placeholders,
+                        .Content = content
+                    })
+                        idx += 1
+                    Next
+                End If
+
+                ' 3) Extract layouts
+                For Each sm As SlideMasterPart In presPart.SlideMasterParts
+                    For Each layoutPart As SlideLayoutPart In sm.SlideLayoutParts
+                        Dim name As String = GetLayoutName(layoutPart)
+                        Dim layoutUri As String = layoutPart.Uri.ToString()
+                        Dim relId As String = sm.GetIdOfPart(layoutPart)
+
+                        result.Layouts.Add(New LayoutJson With {
+                        .Name = name,
+                        .LayoutId = layoutUri,
+                        .LayoutRelId = relId
+                    })
+                    Next
+                Next
+
+                ' 4) Serialize
+                Return System.Text.Json.JsonSerializer.Serialize(
+                result,
+                New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+            )
+            End Using
+
+        Catch ex As System.IO.IOException
+            ' I/O errors when opening the file
+            ShowCustomMessageBox($"Error opening presentation (I/O): {ex.Message}")
+            Return String.Empty
+
+        Catch ex As DocumentFormat.OpenXml.Packaging.OpenXmlPackageException
+            ' OpenXML package parsing errors
+            ShowCustomMessageBox($"Error processing presentation (OpenXML): {ex.Message}")
+            Return String.Empty
+
+        Catch ex As System.Exception
+            ' All other unexpected errors
+            ShowCustomMessageBox($"Unexpected error: {ex.Message}")
+            Return String.Empty
+        End Try
+    End Function
+
+
+
+
+    ''' <summary>
+    ''' Liest eine .pptx-Datei ein und gibt eine kompakte JSON-Beschreibung
+    ''' mit slideId, slideKey, layoutRelId, Platzhalter-Typen und Text-Content zurück.
+    ''' </summary>
+    ''' <param name="pptxPath">Pfad zur PPTX-Datei</param>
+    ''' <returns>Indented JSON-String</returns>
+    Public Function oldGetPresentationJson(pptxPath As String) As String
+        If Not File.Exists(pptxPath) Then
+            Throw New Exception($"Datei nicht gefunden: {pptxPath}")
+        End If
+
+        Using presDoc As PresentationDocument = PresentationDocument.Open(pptxPath, False)
+            Dim presPart As PresentationPart = presDoc.PresentationPart
+            If presPart Is Nothing OrElse presPart.Presentation Is Nothing Then
+                Throw New Exception("Ungültige oder beschädigte Präsentation.")
+            End If
+
+            Dim result As New PresentationJson With {
+                .Title = presDoc.PackageProperties.Title,
+                .Slides = New List(Of SlideJson)(),
+                .Layouts = New List(Of LayoutJson)()
+            }
+
+            ' 1) Slides extrahieren
+            Dim slideIdList = presPart.Presentation.SlideIdList
+            If slideIdList IsNot Nothing Then
+                Dim idx As Integer = 0
+                For Each sid As SlideId In slideIdList.Elements(Of SlideId)()
+                    Dim sp As SlidePart = CType(presPart.GetPartById(sid.RelationshipId), SlidePart)
+
+                    ' Titel und Key
+                    Dim title As String = GetSlideTitle(sp)
+                    Dim key As String
+                    If String.IsNullOrWhiteSpace(title) Then
+                        key = $"SID-{sid.Id.Value}"
+                    Else
+                        key = $"{SanitizeKey(title)}-{sid.Id.Value}"
+                    End If
+
+                    ' Layout- und Master-Info
+                    Dim layoutPart As SlideLayoutPart = sp.SlideLayoutPart
+                    Dim layoutName As String = GetLayoutName(layoutPart)
+                    Dim masterName As String = If(
+                        layoutPart IsNot Nothing,
+                        GetMasterName(layoutPart.SlideMasterPart),
+                        String.Empty
+                    )
+
+                    ' Platzhalter-Typen und Content
+                    Dim placeholders As New List(Of String)
+                    Dim content As New List(Of String)
+                    If sp.Slide IsNot Nothing AndAlso
+                       sp.Slide.CommonSlideData IsNot Nothing AndAlso
+                       sp.Slide.CommonSlideData.ShapeTree IsNot Nothing Then
+
+                        For Each shp As DocumentFormat.OpenXml.Presentation.Shape In
+                            sp.Slide.CommonSlideData.ShapeTree.OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+                            ' Textinhalt sammeln
+                            If shp.TextBody IsNot Nothing Then
+                                content.Add(shp.TextBody.InnerText.Trim())
+                            End If
+
+                            ' Placeholder-Typ sammeln
+                            Dim nv = shp.NonVisualShapeProperties
+                            If nv IsNot Nothing AndAlso nv.ApplicationNonVisualDrawingProperties IsNot Nothing Then
+                                Dim ph = nv.ApplicationNonVisualDrawingProperties.PlaceholderShape
+                                If ph IsNot Nothing AndAlso ph.Type IsNot Nothing Then
+                                    placeholders.Add(ph.Type.Value.ToString())
+                                End If
+                            End If
+                        Next
+                    End If
+
+                    result.Slides.Add(New SlideJson With {
+                        .SlideKey = key,
+                        .SlideId = sid.Id.Value,
+                        .Index = idx,
+                        .Title = title,
+                        .Layout = layoutName,
+                        .Master = masterName,
+                        .Placeholders = placeholders,
+                        .Content = content
+                    })
+                    idx += 1
+                Next
+            End If
+
+            ' 2) Layouts extrahieren
+            For Each sm As SlideMasterPart In presPart.SlideMasterParts
+                For Each layoutPart As SlideLayoutPart In sm.SlideLayoutParts
+                    Dim name As String = GetLayoutName(layoutPart)
+                    Dim layoutUri As String = layoutPart.Uri.ToString()
+                    Dim relId As String = sm.GetIdOfPart(layoutPart)
+
+                    result.Layouts.Add(New LayoutJson With {
+                        .Name = name,
+                        .LayoutId = layoutUri,
+                        .LayoutRelId = relId
+                    })
+                Next
+            Next
+
+            ' 3) Serialisieren mit dem System.Text.Json-Serializer
+            Return System.Text.Json.JsonSerializer.Serialize(
+                result,
+                New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+            )
+        End Using
+    End Function
+
+
+    ' --- DTO-Klassen für JSON ---
+    Public Class PresentationJson
+        <JsonPropertyName("title")>
+        Public Property Title As String
+
+        <JsonPropertyName("slides")>
+        Public Property Slides As List(Of SlideJson)
+
+        <JsonPropertyName("layouts")>
+        Public Property Layouts As List(Of LayoutJson)
+    End Class
+
+    Public Class SlideJson
+        <JsonPropertyName("slideKey")>
+        Public Property SlideKey As String
+
+        <JsonPropertyName("slideId")>
+        Public Property SlideId As UInteger
+
+        <JsonPropertyName("index")>
+        Public Property Index As Integer
+
+        <JsonPropertyName("title")>
+        Public Property Title As String
+
+        <JsonPropertyName("layout")>
+        Public Property Layout As String
+
+        <JsonPropertyName("master")>
+        Public Property Master As String
+
+        <JsonPropertyName("placeholders")>
+        Public Property Placeholders As List(Of String)
+
+        <JsonPropertyName("content")>
+        Public Property Content As List(Of String)
+    End Class
+
+    Public Class LayoutJson
+        <JsonPropertyName("name")>
+        Public Property Name As String
+
+        <JsonPropertyName("layoutId")>
+        Public Property LayoutId As String
+
+        <JsonPropertyName("layoutRelId")>
+        Public Property LayoutRelId As String
+    End Class
+
+
+    ' --- Hilfsfunktionen ---
+    Private Function GetSlideTitle(sp As SlidePart) As String
+        If sp.Slide Is Nothing OrElse
+           sp.Slide.CommonSlideData Is Nothing OrElse
+           sp.Slide.CommonSlideData.ShapeTree Is Nothing Then
+            Return String.Empty
+        End If
+
+        For Each shp As DocumentFormat.OpenXml.Presentation.Shape In
+            sp.Slide.CommonSlideData.ShapeTree.OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+            Dim nv = shp.NonVisualShapeProperties
+            If nv IsNot Nothing AndAlso nv.ApplicationNonVisualDrawingProperties IsNot Nothing Then
+                Dim ph = nv.ApplicationNonVisualDrawingProperties.PlaceholderShape
+                If ph IsNot Nothing AndAlso
+                   (ph.Type Is Nothing OrElse
+                    ph.Type.Value = PlaceholderValues.Title OrElse
+                    ph.Type.Value = PlaceholderValues.CenteredTitle) Then
+                    Return shp.TextBody.InnerText
+                End If
+            End If
+        Next
+
+        Return String.Empty
+    End Function
+
+    Private Function GetLayoutName(layoutPart As SlideLayoutPart) As String
+        If layoutPart IsNot Nothing AndAlso
+           layoutPart.SlideLayout IsNot Nothing AndAlso
+           layoutPart.SlideLayout.CommonSlideData IsNot Nothing Then
+
+            Dim nm = layoutPart.SlideLayout.CommonSlideData.Name
+            If Not String.IsNullOrWhiteSpace(nm) Then
+                Return nm
+            End If
+        End If
+        Return layoutPart.Uri.ToString()
+    End Function
+
+    Private Function GetMasterName(smPart As SlideMasterPart) As String
+        If smPart IsNot Nothing AndAlso
+           smPart.SlideMaster IsNot Nothing AndAlso
+           smPart.SlideMaster.CommonSlideData IsNot Nothing Then
+
+            Dim nm = smPart.SlideMaster.CommonSlideData.Name
+            If Not String.IsNullOrWhiteSpace(nm) Then
+                Return nm
+            End If
+        End If
+        Return smPart.Uri.ToString()
+    End Function
+
+    Private Function SanitizeKey(s As String) As String
+        Return New String(
+            s.Select(Function(ch) If(Char.IsLetterOrDigit(ch), ch, "-"c)).ToArray()
+        )
+    End Function
+
+
+    ' 1) DTOs & Polymorph-Converter (verkürzt)
+    Public MustInherit Class ActionBase
+        <JsonPropertyName("op")>
+        Public Property Op As String
+    End Class
+
+    Public Class Anchor
+        <JsonPropertyName("mode")>
+        Public Property Mode As String
+        <JsonPropertyName("by")>
+        Public Property By As AnchorBy
+    End Class
+    Public Class AnchorBy
+        <JsonPropertyName("slideKey")>
+        Public Property SlideKey As String
+    End Class
+
+    Public Class AddSlideAction
+        Inherits ActionBase
+        <JsonPropertyName("anchor")> Public Property Anchor As Anchor
+        <JsonPropertyName("layoutRelId")> Public Property LayoutRelId As String
+        <JsonPropertyName("elements")> Public Property Elements As List(Of JsonElement)
+    End Class
+
+
+    ''' <summary>
+    ''' Strips any leading/trailing garbage so that the returned string
+    ''' starts with '{' or '[' and ends with the matching '}' or ']'.
+    ''' </summary>
+    ''' <param name="raw">The raw input from your LLM.</param>
+    ''' <returns>A cleaned JSON string you can pass to JsonSerializer.Deserialize.</returns>
+    Public Function CleanJsonString(raw As String) As String
+        If String.IsNullOrEmpty(raw) Then
+            Return String.Empty
+        End If
+
+        ' Look for object vs. array start
+        Dim firstObj = raw.IndexOf("{"c)
+        Dim firstArr = raw.IndexOf("["c)
+        Dim startIdx As Integer
+        Dim openChar As Char
+        Dim closeChar As Char
+
+        If firstObj >= 0 AndAlso (firstObj < firstArr OrElse firstArr = -1) Then
+            startIdx = firstObj
+            openChar = "{"c
+            closeChar = "}"c
+        ElseIf firstArr >= 0 Then
+            startIdx = firstArr
+            openChar = "["c
+            closeChar = "]"c
+        Else
+            ' No JSON delimiters found – just return trimmed
+            Return raw.Trim()
+        End If
+
+        ' Find the last matching closing brace/bracket
+        Dim lastIdx = raw.LastIndexOf(closeChar)
+        If lastIdx > startIdx Then
+            Return raw.Substring(startIdx, lastIdx - startIdx + 1).Trim()
+        Else
+            ' Malformed or unmatched – fallback to trimming
+            Return raw.Trim()
+        End If
+    End Function
+
+
+    ' 2) Apply-Funktion
+
+    Public Sub ApplyPlanToPresentation(pptxPath As String, planJson As String)
+        Try
+            ' 1) Prüfen, ob die Datei existiert
+            If Not System.IO.File.Exists(pptxPath) Then
+                ShowCustomMessageBox($"You file '{pptxPath}' was no longer - aborting.")
+                Return
+            End If
+
+            ' 2) JSON-Serializer konfigurieren
+            Dim opts As New System.Text.Json.JsonSerializerOptions With {
+            .PropertyNameCaseInsensitive = True
+        }
+            opts.Converters.Add(New System.Text.Json.Serialization.JsonStringEnumConverter())
+
+            Dim actions As System.Text.Json.JsonElement.ArrayEnumerator
+            Try
+                actions = System.Text.Json.JsonDocument.Parse(planJson) _
+                        .RootElement _
+                        .GetProperty("actions") _
+                        .EnumerateArray()
+            Catch jsEx As System.Text.Json.JsonException
+                ShowCustomMessageBox("The AI has sent an invalid instruction on how to build the slides: " & jsEx.Message)
+                Return
+            End Try
+
+            ' 3) Präsentation einmal exklusiv öffnen
+            Using presDoc As DocumentFormat.OpenXml.Packaging.PresentationDocument =
+              DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxPath, True)
+
+                Dim presPart As DocumentFormat.OpenXml.Packaging.PresentationPart = presDoc.PresentationPart
+                If presPart Is Nothing Then
+                    ShowCustomMessageBox("Presentation part is missing in the file.")
+                    Return
+                End If
+
+                ' Sicherstellen, dass SlideIdList existiert
+                Dim pres = presPart.Presentation
+                If pres.SlideIdList Is Nothing Then
+                    pres.AppendChild(New DocumentFormat.OpenXml.Presentation.SlideIdList())
+                    pres.Save()
+                End If
+
+                ' 4) Initialen Deck-Index aus dem geöffneten PresentationPart aufbauen
+                Dim idx = BuildDeckIndex(presPart)
+                Dim currentAnchorKey As String = Nothing
+
+                ' 5) Aktionen durchlaufen
+                For Each actElem In actions
+                    If actElem.GetProperty("op").GetString() <> "add_slide" Then Continue For
+
+                    Try
+                        ' Anchor-Key aus JSON auslesen
+                        Dim anchorKey = actElem.GetProperty("anchor") _
+                                       .GetProperty("by") _
+                                       .GetProperty("slideKey") _
+                                       .GetString()
+                        If anchorKey <> "lastInserted" Then
+                            currentAnchorKey = anchorKey
+                        End If
+
+                        Dim layoutRelId As String = actElem.GetProperty("layoutRelId").GetString()
+
+                        ' Anchor-ID bestimmen, 0 = append to end
+                        Dim anchorId As UInteger
+                        If currentAnchorKey IsNot Nothing AndAlso idx.SlideKeyById.ContainsKey(currentAnchorKey) Then
+                            anchorId = idx.SlideKeyById(currentAnchorKey)
+                        Else
+                            anchorId = 0UI
+                        End If
+
+                        ' 5.1) Neue Folie klonen und einfügen
+                        Dim newSlidePart As DocumentFormat.OpenXml.Packaging.SlidePart = CloneTemplateSlide(presPart, layoutRelId)
+                        Dim newSlideId As UInteger = InsertAfter(presPart, anchorId, newSlidePart)
+                        presPart.Presentation.Save()
+
+                        ' 5.2) Text- und Bullet-Elemente füllen
+                        For Each el In actElem.GetProperty("elements").EnumerateArray()
+                            Select Case el.GetProperty("type").GetString()
+                                Case "title"
+                                    SetTitle(newSlidePart, el.GetProperty("text").GetString(), el)
+                                Case "bullet_text"
+                                    SetBullets(newSlidePart, el)
+                                Case "text"
+                                    SetText(newSlidePart,
+                                            el.GetProperty("placeholder").GetString(),
+                                            el.GetProperty("text").GetString(),
+                                            el)
+                            End Select
+                        Next
+
+                        presPart.Presentation.Save()
+
+                        ' 5.3) Deck-Index neu aufbauen
+                        idx = BuildDeckIndex(presPart)
+                        currentAnchorKey = GetSlideKey(newSlidePart, newSlideId)
+                    Catch keyEx As KeyNotFoundException
+                        ShowCustomMessageBox("The AI sent an instruction that cannot be implemented (slide key not found): " & keyEx.Message)
+                        Return
+                    Catch ex As Exception
+                        ShowCustomMessageBox("Encountered an error when creating the slides: " & ex.Message)
+                        Return
+                    End Try
+                Next
+            End Using
+
+        Catch oxEx As DocumentFormat.OpenXml.Packaging.OpenXmlPackageException
+            ShowCustomMessageBox("A PowerPoint file error occurred: " & oxEx.Message)
+        Catch ex As Exception
+            ShowCustomMessageBox("An unexpected error occurred when amending your Powerpoint: " & ex.Message)
+        End Try
+    End Sub
+
+
+
+
+    ' Neuer Overload: nimmt PresentationPart statt Pfad
+    Public Function BuildDeckIndex(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart
+) As DeckIndex
+        Dim idx As New DeckIndex With {
+        .SlideKeyById = New Dictionary(Of String, UInteger)(),
+        .IndexBySlideId = New Dictionary(Of UInteger, Integer)()
+    }
+        Dim i As Integer = 0
+        For Each sid In presPart.Presentation.SlideIdList.Elements(
+                            Of DocumentFormat.OpenXml.Presentation.SlideId)()
+            idx.IndexBySlideId(sid.Id.Value) = i
+            Dim sp = CType(presPart.GetPartById(sid.RelationshipId),
+                       DocumentFormat.OpenXml.Packaging.SlidePart)
+            Dim key = GetSlideKey(sp, sid.Id.Value)
+            idx.SlideKeyById(key) = sid.Id.Value
+            i += 1
+        Next
+        Return idx
+    End Function
+
+
+    Public Function BuildDeckIndex(pptxPath As String) As DeckIndex
+        Using presDoc As DocumentFormat.OpenXml.Packaging.PresentationDocument =
+              DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxPath, False)
+            Dim presPart = presDoc.PresentationPart
+            Dim idx As New DeckIndex With {
+              .SlideKeyById = New Dictionary(Of String, UInteger)(),
+              .IndexBySlideId = New Dictionary(Of UInteger, Integer)()
+            }
+            Dim i As Integer = 0
+            For Each sid As DocumentFormat.OpenXml.Presentation.SlideId _
+                In presPart.Presentation.SlideIdList.Elements(Of DocumentFormat.OpenXml.Presentation.SlideId)()
+                idx.IndexBySlideId(sid.Id.Value) = i
+                Dim sp = CType(presPart.GetPartById(sid.RelationshipId), DocumentFormat.OpenXml.Packaging.SlidePart)
+                Dim key = GetSlideKey(sp, sid.Id.Value)
+                idx.SlideKeyById(key) = sid.Id.Value
+                i += 1
+            Next
+            Return idx
+        End Using
+    End Function
+
+    Public Class DeckIndex
+        Public Property SlideKeyById As Dictionary(Of String, UInteger)
+        Public Property IndexBySlideId As Dictionary(Of UInteger, Integer)
+    End Class
+
+
+    Private Function CloneTemplateSlide(
+    presPart As PresentationPart,
+    layoutRelId As String
+) As SlidePart
+
+        ' 1) Finde das SlideLayoutPart im Master
+        Dim targetLayout As SlideLayoutPart = Nothing
+        For Each masterPart As SlideMasterPart In presPart.SlideMasterParts
+            For Each layout As SlideLayoutPart In masterPart.SlideLayoutParts
+                If masterPart.GetIdOfPart(layout) = layoutRelId Then
+                    targetLayout = layout
+                    Exit For
+                End If
+            Next
+            If targetLayout IsNot Nothing Then Exit For
+        Next
+
+        If targetLayout Is Nothing Then
+            Throw New System.Collections.Generic.KeyNotFoundException(
+            $"Kein SlideLayoutPart für LayoutRelId '{layoutRelId}'."
+        )
+        End If
+
+        ' 2) Lege einen *neuen* SlidePart an
+        Dim newSlidePart As SlidePart = presPart.AddNewPart(Of SlidePart)()
+
+        ' 3) Baue eine neue Slide, indem Sie nur die leeren Platzhalter aus dem Layout übernehmen
+        Dim layoutDef As SlideLayout = targetLayout.SlideLayout
+        Dim sld As New DocumentFormat.OpenXml.Presentation.Slide()
+        ' CommonSlideData (ShapeTree mit Platzhaltern)
+        sld.Append(CType(layoutDef.CommonSlideData.CloneNode(True), OpenXmlElement))
+        ' ColorMapOverride (Farbanpassung)
+        If layoutDef.ColorMapOverride IsNot Nothing Then
+            sld.Append(CType(layoutDef.ColorMapOverride.CloneNode(True), OpenXmlElement))
+        End If
+
+        ' 4) Weisen Sie die Slide dem neuen Part zu und verknüpfen das Layout
+        newSlidePart.Slide = sld
+        newSlidePart.AddPart(targetLayout)
+
+        newSlidePart.Slide.Save()
+        Return newSlidePart
+    End Function
+
+
+    Private Function InsertAfter(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart,
+    anchorSlideId As UInteger,
+    newSlidePart As DocumentFormat.OpenXml.Packaging.SlidePart
+) As UInteger
+
+        Dim slideList = presPart.Presentation.SlideIdList
+        Dim relId = presPart.GetIdOfPart(newSlidePart)
+
+        ' Existierende SlideId-Knoten
+        Dim existing = slideList.Elements(Of DocumentFormat.OpenXml.Presentation.SlideId)()
+        Dim newId As UInteger
+
+        If existing.Any() Then
+            newId = existing.Max(Function(s) s.Id.Value) + 1UI
+        Else
+            newId = 256UI   ' Erstes Slide
+        End If
+
+        Dim newSlide = New DocumentFormat.OpenXml.Presentation.SlideId() With {
+      .Id = newId,
+      .RelationshipId = relId
+    }
+
+        ' Wenn anchorSlideId = 0, dann immer ans Ende anhängen
+        If anchorSlideId = 0UI Then
+            slideList.Append(newSlide)
+        Else
+            ' Ansonsten gezielt nach dem Anker einfügen
+            Dim anchor = existing.FirstOrDefault(Function(s) s.Id.Value = anchorSlideId)
+            If anchor Is Nothing Then
+                slideList.Append(newSlide)
+            Else
+                anchor.InsertAfterSelf(newSlide)
+            End If
+        End If
+
+        Return newId
+    End Function
+
+    Private Sub SetText(
+    sp As DocumentFormat.OpenXml.Packaging.SlidePart,
+    placeholderName As String,
+    text As String,
+    el As System.Text.Json.JsonElement
+)
+        ' 1) Alle Shapes auf der Folie ermitteln
+        Dim allShapes = sp.Slide.CommonSlideData.ShapeTree.
+                    Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
+        Dim targetShape As DocumentFormat.OpenXml.Presentation.Shape = Nothing
+
+        ' 1a) Echte Body-Placeholder-Box finden
+        For Each shp In allShapes
+            Dim ph = shp.NonVisualShapeProperties?.
+                 ApplicationNonVisualDrawingProperties?.
+                 PlaceholderShape
+            If ph IsNot Nothing AndAlso ph.Type IsNot Nothing AndAlso
+           ph.Type.Value = DocumentFormat.OpenXml.Presentation.PlaceholderValues.Body Then
+                targetShape = shp
+                Exit For
+            End If
+        Next
+
+        ' 1b) Fallback: JSON-placeholder im Shape-Namen
+        If targetShape Is Nothing AndAlso Not String.IsNullOrEmpty(placeholderName) Then
+            For Each shp In allShapes
+                Dim nv = shp.NonVisualShapeProperties?.
+                     NonVisualDrawingProperties
+                Dim nm = If(nv?.Name?.Value, "")
+                If nm.IndexOf(placeholderName, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    targetShape = shp
+                    Exit For
+                End If
+            Next
+        End If
+
+        ' 1c) Fallback: erstes Nicht-Title-Shape
+        If targetShape Is Nothing Then
+            For Each shp In allShapes
+                Dim ph = shp.NonVisualShapeProperties?.
+                     ApplicationNonVisualDrawingProperties?.
+                     PlaceholderShape
+                Dim typ = If(ph?.Type IsNot Nothing, ph.Type.Value, Nothing)
+                If typ <> DocumentFormat.OpenXml.Presentation.PlaceholderValues.Title AndAlso
+               typ <> DocumentFormat.OpenXml.Presentation.PlaceholderValues.CenteredTitle Then
+                    targetShape = shp
+                    Exit For
+                End If
+            Next
+        End If
+
+        If targetShape Is Nothing Then Return
+
+        ' 2) Neuer TextBody (ohne ListStyle, damit keine Bullets erscheinen)
+        Dim tb As New DocumentFormat.OpenXml.Presentation.TextBody()
+        tb.Append(New DocumentFormat.OpenXml.Drawing.BodyProperties())
+        ' kein ListStyle hinzufügen
+
+        ' 3) RunProperties aus el("style")
+        Dim rp As New DocumentFormat.OpenXml.Drawing.RunProperties()
+        Dim styleEl As System.Text.Json.JsonElement
+        If el.TryGetProperty("style", styleEl) Then
+            Dim tmp As System.Text.Json.JsonElement
+            If styleEl.TryGetProperty("fontFamily", tmp) Then
+                rp.Append(New DocumentFormat.OpenXml.Drawing.LatinFont() With {.Typeface = tmp.GetString()})
+            End If
+            If styleEl.TryGetProperty("fontSize", tmp) Then
+                rp.FontSize = CUInt(tmp.GetInt32() * 100)
+            End If
+            If styleEl.TryGetProperty("bold", tmp) AndAlso tmp.GetBoolean() Then rp.Bold = True
+            If styleEl.TryGetProperty("italic", tmp) AndAlso tmp.GetBoolean() Then rp.Italic = True
+            If styleEl.TryGetProperty("color", tmp) Then
+                Dim hex = tmp.GetString().TrimStart("#"c)
+                rp.Append(New DocumentFormat.OpenXml.Drawing.SolidFill(
+                New DocumentFormat.OpenXml.Drawing.RgbColorModelHex() With {.Val = hex}
+            ))
+            End If
+        End If
+
+        ' 4) ParagraphProperties mit NoBullet, um Aufzählungszeichen zu unterdrücken
+        Dim pPr As New DocumentFormat.OpenXml.Drawing.ParagraphProperties() With {
+        .Indent = 0,       ' hanging indent = 0
+        .LeftMargin = 0    ' left margin = 0
+                }
+
+        pPr.Append(New DocumentFormat.OpenXml.Drawing.NoBullet())
+
+
+        ' 5) Run und Paragraph erstellen
+        Dim runElem = New DocumentFormat.OpenXml.Drawing.Run(rp, New DocumentFormat.OpenXml.Drawing.Text(text))
+        Dim para As New DocumentFormat.OpenXml.Drawing.Paragraph()
+        para.Append(pPr)
+        para.Append(runElem)
+        tb.Append(para)
+
+        ' 6) TextBody dem Shape zuweisen und speichern
+        targetShape.TextBody = tb
+        sp.Slide.Save()
+    End Sub
+
+
+    ''' <summary>
+    ''' Setzt den Folientitel (Title oder CenteredTitle Placeholder).
+    ''' </summary>
+    Private Sub SetTitle(
+    sp As DocumentFormat.OpenXml.Packaging.SlidePart,
+    text As String,
+    el As System.Text.Json.JsonElement
+)
+        ' 1) Title-Shape finden
+        Dim titleShape As DocumentFormat.OpenXml.Presentation.Shape = Nothing
+        For Each shp As DocumentFormat.OpenXml.Presentation.Shape _
+        In sp.Slide.CommonSlideData.ShapeTree.
+           Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+            ' a) PlaceholderShape sicher auslesen
+            Dim ph = shp.NonVisualShapeProperties? _
+                     .ApplicationNonVisualDrawingProperties? _
+                     .PlaceholderShape
+
+            ' b) Erst prüfen, ob ph.Type nicht Nothing ist
+            If ph IsNot Nothing AndAlso
+           ph.Type IsNot Nothing AndAlso
+           (ph.Type.Value = DocumentFormat.OpenXml.Presentation.
+                            PlaceholderValues.Title _
+            OrElse ph.Type.Value = DocumentFormat.OpenXml.Presentation.
+                            PlaceholderValues.CenteredTitle) Then
+
+                titleShape = shp
+                Exit For
+            End If
+        Next
+
+        ' Wenn kein Title-Placeholder gefunden, abbrechen
+        If titleShape Is Nothing Then
+            Return
+        End If
+
+        ' 2) Neuen TextBody bauen und an den Shape hängen
+        Dim tb As New DocumentFormat.OpenXml.Presentation.TextBody()
+        tb.Append(New DocumentFormat.OpenXml.Drawing.BodyProperties())
+        tb.Append(New DocumentFormat.OpenXml.Drawing.ListStyle())
+        tb.Append(BuildParagraph(text, el))
+
+        titleShape.TextBody = tb
+        sp.Slide.Save()
+    End Sub
+
+
+
+    Private Sub SetBullets(
+    sp As DocumentFormat.OpenXml.Packaging.SlidePart,
+    el As System.Text.Json.JsonElement
+)
+        ' 1) Optionalen Placeholder-Namen aus JSON lesen
+        Dim placeholderName As String = Nothing
+        Dim tmpEl As System.Text.Json.JsonElement
+        If el.TryGetProperty("placeholder", tmpEl) Then
+            placeholderName = tmpEl.GetString()
+        End If
+
+        ' 2) Alle Shapes auf der Folie durchsuchen
+        Dim allShapes = sp.Slide.CommonSlideData.ShapeTree.
+                    Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
+        Dim bodyShape As DocumentFormat.OpenXml.Presentation.Shape = Nothing
+
+        ' 2a) Echte Body-Placeholder-Box finden
+        For Each shp In allShapes
+            Dim ph = shp.NonVisualShapeProperties? _
+                 .ApplicationNonVisualDrawingProperties? _
+                 .PlaceholderShape
+            If ph IsNot Nothing AndAlso ph.Type IsNot Nothing AndAlso
+           ph.Type.Value = DocumentFormat.OpenXml.Presentation.PlaceholderValues.Body Then
+                bodyShape = shp
+                Exit For
+            End If
+        Next
+
+        ' 2b) Fallback: JSON-placeholder im Shape-Namen
+        If bodyShape Is Nothing AndAlso Not String.IsNullOrEmpty(placeholderName) Then
+            For Each shp In allShapes
+                Dim nvProps = shp.NonVisualShapeProperties? _
+                          .NonVisualDrawingProperties
+                Dim shpName As String = If(nvProps?.Name?.Value, "")
+                If shpName.IndexOf(placeholderName, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    bodyShape = shp
+                    Exit For
+                End If
+            Next
+        End If
+
+        ' 2c) Fallback: erstes Nicht-Title-Shape
+        If bodyShape Is Nothing Then
+            For Each shp In allShapes
+                Dim ph = shp.NonVisualShapeProperties? _
+                     .ApplicationNonVisualDrawingProperties? _
+                     .PlaceholderShape
+                Dim typ = If(ph?.Type IsNot Nothing, ph.Type.Value, Nothing)
+                If typ <> DocumentFormat.OpenXml.Presentation.PlaceholderValues.Title AndAlso
+               typ <> DocumentFormat.OpenXml.Presentation.PlaceholderValues.CenteredTitle Then
+                    bodyShape = shp
+                    Exit For
+                End If
+            Next
+        End If
+
+        ' Abbruch, wenn kein Body-Shape gefunden wurde
+        If bodyShape Is Nothing Then
+            Return
+        End If
+
+        ' 3) Neues TextBody mit ListStyle erzeugen
+        Dim tb As New DocumentFormat.OpenXml.Presentation.TextBody()
+        tb.Append(New DocumentFormat.OpenXml.Drawing.BodyProperties())
+        tb.Append(New DocumentFormat.OpenXml.Drawing.ListStyle())
+
+        ' 4) Bullets aus JSON lesen und als verschachtelte Paragraphen anfügen
+        For Each bElem As System.Text.Json.JsonElement In el.GetProperty("bullets").EnumerateArray()
+            ' 4a) Text und Level ermitteln
+            Dim text As String
+            Dim level As Integer = 0
+            If bElem.ValueKind = System.Text.Json.JsonValueKind.Object Then
+                If bElem.TryGetProperty("text", tmpEl) Then
+                    text = tmpEl.GetString()
+                Else
+                    Continue For
+                End If
+                If bElem.TryGetProperty("level", tmpEl) Then
+                    level = tmpEl.GetInt32()
+                End If
+            Else
+                text = bElem.GetString()
+            End If
+
+            ' 4b) RunProperties aus el.style erzeugen
+            Dim rp As New DocumentFormat.OpenXml.Drawing.RunProperties()
+            Dim styleEl As System.Text.Json.JsonElement
+            If el.TryGetProperty("style", styleEl) Then
+                Dim tmp As System.Text.Json.JsonElement
+                If styleEl.TryGetProperty("fontFamily", tmp) Then
+                    rp.Append(New DocumentFormat.OpenXml.Drawing.LatinFont() With {.Typeface = tmp.GetString()})
+                End If
+                If styleEl.TryGetProperty("fontSize", tmp) Then
+                    rp.FontSize = CUInt(tmp.GetInt32() * 100)
+                End If
+                If styleEl.TryGetProperty("bold", tmp) AndAlso tmp.GetBoolean() Then rp.Bold = True
+                If styleEl.TryGetProperty("italic", tmp) AndAlso tmp.GetBoolean() Then rp.Italic = True
+                If styleEl.TryGetProperty("color", tmp) Then
+                    Dim hex = tmp.GetString().TrimStart("#"c)
+                    rp.Append(New DocumentFormat.OpenXml.Drawing.SolidFill(
+                    New DocumentFormat.OpenXml.Drawing.RgbColorModelHex() With {.Val = hex}
+                ))
+                End If
+            End If
+
+            ' 4c) ParagraphProperties mit Level setzen
+            Dim actualLevel = System.Math.Max(0, System.Math.Min(8, level))
+            Dim pPr As New DocumentFormat.OpenXml.Drawing.ParagraphProperties() With {
+                    .Level = CByte(actualLevel)
+                }
+            ' 4d) Run und Paragraph bauen
+            Dim runElem = New DocumentFormat.OpenXml.Drawing.Run(rp, New DocumentFormat.OpenXml.Drawing.Text(text))
+            Dim para As New DocumentFormat.OpenXml.Drawing.Paragraph()
+            para.Append(pPr)
+            para.Append(runElem)
+
+            tb.Append(para)
+        Next
+
+        ' 5) TextBody dem Shape zuweisen und speichern
+        bodyShape.TextBody = tb
+        sp.Slide.Save()
+    End Sub
+
+
+
+
+
+    ''' <summary>
+    ''' Baut einen einzelnen Drawing.Paragraph mit Text und RunProperties.
+    ''' </summary>
+    Private Function BuildParagraph(
+      text As String,
+      el As JsonElement
+    ) As DocumentFormat.OpenXml.Drawing.Paragraph
+
+        ' 1) RunProperties und Style aus JSON
+        Dim rp As New DocumentFormat.OpenXml.Drawing.RunProperties()
+        Dim styleEl As JsonElement
+        If el.TryGetProperty("style", styleEl) Then
+            Dim tmp As JsonElement
+            If styleEl.TryGetProperty("fontFamily", tmp) Then
+                rp.Append(New DocumentFormat.OpenXml.Drawing.LatinFont() With {.Typeface = tmp.GetString()})
+            End If
+            If styleEl.TryGetProperty("fontSize", tmp) Then
+                rp.FontSize = CUInt(tmp.GetInt32() * 100)
+            End If
+            If styleEl.TryGetProperty("bold", tmp) AndAlso tmp.GetBoolean() Then rp.Bold = True
+            If styleEl.TryGetProperty("italic", tmp) AndAlso tmp.GetBoolean() Then rp.Italic = True
+            If styleEl.TryGetProperty("color", tmp) Then
+                Dim hex = tmp.GetString().TrimStart("#"c)
+                rp.Append(New DocumentFormat.OpenXml.Drawing.SolidFill(
+          New DocumentFormat.OpenXml.Drawing.RgbColorModelHex() With {.Val = hex}
+        ))
+            End If
+        End If
+
+        ' 2) Run + Paragraph erzeugen
+        Dim runElem = New DocumentFormat.OpenXml.Drawing.Run(rp, New DocumentFormat.OpenXml.Drawing.Text(text))
+        Dim para = New DocumentFormat.OpenXml.Drawing.Paragraph()
+        para.Append(runElem)
+        Return para
+    End Function
+
+    Private Function BuildRun(
+      text As String,
+      el As JsonElement
+    ) As DocumentFormat.OpenXml.Drawing.Run
+
+        Dim rp As New DocumentFormat.OpenXml.Drawing.RunProperties()
+
+        ' KORREKT: Füge LatinFont, SolidFill als Kind-Elemente hinzu
+        Dim styleEl As JsonElement
+        If el.TryGetProperty("style", styleEl) Then
+            Dim tmp As JsonElement
+            If styleEl.TryGetProperty("fontFamily", tmp) Then
+                rp.Append(New DocumentFormat.OpenXml.Drawing.LatinFont() With {.Typeface = tmp.GetString()})
+            End If
+            If styleEl.TryGetProperty("fontSize", tmp) Then
+                rp.FontSize = CUInt(tmp.GetInt32() * 100)
+            End If
+            If styleEl.TryGetProperty("bold", tmp) AndAlso tmp.GetBoolean() Then rp.Bold = True
+            If styleEl.TryGetProperty("italic", tmp) AndAlso tmp.GetBoolean() Then rp.Italic = True
+            If styleEl.TryGetProperty("color", tmp) Then
+                Dim hex = tmp.GetString().TrimStart("#"c)
+                rp.Append(New DocumentFormat.OpenXml.Drawing.SolidFill(
+            New DocumentFormat.OpenXml.Drawing.RgbColorModelHex() With {.Val = hex}
+        ))
+            End If
+        End If
+
+        Return New DocumentFormat.OpenXml.Drawing.Run(rp, New DocumentFormat.OpenXml.Drawing.Text(text))
+    End Function
+
+
+    Private Function GetSlideKey(
+        sp As DocumentFormat.OpenXml.Packaging.SlidePart,
+        slideId As UInteger
+      ) As String
+        Dim title = GetSlideTitle(sp) ' <- Dein vorhandener Helper!
+        If String.IsNullOrWhiteSpace(title) Then
+            Return $"SID-{slideId}"
+        Else
+            Return $"{SanitizeKey(title)}-{slideId}"
+        End If
+    End Function
 
 End Class
 

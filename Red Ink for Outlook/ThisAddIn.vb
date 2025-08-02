@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 28.7.2025
+' 1.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -134,7 +134,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.280725 Gen2 Beta Test"
+    Public Const Version As String = "V.010825 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -293,6 +293,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_Anon = value
+        End Set
+    End Property
+
+    Public Shared Property INI_TokenCount As String
+        Get
+            Return _context.INI_TokenCount
+        End Get
+        Set(value As String)
+            _context.INI_TokenCount = value
+        End Set
+    End Property
+
+    Public Shared Property INI_TokenCount_2 As String
+        Get
+            Return _context.INI_TokenCount_2
+        End Get
+        Set(value As String)
+            _context.INI_TokenCount_2 = value
         End Set
     End Property
 
@@ -661,6 +679,15 @@ Public Class ThisAddIn
         End Get
         Set(value As Boolean)
             _context.INI_KeepFormat1 = value
+        End Set
+    End Property
+
+    Public Shared Property INI_MarkdownConvert As Boolean
+        Get
+            Return _context.INI_MarkdownConvert
+        End Get
+        Set(value As Boolean)
+            _context.INI_MarkdownConvert = value
         End Set
     End Property
 
@@ -2293,7 +2320,7 @@ Public Class ThisAddIn
 
         ' Add spacing and insert with your markdown helper
         selection.TypeParagraph()
-        InsertTextWithMarkdown(selection, result)
+        InsertTextWithMarkdown(selection, result, True)
 
     End Sub
 
@@ -2442,6 +2469,7 @@ Public Class ThisAddIn
             If KeepFormat Then
                 SelectedText = SLib.GetRangeHtml(selection.Range)
             Else
+                If INI_MarkdownConvert Then ConvertRangeToMarkdown(selection.Range)
                 SelectedText = selection.Text
             End If
 
@@ -2462,7 +2490,7 @@ Public Class ThisAddIn
                 End Select
             End If
 
-            Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf)
+            Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbCr) Or SelectedText.EndsWith(vbLf)
 
             ' Call your LLM function with the selected text
             Dim LLMResult As String = Await LLM(SysCommand & If(KeepFormat, " " & SP_Add_KeepHTMLIntact, SP_Add_KeepInlineIntact), "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0)
@@ -2473,6 +2501,9 @@ Public Class ThisAddIn
                 LLMResult = Await PostCorrection(LLMResult)
             End If
 
+            Debug.WriteLine("TrailingCR=" & trailingCR)
+            Debug.WriteLine($"Selection='{selection.Text}'")
+
             ' Replace the selected text with the processed result
             If Not String.IsNullOrWhiteSpace(LLMResult) Then
                 If KeepFormat Then
@@ -2480,7 +2511,7 @@ Public Class ThisAddIn
                     Dim Plaintext As String = ""
 
                     SelectedText = selection.Text
-                    SLib.InsertTextWithFormat(LLMResult, range, Inplace)
+                    SLib.InsertTextWithFormat(LLMResult, range, Inplace, Not trailingCR)
                     If DoMarkup Then
                         LLMResult = SLib.RemoveHTML(LLMResult)
                         If MarkupMethod <> 3 Then
@@ -2498,10 +2529,10 @@ Public Class ThisAddIn
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
                         If DoMarkup And MarkupMethod <> 3 Then
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>")
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>", trailingCR)
                             'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                         Else
-                            SLib.InsertTextWithMarkdown(selection, LLMResult)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
                             'selection.TypeText(LLMResult)
                         End If
                     Else
@@ -2526,10 +2557,10 @@ Public Class ThisAddIn
 
                         If DoMarkup And MarkupMethod <> 3 Then
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>" & vbCrLf & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>" & vbCrLf & vbCrLf, trailingCR)
                         Else
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, LLMResult)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
 
                         End If
                     End If
@@ -2809,7 +2840,7 @@ Public Class ThisAddIn
 
                     ' Insert your text (LLMResult) at the beginning
                     Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
-                    InsertTextWithMarkdown(docSelection, LLMResult)
+                    InsertTextWithMarkdown(docSelection, LLMResult, True)
 
                 Catch Ex As System.Exception
                     Dim FinalText As String = SLib.ShowCustomWindow("The Word document could not be created or the LLM output not inserted. Here is the result of the LLM (you can edit it):", LLMResult, "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made. If you select Cancel, nothing will be put into the clipboard (without formatting).", AN, False)
@@ -2838,12 +2869,12 @@ Public Class ThisAddIn
 
                 ' Insert the result as a new paragraph
                 If DoMarkup And MarkupMethod <> 3 Then
-                    SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                    SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf, trailingCR)
                 Else
                     If DoInplace Then
-                        SLib.InsertTextWithMarkdown(selection, LLMResult)
+                        SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
                     Else
-                        SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf)
+                        SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf, trailingCR)
                     End If
                 End If
 
@@ -3035,6 +3066,277 @@ Public Class ThisAddIn
     End Sub
 
 
+    Private Shared Sub ConvertRangeToMarkdown(WorkingRange As Range)
+
+        Dim listRegex As New Regex("^(\s*)([-*+]|\d+[\.\)])\s+", RegexOptions.Compiled)
+
+
+        Dim rng As Word.Range = WorkingRange.Duplicate
+        If rng.End < rng.Document.Content.End - 1 Then
+            rng.End = rng.End + 1
+        End If
+
+        Dim doc As Microsoft.Office.Interop.Word.Document = rng.Document
+
+        ' 0) Überschriften & Listen
+        For Each para As Microsoft.Office.Interop.Word.Paragraph In rng.Paragraphs
+            Dim styleName As String = CType(para.Style, Microsoft.Office.Interop.Word.Style).NameLocal
+
+            Select Case styleName
+                Case doc.Styles(Word.WdBuiltinStyle.wdStyleTitle).NameLocal
+                    para.Range.InsertBefore("# ")
+                Case doc.Styles(Word.WdBuiltinStyle.wdStyleHeading1).NameLocal
+                    para.Range.InsertBefore("# ")
+                Case doc.Styles(Word.WdBuiltinStyle.wdStyleHeading2).NameLocal
+                    para.Range.InsertBefore("## ")
+                Case doc.Styles(Word.WdBuiltinStyle.wdStyleHeading3).NameLocal
+                    para.Range.InsertBefore("### ")
+                    ' … und so weiter bis Heading6 …
+            End Select
+
+            ' — Listen erkennen
+            With para.Range.ListFormat
+                Try
+                    ' Nur fortfahren, wenn eine Liste vorliegt
+                    If .ListType <> Microsoft.Office.Interop.Word.WdListType.wdListNoNumbering Then
+
+                        ' 1) Alle nötigen Infos VOR RemoveNumbers speichern
+                        Dim lvl As Integer = .ListLevelNumber
+                        Dim lt As Microsoft.Office.Interop.Word.WdListType = .ListType
+                        Dim ls As String = .ListString.Trim()
+
+                        ' 2) Prefix berechnen (4 Spaces pro Ebene)
+                        Dim indent As String = New String(" "c, (lvl - 1) * 4)
+                        Dim prefix As String
+                        Select Case lt
+                            Case Microsoft.Office.Interop.Word.WdListType.wdListBullet,
+                                 Microsoft.Office.Interop.Word.WdListType.wdListPictureBullet
+                                prefix = indent & "- "
+                            Case Microsoft.Office.Interop.Word.WdListType.wdListSimpleNumbering,
+                                 Microsoft.Office.Interop.Word.WdListType.wdListOutlineNumbering,
+                                 Microsoft.Office.Interop.Word.WdListType.wdListMixedNumbering,
+                                 Microsoft.Office.Interop.Word.WdListType.wdListListNumOnly
+                                prefix = indent & ls & " "
+                            Case Else
+                                prefix = indent & "- "
+                        End Select
+
+                        ' 3) Liste entfernen
+                        .RemoveNumbers()
+
+                        ' 4) Markdown-Präfix am Zeilenanfang einfügen
+                        Dim insertRange As Microsoft.Office.Interop.Word.Range = para.Range.Duplicate()
+                        insertRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseStart)
+                        insertRange.InsertBefore(prefix)
+
+                        ' Range für das eingefügte Prefix erstellen
+                        Dim prefixRange As Word.Range = insertRange.Duplicate
+                        prefixRange.End = prefixRange.Start + prefix.Length
+
+                        ' Font zurücksetzen (Standard-Formatierung)
+                        prefixRange.Font.Reset()
+
+                    End If
+
+                Catch ex As System.Exception
+                    System.Diagnostics.Debug.WriteLine("Fehler bei Listenkonvertierung: " & ex.ToString())
+                End Try
+            End With
+
+        Next
+
+        ' 1) Fett + Italic  (Absatz)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Font.Italic = True
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "***\1***^13",
+                        Sub(rep)                          ' nur Bold & Italic abstellen
+                            rep.Bold = False
+                            rep.Italic = False
+                        End Sub)
+
+        ' 2) Fett + Italic  (Inline)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Font.Italic = True
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "***^&***",
+                        Sub(rep)
+                            rep.Bold = False
+                            rep.Italic = False
+                        End Sub)
+
+
+        ' 3) Nur Fett  (Absatz)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "**\1**^13",
+                        Sub(rep)
+                            rep.Bold = False
+                        End Sub)
+
+        ' 4) Nur Fett  (Inline)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Bold = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "**^&**",
+                        Sub(rep)
+                            rep.Bold = False
+                        End Sub)
+
+
+        ' 5) Nur Italic  (Absatz)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Italic = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "*\1*^13",
+                        Sub(rep)
+                            rep.Italic = False
+                        End Sub)
+
+        ' 6) Nur Italic  (Inline)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Italic = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "*^&*",
+                        Sub(rep)
+                            rep.Italic = False
+                        End Sub)
+
+
+        ' 7) Underline  (Absatz)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "<u>\1</u>^13",
+                        Sub(rep)
+                            rep.Underline = Word.WdUnderline.wdUnderlineNone
+                        End Sub)
+
+        ' 8) Underline  (Inline)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "<u>^&</u>",
+                        Sub(rep)
+                            rep.Underline = Word.WdUnderline.wdUnderlineNone
+                        End Sub)
+
+        ' 9) Strikethrough  (Absatz)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.StrikeThrough = True
+                            f.Text = "(*)^13"
+                            f.MatchWildcards = True
+                        End Sub,
+                        "~~\1~~^13",
+                        Sub(rep)
+                            rep.StrikeThrough = False
+                        End Sub)
+
+        '10) Strikethrough  (Inline)
+        ReplaceWithinRange(rng,
+                        Sub(f)
+                            f.Font.StrikeThrough = True
+                            f.Text = ""
+                            f.MatchWildcards = False
+                        End Sub,
+                        "~~^&~~",
+                        Sub(rep)
+                            rep.StrikeThrough = False
+                        End Sub)
+
+
+        ' Auswahl wiederherstellen
+        'rng = workingrange.Duplicate
+
+        rng.End = rng.End - 1
+        rng.Select()
+
+    End Sub
+
+    Private Shared Sub ReplaceWithinRange(
+    ByVal rng As Word.Range,
+    ByVal configureFind As Action(Of Word.Find),
+    ByVal replacementText As String,
+    ByVal tweakReplacement As Action(Of Word.Font))
+
+        Dim doc As Word.Document = rng.Document
+        Dim originalStart As Long = rng.Start
+        Dim originalEnd As Long = rng.End
+        Dim currentPosition As Long = originalStart
+
+        Do
+            ' Create a range from current position to the end of the original range
+            Dim searchRange As Word.Range = doc.Range(currentPosition, originalEnd)
+            Dim f As Word.Find = searchRange.Find
+
+            Debug.WriteLine($"Searchrange = '{searchRange.Text}'")
+
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+
+            configureFind(f)
+            f.Replacement.Text = replacementText
+            tweakReplacement(f.Replacement.Font)
+
+            f.Forward = True
+            f.Wrap = Word.WdFindWrap.wdFindStop
+            f.Format = True
+
+            ' If no more matches, exit
+            If Not f.Execute(Replace:=Word.WdReplace.wdReplaceOne) Then Exit Do
+
+            Debug.WriteLine($"Searchrange = '{searchRange.Text}' (after change)")
+
+            ' After replacement, searchRange now points to the match
+            ' Check if this match/replacement went beyond our boundary
+            If searchRange.End > originalEnd Then
+                Debug.WriteLine("Went too far!")
+                doc.Undo()
+                Exit Do
+            End If
+
+            ' Set the current position to continue from the end of this match
+            currentPosition = searchRange.End
+            originalEnd = rng.End
+
+        Loop While currentPosition < originalEnd
+
+        ' Update the original range to reflect the final processed area
+        rng.SetRange(originalStart, originalEnd)
+    End Sub
+
+
+
     Private Function ConvertRtfToPlainText(rtfContent As String) As String
         If String.IsNullOrWhiteSpace(rtfContent) Then Return String.Empty
 
@@ -3115,7 +3417,7 @@ Public Class ThisAddIn
 
         Try
             'Your existing helper that pastes an HTML fragment
-            InsertTextWithFormat(markup, selRange, True)
+            InsertTextWithFormat(markup, selRange, True, True)
 
         Catch ex As System.Exception
             'Handle or log as needed – shows a message box here for completeness
@@ -3441,6 +3743,8 @@ Public Class ThisAddIn
                         {"Temperature_2", "Temperature of {model2}"},
                         {"Timeout_2", "Timeout of {model2}"},
                         {"DoubleS", "Convert '" & ChrW(223) & "' to 'ss'"},
+                        {"Clean", "Clean the LLM response"},
+                        {"MarkdownConvert", "Keep character formatting"},
                         {"KeepFormat1", "Keep format (translations)"},
                         {"ReplaceText1", "Replace text (translations)"},
                         {"KeepFormat2", "Keep format (other commands)"},
@@ -3460,6 +3764,8 @@ Public Class ThisAddIn
                         {"Temperature_2", "The higher, the more creative the LLM will be (0.0-2.0)"},
                         {"Timeout_2", "In milliseconds"},
                         {"DoubleS", "For Switzerland"},
+                        {"Clean", "To remove double-spaces and hidden markers that may have been inserted by the LLM"},
+                        {"MarkdownConvert", "If selected, bold, italic, underline and some more formatting will be preserved converting it to Markdown coding before passing it to the LLM (most LLM support it)"},
                         {"KeepFormat1", "If selected, the original's text basic formatting of a translated text will be retained (by HTML encoding, takes time!)"},
                         {"ReplaceText1", "If selected, the response of the LLM for translations will replace the original text"},
                         {"KeepFormat2", "If selected, the original's text basic formatting of other text (other than translations) will be retained (by HTML encoding, takes time!)"},
@@ -4014,7 +4320,7 @@ Public Class ThisAddIn
 
                         ' Insert your text (LLMResult) at the beginning
                         Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
-                        InsertTextWithMarkdown(docSelection, llmResult)
+                        InsertTextWithMarkdown(docSelection, llmResult, True)
                         Await SwitchToUi(Sub()
                                              ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
                                          End Sub)

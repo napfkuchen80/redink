@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 23.7.2025
+' 31.7.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -49,12 +49,13 @@ Public Class frmAIChat
 
     Const AN As String = "Red Ink"
     Const AN5 As String = "Inky"   ' for Chatbox
-
+    Private Const ExtWSTrigger As String = "(addws)"
 
     Private PreceedingNewline As String = ""
     Private OldChat As String = ""
     Private UserLanguage As String = New CultureInfo(Globals.ThisAddIn.Application.LanguageSettings.LanguageID(MsoAppLanguageID.msoLanguageIDUI)).Name
     Private SystemPrompt As String = ""
+
 
     Private WithEvents btnCopy As New System.Windows.Forms.Button() With {.Text = "Copy All", .AutoSize = True}
     Private WithEvents btnCopyLastAnswer As New System.Windows.Forms.Button() With {.Text = "Copy Last Answer", .AutoSize = True}
@@ -180,7 +181,7 @@ Public Class frmAIChat
         AddHandler txtUserInput.KeyDown, AddressOf UserInput_KeyDown
 
         ' Set up instructions label
-        lblInstructions.Text = $"Enter your question and click 'Send' or Ctrl-Enter. You can allow the chatbot to perform actions on your worksheet (change or comment cells): you can undo the last action, if needed."
+        lblInstructions.Text = $"Enter your question and click 'Send' or Ctrl-Enter. Add '{ExtWSTrigger}' to pass along other open worksheets in your question. You can allow the chatbot to perform actions on your worksheet (change or comment cells): you can undo the last action, if needed."
         lblInstructions.AutoSize = True
         lblInstructions.Height = 50
         lblInstructions.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
@@ -253,6 +254,7 @@ Public Class frmAIChat
             Dim docText As String = ""
             Dim selectiontext As String = ""
             Dim selectedcells As String = ""
+            Dim InsertWS As String = ""
             If chkIncludeDocText.Checked Then
                 Dim ws As Excel.Worksheet = Globals.ThisAddIn.Application.ActiveSheet
                 Dim selectedRange As Excel.Range = ws.UsedRange
@@ -271,6 +273,28 @@ Public Class frmAIChat
                         selectedcells = intersectedRange.Address(False, False)
                     End If
                 End If
+            End If
+
+            If Not String.IsNullOrEmpty(userPrompt) And userPrompt.IndexOf(ExtWSTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                If Not chkIncludeDocText.Checked AndAlso Not chkIncludeselection.Checked Then
+                    ShowCustomMessageBox("You cannot use the " & ExtWSTrigger & " trigger if you do not includ the worksheet or a selection of it - trigger ignored.")
+                    InsertWS = ""
+                Else
+                    InsertWS = Globals.ThisAddIn.GatherSelectedWorksheets()
+                    Debug.WriteLine($"GatherSelectedWorksheets returned: {Microsoft.VisualBasic.Left(InsertWS, 3000)}")
+                    If String.IsNullOrWhiteSpace(InsertWS) Then
+                        ShowCustomMessageBox("No content was found or an error occurred in gathering the additional worksheet(s) - doing without them.")
+                        InsertWS = ""
+                    ElseIf InsertWS.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
+                        ShowCustomMessageBox($"An error occured gathering the additional worksheet(s) ({InsertWS.Substring(6).Trim()}) - doing without them.")
+                        InsertWS = ""
+                    ElseIf InsertWS.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
+                        ShowCustomMessageBox($"There are no other worksheets to add - doing without them.")
+                        InsertWS = ""
+                    End If
+
+                End If
+                userPrompt = Regex.Replace(userPrompt, Regex.Escape(ExtWSTrigger), "", RegexOptions.IgnoreCase)
             End If
 
             ' Construct the full prompt
@@ -295,6 +319,10 @@ Public Class frmAIChat
             ElseIf chkIncludeDocText.Checked Then
                 fullPrompt.AppendLine("The user has granted you access to the worksheet '" & combinedName & "' but the entire worksheet is empty.")
             End If
+            If Not InsertWS.IsNullOrWhiteSpace(InsertWS) Then
+                fullPrompt.AppendLine("The user also provided you access to the following additional worksheet(s): " & InsertWS)
+            End If
+
 
             fullPrompt.AppendLine("User: " & userPrompt)
             fullPrompt.AppendLine("The conversation so far (not including any previously added worksheet content):\n" & conversationSoFar)
