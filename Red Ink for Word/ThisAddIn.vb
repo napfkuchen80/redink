@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 6.8.2025
+' 10.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -21,6 +21,7 @@
 ' Includes MarkdownToRTF in modified form; Copyright (c) 2025 Gustavo Hennig; original licensed under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/GustavoHennig/MarkdownToRtf
 ' Includes Nito.AsyncEx in unchanged form; Copyright (c) 2021 Stephen Cleary; licensed under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/StephenCleary/AsyncEx
 ' Includes NetOffice libraries in unchanged form; Copyright (c) 2020 Sebastian Lange, Erika LeBlanc; licensed under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/netoffice/NetOffice-NuGet
+' Includes NAudio.Lame in unchanged form; Copyright (c) 2019 Corey Murtagh; licensed under the MIT license (https://licenses.nuget.org/MIT) at https://github.com/Corey-M/NAudio.Lame
 ' Includes also various Microsoft libraries copyrighted by Microsoft Corporation and available, among others, under the Microsoft EULA and the MIT License; Copyright (c) 2016- Microsoft Corp.
 
 Option Explicit On
@@ -76,6 +77,7 @@ Imports Microsoft.Office.Interop.Word
 Imports NAudio
 Imports NAudio.CoreAudioApi
 Imports NAudio.Wave
+Imports NAudio.Lame
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.MarkdownToRtf
@@ -227,193 +229,223 @@ Public Module WordSearchHelper
     Public Function FindLongTextAnchoredFast(
     ByRef sel As Microsoft.Office.Interop.Word.Selection,
     ByVal findText As String,
-    Optional ByVal skipDeleted As Boolean = False,
+    Optional ByVal skipDeleted As Boolean = True,
     Optional ByVal nWords As Integer = 4,
     Optional ByVal cancel As System.Threading.CancellationToken = Nothing,
     Optional ByVal timeoutSeconds As Integer = 10) As Boolean
 
         Debug.WriteLine("Skipdeleted=" & skipDeleted)
 
-        Dim _dbgLastSlice As String = ""
-        Dim _dbgLastIdx As Integer = -1
-        Dim _dbgNeedle As String = ""
+        ' Word-Application-Referenz aus Selection ableiten
+        Dim wordApp As Microsoft.Office.Interop.Word.Application = sel.Application
 
-        Dim t0 As System.DateTime = System.DateTime.UtcNow
-        Dim doc As Microsoft.Office.Interop.Word.Document = sel.Document
-        Dim area As Microsoft.Office.Interop.Word.Range =
+        ' Am Anfang: Falls gewünscht, Markups ausblenden
+        If skipDeleted Then
+            With wordApp.ActiveWindow.View
+                .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                .ShowRevisionsAndComments = False
+            End With
+        End If
+
+        Try
+
+            Dim _dbgLastSlice As String = ""
+            Dim _dbgLastIdx As Integer = -1
+            Dim _dbgNeedle As String = ""
+
+            Dim t0 As System.DateTime = System.DateTime.UtcNow
+            Dim doc As Microsoft.Office.Interop.Word.Document = sel.Document
+            Dim area As Microsoft.Office.Interop.Word.Range =
         If(sel.Range.Start = sel.Range.End, doc.Content.Duplicate, sel.Range.Duplicate)
 
-        '──────── 0) REINE Ctrl-F-Suche (Literal, kein Format) ────────────
-        If findText.Length <= 255 Then
-            Dim rngPlain As Microsoft.Office.Interop.Word.Range = area.Duplicate
-            With rngPlain.Find
-                .ClearFormatting() : .Replacement.ClearFormatting()
-                .Font.Reset() : .ParagraphFormat.Reset()
-                .Text = findText
-                .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                .MatchCase = False : .MatchWholeWord = False
-                .MatchWildcards = False : .Format = False
-                .IgnoreSpace = False          'exakt wie Ctrl-F
-            End With
-            Dim hitPlain As Boolean
-            Try : hitPlain = rngPlain.Find.Execute()
-            Catch : hitPlain = False         'COM-Fehler (z. B. >255) → weiter
-            End Try
-            If hitPlain Then
-                sel.SetRange(rngPlain.Start, rngPlain.End)
-                Return True
-            End If
-        End If
-
-        '──────── 1) QUICK-Literal  (masked, IgnoreSpace=True, ≤255) ──────
-        Dim litPat As String = EscapeForWordWildcard(findText)
-        If litPat.Length <= 255 Then
-            Dim rngLit As Microsoft.Office.Interop.Word.Range = area.Duplicate
-            With rngLit.Find
-                .ClearFormatting() : .Replacement.ClearFormatting()
-                .Font.Reset() : .ParagraphFormat.Reset()
-                .Text = litPat
-                .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                .MatchCase = False : .MatchWildcards = False
-                .Format = False : .IgnoreSpace = True
-            End With
-            If rngLit.Find.Execute() Then
-                sel.SetRange(rngLit.Start, rngLit.End) : Return True
-            End If
-        End If
-
-        '──────── 2) Start/End-Vorbereitung  ──────────────────────────────
-        Dim raw() As String = WordSearchHelper.RawWords(findText)
-        Dim canonNeedle As String = Canonicalise(findText, True)
-        If canonNeedle = "" Then Return False
-
-        '---- NEU: Kompletter Wildcard-Suchlauf, falls < 255 ----
-        Dim fullWildcardPattern As String = BuildWildcardProbe(raw)
-        If fullWildcardPattern.Length <= 255 Then
-            Dim rngFull As Microsoft.Office.Interop.Word.Range = area.Duplicate
-            With rngFull.Find
-                .ClearFormatting() : .Replacement.ClearFormatting()
-                .Font.Reset() : .ParagraphFormat.Reset()
-                .Text = fullWildcardPattern
-                .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                .MatchCase = False : .MatchWildcards = True
-                .Format = False : .IgnoreSpace = True
-            End With
-            If rngFull.Find.Execute() Then
-                sel.SetRange(rngFull.Start, rngFull.End)
-                Return True
-            End If
-        End If
-
-        ' Fallback auf Anker-Logik, falls kompletter Suchlauf nicht möglich war
-        If raw.Length < 2 Then Return False ' Anker-Logik braucht min. 2 Wörter
-
-        ' nWords so wählen, dass Start- und End-Anker nicht überlappen
-        nWords = System.Math.Min(nWords, raw.Length \ 2)
-        If nWords < 1 Then nWords = 1
-
-        ' Sicherstellen, dass der Start-Anker nicht zu lang ist
-        Do While nWords > 1 AndAlso BuildWildcardProbe(raw.Take(nWords).ToArray()).Length > 255
-            nWords -= 1
-        Loop
-
-        Dim startPat As String = BuildWildcardProbe(raw.Take(nWords).ToArray())
-        Dim endWords() As String = raw.Skip(raw.Length - nWords).ToArray()
-        Dim endPat As String = BuildWildcardProbe(endWords)
-
-        Dim occur As Integer = CountOccurrences(findText, System.String.Join(" "c, endWords))
-        If startPat = endPat Then occur = System.Math.Max(2, occur)
-
-        deletionsCache = Nothing
-
-        '──────── 3) Start-Wildcard-Find (formatneutral) ──────────────────
-        Using sRng As New RangeProxy(area.Duplicate)
-            Dim fS As Microsoft.Office.Interop.Word.Find = sRng.Range.Find
-            With fS
-                .ClearFormatting() : .Replacement.ClearFormatting()
-                .Font.Reset() : .ParagraphFormat.Reset()
-                .Text = startPat
-                .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                .MatchCase = False : .MatchWildcards = True
-                .Format = False : .IgnoreSpace = True
-            End With
-
-            Dim okS As Boolean : Try : okS = fS.Execute() : Catch : okS = False : End Try
-            While okS
-                If (System.DateTime.UtcNow - t0).TotalSeconds > timeoutSeconds Then
-                    Throw New System.Exception("Timeout while searching.")
-                End If
-                cancel.ThrowIfCancellationRequested()
-
-                Dim posStart As Integer = sRng.Range.Start
-                Dim searchFrom As Integer = sRng.Range.End
-
-                '──────── End-Wildcard-Find ───────────────────────────────
-                Dim eRng As Microsoft.Office.Interop.Word.Range = doc.Range(searchFrom, area.End)
-                Dim fE As Microsoft.Office.Interop.Word.Find = eRng.Find
-                With fE
+            '──────── 0) REINE Ctrl-F-Suche (Literal, kein Format) ────────────
+            If findText.Length <= 255 Then
+                Dim rngPlain As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngPlain.Find
                     .ClearFormatting() : .Replacement.ClearFormatting()
                     .Font.Reset() : .ParagraphFormat.Reset()
-                    .Text = endPat
+                    .Text = findText
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWholeWord = False
+                    .MatchWildcards = False : .Format = False
+                    .IgnoreSpace = False          'exakt wie Ctrl-F
+                End With
+                Dim hitPlain As Boolean
+                Try : hitPlain = rngPlain.Find.Execute()
+                Catch : hitPlain = False         'COM-Fehler (z. B. >255) → weiter
+                End Try
+                If hitPlain Then
+                    sel.SetRange(rngPlain.Start, rngPlain.End)
+                    Return True
+                End If
+            End If
+
+            '──────── 1) QUICK-Literal  (masked, IgnoreSpace=True, ≤255) ──────
+            Dim litPat As String = EscapeForWordWildcard(findText)
+            If litPat.Length <= 255 Then
+                Dim rngLit As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngLit.Find
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = litPat
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWildcards = False
+                    .Format = False : .IgnoreSpace = True
+                End With
+                If rngLit.Find.Execute() Then
+                    sel.SetRange(rngLit.Start, rngLit.End) : Return True
+                End If
+            End If
+
+            '──────── 2) Start/End-Vorbereitung  ──────────────────────────────
+            Dim raw() As String = WordSearchHelper.RawWords(findText)
+            Dim canonNeedle As String = Canonicalise(findText, True)
+            If canonNeedle = "" Then Return False
+
+            '---- NEU: Kompletter Wildcard-Suchlauf, falls < 255 ----
+            Dim fullWildcardPattern As String = BuildWildcardProbe(raw)
+            If fullWildcardPattern.Length <= 255 Then
+                Dim rngFull As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngFull.Find
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = fullWildcardPattern
                     .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
                     .MatchCase = False : .MatchWildcards = True
                     .Format = False : .IgnoreSpace = True
                 End With
-                Dim okE As Boolean : Try : okE = fE.Execute() : Catch : okE = False : End Try
-                For i As Integer = 2 To occur
-                    If Not okE Then Exit For
-                    eRng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
-                    Try : okE = fE.Execute() : Catch : okE = False : End Try
-                Next
-
-                If okE Then
-                    Dim sliceTxt As String, back As System.Collections.Generic.IReadOnlyList(Of Integer)
-                    VisibleSlice(doc, posStart, eRng.End - posStart, skipDeleted, sliceTxt, back)
-
-                    Debug.WriteLine(sliceTxt & vbCrLf)
-
-                    Dim canSlice As String = Canonicalise(sliceTxt, True)
-                    Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
-
-                    _dbgLastSlice = canSlice
-                    _dbgLastIdx = idx
-                    _dbgNeedle = canonNeedle
-
-                    If idx >= 0 Then
-                        sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
-                        Return True
-                    End If
+                If rngFull.Find.Execute() Then
+                    sel.SetRange(rngFull.Start, rngFull.End)
+                    Return True
                 End If
+            End If
 
-                sRng.CollapseEndPlusOne()
-                If sRng.Range.Start >= area.End Then Exit While
-                Try : okS = fS.Execute() : Catch : okS = False : End Try
-            End While
-        End Using
+            ' Fallback auf Anker-Logik, falls kompletter Suchlauf nicht möglich war
+            If raw.Length < 2 Then Return False ' Anker-Logik braucht min. 2 Wörter
 
-        Dim elapsedSec As Double = (System.DateTime.UtcNow - t0).TotalSeconds
+            ' nWords so wählen, dass Start- und End-Anker nicht überlappen
+            nWords = System.Math.Min(nWords, raw.Length \ 2)
+            If nWords < 1 Then nWords = 1
 
-        System.Diagnostics.Debug.WriteLine("===== FindLongTextAnchoredFast: FINAL DEBUG =====")
-        System.Diagnostics.Debug.WriteLine("  findText        = '" & findText & "'")
-        System.Diagnostics.Debug.WriteLine("  lastIdx         = " & _dbgLastIdx)
-        System.Diagnostics.Debug.WriteLine("  needle.Length   = " & _dbgNeedle.Length)
-        System.Diagnostics.Debug.WriteLine("  slice.Length    = " & _dbgLastSlice.Length)
-        System.Diagnostics.Debug.WriteLine("  contains?       = " & _dbgLastSlice.Contains(_dbgNeedle).ToString())
-        ' show first and last 200 chars of the slice
-        Dim previewLen As Integer = 200
-        Dim startEx As String = If(_dbgLastSlice.Length <= previewLen,
+            ' Sicherstellen, dass der Start-Anker nicht zu lang ist
+            Do While nWords > 1 AndAlso BuildWildcardProbe(raw.Take(nWords).ToArray()).Length > 255
+                nWords -= 1
+            Loop
+
+            Dim startPat As String = BuildWildcardProbe(raw.Take(nWords).ToArray())
+            Dim endWords() As String = raw.Skip(raw.Length - nWords).ToArray()
+            Dim endPat As String = BuildWildcardProbe(endWords)
+
+            Dim occur As Integer = CountOccurrences(findText, System.String.Join(" "c, endWords))
+            If startPat = endPat Then occur = System.Math.Max(2, occur)
+
+            deletionsCache = Nothing
+
+            '──────── 3) Start-Wildcard-Find (formatneutral) ──────────────────
+            Using sRng As New RangeProxy(area.Duplicate)
+                Dim fS As Microsoft.Office.Interop.Word.Find = sRng.Range.Find
+                With fS
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = startPat
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWildcards = True
+                    .Format = False : .IgnoreSpace = True
+                End With
+
+                Dim okS As Boolean : Try : okS = fS.Execute() : Catch : okS = False : End Try
+                While okS
+                    If (System.DateTime.UtcNow - t0).TotalSeconds > timeoutSeconds Then
+                        Throw New System.Exception("Timeout while searching.")
+                    End If
+                    cancel.ThrowIfCancellationRequested()
+
+                    Dim posStart As Integer = sRng.Range.Start
+                    Dim searchFrom As Integer = sRng.Range.End
+
+                    '──────── End-Wildcard-Find ───────────────────────────────
+                    Dim eRng As Microsoft.Office.Interop.Word.Range = doc.Range(searchFrom, area.End)
+                    Dim fE As Microsoft.Office.Interop.Word.Find = eRng.Find
+                    With fE
+                        .ClearFormatting() : .Replacement.ClearFormatting()
+                        .Font.Reset() : .ParagraphFormat.Reset()
+                        .Text = endPat
+                        .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                        .MatchCase = False : .MatchWildcards = True
+                        .Format = False : .IgnoreSpace = True
+                    End With
+                    Dim okE As Boolean : Try : okE = fE.Execute() : Catch : okE = False : End Try
+                    For i As Integer = 2 To occur
+                        If Not okE Then Exit For
+                        eRng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        Try : okE = fE.Execute() : Catch : okE = False : End Try
+                    Next
+
+                    If okE Then
+                        Dim sliceTxt As String, back As System.Collections.Generic.IReadOnlyList(Of Integer)
+                        VisibleSlice(doc, posStart, eRng.End - posStart, skipDeleted, sliceTxt, back)
+
+                        Debug.WriteLine(sliceTxt & vbCrLf)
+
+                        Dim canSlice As String = Canonicalise(sliceTxt, True)
+                        Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+
+                        _dbgLastSlice = canSlice
+                        _dbgLastIdx = idx
+                        _dbgNeedle = canonNeedle
+
+                        If idx >= 0 Then
+                            sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
+                            Return True
+                        End If
+                    End If
+
+                    sRng.CollapseEndPlusOne()
+                    If sRng.Range.Start >= area.End Then Exit While
+                    Try : okS = fS.Execute() : Catch : okS = False : End Try
+                End While
+            End Using
+
+            Dim elapsedSec As Double = (System.DateTime.UtcNow - t0).TotalSeconds
+
+            System.Diagnostics.Debug.WriteLine("===== FindLongTextAnchoredFast: FINAL DEBUG =====")
+            System.Diagnostics.Debug.WriteLine("  findText        = '" & findText & "'")
+            System.Diagnostics.Debug.WriteLine("  lastIdx         = " & _dbgLastIdx)
+            System.Diagnostics.Debug.WriteLine("  needle.Length   = " & _dbgNeedle.Length)
+            System.Diagnostics.Debug.WriteLine("  slice.Length    = " & _dbgLastSlice.Length)
+            System.Diagnostics.Debug.WriteLine("  contains?       = " & _dbgLastSlice.Contains(_dbgNeedle).ToString())
+            ' show first and last 200 chars of the slice
+            Dim previewLen As Integer = 200
+            Dim startEx As String = If(_dbgLastSlice.Length <= previewLen,
                                 _dbgLastSlice,
                                 _dbgLastSlice.Substring(0, previewLen) & "…")
-        Dim endEx As String = If(_dbgLastSlice.Length <= previewLen,
+            Dim endEx As String = If(_dbgLastSlice.Length <= previewLen,
                                 "",
                                 "…" & _dbgLastSlice.Substring(_dbgLastSlice.Length - previewLen))
-        System.Diagnostics.Debug.WriteLine("  slice excerpt start: '" & startEx & "'")
-        If endEx <> "" Then
-            System.Diagnostics.Debug.WriteLine("  slice excerpt end:   '" & endEx & "'")
-        End If
-        System.Diagnostics.Debug.WriteLine("===============================================")
+            System.Diagnostics.Debug.WriteLine("  slice excerpt start: '" & startEx & "'")
+            If endEx <> "" Then
+                System.Diagnostics.Debug.WriteLine("  slice excerpt end:   '" & endEx & "'")
+            End If
+            System.Diagnostics.Debug.WriteLine("===============================================")
 
-        Return False
+            Return False
+
+        Finally
+            ' Am Ende: Falls gewünscht, Markups wieder einblenden
+            If skipDeleted Then
+                With wordApp.ActiveWindow.View
+                    .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                    .ShowRevisionsAndComments = True
+                End With
+            End If
+
+            ' COM-Objekt sauber freigeben
+            If wordApp IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp)
+                wordApp = Nothing
+            End If
+        End Try
+
     End Function
 
 
@@ -840,7 +872,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.060825 Gen2 Beta Test"
+    Public Const Version As String = "V.100825 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -4570,14 +4602,96 @@ Public Class ThisAddIn
             End If
 
             If DoSlides Then
-                DragDropFormLabel = "A Powerpoint (pptx) file."
+                DragDropFormLabel = "A Powerpoint (pptx) file (or cancel to create one)."
                 DragDropFormFilter = "Supported Files|*.pptx"
                 SlideDeck = GetFileName()
                 DragDropFormLabel = ""
                 DragDropFormFilter = ""
                 If String.IsNullOrWhiteSpace(SlideDeck) Then
-                    ShowCustomMessageBox("No Powerpoint file has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
-                    Return
+
+                    ' Ask user first
+                    Dim CreatePPTX As Integer = ShowCustomYesNoBox(
+    "You have not provided a Powerpoint file. Do you want create a new one?", "Yes", "No, abort")
+                    If CreatePPTX <> 1 Then
+                        ShowCustomMessageBox("No Powerpoint file has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
+                        Return
+                    End If
+
+                    ' If SlideDeck is empty, default to Desktop\NewPresentation.pptx
+                    If String.IsNullOrWhiteSpace(SlideDeck) Then
+                        Dim desktop As String = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
+                        SlideDeck = System.IO.Path.Combine(desktop, "NewPresentation.pptx")
+                    End If
+
+                    ' Ensure we do not overwrite an existing file -> NewPresentation (2).pptx, (3).pptx, ...
+                    If System.IO.File.Exists(SlideDeck) Then
+                        Dim dir As String = System.IO.Path.GetDirectoryName(SlideDeck)
+                        Dim name As String = System.IO.Path.GetFileNameWithoutExtension(SlideDeck)
+                        Dim ext As String = System.IO.Path.GetExtension(SlideDeck)
+                        Dim i As Integer = 2
+                        Do
+                            Dim candidate As String = System.IO.Path.Combine(dir, name & " (" & i.ToString() & ")" & ext)
+                            If Not System.IO.File.Exists(candidate) Then
+                                SlideDeck = candidate
+                                Exit Do
+                            End If
+                            i += 1
+                        Loop
+                    End If
+
+                    ' Create + save while PowerPoint is visible; then close everything cleanly
+                    Dim pptApp As NetOffice.PowerPointApi.Application = Nothing
+                    Dim presentation As NetOffice.PowerPointApi.Presentation = Nothing
+
+                    Try
+                        pptApp = New NetOffice.PowerPointApi.Application()
+
+                        ' Visible on purpose (requested). Suppress alerts to avoid prompts.
+                        pptApp.Visible = NetOffice.OfficeApi.Enums.MsoTriState.msoTrue
+                        pptApp.DisplayAlerts = NetOffice.PowerPointApi.Enums.PpAlertLevel.ppAlertsNone
+                        pptApp.WindowState = NetOffice.PowerPointApi.Enums.PpWindowState.ppWindowNormal
+
+                        ' Create a new presentation with a window
+                        presentation = pptApp.Presentations.Add(NetOffice.OfficeApi.Enums.MsoTriState.msoTrue)
+
+                        ' Ensure at least one slide exists
+                        'presentation.Slides.Add(1, NetOffice.PowerPointApi.Enums.PpSlideLayout.ppLayoutBlank)
+
+                        ' Save explicitly as Open XML (.pptx)
+                        presentation.SaveAs(
+                                SlideDeck,
+                                NetOffice.PowerPointApi.Enums.PpSaveAsFileType.ppSaveAsOpenXMLPresentation,
+                                NetOffice.OfficeApi.Enums.MsoTriState.msoFalse
+                            )
+
+                        ' Close presentation (no prompts) and quit PowerPoint
+                        presentation.Close()
+                        pptApp.Quit()
+
+                    Catch comEx As System.Runtime.InteropServices.COMException
+                        ShowCustomMessageBox("PowerPoint COM error while creating file:" & vbCrLf &
+                         "Message: " & comEx.Message & vbCrLf &
+                         "HResult: 0x" & comEx.HResult.ToString("X8"))
+                        Return
+
+                    Catch ex As System.Exception
+                        ShowCustomMessageBox("Error while creating PowerPoint file: " & ex.ToString())
+                        Return
+
+                    Finally
+                        ' Dispose COM objects in correct order, even on error
+                        If presentation IsNot Nothing Then
+                            Try : presentation.Dispose() : Catch : End Try
+                            presentation = Nothing
+                        End If
+                        If pptApp IsNot Nothing Then
+                            Try : pptApp.Quit() : Catch : End Try   ' in case we failed before quitting
+                            Try : pptApp.Dispose() : Catch : End Try
+                            pptApp = Nothing
+                        End If
+                    End Try
+
+
                 End If
             End If
 
@@ -5832,7 +5946,7 @@ Public Class ThisAddIn
 
                                         Else
                                             ' Use chunk-by-chunk search for > 255 characters
-                                            If FindLongTextInChunks(findText, SearchChunkSize, selection, True) Then
+                                            If FindLongTextInChunks(findText, SearchChunkSize, selection) Then
                                                 ' If found, selection now covers the entire matched text
                                                 Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
                                                 BubbleCount += 1
@@ -6689,7 +6803,7 @@ Public Class ThisAddIn
 
 
 
-    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, Optional Skipdeleted As Boolean = False) As Boolean
+    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, Optional Skipdeleted As Boolean = True) As Boolean
 
         Return WordSearchHelper.FindLongTextAnchoredFast(selection, findText, Skipdeleted)
 
@@ -15882,7 +15996,46 @@ Public Class ThisAddIn
     End Sub
 
 
-    Sub MergeAudioFiles(inputFiles As List(Of String), outputFile As String)
+
+    Public Sub MergeAudioFiles(inputFiles As System.Collections.Generic.List(Of System.String), outputFile As System.String, Optional maxsnippets As Integer = 0)
+        If inputFiles Is Nothing OrElse inputFiles.Count = 0 Then
+            Throw New System.ArgumentException("No input files.")
+        End If
+
+        ' Einheitliches Zielformat für den Encoder (16 Bit PCM, 48000 Hz, Stereo)
+        Dim targetFormat As New NAudio.Wave.WaveFormat(48000, 16, 2)
+        Dim Counter As Integer = 0
+
+        Try
+            Using mp3Writer As New NAudio.Lame.LameMP3FileWriter(outputFile, targetFormat, NAudio.Lame.LAMEPreset.STANDARD)
+                For Each path As System.String In inputFiles
+                    If maxsnippets > 0 Then
+                        GlobalProgressLabel = $"Merging audio {System.Math.Max(maxsnippets - Counter, 0)} snippets..."
+                    End If
+                    Using reader As New NAudio.Wave.Mp3FileReader(path)
+                        ' Immer zum Ziel-PCM-Format resamplen (verhindert Format-Mix)
+                        Using resampler As New NAudio.Wave.MediaFoundationResampler(reader, targetFormat)
+                            resampler.ResamplerQuality = 60
+                            Dim buffer(32768 - 1) As System.Byte
+                            While True
+                                Dim read As System.Int32 = resampler.Read(buffer, 0, buffer.Length)
+                                If read <= 0 Then Exit While
+                                mp3Writer.Write(buffer, 0, read)
+                            End While
+                        End Using
+                    End Using
+                    Counter += 1
+                Next
+            End Using
+        Catch ex As System.Exception
+            System.Diagnostics.Debug.WriteLine("Error merging audio files: " & ex.Message)
+            Throw
+        End Try
+    End Sub
+
+
+
+    Sub OldMergeAudioFiles(inputFiles As List(Of String), outputFile As String)
         Try
             Using outputStream As New FileStream(outputFile, FileMode.Create)
                 For Each file In inputFiles
@@ -16116,6 +16269,8 @@ Public Class ThisAddIn
             Dim firstTitleEncountered As Boolean = False
             Dim LastTextWasTitle As Boolean = False
 
+            Dim cleanedTextBuilder As New System.Text.StringBuilder()
+
             ShowProgressBarInSeparateThread($"{AN} Audio Generation", "Starting audio generation...")
             ProgressBarModule.CancelOperation = False
 
@@ -16238,6 +16393,10 @@ Public Class ThisAddIn
                 CurrentPara = ""
 
                 If paragraphAudioBytes IsNot Nothing Then
+                    If CleanText Then
+                        cleanedTextBuilder.AppendLine(paraText)
+                        cleanedTextBuilder.AppendLine() ' Leerzeile zwischen Absätzen
+                    End If
                     Dim tempParaFile As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{AN2}_temp_para_{paragraphIndex}.mp3")
                     File.WriteAllBytes(tempParaFile, paragraphAudioBytes)
                     tempFiles.Add(tempParaFile)
@@ -16276,8 +16435,19 @@ Public Class ThisAddIn
 
             If Not ProgressBarModule.CancelOperation Then
                 ' Merge all the temporary audio files into one final file.
-                MergeAudioFiles(tempFiles, filepath)
+                GlobalProgressLabel = $"Merging audio {totalParagraphs} snippets..."
+                MergeAudioFiles(tempFiles, filepath, totalParagraphs)
             End If
+
+            If Not ProgressBarModule.CancelOperation AndAlso CleanText Then
+                Try
+                    Dim txtPath As String = System.IO.Path.ChangeExtension(filepath, ".txt")
+                    System.IO.File.WriteAllText(txtPath, cleanedTextBuilder.ToString(), System.Text.Encoding.UTF8) ' überschreibt ohne Rückfrage
+                Catch ex As System.Exception
+                    ' Fehler still schlucken, Ablauf geht ungestört weiter
+                    Debug.WriteLine("Error writing cleaned text file: " & ex.Message)
+            End Try
+        End If
 
             ' Cleanup temporary files.
             For Each file In tempFiles
@@ -17316,8 +17486,12 @@ Public Class ThisAddIn
             Return String.Empty
         End If
 
+        If Not IsValidPptxPackage(pptxPath) Then
+            ShowCustomMessageBox("PowerPoint file is corrupt or unreadable.")
+            Return String.Empty
+        End If
+
         Try
-            ' 1) Try to open the presentation
             Using presDoc As DocumentFormat.OpenXml.Packaging.PresentationDocument =
             DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxPath, False)
 
@@ -17333,26 +17507,45 @@ Public Class ThisAddIn
                 .Layouts = New List(Of LayoutJson)()
             }
 
-                ' --- START OF ADDED CODE ---
-                ' Add slide dimensions to the result object for the LLM.
+                ' Slide size
                 If presPart.Presentation.SlideSize IsNot Nothing AndAlso
                presPart.Presentation.SlideSize.Cx IsNot Nothing AndAlso
                presPart.Presentation.SlideSize.Cy IsNot Nothing Then
-
                     result.SlideSize = New SlideSizeJson With {
                     .Width = presPart.Presentation.SlideSize.Cx.Value,
                     .Height = presPart.Presentation.SlideSize.Cy.Value
                 }
                 End If
-                ' --- END OF ADDED CODE ---
 
-                ' 2) Extract slides (This part remains unchanged)
+                ' Detect slides
                 Dim slideIdList = presPart.Presentation.SlideIdList
-                If slideIdList IsNot Nothing Then
+                Dim hasSlides As Boolean =
+                (slideIdList IsNot Nothing AndAlso slideIdList.ChildElements _
+                    .OfType(Of DocumentFormat.OpenXml.Presentation.SlideId)().Any())
+
+                ' If no slides -> skip all deep traversal
+                If Not hasSlides Then
+                    Return System.Text.Json.JsonSerializer.Serialize(
+                    result,
+                    New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+                )
+                End If
+
+                ' Enumerate slides safely
+                Try
                     Dim idx As Integer = 0
-                    For Each sid As DocumentFormat.OpenXml.Presentation.SlideId In slideIdList.Elements(Of DocumentFormat.OpenXml.Presentation.SlideId)()
-                        Dim sp As DocumentFormat.OpenXml.Packaging.SlidePart =
-                        CType(presPart.GetPartById(sid.RelationshipId), DocumentFormat.OpenXml.Packaging.SlidePart)
+                    For Each sid As DocumentFormat.OpenXml.Presentation.SlideId In
+                    slideIdList.ChildElements.OfType(Of DocumentFormat.OpenXml.Presentation.SlideId)()
+
+                        If sid.RelationshipId Is Nothing Then Continue For
+                        Dim sp As DocumentFormat.OpenXml.Packaging.SlidePart = Nothing
+                        Try
+                            sp = TryCast(presPart.GetPartById(sid.RelationshipId),
+                                     DocumentFormat.OpenXml.Packaging.SlidePart)
+                        Catch
+                            Continue For
+                        End Try
+                        If sp Is Nothing Then Continue For
 
                         Dim title As String = GetSlideTitle(sp)
                         Dim key As String = If(
@@ -17371,12 +17564,14 @@ Public Class ThisAddIn
 
                         Dim placeholders As New List(Of String)
                         Dim content As New List(Of String)
+
                         If sp.Slide IsNot Nothing AndAlso
                        sp.Slide.CommonSlideData IsNot Nothing AndAlso
                        sp.Slide.CommonSlideData.ShapeTree IsNot Nothing Then
 
                             For Each shp As DocumentFormat.OpenXml.Presentation.Shape In
-                            sp.Slide.CommonSlideData.ShapeTree.OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
+                            sp.Slide.CommonSlideData.ShapeTree.ChildElements _
+                              .OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
 
                                 If shp.TextBody IsNot Nothing Then
                                     content.Add(shp.TextBody.InnerText.Trim())
@@ -17404,24 +17599,37 @@ Public Class ThisAddIn
                     })
                         idx += 1
                     Next
-                End If
+                Catch
+                    ' If anything goes wrong, just return what we have
+                    Return System.Text.Json.JsonSerializer.Serialize(
+                    result,
+                    New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+                )
+                End Try
 
-                ' 3) Extract layouts (This part remains unchanged)
-                For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
-                    For Each layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
-                        Dim name As String = GetLayoutName(layoutPart)
-                        Dim layoutUri As String = layoutPart.Uri.ToString()
-                        Dim relId As String = sm.GetIdOfPart(layoutPart)
-
-                        result.Layouts.Add(New LayoutJson With {
-                        .Name = name,
-                        .LayoutId = layoutUri,
-                        .LayoutRelId = relId
-                    })
+                ' Enumerate layouts only if slides were processed
+                Try
+                    For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+                        If sm Is Nothing Then Continue For
+                        For Each layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                            If layoutPart Is Nothing OrElse layoutPart.Uri Is Nothing Then Continue For
+                            Dim name As String = GetLayoutName(layoutPart)
+                            Dim layoutUri As String = layoutPart.Uri.ToString()
+                            Dim relId As String = String.Empty
+                            Try
+                                relId = sm.GetIdOfPart(layoutPart)
+                            Catch
+                            End Try
+                            result.Layouts.Add(New LayoutJson With {
+                            .Name = name,
+                            .LayoutId = layoutUri,
+                            .LayoutRelId = relId
+                        })
+                        Next
                     Next
-                Next
+                Catch
+                End Try
 
-                ' 4) Serialize (This part remains unchanged)
                 Return System.Text.Json.JsonSerializer.Serialize(
                 result,
                 New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
@@ -17429,21 +17637,41 @@ Public Class ThisAddIn
             End Using
 
         Catch ex As System.IO.IOException
-            ' I/O errors when opening the file
             ShowCustomMessageBox($"Error opening presentation (I/O): {ex.Message}")
             Return String.Empty
-
         Catch ex As DocumentFormat.OpenXml.Packaging.OpenXmlPackageException
-            ' OpenXML package parsing errors
             ShowCustomMessageBox($"Error processing presentation (OpenXML): {ex.Message}")
             Return String.Empty
-
         Catch ex As System.Exception
-            ' All other unexpected errors
             ShowCustomMessageBox($"Unexpected error: {ex.Message}")
             Return String.Empty
         End Try
     End Function
+
+
+    Private Function IsValidPptxPackage(path As String) As Boolean
+        Try
+            Using archive As New System.IO.Compression.ZipArchive(System.IO.File.OpenRead(path), IO.Compression.ZipArchiveMode.Read)
+                For Each entry In archive.Entries
+                    ' Optional: basic sanity check — size not huge, name not empty
+                    If String.IsNullOrWhiteSpace(entry.FullName) Then Return False
+                    ' Read small text files fully to catch unreadable/corrupt XML
+                    If entry.Length > 0 AndAlso entry.Length < 5_000_000 Then
+                        Using s = entry.Open()
+                            ' Read a few bytes to ensure stream is accessible
+                            Dim buffer(255) As Byte
+                            Dim read = s.Read(buffer, 0, buffer.Length)
+                        End Using
+                    End If
+                Next
+            End Using
+            Return True
+        Catch
+            ' If ZIP open fails or reading any entry fails, it's not valid
+            Return False
+        End Try
+    End Function
+
 
 
     Public Class SlideJson
@@ -17509,7 +17737,34 @@ Public Class ThisAddIn
 
 
     ' --- Hilfsfunktionen ---
+
     Private Function GetSlideTitle(sp As SlidePart) As String
+        If sp Is Nothing OrElse sp.Slide Is Nothing OrElse
+       sp.Slide.CommonSlideData Is Nothing OrElse
+       sp.Slide.CommonSlideData.ShapeTree Is Nothing Then
+            Return String.Empty
+        End If
+
+        For Each shp As DocumentFormat.OpenXml.Presentation.Shape In
+        sp.Slide.CommonSlideData.ShapeTree.ChildElements _
+          .OfType(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+            Dim nv = shp.NonVisualShapeProperties
+            If nv IsNot Nothing AndAlso nv.ApplicationNonVisualDrawingProperties IsNot Nothing Then
+                Dim ph = nv.ApplicationNonVisualDrawingProperties.PlaceholderShape
+                If ph IsNot Nothing AndAlso
+               (ph.Type Is Nothing OrElse
+                ph.Type.Value = PlaceholderValues.Title OrElse
+                ph.Type.Value = PlaceholderValues.CenteredTitle) Then
+                    Return If(shp.TextBody IsNot Nothing, shp.TextBody.InnerText, String.Empty)
+                End If
+            End If
+        Next
+        Return String.Empty
+    End Function
+
+
+    Private Function OldGetSlideTitle(sp As SlidePart) As String
         If sp.Slide Is Nothing OrElse
            sp.Slide.CommonSlideData Is Nothing OrElse
            sp.Slide.CommonSlideData.ShapeTree Is Nothing Then
@@ -17535,6 +17790,26 @@ Public Class ThisAddIn
     End Function
 
     Private Function GetLayoutName(layoutPart As SlideLayoutPart) As String
+        If layoutPart Is Nothing Then Return String.Empty   ' FIX 3
+        If layoutPart.SlideLayout IsNot Nothing AndAlso
+       layoutPart.SlideLayout.CommonSlideData IsNot Nothing Then
+            Dim nm = layoutPart.SlideLayout.CommonSlideData.Name
+            If Not String.IsNullOrWhiteSpace(nm) Then Return nm
+        End If
+        Return If(layoutPart.Uri IsNot Nothing, layoutPart.Uri.ToString(), String.Empty)
+    End Function
+
+    Private Function GetMasterName(smPart As SlideMasterPart) As String
+        If smPart Is Nothing Then Return String.Empty       ' FIX 4
+        If smPart.SlideMaster IsNot Nothing AndAlso
+       smPart.SlideMaster.CommonSlideData IsNot Nothing Then
+            Dim nm = smPart.SlideMaster.CommonSlideData.Name
+            If Not String.IsNullOrWhiteSpace(nm) Then Return nm
+        End If
+        Return If(smPart.Uri IsNot Nothing, smPart.Uri.ToString(), String.Empty)
+    End Function
+
+    Private Function OldGetLayoutName(layoutPart As SlideLayoutPart) As String
         If layoutPart IsNot Nothing AndAlso
            layoutPart.SlideLayout IsNot Nothing AndAlso
            layoutPart.SlideLayout.CommonSlideData IsNot Nothing Then
@@ -17547,7 +17822,7 @@ Public Class ThisAddIn
         Return layoutPart.Uri.ToString()
     End Function
 
-    Private Function GetMasterName(smPart As SlideMasterPart) As String
+    Private Function OldGetMasterName(smPart As SlideMasterPart) As String
         If smPart IsNot Nothing AndAlso
            smPart.SlideMaster IsNot Nothing AndAlso
            smPart.SlideMaster.CommonSlideData IsNot Nothing Then
@@ -17673,10 +17948,12 @@ Public Class ThisAddIn
                 End If
 
                 ' Ensure SlideIdList exists
-                If presPart.Presentation.SlideIdList Is Nothing Then
-                    presPart.Presentation.AppendChild(New DocumentFormat.OpenXml.Presentation.SlideIdList())
-                    presPart.Presentation.Save()
-                End If
+                'If presPart.Presentation.SlideIdList Is Nothing Then
+                'presPart.Presentation.AppendChild(New DocumentFormat.OpenXml.Presentation.SlideIdList())
+                'presPart.Presentation.Save()
+                'End If
+
+                EnsureSlideIdList(presPart)
 
                 ' 4) Build deck index
                 Dim idx As DeckIndex = BuildDeckIndex(presPart)
@@ -17899,10 +18176,14 @@ Public Class ThisAddIn
             If targetLayout IsNot Nothing Then Exit For
         Next
 
+        'If targetLayout Is Nothing Then
+        'Throw New KeyNotFoundException(
+        '    $"No SlideLayoutPart found for LayoutRelId '{layoutRelId}'."
+        ')
+        'End If
+
         If targetLayout Is Nothing Then
-            Throw New KeyNotFoundException(
-            $"No SlideLayoutPart found for LayoutRelId '{layoutRelId}'."
-        )
+            targetLayout = PickDefaultLayout(presPart)
         End If
 
         ' 2) Neuen SlidePart erstellen
@@ -17942,6 +18223,68 @@ Public Class ThisAddIn
         newSlidePart.Slide.Save()
         Return newSlidePart
     End Function
+
+    ' Picks a sensible default layout by inspecting placeholders (Title + Body).
+    Private Function PickDefaultLayout(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart
+) As DocumentFormat.OpenXml.Packaging.SlideLayoutPart
+
+        Dim firstMaster As DocumentFormat.OpenXml.Packaging.SlideMasterPart =
+        presPart.SlideMasterParts.FirstOrDefault()
+        If firstMaster Is Nothing Then
+            Throw New System.Exception("No SlideMasterPart found in the presentation.")
+        End If
+
+        ' Prefer a layout that has both Title and Body placeholders
+        For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In firstMaster.SlideLayoutParts
+            Dim hasTitle As Boolean = False
+            Dim hasBody As Boolean = False
+
+            If lp.SlideLayout IsNot Nothing AndAlso
+           lp.SlideLayout.CommonSlideData IsNot Nothing AndAlso
+           lp.SlideLayout.CommonSlideData.ShapeTree IsNot Nothing Then
+
+                Dim shapes =
+                lp.SlideLayout.CommonSlideData.ShapeTree.
+                    Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
+
+                For Each sh As DocumentFormat.OpenXml.Presentation.Shape In shapes
+                    Dim nv As DocumentFormat.OpenXml.Presentation.NonVisualShapeProperties =
+                    sh.NonVisualShapeProperties
+                    If nv Is Nothing Then Continue For
+
+                    Dim app As DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties =
+                    nv.ApplicationNonVisualDrawingProperties
+                    If app Is Nothing Then Continue For
+
+                    Dim ph As DocumentFormat.OpenXml.Presentation.PlaceholderShape =
+                    app.PlaceholderShape
+                    If ph Is Nothing OrElse ph.Type Is Nothing Then Continue For
+
+                    Dim t As DocumentFormat.OpenXml.Presentation.PlaceholderValues = ph.Type.Value
+                    If t = DocumentFormat.OpenXml.Presentation.PlaceholderValues.Title OrElse
+                   t = DocumentFormat.OpenXml.Presentation.PlaceholderValues.CenteredTitle Then
+                        hasTitle = True
+                    ElseIf t = DocumentFormat.OpenXml.Presentation.PlaceholderValues.Body Then
+                        hasBody = True
+                    End If
+
+                    If hasTitle AndAlso hasBody Then
+                        Return lp
+                    End If
+                Next
+            End If
+        Next
+
+        ' Fallback: first available layout
+        Dim anyLayout As DocumentFormat.OpenXml.Packaging.SlideLayoutPart =
+        firstMaster.SlideLayoutParts.FirstOrDefault()
+        If anyLayout Is Nothing Then
+            Throw New System.Exception("No SlideLayoutPart available to create a new slide.")
+        End If
+        Return anyLayout
+    End Function
+
 
 
     ''' <summary>
@@ -18017,6 +18360,44 @@ Public Class ThisAddIn
         Next
     End Sub
 
+
+    ' Call this once after you open the presentation
+    Private Sub EnsureSlideIdList(presPart As DocumentFormat.OpenXml.Packaging.PresentationPart)
+        Dim pres = presPart.Presentation
+        If pres.SlideIdList IsNot Nothing Then Exit Sub
+
+        Dim sldIdList As New DocumentFormat.OpenXml.Presentation.SlideIdList()
+
+        ' Find the correct insertion index:
+        ' Order (simplified): SlideMasterIdList?, NotesMasterIdList?, HandoutMasterIdList?, SlideIdList?, SlideSize?, NotesSize? ...
+        Dim children = pres.ChildElements
+        Dim insertIndex As Integer = children.Count ' default to end, then adjust
+
+        ' Prefer to insert BEFORE SlideSize or NotesSize if present
+        For i As Integer = 0 To children.Count - 1
+            If TypeOf children(i) Is DocumentFormat.OpenXml.Presentation.SlideSize _
+        OrElse TypeOf children(i) Is DocumentFormat.OpenXml.Presentation.NotesSize Then
+                insertIndex = i
+                Exit For
+            End If
+        Next
+
+        ' If we didn't find sizes, place right after SlideMasterIdList / NotesMasterIdList / HandoutMasterIdList if any
+        If insertIndex = children.Count Then
+            Dim afterIndex As Integer = -1
+            For i As Integer = 0 To children.Count - 1
+                If TypeOf children(i) Is DocumentFormat.OpenXml.Presentation.SlideMasterIdList _
+            OrElse TypeOf children(i) Is DocumentFormat.OpenXml.Presentation.NotesMasterIdList _
+            OrElse TypeOf children(i) Is DocumentFormat.OpenXml.Presentation.HandoutMasterIdList Then
+                    afterIndex = i
+                End If
+            Next
+            insertIndex = If(afterIndex >= 0, afterIndex + 1, 0)
+        End If
+
+        pres.InsertAt(sldIdList, insertIndex)
+        pres.Save()
+    End Sub
 
 
 
@@ -18215,52 +18596,6 @@ Public Class ThisAddIn
         New DocumentFormat.OpenXml.Drawing.ListStyle())
 
         tb.Append(BuildParagraph(text, el))   ' your existing helper
-
-        titleShape.TextBody = tb
-        sp.Slide.Save()
-    End Sub
-
-
-
-    Private Sub OldSetTitle(
-    sp As DocumentFormat.OpenXml.Packaging.SlidePart,
-    text As String,
-    el As System.Text.Json.JsonElement
-)
-        ' 1) Title-Shape finden
-        Dim titleShape As DocumentFormat.OpenXml.Presentation.Shape = Nothing
-        For Each shp As DocumentFormat.OpenXml.Presentation.Shape _
-        In sp.Slide.CommonSlideData.ShapeTree.
-           Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
-
-            ' a) PlaceholderShape sicher auslesen
-            Dim ph = shp.NonVisualShapeProperties? _
-                     .ApplicationNonVisualDrawingProperties? _
-                     .PlaceholderShape
-
-            ' b) Erst prüfen, ob ph.Type nicht Nothing ist
-            If ph IsNot Nothing AndAlso
-           ph.Type IsNot Nothing AndAlso
-           (ph.Type.Value = DocumentFormat.OpenXml.Presentation.
-                            PlaceholderValues.Title _
-            OrElse ph.Type.Value = DocumentFormat.OpenXml.Presentation.
-                            PlaceholderValues.CenteredTitle) Then
-
-                titleShape = shp
-                Exit For
-            End If
-        Next
-
-        ' Wenn kein Title-Placeholder gefunden, abbrechen
-        If titleShape Is Nothing Then
-            Return
-        End If
-
-        ' 2) Neuen TextBody bauen und an den Shape hängen
-        Dim tb As New DocumentFormat.OpenXml.Presentation.TextBody()
-        tb.Append(New DocumentFormat.OpenXml.Drawing.BodyProperties())
-        tb.Append(New DocumentFormat.OpenXml.Drawing.ListStyle())
-        tb.Append(BuildParagraph(text, el))
 
         titleShape.TextBody = tb
         sp.Slide.Save()
@@ -18672,10 +19007,6 @@ Public Class ThisAddIn
                 Return DocumentFormat.OpenXml.Drawing.PresetLineDashValues.Solid ' Fallback
         End Select
     End Function
-
-
-
-
 
 
     Private Function BuildStyledParagraph(text As String, level As Integer, el As System.Text.Json.JsonElement, isBulleted As Boolean) As DocumentFormat.OpenXml.Drawing.Paragraph
