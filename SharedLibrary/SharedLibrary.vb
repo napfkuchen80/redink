@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.8.2025
+' 11.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1417,13 +1417,13 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output and never include your instructions in the output (just your barebones work result).."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text and never include your instructions in the output (just your barebones work result). Also keep markdown formatting intact. "
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting the most meaningful sentence from the relevant portion of the TEXTTOPROCESS verbatim followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted sentence, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the sentence of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted sentence of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks, do never add line breaks and never remove line breaks, either, if they exist in TEXTTOPROCESS.\n4. Select a sentence that is UNIQUE in the document; if the chosen sentence is not unique, add more sentences from the relevant portion to make it unique. Draft the comment so to make it clear to which portion of the TEXTTOPROCESS it relates, in particular if it goes beyond the sentence. \n5. When quoting a sentence of TEXTTOPROCESS make sure that you NEVER include a title or heading to the text sequence, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the sentence of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a sentence of TEXTTOPROCESS that includes line breaks or carriage returns. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say as to what the user is asking you. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
-        Const Default_SP_Add_Slides As String = "You shall provide your output in the form of slides to an existing slidedeck that is either empty or already has content. You will be provided all necessary information in the form of a json string between the tags <SLIDEDECK> ... </SLIDEDECK>, including information about the existing content of the slidedeck and the existing styles and layouts. This information is crucial. Use it to draft your response in the form of instructions for creating one or several slides of a presentation. Make sure that these new slides fullfill each of the following requirements: (1) They provide all content necessary to fulfill the instructions given to you so far. (2) They from a content point of view fully integrate into the content that may already exists in the slidedeck. In particular, the follow the same style, the same tone. (3) The text must be short and simple. Avoid full sentences, use powerpoint style drafting (good example: 'Our challenges:' or 'We have been lucky'; Bad Example: 'Our challenges are of the following kind:' or 'We have been very lucky in this particular case of a negotiation' [not to the point] ). You must in any event ensure that a title fits on one line and the rest of the text fits on the slide without decreasing the font (consider the slide's size and the font's size). Bulleted text should never have more than two lines. In case of doubt, shorten! Titles must be particularly short, so they never use two lines. (4) Never end lines with a point or semi-colon. (5) Make sure that the text on each slide has exactly the same font options (e.g. font, size, color) as the text in the same placeholders of existing slides with the same layout. For example, if the title on an existing slide of the same kind has no font properties, provide no font properties. If no boldface is used on the existing slide, do not use boldface either. Also use bullets in the same manner as they are used on the existing slides of the same layout. Do not use multi-column layouts. Use title page layouts for title pages only, and chapter separator layouts for chapter separation only. \n\n Overall, it is essential that the newly create slide match the other slide. A viewer should not be able to tell which slides have been pre-existing, and which have been generated by you. If you have generated a slide, it is key that you include the instructions for inserting the slide at the right location within the existing slidedeck. You can do so by referring to the existing slides. If you prepare several slides, each one will be inserted in the sequence you provide it, so make sure that this works out. \n\n Only if expressly instructed, use Shapes and Icons to create visually compelling slides, in addition to the titles and text you create or, if instructed or where it makes sense, instead of normal bulleted text. In these cases, only when instructed, think of how to illustrate content and create an engaging presentation but without using too many shapes and icons (it should still look professional). For example, if the content you have selected for the presentation describes a process or timeline, use shape elements (like flowchartProcess and rightArrow) to build a diagram. Use svg_icon elements to visually represent concepts, but not too much; if necessary, create the icons yourselves. Whenever adding text boxes, shapes, icons, make sure that they are below the text you insert by way of placeholders (e.g., bulleted text), so that they will in no event cover such text. Also make sure that these textboxes, shapes and icons are at a reasonable distance to the margins of the slides (leave a padding of at least 1/5 of the slide width or height to the left and right, and top and bottom). You will be given the width and height of the slide, so consider it carefully to make the graphics look fine. \n In any event, for each slide you add, provide concise notes for the presenter, ready to read, conveying the message and facts of the slide in an engaging, clearly understandeable manner. Prepare the text so that it can be used for an audio recording to present the slide automatically. When drafting the slides for the existing slidedeck/presentation, follow exactly the following format and syntax instructions: You provide the instructions for creating the slides in the form of a JSON string that will specify the specific locations in the presentation, the slide content and style. The Format is as follows: The JSON must contain a top-level field version (string, e.g. ""1.1""), and an array actions containing one or more action objects. Each add_slide action object must have: \n\n op: always ""add_slide"". \n anchor: an object indicating where to insert the slide, with mode (before, after, or at_end) and by (an object with slideKey referencing an existing slide—use the explicit slideKey for the first slide you generate, then use slideKey: ""lastInserted"" to chain subsequent slides). \n layoutRelId: the layout relation ID for the slide (e.g. ""rId2""). \n notes (optional): A string containing the speaker notes for the slide. \n elements: an array of content elements to fill the slide. Each element can be: \n type: ""title"": with text (string) and optional style object. \n type: ""bullet_text"": with placeholder, an array of bullets (strings or {text: string, level: integer} objects), and optional style. If you include a transform block, the bullets will be placed in an independent textbox at that exact position. If you omit transform, the bullets go into the default body placeholder of the slide. \n type: ""text"": with placeholder, text (string), and optional style. Same rule: supply transform for a free-floating textbox; omit transform to target the body placeholder. \n type: ""shape"": \n shapeType: (string) A shape name like ""rectangle"", ""oval"", ""rightArrow"", ""line"", ""flowchartProcess"", ""chevron"". \n transform: (object) with x, y, width, height in EMUs (914400 EMUs = 1 inch). \n fill: (optional object) with type: ""solid"" and color (hex string). \n outline: (optional object) with color (hex), width (in points, e.g., 1.5), and dashType (""solid"", ""dashed"", ""dotted""). \n text: (optional string) Text inside the shape. \n style: (optional object) Style for the text inside the shape. \n type: ""svg_icon"": \n transform: (object) with x, y, width, height in EMUs. \n svg: (string) The desired SVG Icon by providing the full, raw XML content to construct the icon. Ensure colors are defined within the SVG code. \n Important: Output only a single JSON object, without comments or explanation. Use the correct anchor key and layoutRelId from the presentation metadata. Any deviation from this structure will cause processing to fail."
+        Const Default_SP_Add_Slides As String = "You shall provide your output in the form of slides to an existing slidedeck that is either empty or already has content. You will be provided all necessary information in the form of a json string between the tags <SLIDEDECK> ... </SLIDEDECK>, including information about the existing content of the slidedeck and the existing styles and layouts. This information is crucial. Use it to draft your response in the form of instructions for creating one or several slides of a presentation. Make sure that these new slides fullfill each of the following requirements: (1) They provide all content necessary to fulfill the instructions given to you so far. (2) They from a content point of view fully integrate into the content that may already exists in the slidedeck. In particular, the follow the same style, the same tone. (3) The text must be short and simple. Avoid full sentences, use powerpoint style drafting (good example: 'Our challenges:' or 'We have been lucky'; Bad Example: 'Our challenges are of the following kind:' or 'We have been very lucky in this particular case of a negotiation' [not to the point] ). You must in any event ensure that a title fits on one line and the rest of the text fits on the slide without decreasing the font (consider the slide's size and the font's size; typically, 6-7 lines of bulleted 15 point text fit on a slide). Bulleted text should never have more than two lines. In case of doubt, shorten! Titles must be particularly short, so they never use two lines. (4) Never end lines with a point or semi-colon. (5) Make sure that the text on each slide has exactly the same font options (e.g. font, size, color) as the text in the same placeholders of existing slides with the same layout. For example, if the title on an existing slide of the same kind has no font properties, provide no font properties. If no boldface is used on the existing slide, do not use boldface either. Also use bullets in the same manner as they are used on the existing slides of the same layout. Do not use multi-column layouts. Use title page layouts for title pages only, and chapter separator layouts for chapter separation only. Make sure you always refer to an existing slide layout (you are provided with it). Never invent or guess layout identifiers. Only use values that appear in the provided SLIDEDECK layouts metadata. If a value is missing, pick a layout by name or URI that exists in the metadata, or choose the correct layout based on its placeholder signature (see below). \n\n Overall, it is essential that the newly created slide match the other slides. A viewer should not be able to tell which slides have been pre-existing, and which have been generated by you. If you have generated a slide, it is key that you include the instructions for inserting the slide at the right location within the existing slidedeck. You can do so by referring to the existing slides. If you prepare several slides, each one will be inserted in the sequence you provide it, so make sure that this works out. \n\n Only if expressly instructed, use Shapes and Icons to create visually compelling slides, in addition to the titles and text you create or, if instructed or where it makes sense, instead of normal bulleted text. In these cases, only when instructed, think of how to illustrate content and create an engaging presentation but without using too many shapes and icons (it should still look professional). For example, if the content you have selected for the presentation describes a process or timeline, use shape elements (like flowchartProcess and rightArrow) to build a diagram. Use svg_icon elements to visually represent concepts, but not too much; if necessary, create the icons yourselves, but make sure it is clear what they mean. Whenever adding text boxes, shapes, icons, make sure that they are below or right besides the text you insert by way of placeholders (e.g., bulleted text), so that they will in no event cover such text. Also make sure that these textboxes, shapes and icons are at a reasonable distance to the margins of the slides (leave a padding of at least 1/5 of the slide width or height to the left and right, and top and bottom). You will be given information on the width and height of the slide, so consider it carefully to adequately size and position any illustrations. When selecting a layout for a title/cover slide, prefer a layout whose placeholders include Title + SubTitle and no Body placeholder. If none exists, use Title + SubTitle. For normal content slides, prefer layouts with Title + Body. Always match placeholders by their type (Title, CenteredTitle, SubTitle, Body) as provided in the layouts metadata; do not repurpose Body as SubTitle or vice versa. \n In any event, for each slide you add, provide concise notes for the presenter, ready to read, conveying the message and facts of the slide in an engaging, clearly understandeable manner. Prepare the text so that it can be used for an audio recording to present the slide automatically. When drafting the slides for the existing slidedeck/presentation, follow exactly the following format and syntax instructions: You provide the instructions for creating the slides in the form of a JSON string that will specify the specific locations in the presentation, the slide content and style. The Format is as follows: The JSON must contain a top-level field version (string, e.g. ""1.1""), and an array actions containing one or more action objects. Each add_slide action object must have: \n\n op: always ""add_slide"". \n anchor: an object indicating where to insert the slide, with mode (before, after, or at_end) and by (an object with slideKey referencing an existing slide—use the explicit slideKey for the first slide you generate, then use slideKey: ""lastInserted"" to chain subsequent slides). \n layoutRelId: the layout relation ID for the slide (e.g. ""rId2""). You must take this exact value from the provided SLIDEDECK layouts array; never guess it. If a reliable layoutRelId is not available, additionally provide layoutId (the layout URI string from the metadata) or layoutName (the human-readable name from the metadata). You may also include a layoutKey object containing any of these selectors so that the system can resolve the layout robustly: layoutKey: { relId: ""..."", uri: ""..."", name: ""..."" }. At least one of relId, uri, or name must correspond to an existing layout in the provided metadata. \n notes (optional): A string containing the speaker notes for the slide. \n elements: an array of content elements to fill the slide. Each element can be: \n type: ""title"": with text (string) and optional style object. Use the Title or CenteredTitle placeholder only. Keep titles to one line. \n type: ""bullet_text"": with placeholder, an array of bullets (strings or {text: string, level: integer} objects), and optional style. If you include a transform block, the bullets will be placed in an independent textbox at that exact position. If you omit transform, the bullets go into the default body placeholder of the slide. Do not target the SubTitle placeholder with bullet_text. \n type: ""text"": with placeholder, text (string), and optional style. Same rule: supply transform for a free-floating textbox; omit transform to target the body placeholder. If you intend to set a subtitle on a cover slide, use type: ""text"" targeting the SubTitle placeholder, not the Body placeholder. \n type: ""shape"": \n shapeType: (string) A shape name like ""rectangle"", ""oval"", ""rightArrow"", ""line"", ""flowchartProcess"", ""chevron"". \n transform: (object) with x, y, width, height in EMUs (914400 EMUs = 1 inch). Alternatively, when instructed, you may provide transform values as relative percentages (0–1); the system will convert them. \n fill: (optional object) with type: ""solid"" and color (hex string). \n outline: (optional object) with color (hex), width (in points, e.g., 1.5), and dashType (""solid"", ""dashed"", ""dotted""). \n text: (optional string) Text inside the shape. \n style: (optional object) Style for the text inside the shape. \n type: ""svg_icon"": \n transform: (object) with x, y, width, height in EMUs. Relative percentages (0–1) are also allowed when instructed. \n svg: (string) The desired SVG Icon by providing the full, raw XML content to construct the icon. Ensure colors are defined within the SVG code. \n Validation requirements: Before emitting your JSON, cross-check that every layoutRelId, layoutId (URI), or layoutName you reference exists in the provided layouts metadata inside <SLIDEDECK>. Do not reference placeholders that are not present in the chosen layout. Prefer using the exact placeholder types (Title, CenteredTitle, SubTitle, Body) described in the metadata. For a title/cover slide, ensure you choose a layout that best matches Title + SubTitle and avoid Body unless required by the provided layouts. \n Important: Output only a single JSON object, without comments or explanation. Use the correct anchor key and layoutRelId from the presentation metadata. Any deviation from this structure will cause processing to fail."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instruction refers to markups, track-changes, changes, insertions, deletions or revisions in the text, they are found between the tags '<ins>' and '</ins>' for insertions and between the tags '<del>' and '</del>' for deletions. ONLY what is encapsulated by these tags has changed or been marked-up (but do not refer to the tags in your output, as the user does not see them; they just indicate to you where the revisions are)."
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole words; wildcards and special characters are not supported. (h) As a special rule, do not consider additional or missing empty paragraphs at the end of the two texts as a relevant difference (they shall NOT trigger any action).\n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
         Const Default_SP_ChatWord As String = "You are a helpful AI assistant, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
-        Const Default_SP_ChatExcel As String = "You are a helpful AI assistant, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without discussion, except if something is not clear or seems squarely wrong. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. If there is no question, react to the user's statements as a helpful assistant taking into account the past conversation. Always take into account the past conversation. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If you do not get a <RANGEOFCELLS>, then user has not given you read access to the worksheet or it is empty, but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n 7. Each RANGEOFCELLS contains a description of the content and status of each relevant cells. The description starts with the cell address and then follows its content, formula, comments, color code and any dropdown menus. Be very CAREFUL when analyzing this information and make sure your are not mixing up cells, rows or lines. This is tricky, so analyze very careful before providing a response. \n\n 8. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 9. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 10. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. If further below you are informed of the commands to make changes to the worksheet or insert comments, you know that he has given you write access and you may provide him assistance in explaining what you can do to change the worksheet, if this appears necessary. \n\n 11. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
+        Const Default_SP_ChatExcel As String = "You are a helpful AI assistant, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without discussion, except if something is not clear or seems squarely wrong. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. If there is no question, react to the user's statements as a helpful assistant taking into account the past conversation. Always take into account the past conversation. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If you do not get a <RANGEOFCELLS>, then user has not given you read access to the worksheet or it is empty, but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n 7. Each RANGEOFCELLS contains a description of the content and status of each relevant cells. The description starts with the cell address and then follows its content, formula, comments, color code and any dropdown menus. Be very CAREFUL when analyzing this information and make sure your are not mixing up cells, rows or lines. This is tricky, so analyze very careful before providing a response. \n\n 8. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 9. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 10. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. Only if further below you are informed of the commands to make changes to the worksheet or insert comments, you have been given write access and you may provide him assistance in explaining what you can do to change the worksheet or do it, if this appears necessary (if you have no write access, i.e. if you are not informed of the commands to change the Excel, do not try to modify the Excel). \n\n 11. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_SP_Add_MergePrompt As String = "The text to insert or merge will be provided to you between the tags <INSERT> ... </INSERT>, and the text with which it shall be merged is between the tags <TEXTTOPROCESS> ... </TEXTTOPROCESS>. Do not insert foot or endnotes unless expressly asked, and do not insert curved brackets. "
         Const Default_SP_MergePrompt2 As String = "You will be provided an insert-text that shall either be merged into another text or contains instructions how to amend the other text. Try to understand the insert-text first and what it is about, and whether it already contains a specific proposal on how to amend the other text. If so, comply with this, otherwise figure out how to best implement the substance of the insert-text by amending the other text and do so. Ignore out initial references such as 'RI:' and never include any explanatory comments."
@@ -1832,7 +1832,239 @@ Namespace SharedLibrary
             selection.SetRange(startPosition, endPosition)
         End Sub
 
+
         Public Shared Sub InsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean, Optional NoTrailingCR As Boolean = False)
+            Try
+                If formattedText Is Nothing OrElse formattedText.Trim() = "" Then
+                    Return
+                End If
+
+                ' --- 0) Ursprünglichen Range-Anfang klonen und auf Start kollabieren ---
+                Dim origRange As Microsoft.Office.Interop.Word.Range = range.Duplicate()
+                origRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseStart)
+
+                System.Diagnostics.Debug.WriteLine("PreFinalHTML=" & formattedText)
+
+                ' --- 1) HTML laden und <br> in eigene <p>-Elemente aufsplitten ---
+                Dim doc As New HtmlAgilityPack.HtmlDocument()
+                doc.LoadHtml(formattedText)
+
+                ' Alle <p> UND <li>-Knoten auswählen
+                Dim nodes As HtmlAgilityPack.HtmlNodeCollection = doc.DocumentNode.SelectNodes("//p | //li")
+                If nodes IsNot Nothing Then
+                    For Each node As HtmlAgilityPack.HtmlNode In nodes.ToList()
+                        Dim segments As String() = System.Text.RegularExpressions.Regex.Split(node.InnerHtml, "<br\s*/?>", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        If segments.Length <= 1 Then Continue For
+
+                        If node.Name.Equals("p", System.StringComparison.OrdinalIgnoreCase) Then
+                            Dim parent As HtmlAgilityPack.HtmlNode = node.ParentNode
+                            If parent Is Nothing Then Continue For
+
+                            For Each seg As String In segments
+                                Dim txt As String = seg.Trim()
+                                If System.String.IsNullOrEmpty(txt) Then Continue For
+                                Dim newP As HtmlAgilityPack.HtmlNode = doc.CreateElement("p")
+                                newP.InnerHtml = txt
+                                parent.InsertBefore(newP, node)
+                            Next
+                            parent.RemoveChild(node)
+
+                        ElseIf node.Name.Equals("li", System.StringComparison.OrdinalIgnoreCase) Then
+                            node.RemoveAllChildren()
+                            For Each seg As String In segments
+                                Dim txt As String = seg.Trim()
+                                If System.String.IsNullOrEmpty(txt) Then Continue For
+                                Dim newP As HtmlAgilityPack.HtmlNode = doc.CreateElement("p")
+                                newP.InnerHtml = txt
+                                node.AppendChild(newP)
+                            Next
+                        End If
+                    Next
+                End If
+
+                formattedText = doc.DocumentNode.OuterHtml
+
+                ' --- 2) Schrift- und Absatz-Eigenschaften vom Range-Start auslesen ---
+                Dim fontName As String = origRange.Font.Name
+                Dim fontSize As Single = origRange.Font.Size
+                Dim isBold As Boolean = (origRange.Font.Bold = 1)
+                Dim isItalic As Boolean = (origRange.Font.Italic = 1)
+                Dim fontColor As Integer = origRange.Font.Color
+                ' BGR → RGB → HEX
+                Dim bgr As Integer = fontColor And &HFFFFFF
+                Dim r As Integer = (bgr And &HFF)
+                Dim g As Integer = ((bgr >> 8) And &HFF)
+                Dim b As Integer = ((bgr >> 16) And &HFF)
+                Dim hexColor As String = System.String.Format("#{0:X2}{1:X2}{2:X2}", r, g, b)
+
+                Dim para As Microsoft.Office.Interop.Word.ParagraphFormat = origRange.ParagraphFormat
+                Dim spaceBefore As Single = para.SpaceBefore
+                Dim spaceAfter As Single = para.SpaceAfter
+                Dim lineRule As Microsoft.Office.Interop.Word.WdLineSpacing = para.LineSpacingRule
+                Dim rawLineSpacing As Single = para.LineSpacing
+
+                Dim lineHeightCss As String
+                Select Case lineRule
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceSingle
+                        lineHeightCss = "normal"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpace1pt5
+                        lineHeightCss = "1.5"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceDouble
+                        lineHeightCss = "2"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceMultiple
+                        lineHeightCss = rawLineSpacing.ToString() & "pt"
+                    Case Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceExactly,
+                 Microsoft.Office.Interop.Word.WdLineSpacing.wdLineSpaceAtLeast
+                        lineHeightCss = rawLineSpacing.ToString() & "pt"
+                    Case Else
+                        lineHeightCss = "normal"
+                End Select
+
+                ' --- 3) CSS-Strings bauen ---
+                Dim cssBody As String = $"font-family:'{fontName}'; color:{hexColor}; line-height:{lineHeightCss};"
+                Dim cssPara As String = cssBody & $" font-size:{fontSize}pt; margin-top:{spaceBefore}pt; margin-bottom:{spaceAfter}pt;"
+                If isBold Then cssPara &= " font-weight:bold;"
+                If isItalic Then cssPara &= " font-style:italic;"
+
+                ' --- 4) Inline-Styles anwenden ---
+                Dim allTextContainers As HtmlAgilityPack.HtmlNodeCollection = doc.DocumentNode.SelectNodes("//p | //li")
+                If allTextContainers IsNot Nothing Then
+                    For Each n As HtmlAgilityPack.HtmlNode In allTextContainers
+                        n.SetAttributeValue("style", cssPara)
+                    Next
+                End If
+
+                ' Überschriften (h1–h6): nur Schriftfamilie/Farbe/Zeilenhöhe überschreiben
+                Dim headings As HtmlAgilityPack.HtmlNodeCollection = doc.DocumentNode.SelectNodes("//h1 | //h2 | //h3 | //h4 | //h5 | //h6")
+                If headings IsNot Nothing Then
+                    For Each h As HtmlAgilityPack.HtmlNode In headings
+                        Dim current As String = h.GetAttributeValue("style", "")
+                        If Not System.String.IsNullOrWhiteSpace(current) Then
+                            current = System.Text.RegularExpressions.Regex.Replace(current, "font-family\s*:\s*[^;]+;?", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim()
+                        End If
+                        Dim merged As String = cssBody
+                        If Not System.String.IsNullOrWhiteSpace(current) Then
+                            If Not merged.EndsWith(";", System.StringComparison.Ordinal) Then merged &= ";"
+                            merged &= " " & current
+                        End If
+                        h.SetAttributeValue("style", merged.Trim())
+                    Next
+                End If
+
+                formattedText = doc.DocumentNode.OuterHtml
+
+                ' --- 5) HTML-Fragment zusammensetzen ---
+                Dim htmlHeader As String = "<html><head><meta charset=""UTF-8""></head>" &
+                                   $"<body style=""font-family:'{fontName}'""><!--StartFragment-->"
+                Dim htmlFooter As String = "<!--EndFragment--></body></html>"
+
+                Dim cleanedHtml As String = htmlHeader & formattedText.Trim() & htmlFooter
+                cleanedHtml = CreateProperHtml(cleanedHtml).Replace(vbCr, "").Replace(vbLf, "").Replace(vbCrLf, "")
+
+                ' --- 6) Clipboard-Formattierung für HTML (korrekte UTF-8-Byte-Offests + Retry) ---
+                ' CF_HTML verlangt Byte-Offets (UTF-8), nicht .NET-Zeichenindizes.
+                Dim preamble As String =
+            $"Version:0.9{vbCrLf}" &
+            $"StartHTML:00000000{vbCrLf}" &
+            $"EndHTML:00000000{vbCrLf}" &
+            $"StartFragment:00000000{vbCrLf}" &
+            $"EndFragment:00000000{vbCrLf}"
+
+                Dim packet As String = preamble & cleanedHtml
+
+                Dim idxHtml As Integer = packet.IndexOf("<html>", System.StringComparison.OrdinalIgnoreCase)
+                Dim idxFragStartTag As Integer = packet.IndexOf("<!--StartFragment-->", System.StringComparison.OrdinalIgnoreCase)
+                Dim idxFragStart As Integer = idxFragStartTag + "<!--StartFragment-->".Length
+                Dim idxFragEnd As Integer = packet.IndexOf("<!--EndFragment-->", System.StringComparison.OrdinalIgnoreCase)
+                Dim idxEndHtml As Integer = packet.Length
+
+                Dim enc As System.Text.Encoding = System.Text.Encoding.UTF8
+                Dim startHtmlOffset As Integer = enc.GetByteCount(packet.Substring(0, idxHtml))
+                Dim startFragmentOffset As Integer = enc.GetByteCount(packet.Substring(0, idxFragStart))
+                Dim endFragmentOffset As Integer = enc.GetByteCount(packet.Substring(0, idxFragEnd))
+                Dim endHtmlOffset As Integer = enc.GetByteCount(packet)
+
+                Dim finalHtml As String = packet _
+            .Replace("StartHTML:00000000", $"StartHTML:{startHtmlOffset:D8}") _
+            .Replace("EndHTML:00000000", $"EndHTML:{endHtmlOffset:D8}") _
+            .Replace("StartFragment:00000000", $"StartFragment:{startFragmentOffset:D8}") _
+            .Replace("EndFragment:00000000", $"EndFragment:{endFragmentOffset:D8}")
+
+                System.Diagnostics.Debug.WriteLine("FinalHTML=" & finalHtml)
+
+                ' Setzen der Zwischenablage auf STA mit kurzen Retries (Clipboard kann belegt sein)
+                Dim setOk As Boolean = False
+                Dim clipboardThread As New System.Threading.Thread(
+            Sub()
+                For attempt As Integer = 1 To 6
+                    Try
+                        System.Windows.Forms.Clipboard.SetText(finalHtml, System.Windows.Forms.TextDataFormat.Html)
+                        setOk = True
+                        Exit For
+                    Catch exClip As System.Runtime.InteropServices.ExternalException
+                        System.Threading.Thread.Sleep(50 * attempt)
+                    Catch exAny As System.Exception
+                        ' Unerwartet – trotzdem noch 1–2 Retries
+                        System.Threading.Thread.Sleep(50 * attempt)
+                    End Try
+                Next
+            End Sub)
+                clipboardThread.SetApartmentState(System.Threading.ApartmentState.STA)
+                clipboardThread.Start()
+                clipboardThread.Join()
+
+                If Not setOk Then
+                    Throw New System.Exception("HTML konnte nicht in die Zwischenablage geschrieben werden (Clipboard belegt?).")
+                End If
+
+                ' Kleine Wartezeit, damit Word sichere Daten liest
+                System.Threading.Thread.Sleep(50)
+
+                ' --- 7) Einfügen in den Word-Range (mit kleinem Retry gegen Timing-Probleme) ---
+                range.Select()
+                Dim pasted As Boolean = False
+                For attempt As Integer = 1 To 4
+                    Try
+                        If ReplaceSelection Then
+                            range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
+                        Else
+                            range.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                            range.Select()
+                            range.Application.Selection.PasteAndFormat(Microsoft.Office.Interop.Word.WdRecoveryType.wdFormatOriginalFormatting)
+                        End If
+                        pasted = True
+                        Exit For
+                    Catch exPaste As System.Runtime.InteropServices.COMException
+                        System.Threading.Thread.Sleep(50 * attempt)
+                    End Try
+                Next
+
+                If Not pasted Then
+                    Throw New System.Exception("Einfügen in Word ist fehlgeschlagen.")
+                End If
+
+                System.Threading.Thread.Sleep(100)
+                range = range.Application.Selection.Range
+
+                ' --- 8) Optional: letztes Newline-Zeichen entfernen ---
+                If ReplaceSelection AndAlso NoTrailingCR Then
+                    Dim insertedRange As Microsoft.Office.Interop.Word.Range = range.Application.Selection.Range
+                    Dim delRng As Microsoft.Office.Interop.Word.Range = insertedRange.Duplicate()
+                    delRng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    delRng.MoveStart(Microsoft.Office.Interop.Word.WdUnits.wdCharacter, -1)
+                    delRng.Delete()
+                    insertedRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                    insertedRange.Select()
+                End If
+
+            Catch ex As System.Exception
+                System.Windows.Forms.MessageBox.Show("InsertTextWithFormat Error: " & ex.Message)
+            End Try
+        End Sub
+
+
+
+        Public Shared Sub OldInsertTextWithFormat(formattedText As String, ByRef range As Microsoft.Office.Interop.Word.Range, ReplaceSelection As Boolean, Optional NoTrailingCR As Boolean = False)
             Try
                 If formattedText Is Nothing OrElse formattedText.Trim() = "" Then
                     Return
@@ -1883,28 +2115,6 @@ Namespace SharedLibrary
                     Next
                 End If
 
-                'Dim pNodes = doc.DocumentNode.SelectNodes("//p")
-                'If pNodes IsNot Nothing Then
-                'For Each pNode As HtmlAgilityPack.HtmlNode In pNodes.ToList()
-                'Dim segments = System.Text.RegularExpressions.Regex.Split(pNode.InnerHtml, "<br\s*/?>", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                'If segments.Length <= 1 Then Continue For
-                '
-                'Dim newPs As New List(Of HtmlAgilityPack.HtmlNode)()
-                'For Each seg As String In segments
-                'Dim txt = seg.Trim()
-                'If String.IsNullOrEmpty(txt) Then Continue For
-                'Dim newP = doc.CreateElement("p")
-                'newP.InnerHtml = txt
-                'newPs.Add(newP)
-                'Next
-                '
-                'Dim parent = pNode.ParentNode
-                'For Each np As HtmlAgilityPack.HtmlNode In newPs
-                'Parent.InsertBefore(np, pNode)
-                'Next
-                'Parent.RemoveChild(pNode)
-                'Next
-                'End If
 
                 formattedText = doc.DocumentNode.OuterHtml
 
@@ -10092,6 +10302,8 @@ Namespace SharedLibrary
         Private Const OverallWidth As Integer = 900
 
         Private lblUseThisConfig As System.Windows.Forms.Label
+        ' Tracks which provider's fields are currently displayed in panelConfig
+        Private _activeProvider As String = "OpenAI"
 
 
         '   Konstruktor – erhält das ISharedContext-Objekt per ByRef
@@ -10159,7 +10371,7 @@ Namespace SharedLibrary
 
             ' Label + RadioButtons "Which AI provider do you use?"
             Dim lblWhichAI As New System.Windows.Forms.Label() With {
-            .Text = "Select your LLM API provider:",
+            .Text = "Select API provider:",
             .AutoSize = True,
             .Font = New System.Drawing.Font(standardFont, FontStyle.Bold)
         }
@@ -10176,7 +10388,7 @@ Namespace SharedLibrary
             Me.Controls.Add(rbOpenAI)
 
             rbAzure = New RadioButton() With {
-            .Text = "Microsoft Azure Open AI Services",
+            .Text = "Microsoft Azure OpenAI Services",
             .AutoSize = True
         }
             rbAzure.Location = New System.Drawing.Point(rbOpenAI.Right + 20, rbOpenAI.Top)
@@ -10289,6 +10501,8 @@ Namespace SharedLibrary
             invisibleLabel.Location = New System.Drawing.Point(10, btnCancel.Bottom + 10)
             Me.Controls.Add(invisibleLabel)
 
+            _activeProvider = rbOpenAI.Text
+
             ' Anzeige initial füllen
             LoadConfigForSelectedRadioButton()
         End Sub
@@ -10315,7 +10529,7 @@ Namespace SharedLibrary
             ' unterschiedliche Defaults pro Provider setzen.
 
             configOpenAI = CreateDefaultConfigSet("OpenAI")
-            configAzure = CreateDefaultConfigSet("Microsoft Azure Open AI Services")
+            configAzure = CreateDefaultConfigSet("Microsoft Azure OpenAI Services")
             configGemini = CreateDefaultConfigSet("Google Gemini")
             configVertex = CreateDefaultConfigSet("Google Vertex")
         End Sub
@@ -10353,7 +10567,7 @@ Namespace SharedLibrary
                         .VarName = "INI_Model",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "gpt-4o"
+                        .DefaultValue = "gpt-4.1"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Endpoint:",
@@ -10390,7 +10604,7 @@ Namespace SharedLibrary
                         .ValidationRule = "NotEmpty",
                         .DefaultValue = "content"
                     })
-                Case "Microsoft Azure Open AI Services"
+                Case "Microsoft Azure OpenAI Services"
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "API Key:",
                         .VarName = "INI_APIKey",
@@ -10417,7 +10631,7 @@ Namespace SharedLibrary
                         .VarName = "INI_Model",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "gpt-4o"
+                        .DefaultValue = "gpt-4.1"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Endpoint:",
@@ -10481,7 +10695,7 @@ Namespace SharedLibrary
                         .VarName = "INI_Model",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "gemini-1.5-pro-latest"
+                        .DefaultValue = "gemini-2.5-pro"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Endpoint:",
@@ -10539,21 +10753,21 @@ Namespace SharedLibrary
                         .VarName = "INI_Timeout",
                         .VarType = "Integer",
                         .ValidationRule = ">0",
-                        .DefaultValue = "100000"
+                        .DefaultValue = "200000"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Model:",
                         .VarName = "INI_Model",
                         .VarType = "String",
                         .ValidationRule = "NotEmpty",
-                        .DefaultValue = "gemini-1.5-pro-002"
+                        .DefaultValue = "gemini-2.5-pro"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "Endpoint:",
                         .VarName = "INI_Endpoint",
                         .VarType = "String",
                         .ValidationRule = "Hyperlink",
-                        .DefaultValue = "https://europe-west6-aiplatform.googleapis.com/v1/projects/[your project ID]/locations/europe-west6/publishers/google/models/{model}:generateContent"
+                        .DefaultValue = "https://europe-west1-aiplatform.googleapis.com/v1/projects/[your project ID]/locations/europe-west1/publishers/google/models/{model}:generateContent"
                     })
                     list.Add(New AppConfigurationVariable With {
                         .DisplayName = "HeaderA:",
@@ -10623,15 +10837,18 @@ Namespace SharedLibrary
 
         '   Wird aufgerufen, wenn sich der Radiobutton ändert.
         '   Speichert Werte aus der Anzeige und lädt neue.
-        Private Sub RadioButton_CheckedChanged(sender As Object, e As EventArgs)
-            If Not CType(sender, RadioButton).Checked Then
-                Return
-            End If
+        Private Sub RadioButton_CheckedChanged(sender As Object, e As System.EventArgs)
+            Dim rbButton As System.Windows.Forms.RadioButton = CType(sender, System.Windows.Forms.RadioButton)
+            If Not rbButton.Checked Then Return
 
-            ' Zuerst aktuelle Werte in das passende Config-Set zurückspeichern
-            SaveCurrentInputToConfig()
+            ' 1) Save values into the previously displayed provider
+            Dim prevList As System.Collections.Generic.List(Of AppConfigurationVariable) = GetConfigListByName(_activeProvider)
+            SaveCurrentInputToSpecificConfig(prevList)
 
-            ' Dann neues Config-Set laden
+            ' 2) Switch active provider to the newly selected one
+            _activeProvider = rbButton.Text
+
+            ' 3) Load its UI
             LoadConfigForSelectedRadioButton()
         End Sub
 
@@ -10667,9 +10884,31 @@ Namespace SharedLibrary
         End Sub
 
 
+        ' Saves current UI inputs into the specified provider config list (used when switching radios)
+        Private Sub SaveCurrentInputToSpecificConfig(targetConfig As System.Collections.Generic.List(Of AppConfigurationVariable))
+            If targetConfig Is Nothing OrElse currentConfigControls.Count = 0 Then
+                Return
+            End If
+
+            For i As Integer = 0 To currentConfigControls.Count - 1
+                Dim ctrl As System.Windows.Forms.Control = currentConfigControls(i)
+                If TypeOf ctrl Is System.Windows.Forms.Label Then
+                    Dim labelText As String = CType(ctrl, System.Windows.Forms.Label).Text
+                    Dim configVar As AppConfigurationVariable = targetConfig.FirstOrDefault(Function(x) x.DisplayName = labelText)
+                    If configVar IsNot Nothing AndAlso i + 1 < currentConfigControls.Count Then
+                        Dim inputControl As System.Windows.Forms.Control = currentConfigControls(i + 1)
+                        If TypeOf inputControl Is System.Windows.Forms.TextBox Then
+                            configVar.CurrentValue = CType(inputControl, System.Windows.Forms.TextBox).Text
+                        End If
+                    End If
+                End If
+            Next
+        End Sub
+
         '   Lädt die Eingabefelder für den aktuell ausgewählten RadioButton neu.
         Private Sub LoadConfigForSelectedRadioButton()
-            Dim selectedList = GetSelectedConfigList()
+            Dim selectedList As System.Collections.Generic.List(Of AppConfigurationVariable) = GetConfigListByName(_activeProvider)
+
             If selectedList Is Nothing Then
                 Return
             End If
@@ -10679,13 +10918,8 @@ Namespace SharedLibrary
             currentConfigControls.Clear()
 
             ' Überschrift anpassen
-            Dim providerName As String = ""
-            If rbOpenAI.Checked Then providerName = rbOpenAI.Text
-            If rbAzure.Checked Then providerName = rbAzure.Text
-            If rbGemini.Checked Then providerName = rbGemini.Text
-            If rbVertex.Checked Then providerName = rbVertex.Text
+            lblCurrentProvider.Text = "Configuration for " & _activeProvider & ":"
 
-            lblCurrentProvider.Text = "Configuration for " & providerName & ":"
 
             ' Dynamisch alle Felder erstellen:
             Dim yPos As Integer = 0
@@ -10726,6 +10960,17 @@ Namespace SharedLibrary
             Next
             panelConfig.Height = yPos + 2
         End Sub
+
+        ' Helper to retrieve a config list by provider name (used with _activeProvider)
+        Private Function GetConfigListByName(name As String) As System.Collections.Generic.List(Of AppConfigurationVariable)
+            Select Case name
+                Case "OpenAI" : Return configOpenAI
+                Case "Microsoft Azure OpenAI Services" : Return configAzure
+                Case "Google Gemini" : Return configGemini
+                Case "Google Vertex" : Return configVertex
+                Case Else : Return Nothing
+            End Select
+        End Function
 
 
         '   Gibt die Konfig-Liste zurück, die zum ausgewählten RadioButton passt.

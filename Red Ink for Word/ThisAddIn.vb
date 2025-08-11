@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.8.2025
+' 11.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -872,7 +872,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.100825 Gen2 Beta Test"
+    Public Const Version As String = "V.110825 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -17523,12 +17523,38 @@ Public Class ThisAddIn
                 (slideIdList IsNot Nothing AndAlso slideIdList.ChildElements _
                     .OfType(Of DocumentFormat.OpenXml.Presentation.SlideId)().Any())
 
-                ' If no slides -> skip all deep traversal
                 If Not hasSlides Then
+                    ' still gather layouts from masters even if there are no slides
+                    Try
+                        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+                            If sm Is Nothing Then Continue For
+                            Dim masterName As System.String = GetMasterName(sm)
+                            For Each layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                                If layoutPart Is Nothing OrElse layoutPart.Uri Is Nothing Then Continue For
+                                Dim name As System.String = GetLayoutName(layoutPart)
+                                Dim layoutUri As System.String = layoutPart.Uri.ToString()
+                                Dim relId As System.String = System.String.Empty
+                                Try
+                                    relId = sm.GetIdOfPart(layoutPart)
+                                Catch
+                                End Try
+
+                                Dim info = AnalyzeLayoutPlaceholders(layoutPart)  ' see helper below
+
+                                result.Layouts.Add(New LayoutJson With {
+                    .Name = name,
+                    .LayoutId = layoutUri,
+                    .LayoutRelId = relId
+                })
+                            Next
+                        Next
+                    Catch
+                    End Try
+
                     Return System.Text.Json.JsonSerializer.Serialize(
-                    result,
-                    New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
-                )
+        result,
+        New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+    )
                 End If
 
                 ' Enumerate slides safely
@@ -17735,9 +17761,42 @@ Public Class ThisAddIn
         Public Property Layouts As List(Of LayoutJson)
     End Class
 
+    Private NotInheritable Class LayoutInfo
+        Public Property HasTitle As System.Boolean
+        Public Property HasCenteredTitle As System.Boolean
+        Public Property HasSubTitle As System.Boolean
+        Public Property HasBody As System.Boolean
+    End Class
 
-    ' --- Hilfsfunktionen ---
+    Private Function AnalyzeLayoutPlaceholders(lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart) As LayoutInfo
+        Dim li As New LayoutInfo()
+        Dim tree = lp?.SlideLayout?.CommonSlideData?.ShapeTree
+        If tree Is Nothing Then Return li
 
+        For Each shp As DocumentFormat.OpenXml.Presentation.Shape In tree.Elements(Of DocumentFormat.OpenXml.Presentation.Shape)()
+            Dim ph = shp?.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape
+            If ph Is Nothing Then Continue For
+            If ph.Type Is Nothing Then
+                ' in PPT the "subtitle" box is frequently a placeholder with no explicit type but index=1
+                If ph.Index IsNot Nothing AndAlso ph.Index.Value = 1UI Then
+                    li.HasSubTitle = True
+                End If
+                Continue For
+            End If
+            Select Case ph.Type.Value
+                Case DocumentFormat.OpenXml.Presentation.PlaceholderValues.Title
+                    li.HasTitle = True
+                Case DocumentFormat.OpenXml.Presentation.PlaceholderValues.CenteredTitle
+                    li.HasCenteredTitle = True
+                Case DocumentFormat.OpenXml.Presentation.PlaceholderValues.SubTitle
+                    li.HasSubTitle = True
+                Case DocumentFormat.OpenXml.Presentation.PlaceholderValues.Body
+                    li.HasBody = True
+            End Select
+        Next
+
+        Return li
+    End Function
     Private Function GetSlideTitle(sp As SlidePart) As String
         If sp Is Nothing OrElse sp.Slide Is Nothing OrElse
        sp.Slide.CommonSlideData Is Nothing OrElse
@@ -17967,20 +18026,39 @@ Public Class ThisAddIn
                     End If
 
                     Try
-                        ' 5.1 Anchor
-                        Dim anchorKey = actElem.GetProperty("anchor") _
-                                    .GetProperty("by") _
-                                    .GetProperty("slideKey") _
-                                    .GetString()
-                        If anchorKey <> "lastInserted" Then
-                            currentAnchorKey = anchorKey
+                        ' --- 5.1 Anchor (robust) ---
+                        Dim anchorId As UInteger = 0UI
+                        Dim anchorEl As System.Text.Json.JsonElement
+                        Dim byEl As System.Text.Json.JsonElement
+                        Dim anchorKey As System.String = Nothing
+
+                        If actElem.TryGetProperty("anchor", anchorEl) Then
+                            ' mode is optional; for "at_end" we simply leave anchorId = 0UI
+                            If anchorEl.TryGetProperty("by", byEl) AndAlso byEl.TryGetProperty("slideKey", Nothing) Then
+                                anchorKey = byEl.GetProperty("slideKey").GetString()
+                            End If
                         End If
 
-                        Dim layoutRelId As String = actElem.GetProperty("layoutRelId").GetString()
-                        Dim anchorId As UInteger = 0UI
-                        If currentAnchorKey IsNot Nothing AndAlso idx.SlideKeyById.ContainsKey(currentAnchorKey) Then
-                            anchorId = idx.SlideKeyById(currentAnchorKey)
+                        ' Resolve anchorId only if we actually got a key
+                        If Not System.String.IsNullOrEmpty(anchorKey) Then
+                            If anchorKey <> "lastInserted" Then
+                                currentAnchorKey = anchorKey
+                            End If
+
+                            Dim keyToUse As System.String = If(anchorKey = "lastInserted", currentAnchorKey, anchorKey)
+                            If Not System.String.IsNullOrEmpty(keyToUse) AndAlso idx.SlideKeyById.ContainsKey(keyToUse) Then
+                                anchorId = idx.SlideKeyById(keyToUse)
+                            End If
                         End If
+
+                        ' --- 5.1b Layout key (guarded) ---
+                        Dim layoutRelId As System.String = Nothing
+                        Dim tmpEl As System.Text.Json.JsonElement
+                        If actElem.TryGetProperty("layoutRelId", tmpEl) Then
+                            layoutRelId = tmpEl.GetString()
+                        End If
+                        ' (optional) if you later support layoutKey { relId|uri|name }, you could read it here when layoutRelId Is Nothing
+
 
                         ' 5.2 Clone slide
                         Dim newSp As DocumentFormat.OpenXml.Packaging.SlidePart =
@@ -18160,6 +18238,125 @@ Public Class ThisAddIn
 
 
     Private Function CloneTemplateSlide(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart,
+    layoutRelId As System.String
+) As DocumentFormat.OpenXml.Packaging.SlidePart
+
+        Dim targetLayout As DocumentFormat.OpenXml.Packaging.SlideLayoutPart =
+        ResolveLayout(presPart, layoutRelId)
+
+        If targetLayout Is Nothing Then
+            ' final fallback to a decent default (prefer Title+Subtitle without Body if possible)
+            targetLayout = PickCoverLikeLayout(presPart)
+            If targetLayout Is Nothing Then
+                targetLayout = PickDefaultLayout(presPart)
+            End If
+        End If
+
+        Dim newSlidePart As DocumentFormat.OpenXml.Packaging.SlidePart =
+        presPart.AddNewPart(Of DocumentFormat.OpenXml.Packaging.SlidePart)()
+
+        Dim newSlide As New DocumentFormat.OpenXml.Presentation.Slide()
+
+        If targetLayout.SlideLayout.CommonSlideData IsNot Nothing Then
+            newSlide.CommonSlideData = CType(
+            targetLayout.SlideLayout.CommonSlideData.CloneNode(True),
+            DocumentFormat.OpenXml.Presentation.CommonSlideData)
+        End If
+
+        If targetLayout.SlideLayout.ColorMapOverride IsNot Nothing Then
+            newSlide.ColorMapOverride = CType(
+            targetLayout.SlideLayout.ColorMapOverride.CloneNode(True),
+            DocumentFormat.OpenXml.Presentation.ColorMapOverride)
+        End If
+
+        PurgeLayoutSampleText(newSlide)
+
+        newSlidePart.Slide = newSlide
+
+        CopyLayoutImagesToSlide(targetLayout, newSlidePart)
+
+        newSlidePart.AddPart(targetLayout)
+
+        newSlidePart.Slide.Save()
+        Return newSlidePart
+    End Function
+
+    Private Function ResolveLayout(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart,
+    requested As System.String
+) As DocumentFormat.OpenXml.Packaging.SlideLayoutPart
+
+        If System.String.IsNullOrWhiteSpace(requested) Then Return Nothing
+
+        Dim req = requested.Trim()
+
+        ' 1) Try as exact relId
+        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+            For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                Dim rid As System.String = System.String.Empty
+                Try : rid = sm.GetIdOfPart(lp) : Catch : End Try
+                If Not System.String.IsNullOrEmpty(rid) AndAlso
+               System.String.Equals(rid, req, System.StringComparison.OrdinalIgnoreCase) Then
+                    Return lp
+                End If
+            Next
+        Next
+
+        ' 2) Try by URI string
+        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+            For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                Dim u = lp.Uri?.ToString()
+                If Not System.String.IsNullOrEmpty(u) AndAlso
+               System.String.Equals(u, req, System.StringComparison.OrdinalIgnoreCase) Then
+                    Return lp
+                End If
+            Next
+        Next
+
+        ' 3) Try by human-readable layout name (e.g., "Title Slide" / "Titel")
+        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+            For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                Dim name As System.String = GetLayoutName(lp)
+                If Not System.String.IsNullOrEmpty(name) AndAlso
+               System.String.Equals(name, req, System.StringComparison.OrdinalIgnoreCase) Then
+                    Return lp
+                End If
+            Next
+        Next
+
+        Return Nothing
+    End Function
+
+    Private Function PickCoverLikeLayout(
+    presPart As DocumentFormat.OpenXml.Packaging.PresentationPart
+) As DocumentFormat.OpenXml.Packaging.SlideLayoutPart
+
+        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+            For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                Dim li = AnalyzeLayoutPlaceholders(lp)
+                ' Typical title slide: Title + Subtitle; often NO Body placeholder
+                If (li.HasTitle OrElse li.HasCenteredTitle) AndAlso li.HasSubTitle AndAlso Not li.HasBody Then
+                    Return lp
+                End If
+            Next
+        Next
+
+        ' next best: Title + Subtitle, even if Body exists
+        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+            For Each lp As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                Dim li = AnalyzeLayoutPlaceholders(lp)
+                If (li.HasTitle OrElse li.HasCenteredTitle) AndAlso li.HasSubTitle Then
+                    Return lp
+                End If
+            Next
+        Next
+
+        Return Nothing
+    End Function
+
+
+    Private Function xxxxCloneTemplateSlide(
     presPart As DocumentFormat.OpenXml.Packaging.PresentationPart,
     layoutRelId As String
 ) As DocumentFormat.OpenXml.Packaging.SlidePart
