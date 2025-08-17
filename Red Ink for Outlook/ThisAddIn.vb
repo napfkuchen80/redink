@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 11.8.2025
+' 17.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -136,7 +136,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.110825 Gen2 Beta Test"
+    Public Const Version As String = "V.170825 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -2517,7 +2517,7 @@ Public Class ThisAddIn
                     If DoMarkup Then
                         LLMResult = SLib.RemoveHTML(LLMResult)
                         If MarkupMethod <> 3 Then
-                            range.Text = vbCrLf & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf
+                            range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf
                         End If
                         range.Collapse(WdCollapseDirection.wdCollapseEnd)
                         selection.SetRange(range.Start, selection.End)
@@ -2531,7 +2531,7 @@ Public Class ThisAddIn
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
                         If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
                         If DoMarkup And MarkupMethod <> 3 Then
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>", trailingCR)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
                             'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                         Else
                             SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
@@ -2559,7 +2559,7 @@ Public Class ThisAddIn
 
                         If DoMarkup And MarkupMethod <> 3 Then
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & "<br>MARKUP:<br>" & vbCrLf & vbCrLf, trailingCR)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>" & vbCrLf, trailingCR)
                         Else
                             'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
                             SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
@@ -2691,9 +2691,19 @@ Public Class ThisAddIn
             ' Prompt for the text to process
 
             If Not NoText Then
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {InplaceInstruct}, {ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
+                Dim OptionalButtons As System.Tuple(Of String, String, String)() = {
+                            System.Tuple.Create("OK, use window", $"Use this to automatically insert '{ClipboardPrefix}' as a prefix.", ClipboardPrefix),
+                            System.Tuple.Create("OK, do a new doc", $"Use this to automatically insert '{NewDocPrefix}' as a prefix.", NewDocPrefix),
+                            System.Tuple.Create("OK, do a markup", $"Use this to automatically insert '{MarkupPrefixDiff}' as a prefix.", MarkupPrefixDiff)
+                        }
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {InplaceInstruct}, {ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt, OptionalButtons)
             Else
-                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt)
+                Dim OptionalButtons As System.Tuple(Of String, String, String)() = {
+                            System.Tuple.Create("OK, use window", $"Use this to automatically insert '{ClipboardPrefix}' as a prefix.", ClipboardPrefix),
+                            System.Tuple.Create("OK, do a new doc", $"Use this to automatically insert '{NewDocPrefix}' as a prefix.", NewDocPrefix)
+                        }
+
+                OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct}){PromptLibInstruct}{AddOnInstruct}{LastPromptInstruct}:", $"{AN} Freestyle", False, "", My.Settings.LastPrompt, OptionalButtons)
             End If
 
             If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
@@ -2871,7 +2881,7 @@ Public Class ThisAddIn
 
                 ' Insert the result as a new paragraph
                 If DoMarkup And MarkupMethod <> 3 Then
-                    SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf, trailingCR)
+                    SLib.InsertTextWithMarkdown(selection, vbCrLf & LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
                 Else
                     If DoInplace Then
                         SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
@@ -4212,8 +4222,15 @@ Public Class ThisAddIn
                 sb.Append(":")
                 Dim promptMsg As String = sb.ToString()
 
+                Dim OptionalButtons As System.Tuple(Of String, String, String)()
+                If wordInstalled Then
+                    OptionalButtons = {
+                            System.Tuple.Create("OK, do a new doc", $"Use this to automatically insert '{NewDocPrefix}' as a prefix.", NewDocPrefix)
+                        }
+                End If
+
                 OtherPrompt = Await SwitchToUi(Function()
-                                                   Return SLib.ShowCustomInputBox(promptMsg, promptCaption, False, "", My.Settings.LastPrompt)
+                                                   Return SLib.ShowCustomInputBox(promptMsg, promptCaption, False, "", My.Settings.LastPrompt, If(wordInstalled, OptionalButtons, Nothing))
                                                End Function)
 
                 Dim doMarkupFlag As Boolean = False

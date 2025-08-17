@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 11.8.2025
+' 17.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -872,7 +872,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.110825 Gen2 Beta Test"
+    Public Const Version As String = "V.170825 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -3255,6 +3255,7 @@ Public Class ThisAddIn
             Globals.ThisAddIn.Application.Selection.TypeParagraph()
             Globals.ThisAddIn.Application.Selection.TypeParagraph()
             InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & result & vbCrLf, False)
+
         End If
 
     End Sub
@@ -3515,6 +3516,7 @@ Public Class ThisAddIn
                     ' Use default path (Desktop) with default filename
                     selectedoutputpath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), TTSDefaultFile)
                 ElseIf selectedoutputpath.EndsWith("\") OrElse selectedoutputpath.EndsWith("/") Then
+                ElseIf selectedoutputpath.EndsWith("\") OrElse selectedoutputpath.EndsWith("/") Then
                     ' If only a folder is given, append default filename
                     selectedoutputpath = System.IO.Path.Combine(selectedoutputpath, TTSDefaultFile)
                 Else
@@ -3542,7 +3544,7 @@ Public Class ThisAddIn
             Else
                 Dim Voices As Integer = ShowCustomYesNoBox("Do you want to use alternate voices to read the text?", "No, one voice", "Yes, alternate", "Create Audio")
                 If Voices = 0 Then Return
-                Using frm As New TTSSelectionForm("Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2) ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2)
+                Using frm As New TTSSelectionForm("Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2, FromFile = "pptx") ' TTSSelectionForm(_context, INI_OAuth2ClientMail, INI_OAuth2Scopes, INI_APIKey, INI_OAuth2Endpoint, INI_OAuth2ATExpiry, "Select the voice you wish To use For creating your audio file And configure where To save it.", $"{AN} Text-To-Speech - Select Voices", Voices = 2)
                     If frm.ShowDialog() = DialogResult.OK Then
                         Dim selectedVoices As List(Of String) = frm.SelectedVoices
                         Dim selectedLanguage As String = frm.SelectedLanguage
@@ -3947,10 +3949,25 @@ Public Class ThisAddIn
                                                                 Dim currentSelection As Word.Selection = newDoc.Application.Selection
                                                                 currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                                                 InsertTextWithMarkdown(currentSelection, llmresult, True, True)
+                                                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                                                If Regex.IsMatch(llmresult, pattern) Then
+                                                                    Dim rng As Range = wordApp.currentSelection.Range
+                                                                    RestoreSpecialTextElements(rng)
+                                                                    rng.Document.Fields.Update()
+                                                                End If
+
+
                                                             ElseIf NewDocChoice = 2 Then
                                                                 Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                                                 Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                                                 InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & llmresult, False)
+                                                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                                                If Regex.IsMatch(llmresult, pattern) Then
+                                                                    Dim rng As Range = wordApp.Selection.Range
+                                                                    RestoreSpecialTextElements(rng)
+                                                                    rng.Document.Fields.Update()
+                                                                End If
+
                                                             Else
                                                                 ShowCustomMessageBox("No text was inserted (but included in the clipboard as RTF).")
                                                                 SLib.PutInClipboard(MarkdownToRtfConverter.Convert((llmresult)))
@@ -3997,10 +4014,24 @@ Public Class ThisAddIn
                                         Dim currentSelection As Word.Selection = newDoc.Application.Selection
                                         currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                         InsertTextWithMarkdown(currentSelection, llmresult, True, True)
+                                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                        If Regex.IsMatch(llmresult, pattern) Then
+                                            Dim rng As Range = wordApp.currentselection.Range
+                                            RestoreSpecialTextElements(rng)
+                                            rng.Document.Fields.Update()
+                                        End If
+
                                     ElseIf NewDocChoice = 2 Then
                                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                         Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                         InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & llmresult, False)
+                                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                        If Regex.IsMatch(llmresult, pattern) Then
+                                            Dim rng As Range = wordApp.Selection.Range
+                                            RestoreSpecialTextElements(rng)
+                                            rng.Document.Fields.Update()
+                                        End If
+
                                     Else
                                         ShowCustomMessageBox("No text was inserted (but included in the clipboard as RTF).")
                                         SLib.PutInClipboard(MarkdownToRtfConverter.Convert((llmresult)))
@@ -4028,6 +4059,12 @@ Public Class ThisAddIn
                     Globals.ThisAddIn.Application.Selection.TypeParagraph()
                     Globals.ThisAddIn.Application.Selection.TypeParagraph()
                     InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, llmresult, False)
+                    Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                    If Regex.IsMatch(llmresult, pattern) Then
+                        Dim rng As Range = wordApp.Selection.Range
+                        RestoreSpecialTextElements(rng)
+                        rng.Document.Fields.Update()
+                    End If
                 End If
             End If
 
@@ -4151,15 +4188,28 @@ Public Class ThisAddIn
                 AddOnInstruct = AddOnInstruct.Substring(0, lastCommaIndex) & ", and" & AddOnInstruct.Substring(lastCommaIndex + 1)
             End If
 
+
             If LastPrompt.Trim() = "" Then
                 If Not NoText Then
-                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct}, {BubblesInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                    Dim OptionalButtons As System.Tuple(Of String, String, String)() = {
+                            System.Tuple.Create("OK, use window", $"Use this to automatically insert '{ClipboardPrefix}' as a prefix.", ClipboardPrefix),
+                            System.Tuple.Create("OK, use pane", $"Use this to automatically insert '{PanePrefix}' as a prefix.", PanePrefix),
+                            System.Tuple.Create("OK, do a markup", $"Use this to automatically insert '{MarkupPrefixDiff}' as a prefix.", MarkupPrefixDiff)
+                        }
+
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected text ({MarkupInstruct}, {ClipboardInstruct}, {InplaceInstruct}, {BubblesInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons).Trim()
                 Else
-                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt).Trim()
+                    Dim OptionalButtons As System.Tuple(Of String, String, String)() = {
+                            System.Tuple.Create("OK, use window", $"Use this to automatically insert '{ClipboardPrefix}' as a prefix.", ClipboardPrefix),
+                            System.Tuple.Create("OK, use pane", $"Use this to automatically insert '{PanePrefix}' as a prefix.", PanePrefix)
+                        }
+                    OtherPrompt = SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute ({ClipboardInstruct} or {SlidesInstruct}){PromptLibInstruct}{ExtInstruct}{AddOnInstruct}{PureInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons).Trim()
                 End If
             Else
                 OtherPrompt = LastPrompt
             End If
+
+            Debug.WriteLine($"OtherPrompt: '{OtherPrompt}'")
 
             SelectedText = ""
 
@@ -4214,7 +4264,7 @@ Public Class ThisAddIn
                 Call AnonymizeSelection()
                 Return
             End If
-            If OtherPrompt.StartsWith("insertclipboard", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("insertclip", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("clipboard", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("iclip", StringComparison.OrdinalIgnoreCase) Then
+            If OtherPrompt.StartsWith("insertclipboard", StringComparison.OrdinalIgnoreCase) OrElse OtherPrompt.StartsWith("insertclip", StringComparison.OrdinalIgnoreCase) Then
                 Call InsertClipboard()
                 Return
             End If
@@ -4248,6 +4298,12 @@ Public Class ThisAddIn
                             Globals.ThisAddIn.Application.Selection.TypeParagraph()
                             Globals.ThisAddIn.Application.Selection.TypeParagraph()
                             InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & testtextorig, False)
+                            Dim patternx As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                            If Regex.IsMatch(testtextorig, patternx) Then
+                                Dim rng As Range = wordApp.Selection.Range
+                                RestoreSpecialTextElements(rng)
+                                rng.Document.Fields.Update()
+                            End If
                         Else
                             SLib.PutInClipboard(testtext)
                         End If
@@ -4755,6 +4811,8 @@ Public Class ThisAddIn
                 ChunkSize = 0
             End If
 
+            Debug.WriteLine("Freestyle Prompt: " & SysPrompt)
+
             Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck)
 
             If UseSecondAPI And originalConfigLoaded Then
@@ -4787,7 +4845,7 @@ Public Class ThisAddIn
                 Return False
             End If
 
-            InfoBox.ShowInfoBox("Asking the LLM to search the library based on the intruction ....")
+            InfoBox.ShowInfoBox("Asking the LLM to search the library based on the instruction ....")
 
             SysPromptTemp = InterpolateAtRuntime(INI_Lib_Find_SP)
 
@@ -4799,7 +4857,7 @@ Public Class ThisAddIn
                 Return False
             End If
 
-            InfoBox.ShowInfoBox("Having the LLM apply the result from the library search: " & LibResult, 5)
+            InfoBox.ShowInfoBox("Having the LLM apply the result from the library search: " & LibResult, 6)
 
             If DoMarkup And Not String.IsNullOrWhiteSpace(SelectedText) Then
                 SysPrompt = InterpolateAtRuntime(INI_Lib_Apply_SP_Markup)
@@ -4920,6 +4978,11 @@ Public Class ThisAddIn
             result = Await LLM($"{basicinstruction} This Is the text: {inputtext}", "", "", "", 0, False, True)
         End If
         splash.Close()
+
+        result = result.TrimEnd()
+        result = result.Replace($"{vbCrLf}* ", vbCrLf & ChrW(8226) & " ").Replace($"{vbCr}* ", vbCr & ChrW(8226) & " ").Replace($"{vbLf}* ", vbLf & ChrW(8226) & " ")
+        result = result.Replace($"  *  ", "  " & ChrW(8226) & "  ")
+        result = RemoveMarkdownFormatting(result)
 
         ShowCustomMessageBox(result, $"{AN6} tickles your brain ...")
     End Sub
@@ -5779,6 +5842,12 @@ Public Class ThisAddIn
                         newDoc.Activate()
                         Dim newSelection As Word.Selection = Globals.ThisAddIn.Application.Selection
                         InsertTextWithMarkdown(newSelection, LLMResult, True, True)
+                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                        rng = wordApp.Selection.Range
+                        If Regex.IsMatch(LLMResult, pattern) Then
+                            RestoreSpecialTextElements(rng)
+                            rng.Document.Fields.Update()
+                        End If
 
                     ElseIf PutInClipboard AndAlso Not DoSilent Then
 
@@ -5812,11 +5881,23 @@ Public Class ThisAddIn
                                                                 Dim currentSelection As Word.Selection = newDoc.Application.Selection
                                                                 currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                                                 InsertTextWithMarkdown(currentSelection, LLMResult, True, True)
+                                                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                                                If Regex.IsMatch(LLMResult, pattern) Then
+                                                                    rng = wordApp.currentselection.Range
+                                                                    RestoreSpecialTextElements(rng)
+                                                                    rng.Document.Fields.Update()
+                                                                End If
                                                             ElseIf NewDocChoice = 2 Then
                                                                 Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                                                 Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                                                 Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                                                 InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & LLMResult, False)
+                                                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                                                If Regex.IsMatch(LLMResult, pattern) Then
+                                                                    rng = wordApp.Selection.Range
+                                                                    RestoreSpecialTextElements(rng)
+                                                                    rng.Document.Fields.Update()
+                                                                End If
                                                             Else
                                                                 ShowCustomMessageBox("No text was inserted (but included in the clipboard as RTF).")
                                                                 SLib.PutInClipboard(MarkdownToRtfConverter.Convert((LLMResult)))
@@ -5863,11 +5944,23 @@ Public Class ThisAddIn
                                         Dim currentSelection As Word.Selection = newDoc.Application.Selection
                                         currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                         InsertTextWithMarkdown(currentSelection, LLMResult, True, True)
+                                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                        If Regex.IsMatch(LLMResult, pattern) Then
+                                            rng = wordApp.currentSelection.Range
+                                            RestoreSpecialTextElements(rng)
+                                            rng.Document.Fields.Update()
+                                        End If
                                     ElseIf NewDocChoice = 2 Then
                                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                                         Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                         Globals.ThisAddIn.Application.Selection.TypeParagraph()
                                         InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, LLMResult, False)
+                                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                        If Regex.IsMatch(LLMResult, pattern) Then
+                                            rng = wordApp.Selection.Range
+                                            RestoreSpecialTextElements(rng)
+                                            rng.Document.Fields.Update()
+                                        End If
                                     Else
                                         ShowCustomMessageBox("No text was inserted (but included in the clipboard as RTF).")
                                         SLib.PutInClipboard(MarkdownToRtfConverter.Convert((LLMResult)))
@@ -6019,6 +6112,12 @@ Public Class ThisAddIn
                     ElseIf NoSelectedText Then
 
                         InsertTextWithMarkdown(selection, vbCrLf & LLMResult, trailingCR, True)
+                        Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                        If Regex.IsMatch(LLMResult, pattern) Then
+                            rng = wordApp.Selection.Range
+                            RestoreSpecialTextElements(rng)
+                            rng.Document.Fields.Update()
+                        End If
 
                         ' End Extended Selection Mode
                         Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
@@ -6035,12 +6134,18 @@ Public Class ThisAddIn
                                 If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoFormatAndFieldSaving Then
                                     ApplyParagraphFormat(rng)
                                 End If
-                                If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(SaveRng)
-                                SaveRng.Document.Fields.Update()
+                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                    RestoreSpecialTextElements(SaveRng)
+                                    SaveRng.Document.Fields.Update()
+                                End If
                             Else
                                 CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
-                                If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(rng)
-                                rng.Document.Fields.Update()
+                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                    RestoreSpecialTextElements(rng)
+                                    rng.Document.Fields.Update()
+                                End If
                             End If
                         End If
 
@@ -6069,13 +6174,20 @@ Public Class ThisAddIn
                                     If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoFormatAndFieldSaving Then
                                         ApplyParagraphFormat(rng)
                                     End If
-                                    If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(SaveRng)
-                                    SaveRng.Document.Fields.Update()
+                                    Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                        RestoreSpecialTextElements(SaveRng)
+                                        SaveRng.Document.Fields.Update()
+                                    End If
                                 Else
                                     If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                     CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
-                                    If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(rng)
-                                    rng.Document.Fields.Update()
+                                    Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                        RestoreSpecialTextElements(rng)
+                                        rng.Document.Fields.Update()
+                                    End If
+
                                 End If
                             Else
                                 InsertTextWithMarkdown(selection, LLMResult, trailingCR)
@@ -6100,8 +6212,11 @@ Public Class ThisAddIn
                                 Debug.WriteLine($"SaveRange Start = {SaveRng.Start} Selection Start = {selection.Start}")
                                 Debug.WriteLine($"SaveRange End = {SaveRng.End} Selection End = {selection.End}")
 
-                                If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(SaveRng)
-                                SaveRng.Document.Fields.Update()
+                                Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                    RestoreSpecialTextElements(SaveRng)
+                                    SaveRng.Document.Fields.Update()
+                                End If
                             End If
 
                         Else
@@ -6111,8 +6226,9 @@ Public Class ThisAddIn
                             rng = selection.Range
                             If DoMarkup Then
                                 If MarkupMethod = 2 Or MarkupMethod = 3 Then
+                                    Dim Pattern As String = ""
                                     If MarkupMethod = 3 Then
-                                        Dim pattern As String = "\{\{.*?\}\}"
+                                        Pattern = "\{\{.*?\}\}"
                                         If System.Text.RegularExpressions.Regex.IsMatch(LLMResult, pattern) Then
                                             SLib.InsertTextWithBoldMarkers(selection, LLMResult)
                                             'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
@@ -6127,12 +6243,19 @@ Public Class ThisAddIn
                                     If Not ParaFormatInline AndAlso Not NoFormatting AndAlso Not NoFormatAndFieldSaving Then
                                         ApplyParagraphFormat(rng)
                                     End If
-                                    If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(SaveRng)
-                                    SaveRng.Document.Fields.Update()
+                                    Pattern = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                        RestoreSpecialTextElements(SaveRng)
+                                        SaveRng.Document.Fields.Update()
+                                    End If
                                 Else
                                     If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                     CompareAndInsertComparedoc(SelectedText, LLMResult, rng, ParaFormatInline, NoFormatting)
-                                    If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(rng)
+                                    Dim pattern As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                        RestoreSpecialTextElements(rng)
+                                        rng.Document.Fields.Update()
+                                    End If
                                 End If
                             Else
                                 Dim pattern As String = "\{\{.*?\}\}"
@@ -6149,8 +6272,11 @@ Public Class ThisAddIn
                                     ApplyParagraphFormat(rng)
                                 End If
                                 If Not NoFormatting Then
-                                    If Not NoFormatAndFieldSaving Then RestoreSpecialTextElements(SaveRng)
-                                    SaveRng.Document.Fields.Update()
+                                    pattern = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                        RestoreSpecialTextElements(SaveRng)
+                                        SaveRng.Document.Fields.Update()
+                                    End If
                                 End If
                             End If
 
@@ -7443,9 +7569,9 @@ Public Class ThisAddIn
 
         'emojiSet = New HashSet(Of String)()
 
-        For i As Integer = 0 To Result.Length - 1
-            Debug.WriteLine($"Char: '{Result(i)}'  ASCII: {Asc(Result(i))}")
-        Next
+        'For i As Integer = 0 To Result.Length - 1
+        'Debug.WriteLine($"Char: '{Result(i)}'  ASCII: {Asc(Result(i))}")
+        'Next
 
         Result = Result.Replace(vbLf & " " & vbLf, vbLf & vbLf)
 
@@ -8881,124 +9007,6 @@ Public Class ThisAddIn
     End Function
 
 
-    Public Function OldAddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
-        ' Read the entire range text at once to minimize COM calls
-        Dim fullText As String = rng.Text
-        Dim resultBuilder As New StringBuilder(fullText.Length * 2) ' Pre-allocate with extra space for tags
-
-        ' Get all revisions and sort them
-        Dim revList = rng.Revisions _
-        .Cast(Of Revision)() _
-        .OrderBy(Function(r) r.Range.Start - rng.Start) _
-        .ToList()
-
-        ' Track our position in the source text
-        Dim currentPos As Integer = 0
-
-        Debug.WriteLine("Revlist Number: " & revList.Count)
-
-        ' Process all revisions
-        For Each rev As Revision In revList
-            ' Calculate position relative to our range
-            Dim relativeStart As Integer = rev.Range.Start - rng.Start
-            Dim relativeEnd As Integer = rev.Range.End - rng.Start
-
-            ' Add text before this revision
-            If relativeStart > currentPos Then
-                resultBuilder.Append(fullText.Substring(currentPos, relativeStart - currentPos))
-            End If
-
-            ' Check if we should include markup for this author
-            Dim includeMarkup As Boolean = String.IsNullOrEmpty(TPMarkupName) OrElse
-            String.Equals(rev.Author, TPMarkupName, StringComparison.OrdinalIgnoreCase)
-
-            ' Get the revision text
-            Dim revText As String = rev.Range.Text
-
-            Debug.WriteLine("MarkupText: " & revText)
-
-            ' Append with appropriate tags
-            If includeMarkup Then
-                Select Case rev.Type
-                    Case WdRevisionType.wdRevisionDelete
-                        resultBuilder.Append("<del>").Append(revText).Append("</del>")
-                    Case WdRevisionType.wdRevisionInsert
-                        resultBuilder.Append("<ins>").Append(revText).Append("</ins>")
-                    Case Else
-                        resultBuilder.Append(revText)
-                End Select
-            Else
-                resultBuilder.Append(revText)
-            End If
-
-            ' Update current position
-            currentPos = relativeEnd
-        Next
-
-        ' Add any remaining text
-        If currentPos < fullText.Length Then
-            resultBuilder.Append(fullText.Substring(currentPos))
-        End If
-
-        Return resultBuilder.ToString()
-    End Function
-
-
-    Public Function xxxAddMarkupTags(ByVal rng As Range, Optional ByVal TPMarkupName As String = Nothing) As String
-        Dim resultBuilder As New StringBuilder()
-
-        ' 1. Alle Revisionen in Dokumentreihenfolge sortieren
-        Dim revList = rng.Revisions _
-        .Cast(Of Revision)() _
-        .OrderBy(Function(r) r.Range.Start) _
-        .ToList()
-
-        ' 2. Startposition auf Anfang des Bereichs setzen
-        Dim currentPos As Integer = rng.Start
-
-        ' 3. Über jede Revision iterieren
-        For Each rev As Revision In revList
-            ' 3a. Unveränderten Text vor der Revision anhängen
-            If rev.Range.Start > currentPos Then
-                Dim unchangedRange As Range = rng.Document.Range(currentPos, rev.Range.Start)
-                resultBuilder.Append(unchangedRange.Text)
-            End If
-
-            ' 3b. Prüfen, ob nach TPMarkupName gefiltert werden soll
-            Dim includeMarkup As Boolean = True
-            If Not String.IsNullOrEmpty(TPMarkupName) Then
-                If Not String.Equals(rev.Author, TPMarkupName, StringComparison.OrdinalIgnoreCase) Then
-                    includeMarkup = False
-                End If
-            End If
-
-            ' 3c. Revisionstext mit Tags oder neutral anhängen
-            If includeMarkup Then
-                Select Case rev.Type
-                    Case WdRevisionType.wdRevisionDelete
-                        resultBuilder.Append("<del>").Append(rev.Range.Text).Append("</del>")
-                    Case WdRevisionType.wdRevisionInsert
-                        resultBuilder.Append("<ins>").Append(rev.Range.Text).Append("</ins>")
-                    Case Else
-                        resultBuilder.Append(rev.Range.Text)
-                End Select
-            Else
-                resultBuilder.Append(rev.Range.Text)
-            End If
-
-            ' 3d. Position hinter der Revision setzen
-            currentPos = rev.Range.End
-        Next
-
-        ' 4. Restlichen unveränderten Text bis zum Ende des Bereichs anhängen
-        If currentPos < rng.End Then
-            Dim tailRange As Range = rng.Document.Range(currentPos, rng.End)
-            resultBuilder.Append(tailRange.Text)
-        End If
-
-        ' Ergebnis zurückgeben
-        Return resultBuilder.ToString()
-    End Function
 
 
     Public Function RemoveMarkupTags(text As String) As String
@@ -9092,104 +9100,6 @@ Public Class ThisAddIn
         End Try
     End Sub
 
-
-    Private Sub oldCompareAndInsert(text1 As String, text2 As String, targetRange As Range, Optional ShowInWindow As Boolean = False, Optional TextforWindow As String = "A text with these changes will be inserted ('Esc' to abort):", Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
-        Try
-
-            Dim diffBuilder As New InlineDiffBuilder(New Differ())
-            Dim sText As String = String.Empty
-
-            Debug.WriteLine("A Text1 = " & text1)
-            Debug.WriteLine("A Text2 = " & text2)
-
-            ' Pre-process the texts to replace line breaks with a unique marker
-            text1 = text1.Replace(vbCrLf, " {vbCrLf} ").Replace(vbCr, " {vbCr} ").Replace(vbLf, " {vbLf} ")
-            text2 = text2.Replace(vbCrLf, " {vbCrLf} ").Replace(vbCr, " {vbCr} ").Replace(vbLf, " {vbLf} ")
-
-            ' Normalize the texts by removing extra spaces
-            text1 = text1.Replace("  ", " ").Trim()
-            text2 = text2.Replace("  ", " ").Trim()
-
-            Debug.WriteLine("B Text1 = " & text1)
-            Debug.WriteLine("B Text2 = " & text2)
-
-            ' Split the texts into words and convert them into a line-by-line format
-            ' 3) In Worte splitten (ohne leere Einträge) und zeilenweise darstellen
-            Dim words1 As String = String.Join(
-              Environment.NewLine,
-              text1.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
-                    )
-            Dim words2 As String = String.Join(
-              Environment.NewLine,
-              text2.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
-                    )
-            ' Generate word-based diff using DiffPlex
-            Dim diffResult As DiffPaneModel = diffBuilder.BuildDiffModel(words1, words2)
-
-            ' Build the formatted output based on the diff results
-            For Each line In diffResult.Lines
-                Select Case line.Type
-                    Case ChangeType.Inserted
-                        sText &= "[INS_START]" & line.Text.Trim() & "[INS_END] "
-                    Case ChangeType.Deleted
-                        sText &= "[DEL_START]" & line.Text.Trim() & "[DEL_END] "
-                    Case ChangeType.Unchanged
-                        sText &= line.Text.Trim() & " "
-                End Select
-            Next
-
-            Debug.WriteLine("1 = " & sText)
-
-            ' Remove preceding and trailing spaces around placeholders
-            sText = sText.Replace("{vbCr}", "{vbCrLf}")
-            sText = sText.Replace("{vbLf}", "{vbCrLf}")
-            sText = sText.Replace(" {vbCrLf} ", "{vbCrLf}")
-            sText = sText.Replace(" {vbCrLf}", "{vbCrLf}")
-            sText = sText.Replace("{vbCrLf} ", "{vbCrLf}")
-
-            Debug.WriteLine("2 = " & sText)
-
-            ' Remove instances of line breaks surrounded by [DEL_START] and [DEL_END]
-            sText = sText.Replace("[DEL_START]{vbCrLf}[DEL_END] ", "")
-            sText = sText.Replace("[DEL_START]{vbCrLf}{vbCrLf}[DEL_END] ", "")
-            sText = sText.Replace("{vbCrLf}[DEL_END] ", "{vbCrLf}[DEL_END]")
-
-            ' Include instances of line breaks surrounded by [INS_START] and [INS_END] without the [INS...] text
-            sText = sText.Replace("[INS_START]{vbCrLf}[INS_END] ", "{vbCrLf}")
-            sText = sText.Replace("[INS_START]{vbCrLf}{vbCrLf}[INS_END] ", "{vbCrLf}{vbCrLf}")
-
-            ' Entferne alle überflüssigen Leerzeilen-Platzhalter am Ende
-
-            Debug.WriteLine("3 = " & sText)
-
-            sText = sText.Replace(vbCrLf, "").Replace(vbCr, "").Replace(vbLf, "")
-
-            ' Replace placeholders with actual line breaks
-            sText = sText.Replace("{vbCrLf}", vbCrLf)
-
-            ' Adjust overlapping tags
-            sText = sText.Replace("[DEL_END] [INS_START]", "[DEL_END][INS_START]")
-            sText = sText.Replace("[INS_START][INS_END] ", "")
-            sText = RemoveInsDelTagsInPlaceholders(sText)
-
-            ' Insert formatted text into the specified range
-            If Not ShowInWindow Then
-                Debug.WriteLine("Text with tags: " & vbCrLf & "'" & sText & "'" & vbCrLf & vbCrLf)
-                InsertMarkupText(sText, targetRange)
-            Else
-                sText = Regex.Replace(sText, "\{\{.*?\}\}", String.Empty)
-
-                Dim htmlContent As String = ConvertMarkupToRTF(TextforWindow & "\r\r" & sText)
-
-                System.Threading.Tasks.Task.Run(Sub()
-                                                    ShowRTFCustomMessageBox(htmlContent)
-                                                End Sub)
-            End If
-
-        Catch ex As System.Exception
-            MessageBox.Show("Error in CompareAndInsertText: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
-    End Sub
 
 
     Private Sub CompareAndInsert(text1 As String, text2 As String, targetRange As Range, Optional ShowInWindow As Boolean = False, Optional TextforWindow As String = "A text with these changes will be inserted ('Esc' to abort):", Optional paraformatinline As Boolean = False, Optional noformatting As Boolean = True)
@@ -16603,10 +16513,14 @@ Public Class ThisAddIn
         Public Property SelectedOutputPath As String = ""
         Public Property SelectedLanguage As String = ""
 
+        Public NoOutputFileRequired As Boolean = False
 
         Public Sub New(topLabelText As String,
                formTitle As String,
-               twoVoicesRequired As Boolean)
+               twoVoicesRequired As Boolean,
+               Optional NoOutputFile As Boolean = False)
+
+            NoOutputFileRequired = NoOutputFile
 
             'context As ISharedContext,
             'clientMail As String,
@@ -16793,14 +16707,14 @@ Public Class ThisAddIn
             ' --- Sample & Output rows ---
             lblSampleText = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Sample text:", .AutoSize = True}
             txtSampleText = New System.Windows.Forms.TextBox() With {.Font = Me.Font, .Width = 467}
-            lblOutputPath = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Output (.mp3):", .AutoSize = True}
-            txtOutputPath = New System.Windows.Forms.TextBox() With {.Font = Me.Font, .Width = 330}
-            chkTemporary = New System.Windows.Forms.CheckBox() With {.Font = Me.Font, .Text = "Temp only", .AutoSize = True}
+            lblOutputPath = New System.Windows.Forms.Label() With {.Font = Me.Font, .Text = "Output (.mp3):", .AutoSize = True, .Enabled = Not NoOutputFileRequired}
+            txtOutputPath = New System.Windows.Forms.TextBox() With {.Font = Me.Font, .Width = 330, .Enabled = Not NoOutputFileRequired}
+            chkTemporary = New System.Windows.Forms.CheckBox() With {.Font = Me.Font, .Text = "Temp only", .AutoSize = True, .Enabled = Not NoOutputFileRequired}
 
             ' --- Bottom Buttons ---
             btnOK = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "OK", .AutoSize = True}
             btnCancel = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "Cancel", .AutoSize = True}
-            btnDesktop = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "Save on Desktop", .AutoSize = True}
+            btnDesktop = New System.Windows.Forms.Button() With {.Font = Me.Font, .Text = "Save on Desktop", .AutoSize = True, .Enabled = Not NoOutputFileRequired}
 
             ' --- Wire up mutual‑exclusion for all radios ---
             Dim radios As New List(Of System.Windows.Forms.RadioButton)

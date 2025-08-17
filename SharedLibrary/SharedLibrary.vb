@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 11.8.2025
+' 17.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1436,11 +1436,15 @@ Namespace SharedLibrary
         Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract a verbatim snippet of a MAXIMUM OF 25 WORDS from the relevant portion of the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text, but NEVER EVER include more than 25 Words from the portion found; choose a meaningful part.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting. If it includes hyphenation, keep the hyphenation as is.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than 25 Words, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters. Never remove any line breaks that exist in the original text\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
 
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. The user wishes that the dialogue you generate has a particular minimum length, meaning that if the duration is more than five minutes or 1000 words, you a) need to go very deep into the topic and text given and b) ensure that you structure the dialogue to have an introduction, multiple chapters to cover each core topic of the text, and a summary and closing segment. For every five minutes of dialogue, create at least 1000 words. You MUST comply with the minimum lenght instruction given, and your output MUST include the ENTIRE dialogue. You may not end your output before you have provided the FULL dialogue (e.g., you are NOT PERMITTED to say that the dialogue continues without providing it). The minimum lenght instruction for the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n16. You shall use SSML tags, but never use any XML tags or XML headers and never provide any Markdown formatting.\n\17. It is important that you really comply with these rules, otherwise the output will be invalid. 18. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
-        Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. You will analyze for me a Text (the Texttoprocess) that is provided to you between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then provide a summary of the various parts of the text and explain to me how the text is structured, so I can better navigate and understand it. Then provide me the key message of the text, explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, and tell me how conclusive the logic is, and whether there are good counter-arguments or weaknesses. Then list material errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special field of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand text in the same language as the Texttoprocess. {INI_PreCorrection}"
+        Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. You will analyze for me a Text (the Texttoprocess) that is provided to you between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then provide a summary of the various parts of the text and explain to me how the text is structured, so I can better navigate and understand it. Then provide me the key message of the text, explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, and tell me how conclusive the logic is, and whether there are good counter-arguments or weaknesses. Then list material errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special field of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand text. Use the same language in which most of the text I provide as the Texttoprocess is drafted in; determine this language before you create the output (e.g., if the text has been mainly written in English, use English, if it is mainly in German use German). {INI_PreCorrection}"
         Const Default_SP_SuggestTitles As String = "You are a legal professional and a clever, astute and well-educated copy editor. You are in the following given a text, enclosed between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Your goal is to read and analyze the content, then create multiple sets of possible titles in the same language as the original text, with three (3) distinct titles each for: (1) professional memo, (2) blog/news post, (3) informal, (4) humorous, and (5) ambiguous, cryptic but ingenious. The titles must be clever, easy to read, well-aligned with the text, and suitable for the stated purpose. Provide more than average results. Use the structure:\nProfessional Memo Titles:\n1) ...\n2) ...\n3) ...\nBlog or News Post Titles:\n1) ...\n2) ...\n3) ...\nInformal Titles:\n1) ...\n2) ...\n3) ...\nHumorous Titles:\n1) ...\n2) ...\n3) ...\nFood for Thought Titles:\n1) ...\n2) ...\n3) ...\n. It is mandatory that you provide your output and all titles provide in the original language of the Texttoprocess."
         Const Default_SP_Friendly As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more friendly, while otherwise preserving its substance, wording and style. Use rhetorical techniques and wording that is typically well received and generates a positive attitude by the recipient, but stay straightforward, and do neither exaggerate nor brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.  {INI_PreCorrection}"
         Const Default_SP_Convincing As String = "You are a legal professional with exceptional language skills who follows instructions meticulously  step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more convincing. Make it more persuasive and concise by the way you amend the language, but preserve its original substance and style. Do not alter the underlying content and arguments, but use rhetorical and language techniques to make the text more convincing, but do not exaggerate and do not brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions. {INI_PreCorrection}"
         Const Default_SP_NoFillers As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Amend the text that is provided to you, in its original language, and is labeled as 'Texttoprocess' as follows: 1. Remove any and all filler words and any and all other words that do not add any meaning or are not necessary for understanding and easily reading the text. 2. Remove any other redundant language or other redunancies. 3. Change passive voice to active voice but only where this is easily possible without changing the entire sentence. 4. Ensure that the text is easy to read, concise and clear. 5. Do not alter the text's overall flow, readability, content, meaning, tone and style. 6. Do not change or remove words where you are not sure whether they are necessary for good reading and content; the text should remain easily readable and not appear choppy or abbreviated. 7. Before you provide me with the revised text, compare its meaning with the the original text and ensure that it remains the same. Otherwise adapt the output to ensure that the meaning of the revised text stays the same as with the original text. 8. Never remove or add line breaks, carriage returns or vertical tabs from the text you are provided. 9. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.{INI_PreCorrection}"
+
+        Const Default_Lib_Find_SP As String = "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You are given an instruction from the user: {OtherPrompt}. If present, the user also provides text between <TEXTTOPROCESS> and </TEXTTOPROCESS>. A library of JSON objects with content of the user that can help you fulfill your task is included between <LIBRARY> and </LIBRARY>, one object per line, each with a field 'text'. Identify and return only the values of 'text' from those library elements that you believe will help you complying with the user’s instruction. If multiple elements apply, separate them with '---'. If no elements apply, return an empty result. Return only the applicable library texts, without any commentary or explanation. <LIBRARY>{LibraryText}</LIBRARY>"
+        Const Default_Lib_Apply_SP As String = "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You have the following instruction: {OtherPrompt}. For performing the instruction, rely as much as possible on the substantive content you are provided between the tags <LIBRESULT> and </LIBRESULT>. (If multiple library elements apply, they are separated by '---'.) Use all library elements intelligently to comply with the user’s instruction, such as drafting a clause. Create a suitable text from scratch, using the library elements and the instruction; use your own skills to combine them intelligently. Stick in all substantive aspects to the material contained in LIBRESULT, as this is the user's preferred library (i.e. do not revert to any other substantive information). If the library contains not enough information, say so. Present a clean, final version of the text without markup or extra commentary. If the library contains conflicting information, you may offer alternatives, provided they are marked as such (for example by offering two alternative wordings within a clause, 'seller friendly:' and 'buyer friendly'), but check out the instruction to determine whether it will tell you which alternative the user is looking for.\n<LIBRESULT>{LibResult}</LIBRESULT>"
+        Const Default_Lib_Apply_SP_Markup As String = "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You have the following instruction: {OtherPrompt}. For performing the instruction, rely as much as possible on the substantive content you are provided between the tags <LIBRESULT> and </LIBRESULT>. (If multiple library elements apply, they are separated by '---'.) The user’s existing text that you need to modify on the basis of your instruction is provided to you between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Use all library elements intelligently to comply with the user’s instruction, such as improving or amending the existing clauses of the user. Stick in all substantive aspects to the material contained in LIBRESULT, as this is the user's preferred library (i.e. do not revert to any other substantive information). If the library contains not enough information, say so at the end of the text in a remark contained in square brackets. Present a clean, final version of the text without markup or extra commentary. If the library contains conflicting information, you may offer alternatives, provided they are marked as such (for example by offering two alternative wordings within a clause, 'seller friendly:' and 'buyer friendly'), but check out the instruction to determine whether it will tell you which alternative the user is looking for.\n<LIBRESULT>{LibResult}</LIBRESULT>"
 
         Public Shared SP_CleanTextPrompt As String = "You are a careful copy-editor and will review the text provided to you between the <TEXTTOPROCESS> tags so that it can be processed by a text-to-speech system. You do this in two steps: First, you will identify any text that cannot be easily read by a text-to-speech-system and do either of these two things: (a) If it is in brackets and merely a reference that is not relevant for a listener (such as references to other parts of the text or sources) you will remove it. (b) Otherwise, you will adapt it so that it is easily readable by a text-to-speech-system without in any way changing its content. Second, you will break up any sentences that are very long or overly complicated in two sentences without in any way changing their meaning or content. \nDuring both steps, you will not otherwise change the text and in your response provide nothing else than the text. "
         Public Shared LicensedTill As Date = CDate("1.1.2000")
@@ -4721,9 +4725,9 @@ Namespace SharedLibrary
                 If context.INI_Lib Then
                     context.INI_Lib_File = If(configDict.ContainsKey("Lib_File"), configDict("Lib_File"), "")
                     context.INI_Lib_Timeout = If(configDict.ContainsKey("Lib_Timeout"), CLng(configDict("Lib_Timeout")), 60000)
-                    context.INI_Lib_Find_SP = If(configDict.ContainsKey("Lib_Find_SP"), configDict("Lib_Find_SP"), "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You are given an instruction from the user: {OtherPrompt}. If present, the user also provides text between <TEXTTOPROCESS> and </TEXTTOPROCESS>. A library of text elements is included between <LIBRARY> and </LIBRARY>, with each element separated by the string '@@@'. Identify and return only those library elements that are directly applicable to the user’s instruction. If multiple elements apply, separate them with '---'. If no elements apply, return an empty result. Return only the applicable library text elements, without any commentary or explanation.\n<LIBRARY>{LibraryText}</LIBRARY>")
-                    context.INI_Lib_Apply_SP = If(configDict.ContainsKey("Lib_Apply_SP"), configDict("Lib_Apply_SP"), "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You have the following instruction: {OtherPrompt}. You have the relevant library text between <LIBRESULT> and </LIBRESULT>. (If multiple library elements apply, they are separated by '---'.) The user’s text, if any, appears between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Use the library elements intelligently to comply with the user’s instruction, such as drafting or improving a clause. If no text is provided, create a suitable text from scratch, relying on the library elements and the instruction. Present a clean, final version of the text without markup or extra commentary.\n<LIBRESULT>{LibResult}</LIBRESULT>")
-                    context.INI_Lib_Apply_SP_Markup = If(configDict.ContainsKey("Lib_Apply_SP_Markup"), configDict("Lib_Apply_SP_Markup"), "You are a legal professional with very good legal, language and logical skills and text handling capabilities, and you precisely comply with any instructions step by step. You have the following instruction: {OtherPrompt}. The user-provided text appears between <TEXTTOPROCESS> and </TEXTTOPROCESS>. The relevant library text is between <LIBRESULT> and </LIBRESULT>. (If multiple library elements apply, they are separated by '---'.) Use these library elements intelligently to fulfill the user’s instruction, such as drafting or modifying a clause based on a sample in the library. Fullfill the instruction by amending or expanding the portions of the user’s text that (for example, by including a clause or amending an existing one), always take into account the full text provided by the user and only use the additional information from the library and the instruction. Provide your final text without additional commentary.\n<LIBRESULT>{LibResult}</LIBRESULT>")
+                    context.INI_Lib_Find_SP = If(configDict.ContainsKey("Lib_Find_SP"), configDict("Lib_Find_SP"), Default_Lib_Find_SP)
+                    context.INI_Lib_Apply_SP = If(configDict.ContainsKey("Lib_Apply_SP"), configDict("Lib_Apply_SP"), Default_Lib_Apply_SP)
+                    context.INI_Lib_Apply_SP_Markup = If(configDict.ContainsKey("Lib_Apply_SP_Markup"), configDict("Lib_Apply_SP_Markup"), Default_Lib_Apply_SP_Markup)
 
                 End If
 
@@ -5714,6 +5718,221 @@ Namespace SharedLibrary
                                                     title As String,
                                                     SimpleInput As Boolean,
                                                     Optional DefaultValue As String = "",
+                                                    Optional CtrlP As String = "",
+                                                    Optional OptionalButtons As System.Tuple(Of System.String, System.String, System.String)() = Nothing
+                                                ) As String
+
+            ' Create and configure the form
+            Dim inputForm As New Form() With {
+        .Opacity = 0,
+        .Text = title,
+        .FormBorderStyle = FormBorderStyle.FixedDialog,
+        .StartPosition = FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .ShowInTaskbar = False,
+        .TopMost = True,
+        .AutoScaleMode = AutoScaleMode.Font,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink
+    }
+
+            ' Set the icon
+            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
+            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
+
+            ' Standard font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            inputForm.Font = standardFont
+
+            ' Main flow panel (vertical stack, auto‐sized, padding)
+            Dim mainFlow As New FlowLayoutPanel() With {
+        .FlowDirection = FlowDirection.TopDown,
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Padding = New Padding(20),
+        .MaximumSize = New Size(640 + 100, 0)   ' Limit total width
+    }
+
+            ' Prompt label
+            Dim promptLabel As New System.Windows.Forms.Label() With {
+        .Text = prompt,
+        .Font = standardFont,
+        .AutoSize = True,
+        .MaximumSize = New Size(600 + 100, 0)   ' Wrap at 600px
+    }
+            mainFlow.Controls.Add(promptLabel)
+
+            ' Input TextBox
+            Dim inputTextBox As New TextBox() With {
+        .Font = standardFont,
+        .Multiline = Not SimpleInput,
+        .WordWrap = True,
+        .ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical),
+        .Width = 600 + 100,
+        .Text = DefaultValue
+    }
+            If SimpleInput Then
+                ' Single‐line height
+                inputTextBox.Height = TextRenderer.MeasureText("Wy", standardFont).Height + 6
+            Else
+                ' Multi‐line height
+                inputTextBox.Height = 150
+            End If
+            mainFlow.Controls.Add(inputTextBox)
+
+            ' KeyDown handlers for Enter/Escape
+            If SimpleInput Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            Else
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
+                                                         inputForm.DialogResult = DialogResult.OK
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     ElseIf e.KeyCode = Keys.Escape Then
+                                                         inputForm.DialogResult = DialogResult.Cancel
+                                                         inputForm.Close()
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            End If
+
+            ' Ctrl+P insertion, if provided
+            If Not String.IsNullOrEmpty(CtrlP) Then
+                AddHandler inputTextBox.KeyDown, Sub(sender, e)
+                                                     If e.KeyCode = Keys.P AndAlso e.Modifiers = Keys.Control Then
+                                                         Dim selPos = inputTextBox.SelectionStart
+                                                         inputTextBox.Text = inputTextBox.Text.Insert(selPos, CtrlP)
+                                                         inputTextBox.SelectionStart = selPos + CtrlP.Length
+                                                         e.SuppressKeyPress = True
+                                                     End If
+                                                 End Sub
+            End If
+
+            Dim selectedPrefix As System.String = Nothing
+
+            ' OK and Cancel buttons
+            Dim okButton As New Button() With {
+        .Text = "OK",
+        .AutoSize = True,
+        .Font = standardFont
+    }
+            Dim cancelButton As New Button() With {
+        .Text = "Cancel",
+        .AutoSize = True,
+        .Font = standardFont
+    }
+
+            AddHandler okButton.Click, Sub()
+                                           inputForm.DialogResult = DialogResult.OK
+                                           inputForm.Close()
+                                       End Sub
+            AddHandler cancelButton.Click, Sub()
+                                               inputForm.DialogResult = DialogResult.Cancel
+                                               inputForm.Close()
+                                           End Sub
+
+            ' Bottom flow panel for buttons
+            Dim bottomFlow As New FlowLayoutPanel() With {
+        .FlowDirection = FlowDirection.LeftToRight,
+        .AutoSize = True,
+        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        .Margin = New Padding(0, 20, 0, 0)
+    }
+            bottomFlow.Controls.Add(okButton)
+            bottomFlow.Controls.Add(cancelButton)
+
+            ' Optional extra buttons (max 5): label, tooltip (description), and prefix
+            If OptionalButtons IsNot Nothing AndAlso OptionalButtons.Length > 0 Then
+                Dim tip As New System.Windows.Forms.ToolTip()
+                Dim count As System.Int32 = System.Math.Min(5, OptionalButtons.Length)
+                For i As System.Int32 = 0 To count - 1
+                    Dim item = OptionalButtons(i)
+                    Dim extraBtn As New System.Windows.Forms.Button() With {
+                    .Text = item.Item1,
+                    .AutoSize = True,
+                    .Font = standardFont
+                }
+                    ' Tooltip shows description
+                    tip.SetToolTip(extraBtn, item.Item2)
+                    ' First extra button: double padding to the Cancel button
+                    If i = 0 Then
+                        extraBtn.Margin = New System.Windows.Forms.Padding(cancelButton.Margin.Left * 2, cancelButton.Margin.Top, cancelButton.Margin.Right, cancelButton.Margin.Bottom)
+                    End If
+                    AddHandler extraBtn.Click,
+                    Sub()
+                        selectedPrefix = item.Item3
+                        inputForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                        inputForm.Close()
+                    End Sub
+                    bottomFlow.Controls.Add(extraBtn)
+                Next
+            End If
+
+            mainFlow.Controls.Add(bottomFlow)
+
+            ' Add layout to form
+            inputForm.Controls.Add(mainFlow)
+
+            ' Ensure the form is top‐most and focused
+            inputForm.TopMost = True
+            inputForm.BringToFront()
+            inputForm.Focus()
+
+            ' Show the dialog, optionally owned by Outlook
+            Dim Result As DialogResult
+            If title.Contains("Browser") Then
+                Dim outlookApp As Object = CreateObject("Outlook.Application")
+                If outlookApp IsNot Nothing Then
+                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
+                "ActiveExplorer",
+                BindingFlags.GetProperty, Nothing, outlookApp, Nothing
+            )
+                    If explorer IsNot Nothing Then
+                        explorer.GetType().InvokeMember(
+                    "WindowState",
+                    BindingFlags.SetProperty, Nothing, explorer, New Object() {1})
+                        explorer.GetType().InvokeMember(
+                    "Activate",
+                    BindingFlags.InvokeMethod, Nothing, explorer, Nothing)
+                    End If
+                End If
+                inputForm.Opacity = 1
+                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
+                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
+            Else
+                inputForm.Opacity = 1
+                Result = inputForm.ShowDialog()
+            End If
+
+            ' Return the entered text or appropriate default
+            If Result = DialogResult.OK Then
+                'Return inputTextBox.Text
+                Dim finalText As System.String = inputTextBox.Text
+                If Not System.String.IsNullOrEmpty(selectedPrefix) AndAlso Not finalText.StartsWith(selectedPrefix, StringComparison.OrdinalIgnoreCase) Then
+                    finalText = selectedPrefix & " " & finalText
+                End If
+                Debug.WriteLine("Final text: " & finalText)
+                Return finalText
+            Else
+                    Return If(Not SimpleInput, "ESC", "")
+            End If
+        End Function
+
+
+        Public Shared Function oldShowCustomInputBox(
+                                                    prompt As String,
+                                                    title As String,
+                                                    SimpleInput As Boolean,
+                                                    Optional DefaultValue As String = "",
                                                     Optional CtrlP As String = ""
                                                 ) As String
 
@@ -6042,8 +6261,8 @@ Namespace SharedLibrary
             ' Truncate if too long
             If String.IsNullOrWhiteSpace(header) Then header = AN
             Dim isTruncated As Boolean = False
-            If bodyText.Length > 15000 Then
-                bodyText = bodyText.Substring(0, 15000) & "(...)"
+            If bodyText.Length > 10000 Then
+                bodyText = bodyText.Substring(0, 10000) & "(...)"
                 isTruncated = True
             End If
 
@@ -6071,7 +6290,158 @@ Namespace SharedLibrary
             messageForm.Font = standardFont
 
             ' Layout
-            Dim maxLabelWidth = 450
+            Dim maxLabelWidth = 500
+            Dim mainFlow As New FlowLayoutPanel() With {
+            .FlowDirection = FlowDirection.TopDown,
+            .Dock = DockStyle.Fill,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .Padding = New Padding(20),
+            .MaximumSize = New Size(maxLabelWidth + 40, 0)
+        }
+
+            ' Body label
+            'Dim bodyLabel As New System.Windows.Forms.Label() With {
+            '.Text = bodyText,
+            '.Font = standardFont,
+            '.AutoSize = True,
+            '.MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
+            '}
+            'mainFlow.Controls.Add(bodyLabel)
+
+            ' Measure text to decide if scrolling is needed
+            Dim maxVisibleHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height \ 2
+            Dim measured As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(
+                    bodyText,
+                    standardFont,
+                    New System.Drawing.Size(maxLabelWidth, Integer.MaxValue),
+                    System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
+                )
+
+            ' Scrollable container that only shows scrollbars if content exceeds size
+            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
+                    .AutoScroll = True,
+                    .AutoSize = False,
+                    .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0),
+                    .Padding = New System.Windows.Forms.Padding(0),
+                    .Size = New System.Drawing.Size(maxLabelWidth, Math.Min(measured.Height, maxVisibleHeight))
+                }
+
+            ' Body label inside scroll panel
+            Dim bodyLabel As New System.Windows.Forms.Label() With {
+                    .Text = bodyText,
+                    .Font = standardFont,
+                    .AutoSize = True,
+                    .MaximumSize = New System.Drawing.Size(maxLabelWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth, 0)
+                }
+            bodyScrollPanel.Controls.Add(bodyLabel)
+            mainFlow.Controls.Add(bodyScrollPanel)
+
+            ' OK button and countdown
+            Dim okButton As New Button() With {
+            .Text = "OK",
+            .AutoSize = True,
+            .Font = standardFont
+        }
+            Dim countdownLabel As New System.Windows.Forms.Label() With {
+            .Font = standardFont,
+            .AutoSize = True
+        }
+
+            Dim userClicked As Boolean = False
+
+            AddHandler okButton.Click, Sub()
+                                           userClicked = True
+                                           messageForm.Close()
+                                       End Sub
+
+            ' Bottom flow
+            Dim bottomFlow As New FlowLayoutPanel() With {
+            .FlowDirection = FlowDirection.LeftToRight,
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .Margin = New Padding(0, 20, 0, 0)
+        }
+            bottomFlow.Controls.Add(okButton)
+            If autoCloseSeconds.HasValue Then
+                bottomFlow.Controls.Add(countdownLabel)
+            End If
+            mainFlow.Controls.Add(bottomFlow)
+
+            messageForm.Controls.Add(mainFlow)
+
+            ' Auto-close
+
+            If autoCloseSeconds.HasValue Then
+                Dim remaining = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
+                AddHandler t.Tick, Sub()
+                                       remaining -= 1
+                                       If remaining > 0 Then
+                                           countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                                       Else
+                                           t.Stop()
+                                           If Not userClicked Then
+                                               messageForm.Close()
+                                           End If
+                                       End If
+                                   End Sub
+                t.Start()
+
+                messageForm.Opacity = 1
+                If SeparateThread Then
+                    messageForm.ShowDialog()
+                Else
+                    messageForm.Show()
+                    System.Windows.Forms.Application.DoEvents()
+                End If
+            Else
+                messageForm.Opacity = 1
+                messageForm.ShowDialog()
+            End If
+        End Sub
+
+        Public Shared Sub OldShowCustomMessageBox(
+                                    ByVal bodyText As String,
+                                    Optional header As String = AN,
+                                    Optional autoCloseSeconds As Integer? = Nothing,
+                                    Optional Defaulttext As String = " - execution continues meanwhile",
+                                    Optional SeparateThread As Boolean = False
+                                )
+            ' Truncate if too long
+            If String.IsNullOrWhiteSpace(header) Then header = AN
+            Dim isTruncated As Boolean = False
+            If bodyText.Length > 10000 Then
+                bodyText = bodyText.Substring(0, 10000) & "(...)"
+                isTruncated = True
+            End If
+
+            ' Create and configure form
+            Dim messageForm As New Form() With {
+                            .Opacity = 0,
+                            .Text = header,
+                            .FormBorderStyle = FormBorderStyle.FixedDialog,
+                            .StartPosition = FormStartPosition.CenterScreen,
+                            .MaximizeBox = False,
+                            .MinimizeBox = False,
+                            .ShowInTaskbar = False,
+                            .TopMost = True,
+                            .AutoScaleMode = AutoScaleMode.Font,
+                            .AutoSize = True,
+                            .AutoSizeMode = AutoSizeMode.GrowAndShrink
+                        }
+
+            ' Icon
+            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
+            messageForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
+            messageForm.Font = standardFont
+
+            ' Layout
+            Dim maxLabelWidth = 650
             Dim mainFlow As New FlowLayoutPanel() With {
             .FlowDirection = FlowDirection.TopDown,
             .Dock = DockStyle.Fill,
