@@ -77,6 +77,13 @@ Public Class Ribbon1
     Private Sub RI_Clipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Clipboard.Click
         Globals.ThisAddIn.MainMenu("InsertClipboard")
     End Sub
+    Private Sub RI_ApplyMyStyle_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_ApplyMyStyle.Click
+        Globals.ThisAddIn.MainMenu("ApplyMyStyle")
+    End Sub
+
+    Private Sub RI_DefineMyStyle_Click_1(sender As Object, e As RibbonControlEventArgs) Handles RI_DefineMyStyle.Click
+        Globals.ThisAddIn.DefineMyStyle()
+    End Sub
 
 End Class
 
@@ -153,5 +160,14 @@ Public Class Ribbon2
     Private Sub RI_Clipboard_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Clipboard.Click
         Globals.ThisAddIn.MainMenu("InsertClipboard")
     End Sub
+
+    Private Sub RI_ApplyMyStyle_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_ApplyMyStyle.Click
+        Globals.ThisAddIn.MainMenu("ApplyMyStyle")
+    End Sub
+
+    Private Sub RI_DefineMyStyle_Click_1(sender As Object, e As RibbonControlEventArgs) Handles RI_DefineMyStyle.Click
+        Globals.ThisAddIn.DefineMyStyle()
+    End Sub
+
 
 End Class

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 17.8.2025
+' 24.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -56,12 +56,14 @@ Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
 Imports DocumentFormat.OpenXml
 Imports DocumentFormat.OpenXml.Drawing
+Imports DocumentFormat.OpenXml.Drawing.Diagrams
+Imports DocumentFormat.OpenXml.Office2010.Drawing
+Imports DocumentFormat.OpenXml.Office2010.PowerPoint
+Imports DocumentFormat.OpenXml.Office2010.Word
 Imports DocumentFormat.OpenXml.Packaging
 Imports DocumentFormat.OpenXml.Presentation
 Imports DocumentFormat.OpenXml.Validation
 Imports DocumentFormat.OpenXml.Wordprocessing
-Imports DocumentFormat.OpenXml.Office2010.PowerPoint
-Imports DocumentFormat.OpenXml.Office2010.Drawing
 Imports Google.Api.Gax.Grpc
 Imports Google.Apis.Auth.OAuth2.Responses
 Imports Google.Cloud.Speech.V1
@@ -76,8 +78,8 @@ Imports Microsoft.Office.Interop.PowerPoint
 Imports Microsoft.Office.Interop.Word
 Imports NAudio
 Imports NAudio.CoreAudioApi
-Imports NAudio.Wave
 Imports NAudio.Lame
+Imports NAudio.Wave
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.MarkdownToRtf
@@ -206,8 +208,6 @@ Public Class BridgeSubs
 End Class
 
 #End Region
-
-
 
 
 Public Module WordSearchHelper
@@ -872,13 +872,19 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.170825 Gen2 Beta Test"
+    Public Const Version As String = "V.240825 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
     Public Const AN5 As String = "RI" ' for bubble comments 
     Public Const AN6 As String = "Inky" ' for chat
+
+
+    'Public Const SP_MyStyle_Word As String = "Read and deeply analyze all sample documents provided between tags <DOCUMENT00> ... </DOCUMENT00> (00 is a number; there may be many) together with the following additional instructions if present: {OtherPrompt}. Your goals are (A) to produce a thorough, abstract, privacy-safe style analysis for the user without any verbatim or near-verbatim text and without unique named entities, and (B) to append a self-contained, reusable meta-prompt that can be pasted as an addon at the end of any writing instruction so an LLM will write in the same style without needing to reference the analysis. Requirements for (A) Analysis: 1) Cross-document synthesis: separate stable traits from context-specific quirks; cluster sub-styles by context (emails, reports, tutorials, marketing, technical notes) and state triggers. 2) Macro-structure: openings, thesis placement, argument or narrative arcs, section logic, signposting, introductions and conclusions, calls to action, scoping rules. 3) Tone and stance: formality, warmth, hedging vs assertion, confidence calibration, neutrality vs opinionated voice, empathy cues, humor or irony. 4) Audience modeling: assumed knowledge, jargon onboarding, teaching or persuasion patterns, questions, objection handling. 5) Rhetoric: analogies, metaphors, contrasts, problem-solution, story beats, example vs abstraction balance, use of evidence, citation habits, link style. 6) Syntax and rhythm: sentence length ranges and variance, clause chaining, voice balance active vs passive, preferred sentence types, cadence markers (commas, dashes, parentheses, semicolons), punctuation quirks, emoji usage, capitalization habits, list patterns, table or code-block usage. 7) Paragraphing and pacing: typical paragraph length, transition density, discourse markers, abstract-to-concrete flow, definition scaffolding, summary habits. 8) Lexicon without quoting passages: identify categories of favored verbs, adjectives, adverbs; register plain vs ornate; Latinate vs Anglo-Saxon preference; modality words; quantification habits. 9) Consistency rules and exceptions: what never appears, what rarely appears, conditions that trigger tone or structure shifts. 10) Formatting and stylebook: language variant, spelling conventions, Oxford comma, numerals, dates, units, acronyms, headings, figure or table captions, block vs inline quotes. 11) Uncertainty and ethics: how the author signals uncertainty, handles caveats, bias avoidance, disclaimers. 12) Quantified measurements: content-free metrics and ranges for the above (counts, percentages, ranges) without exemplar phrases. 13) Multi-source hygiene: ignore quoted third-party passages that are not the author’s voice, deduplicate near-identical segments, note contradictions and resolve by majority pattern with justification. 14) Output structure for (A): present a concise report in English with sections numbered (1) to (14); include a single inline Style DNA JSON line with generic keys and concrete values, for example {""Formality"":""medium high"",""AvgSentenceWords"":""18-26"",""Voice"":""active>passive"",""Transitions"":""frequent"",""Lists"":""often"",""Hedging"":""low"",""Humor"":""rare"",""Emoji"":""never""}; values must be abstract and safe. 15) Language fidelity for cited words: if you refer to specific single words or short expressions to illustrate lexical tendencies, reproduce them exactly in their original language and casing, including any non-ASCII characters like ä, ö, ü, é, ñ, etc., as-is and unescaped; include only generic, non-proprietary, non-unique words; replace unique terms with placeholders like [domain-term] or [brand-name]. Guardrails: never emit exact substrings beyond common stopwords; do not include proprietary names or confidential data; if browsing the web is possible and URLs are present in the additional instructions, consult them for extra style signals but weight them lower than the inline samples unless explicitly told otherwise; if browsing is unavailable, state that and proceed from local inputs only. Smarter style title generation: build a short, information-dense title that summarizes the overall style in 3-7 words by combining top-ranked attributes from these axes: (a) Formality (low/medium/high), (b) Evidence orientation (data-driven, example-led, principle-first), (c) Domain orientation (technical, business, marketing, educational, policy), (d) Pacing (brisk, moderate, leisurely), (e) Warmth (cool, neutral, warm), (f) Narrative vs analytical balance (story-forward, analysis-forward, hybrid). Title rules: capitalize major words, allow commas or hyphens, avoid brand or person names, avoid filler words, no emojis, ASCII punctuation only. Requirements for (B) Self-contained meta-prompt addon: After the analysis, generate the short descriptive title as above and use it as the [Title] field. Then append exactly two bracketed fields on one line: [Title = <generated style title>] [Prompt = When generating the draft for the user’s preceding task, act as a style emulator and produce the final text in the author’s style. Do not restate the task and do not ask for more information. Enforce the following self-contained Style DNA and rules without referring to any other document: 1) Style DNA JSON: include explicit key:value parameters you inferred covering macro-structure, tone, audience assumptions, rhetoric, syntax and rhythm, paragraphing, lexicon categories, formatting conventions, and uncertainty handling; include numeric ranges where applicable (e.g., AvgSentenceWords, ParagraphLength, TransitionDensity, VoiceBalance). If you list representative words, reproduce them exactly in their original language and casing and include only generic, non-unique words. 2) Structural rules: specify opening patterns, section ordering, signposting habits, and conclusion style to apply. 3) Tone rules: specify targets for formality, warmth, assertiveness vs hedging, and empathy markers. 4) Lexicon rules: specify categories of favored words and safe representative words; exclude unique names or rare proprietary phrases. 5) Punctuation and formatting rules: specify preferred punctuation, list usage, headings, numerals, dates, units, and citation style. 6) Rhetorical frequency: specify expected frequency or ranges for analogies, contrasts, examples, and data references. 7) Safety and ethics: specify how to signal uncertainty and include disclaimers if needed. 8) Fidelity checklist for self-review before output: confirm sentence-length distribution, transition density, voice balance, list usage, and formatting conventions match the specified ranges; confirm no unique terms from samples are reproduced. 9) Knobs: allow small adjustments for formality, pacing, and detail depth to fit the task, staying within the specified ranges by default. 10) Output policy: deliver only the final draft text aligned to the preceding task, with clean formatting, no meta-commentary, no checklists, and no references to any analysis.] Constraints for the entire response: English prose, UTF-8 encoding with readable non-ASCII characters, single line for the two bracketed fields, and include {OtherPrompt} only once as provided."
+    'Public Const SP_MyStyle_Apply As String = "You are a professional copy editor and writer with excellent language and drafting skills. Rewrite the text provided to you between the <TEXTTOPROCESS> tags as per the following style instructions. Do not change any substantive content, do not restructure, do not add or remove paragraphs, do not shorten or extend the text, just adapt the style as per the following style profile (and correct obvious spelling and grammar errors). "
+    'Public Const INI_MyStylePath As String = "C:\Users\david\Desktop\mystyle.ini"
+
 
     Private Const ISearch_MinChars = 500         ' minimum characters for a search hit to be relevant
     Private Const ISearch_MaxChars = 4000        ' characters that will be used per search result (rest will be cut off)
@@ -893,6 +899,8 @@ Public Class ThisAddIn
     Private Const TPMarkupTriggerR As String = ")"
     Private Const TPMarkupTriggerInstruct As String = "(rev[:user])"
     Private Const ExtTrigger As String = "{doc}"
+    Private Const AddDocTrigger As String = "(adddoc)"
+    Private Const MyStyleTrigger As String = "(mystyle)"
     Private Const NoFormatTrigger As String = "(noformat)"
     Private Const NoFormatTrigger2 As String = "(nf)"
     Private Const SameAsReplaceTrigger As String = "(sar)"
@@ -1728,6 +1736,34 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_MyStyle_Word As String
+        Get
+            Return _context.SP_MyStyle_Word
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Word = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Outlook As String
+        Get
+            Return _context.SP_MyStyle_Outlook
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Outlook = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Apply As String
+        Get
+            Return _context.SP_MyStyle_Apply
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Apply = value
+        End Set
+    End Property
+
+
     Public Shared Property SP_Shorten As String
         Get
             Return _context.SP_Shorten
@@ -2319,6 +2355,16 @@ Public Class ThisAddIn
             _context.INI_PromptLibPath = value
         End Set
     End Property
+
+    Public Shared Property INI_MyStylePath As String
+        Get
+            Return _context.INI_MyStylePath
+        End Get
+        Set(value As String)
+            _context.INI_MyStylePath = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_PromptLibPath_Transcript As String
         Get
@@ -3053,6 +3099,8 @@ Public Class ThisAddIn
     Public ShortenLength As Double
     Public SummaryLength As Integer
     Public OtherPrompt As String = ""
+    Public InsertDocs As String = ""
+    Public MyStyleInsert As String = ""
     Public SearchTerms As String
     Public SearchContext As String
     Public CurrentDate As String
@@ -3119,6 +3167,45 @@ Public Class ThisAddIn
     End Sub
 
 
+    Friend NotInheritable Class WordUndoScope
+        Implements System.IDisposable
+
+        Private ReadOnly _app As Microsoft.Office.Interop.Word.Application
+        Private ReadOnly _undo As Microsoft.Office.Interop.Word.UndoRecord
+        Private ReadOnly _iStarted As System.Boolean
+
+        Public Sub New(app As Microsoft.Office.Interop.Word.Application, Optional name As System.String = Nothing)
+            _app = app
+            _undo = _app.UndoRecord
+
+            ' Word < 2013 (Version < 15.0) hat kein UndoRecord.
+            Dim ver As System.Version = New System.Version(_app.Version)
+            If ver.Major < 15 Then
+                Return
+            End If
+
+            ' Nur starten, wenn gerade kein anderer Custom-Record läuft
+            If Not _undo.IsRecordingCustomRecord Then
+                If name IsNot Nothing AndAlso name.Length > 0 Then
+                    _undo.StartCustomRecord(name)
+                Else
+                    _undo.StartCustomRecord("VSTO-Aktion")
+                End If
+                _iStarted = True
+            End If
+        End Sub
+
+        Public Sub Dispose() Implements System.IDisposable.Dispose
+            Try
+                If _iStarted AndAlso _undo.IsRecordingCustomRecord Then
+                    _undo.EndCustomRecord()
+                End If
+            Catch ex As System.Exception
+                ' Nichts werfen – wir sind in Dispose
+            End Try
+        End Sub
+    End Class
+
     Public Function INILoadFail() As Boolean
         If Not INIloaded Then
             If Not StartupInitialized Then
@@ -3175,6 +3262,7 @@ Public Class ThisAddIn
         If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Correct), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText2)
     End Sub
+
     Public Async Sub Improve()
         If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Improve), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText2)
@@ -3191,6 +3279,38 @@ Public Class ThisAddIn
         If INILoadFail() Then Return
         Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_NoFillers), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText2)
     End Sub
+
+    Public Async Sub ApplyMyStyle()
+        If INILoadFail() Then Return
+
+        Dim application As Word.Application = Globals.ThisAddIn.Application
+        Dim Selection As Microsoft.Office.Interop.Word.Selection = application.Selection
+
+        Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+
+        If String.IsNullOrWhiteSpace(StylePath) Then
+            ShowCustomMessageBox("You have not defined a MyStyle prompt file. Please do so first in the configuration file or using 'Settings'.")
+            Return
+        End If
+        If Not IO.File.Exists(StylePath) Then
+            ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+            Return
+        End If
+        If Selection.Type = WdSelectionType.wdSelectionIP Then
+            ShowCustomMessageBox("Please select the text to be processed.")
+            Return
+        End If
+
+        MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", False)
+        If MyStyleInsert = "ERROR" Then Return
+        If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then
+            Return
+        End If
+
+        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_MyStyle_Apply) & " " & MyStyleInsert, True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, False, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText2)
+    End Sub
+
+
     Public Async Sub Anonymize()
         If INILoadFail() Then Return
 
@@ -3585,6 +3705,105 @@ Public Class ThisAddIn
         Dim result = Globals.Ribbons.Ribbon1.InitializeAppAsync()
 
     End Sub
+
+
+    Public Async Sub DefineMyStyle()
+        If INILoadFail() Then Return
+
+        Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+
+        If String.IsNullOrWhiteSpace(StylePath) Then
+            ShowCustomMessageBox("You have not configured a MyStyle prompt file path. Please do so in the configuration file or using 'Settings'.")
+            Return
+        End If
+
+        Dim Label As String = $"You are about to have {AN} create a profile of your writing syle. There are six steps:" & vbCrLf & vbCrLf &
+                               "1. If you have selected text, this will be used as a sample." & vbCrLf &
+                               "2. You select one, all or none of the open Word documents as further samples." & vbCrLf &
+                               "3. You can provide further input as further instructions to the model (e.g., Internet links to check if the model is able to do so)." & vbCrLf &
+                               "4. You select the model to perform the analysis (e.g., a reasoning model, Internet access if links are to be consulted)" & vbCrLf &
+                               "5. You can review and amend the analysis, including at the end the prompt for the AI to implement your style." & vbCrLf &
+                               $"6. The analysis will be saved to your personal MyStyle prompt file ({StylePath})."
+
+        Dim Answer As Integer = ShowCustomYesNoBox(Label, "Continue", "Cancel", $"{AN} Define MyStyle",
+                                    extraButtonText:="Edit MyStyle prompt file",
+                                                            extraButtonAction:=Sub()
+                                                                                   ' Your code here
+                                                                                   SLib.ShowTextFileEditor(StylePath, "Edit your MyStyle prompt file (use 'Define MyStyle' to create new prompts automatically):")
+                                                                               End Sub)
+
+        If Answer <> 1 Then Return
+
+        ' Get Selected text
+
+        Dim application As Word.Application = Globals.ThisAddIn.Application
+        Dim selection As Word.Selection = application.Selection
+        SelectedText = ""
+
+        If selection.Type <> Word.WdSelectionType.wdSelectionIP Then
+            SelectedText = selection.Text.Trim()
+        End If
+
+        ' Get other open documents
+
+        InsertDocs = ""
+        InsertDocs = GatherSelectedDocuments(False, True)
+        Debug.WriteLine($"GatherSelectedDocs returned: {Left(InsertDocs, 3000)}")
+        If InsertDocs.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
+            ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - exiting.")
+            Return
+        ElseIf InsertDocs.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
+            ShowCustomMessageBox($"There are no other documents to add - exiting.")
+            Return
+        End If
+
+        ' Get addition instructions
+
+        OtherPrompt = ""
+        OtherPrompt = SLib.ShowCustomInputBox("You can provide additional instructions for the analysis (e.g., Internet links to check [if your model will understand so], aspects to focus on etc.). This is optional.", $"{AN} Define MyStyle", False).Trim()
+
+        If OtherPrompt = "ESC" Then
+            Return
+        End If
+
+        ' Get the model to do it
+
+        Dim UseSecondAPI As Boolean = False
+        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+            Answer = ShowCustomYesNoBox($"Do you want to use one of your alternate models?", "Yes, use alternate", "No, use primary", $"{AN} Define MyStyle")
+            Debug.WriteLine("Answer=" & Answer)
+            If Answer = 1 Then
+                If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                    originalConfigLoaded = False
+                    Return
+                End If
+                UseSecondAPI = True
+            ElseIf Answer <> 2 Then
+                Return
+            End If
+        End If
+
+        ' SP_MyStyle will contain OtherPrompt and InsertDocs
+
+        Dim LLMResponse As String = Await LLM(InterpolateAtRuntime(SP_MyStyle_Word), If(SelectedText <> "", "<DOCUMENT0>" & SelectedText & "</DOCUMENT0> ", "") & InsertDocs, "", "", 0, UseSecondAPI)
+
+        If Not String.IsNullOrWhiteSpace(LLMResponse) Then
+
+            Dim analysis As String = SLib.ShowCustomWindow("The AI provided the following style analysis and MyStyle prompt based on your text samples:", LLMResponse, "If you choose 'OK', the prompt and its title at the end of the analysis will be stored in your MyStyle prompt file for future usage (and the full report copied to the clipboard).", AN, False, False, False, False)
+
+            If Not String.IsNullOrWhiteSpace(analysis) Then
+                SLib.PutInClipboard(analysis)
+                SLib.ExtractAndStorePromptFromAnalysis(analysis, StylePath, "Word")
+            End If
+
+        End If
+        If UseSecondAPI And originalConfigLoaded Then
+            RestoreDefaults(_context, originalConfig)
+            originalConfigLoaded = False
+        End If
+
+    End Sub
+
 
 
     Public Async Sub FreeStyleAM()
@@ -4111,6 +4330,8 @@ Public Class ThisAddIn
         Try
             OtherPrompt = ""
             SysPrompt = ""
+            InsertDocs = ""
+            MyStyleInsert = ""
 
             Dim NoText As Boolean = False
             Dim DoMarkup As Boolean = False
@@ -4133,6 +4354,7 @@ Public Class ThisAddIn
             Dim ChunkSize As Integer = 1
             Dim NoFormatAndFieldSaving As Boolean = False
             Dim DoSlides As Boolean = False
+            Dim DoMyStyle As Boolean = False
 
             Dim MarkupInstruct As String = $"start With '{MarkupPrefixAll}' for markups"
             Dim InplaceInstruct As String = $"with '{InPlacePrefix}'/'{AddPrefix} for replacing/adding to the selection"
@@ -4140,10 +4362,11 @@ Public Class ThisAddIn
             Dim SlidesInstruct As String = $"with '{SlidesPrefix}' for adding to a Powerpoint file"
             Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}', '{NewdocPrefix}' or '{PanePrefix}' for separate output"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
-            Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf)"
+            Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf) or '{AddDocTrigger}' for an open Word doc"
             Dim TPMarkupInstruct As String = $"; add '{TPMarkupTriggerInstruct}' if revisions [of user] should be pointed out to the LLM"
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}/{SameAsReplaceTrigger}' for overriding formatting defaults"
             Dim AllInstruct As String = $"; add '{AllTrigger}' to select all"
+            Dim MyStyleInstruct As String = $"; add '{MyStyleTrigger}' to apply your personal style"
             Dim LibInstruct As String = $"; add '{LibTrigger}' for library search"
             Dim NetInstruct As String = $"; add '{NetTrigger}' for internet search"
             Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -4170,6 +4393,9 @@ Public Class ThisAddIn
             End If
             If INI_ISearch Then
                 AddOnInstruct += NetInstruct.Replace("; add", ", ")
+            End If
+            If Not String.IsNullOrWhiteSpace(INI_MyStylePath) Then
+                AddOnInstruct += MyStyleInstruct.Replace("; add", ", ")
             End If
             If UseSecondAPI Then
                 If Not String.IsNullOrWhiteSpace(INI_APICall_Object_2) Then
@@ -4284,6 +4510,16 @@ Public Class ThisAddIn
                 Return
             End If
 
+            If OtherPrompt.StartsWith("editmystyle", StringComparison.OrdinalIgnoreCase) Then
+                SLib.ShowTextFileEditor(ExpandEnvironmentVariables(INI_MyStylePath), "Edit your MyStyle prompt file (use 'Define MyStyle' to create new prompts automatically):")
+                Return
+            End If
+
+
+            If OtherPrompt.StartsWith("definemystyle", StringComparison.OrdinalIgnoreCase) Then
+                DefineMyStyle()
+                Return
+            End If
 
             If OtherPrompt.StartsWith("redinktest", StringComparison.OrdinalIgnoreCase) Then
 
@@ -4628,6 +4864,35 @@ Public Class ThisAddIn
                 DoNet = True
             End If
 
+            If Not String.IsNullOrWhiteSpace(INI_MyStylePath) And OtherPrompt.IndexOf(MyStyleTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+                If Not IO.File.Exists(StylePath) Then
+                    ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                    Return
+                End If
+                OtherPrompt = OtherPrompt.Replace(MyStyleTrigger, "").Trim()
+                MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
+                If MyStyleInsert = "ERROR" Then Return
+                If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then Return
+                DoMyStyle = True
+            End If
+
+            If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(AddDocTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+
+                InsertDocs = GatherSelectedDocuments()
+                Debug.WriteLine($"GatherSelectedDocs returned: {Left(InsertDocs, 3000)}")
+                If String.IsNullOrWhiteSpace(InsertDocs) Then
+                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - exiting.")
+                    Return
+                ElseIf InsertDocs.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
+                    ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - exiting.")
+                    Return
+                ElseIf InsertDocs.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
+                    ShowCustomMessageBox($"There are no other documents to add - exiting.")
+                    Return
+                End If
+                OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(AddDocTrigger), "", RegexOptions.IgnoreCase)
+            End If
 
             If Not String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
                 DragDropFormLabel = ""
@@ -4667,7 +4932,7 @@ Public Class ThisAddIn
 
                     ' Ask user first
                     Dim CreatePPTX As Integer = ShowCustomYesNoBox(
-    "You have not provided a Powerpoint file. Do you want create a new one?", "Yes", "No, abort")
+                             "You have not provided a Powerpoint file. Do you want create a new one?", "Yes", "No, abort")
                     If CreatePPTX <> 1 Then
                         ShowCustomMessageBox("No Powerpoint file has been selected - will abort. You can try again (use Ctrl-P to re-insert your prompt).")
                         Return
@@ -4813,7 +5078,7 @@ Public Class ThisAddIn
 
             Debug.WriteLine("Freestyle Prompt: " & SysPrompt)
 
-            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck)
+            Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SysPrompt), True, DoKeepFormat, DoKeepParaFormat, DoInplace, DoMarkup, MarkupMethod, DoClipboard, DoBubbles, False, UseSecondAPI, KeepFormatCap, DoTPMarkup, TPMarkupName, False, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck, InsertDocs <> "", DoMyStyle)
 
             If UseSecondAPI And originalConfigLoaded Then
                 RestoreDefaults(_context, originalConfig)
@@ -4923,6 +5188,163 @@ Public Class ThisAddIn
     End Function
 
 
+    Public Function GatherSelectedDocuments(Optional IncludeName As Boolean = True, Optional IncludeNone As System.Boolean = False) As System.String
+        Try
+            Dim app As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
+
+            ' collect all open documents (unique by FullName/Name to avoid duplicates from multiple windows)
+            Dim docList As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
+            Dim seen As New System.Collections.Generic.HashSet(Of System.String)(System.StringComparer.OrdinalIgnoreCase)
+
+            For Each doc As Microsoft.Office.Interop.Word.Document In app.Documents
+                Dim key As System.String = If(Not System.String.IsNullOrEmpty(doc.FullName), doc.FullName, doc.Name)
+                If Not seen.Contains(key) Then
+                    seen.Add(key)
+                    docList.Add(doc)
+                End If
+            Next
+
+            If docList.Count = 0 Then
+                Return "NONE"
+            End If
+
+            ' build selection items for each open document
+            Dim selItems As New System.Collections.Generic.List(Of SelectionItem)()
+            For i As System.Int32 = 0 To docList.Count - 1
+                Dim d As Microsoft.Office.Interop.Word.Document = docList(i)
+                selItems.Add(New SelectionItem($"{d.Name} ({d.FullName})", i + 1))
+            Next
+
+            ' add “All open documents” and optional “None”
+            Dim indexAll As System.Int32 = selItems.Count + 1
+            selItems.Add(New SelectionItem("Add all open documents", indexAll))
+
+            Dim indexNone As System.Int32 = -1
+            If IncludeNone Then
+                indexNone = indexAll + 1
+                selItems.Add(New SelectionItem("Do not add any document", indexNone))
+            End If
+
+            ' prompt user (keep default/highlight on "All" — not "None")
+            Dim itemsArray As SelectionItem() = selItems.ToArray()
+            Dim picked As System.Int32 = SelectValue(itemsArray, indexAll, "Choose document to add …")
+
+            ' user cancelled or invalid choice
+            If picked < 1 Then
+                Return System.String.Empty
+            End If
+
+            ' user explicitly chose "None"
+            If IncludeNone AndAlso picked = indexNone Then
+                Return System.String.Empty
+            End If
+
+            ' determine targets based on selection (single doc or all)
+            Dim targets As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
+            If picked = indexAll Then
+                targets.AddRange(docList)
+            Else
+                ' picked corresponds to 1-based per-document entries
+                If picked - 1 >= 0 AndAlso picked - 1 < docList.Count Then
+                    targets.Add(docList(picked - 1))
+                Else
+                    ' defensive: out-of-range pick -> treat as no selection
+                    Return System.String.Empty
+                End If
+            End If
+
+            ' build the result string
+            Dim insertedDocuments As System.String = System.String.Empty
+            Dim tagIndex As System.Int32 = 1
+
+            For Each d As Microsoft.Office.Interop.Word.Document In targets
+                ' required prefix line before each <DOCUMENT*> tag
+                If IncludeName Then insertedDocuments &= $"Here follows document no. {tagIndex} with the name '" & d.Name & "': " & vbCrLf
+                insertedDocuments &= $"<DOCUMENT{tagIndex}>" & vbCrLf
+                insertedDocuments &= d.Content.Text & vbCrLf
+                insertedDocuments &= $"</DOCUMENT{tagIndex}>" & vbCrLf
+                tagIndex += 1
+            Next
+
+            If System.String.IsNullOrEmpty(insertedDocuments) Then
+                ShowCustomMessageBox("No content could be retrieved from the selected document(s).")
+                Return System.String.Empty
+            End If
+
+            Return insertedDocuments
+
+        Catch ex As System.Exception
+            Return "ERROR " & ex.Message
+        End Try
+    End Function
+
+
+    Public Function OldGatherSelectedDocuments() As System.String
+        Try
+            Dim app As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
+
+            ' collect all open documents (unique by FullName/Name to avoid duplicates from multiple windows)
+            Dim docList As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
+            Dim seen As New System.Collections.Generic.HashSet(Of System.String)(System.StringComparer.OrdinalIgnoreCase)
+
+            For Each doc As Microsoft.Office.Interop.Word.Document In app.Documents
+                Dim key As System.String = If(Not System.String.IsNullOrEmpty(doc.FullName), doc.FullName, doc.Name)
+                If Not seen.Contains(key) Then
+                    seen.Add(key)
+                    docList.Add(doc)
+                End If
+            Next
+
+            If docList.Count = 0 Then Return "NONE"
+
+            ' build selection items for each open document
+            Dim selItems As New System.Collections.Generic.List(Of SelectionItem)()
+            For i As System.Int32 = 0 To docList.Count - 1
+                Dim d As Microsoft.Office.Interop.Word.Document = docList(i)
+                selItems.Add(New SelectionItem($"{d.Name} ({d.FullName})", i + 1))
+            Next
+
+            ' add “All open documents”
+            Dim allIndex As System.Int32 = selItems.Count + 1
+            selItems.Add(New SelectionItem("Add all open documents", allIndex))
+
+            ' prompt user
+            Dim itemsArray As SelectionItem() = selItems.ToArray()
+            Dim picked As System.Int32 = SelectValue(itemsArray, allIndex, "Choose document to add …")
+            If picked < 1 Then Return System.String.Empty
+
+            ' determine targets
+            Dim targets As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
+            If picked = allIndex Then
+                targets.AddRange(docList)
+            Else
+                targets.Add(docList(picked - 1))
+            End If
+
+            ' build the result string
+            Dim insertedDocuments As System.String = System.String.Empty
+            Dim tagIndex As System.Int32 = 1
+
+            For Each d As Microsoft.Office.Interop.Word.Document In targets
+                insertedDocuments &= $"<DOCUMENT{tagIndex}>" & vbCrLf
+                insertedDocuments &= d.Content.Text & vbCrLf
+                insertedDocuments &= $"</DOCUMENT{tagIndex}>" & vbCrLf
+                tagIndex += 1
+            Next
+
+            If System.String.IsNullOrEmpty(insertedDocuments) Then
+                ShowCustomMessageBox("No content could be retrieved from the selected document(s).")
+                Return System.String.Empty
+            End If
+
+            Return insertedDocuments
+
+        Catch ex As System.Exception
+            Return "ERROR " & ex.Message
+        End Try
+    End Function
+
+
 
     Public Async Sub EasterEgg()
 
@@ -5010,6 +5432,9 @@ Public Class ThisAddIn
     ' - ChunkSize: Integer indicating how many paragraphs should be processed at once.
     ' - NoFormatAndFieldSaving: Boolean flag to indicate that no standard formatting/field saving should be applied to the selected text.
     ' - DoNewDoc: Boolean flag to indicate that the output should be placed in a new document.
+    ' - SlideDeck: String containing the file path to the PowerPoint deck to be created or modified.
+    ' - AddDocs: Boolean flag indicating whether insertdocs should be added
+    ' - DoMyStyle: Boolean flag whether MyStyleInsert shall be used
 
     ' Global array to store paragraph formatting information
     Structure ParagraphFormatStructure
@@ -5038,7 +5463,7 @@ Public Class ThisAddIn
     Dim paragraphFormat() As ParagraphFormatStructure
     Dim paraCount As Integer
 
-    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "") As Task(Of String)
+    Private Async Function ProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "", Optional AddDocs As Boolean = False, Optional DoMyStyle As Boolean = False) As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
@@ -5053,160 +5478,109 @@ Public Class ThisAddIn
             Return ""
         End If
 
-        If selection.Type = WdSelectionType.wdSelectionIP Or selection.Tables.Count = 0 Or PutInClipboard Or PutInBubbles Then
+        Try
+            Using New WordUndoScope(application, $"{AN} Changes")
 
-            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck)
+                If selection.Type = WdSelectionType.wdSelectionIP Or selection.Tables.Count = 0 Or PutInClipboard Or PutInBubbles Then
 
-        Else
-
-            Dim userdialog As Integer = ShowCustomYesNoBox("Your text contains tables. Shall each text section and each cell content be processed separately to avoid the table falling apart? This will take more time." & If(ChunkSize > 0, $" Your '(iterate)' parameter will apply only outside the tables.", "") & If(DoMarkup And MarkupMethod <> 2, " For the markup, the Diff markup will be used instead of the markup method choosen by you.", "") & " If you want to abort, close this window.", "No", "Yes, process each cell individually", $"{AN} Table Processing")
-
-            If userdialog = 0 Then Return ""
-
-            If userdialog = 2 Then
-
-                MarkupMethod = 2
-
-                Dim selRange As Range = selection.Range
-                Dim docTables As Tables = selRange.Tables
-
-                Dim isEntirelyWithinTable As Boolean = False
-                Dim isWholeTable As Boolean = False
-                Dim isPartialTableSelection As Boolean = False
-
-                If selection.Tables.Count = 1 Then
-                    Dim tbl As Microsoft.Office.Interop.Word.Table = selRange.Tables(1)
-                    Dim tblRange As Range = tbl.Range
-
-                    ' Check if the selection is entirely within the table boundaries.
-                    isEntirelyWithinTable = (selRange.Start >= tblRange.Start AndAlso selRange.End <= tblRange.End)
-
-                    ' Get trimmed texts. Adjust the characters to trim as needed.
-                    Dim selText As String = selRange.Text.Trim(vbCr, vbLf, " "c)
-                    Dim tblText As String = tblRange.Text.Trim(vbCr, vbLf, " "c)
-
-                    ' Compare the texts. If they differ, then the selection is not the whole table.
-                    isWholeTable = (selText = tblText)
-
-                    ' If the selection is fully contained in the table but does not equal the entire table's text,
-                    ' then it is entirely within the table but is only a part of it.
-                    If isEntirelyWithinTable AndAlso Not isWholeTable Then
-                        isPartialTableSelection = True
-                    End If
-                End If
-
-                If isEntirelyWithinTable Or isWholeTable Then
-
-
-                    ' Fully-qualified per your guidelines
-                    Dim sel As Word.Selection = application.Selection
-                    Dim selCRange As Word.Range = sel.Range
-
-                    ' Loop _only_ the cells the user actually selected
-                    For Each cell As Word.Cell In sel.Cells
-                        ' Make a working copy of the cell’s range, minus its end‐of‐cell marker
-                        Dim cellRange As Word.Range = cell.Range.Duplicate
-                        cellRange.End -= 1
-
-                        ' Compute the overlap of selRange & cellRange
-                        Dim intersection As Word.Range = selCRange.Duplicate
-                        intersection.Start = System.Math.Max(cellRange.Start, selCRange.Start)
-                        intersection.End = System.Math.Min(cellRange.End, selCRange.End)
-
-                        ' If there is any overlap, process _only_ that text
-                        If intersection.Start < intersection.End Then
-                            ' keep UI responsive
-                            System.Windows.Forms.Application.DoEvents()
-
-                            ' show exactly what's being processed
-                            intersection.Select()
-
-                            ' your async processing call
-                            Dim result = Await TrueProcessSelectedText(
-                                SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline,
-                                InPlace, DoMarkup, MarkupMethod, PutInClipboard,
-                                PutInBubbles, SelectionMandatory, UseSecondAPI,
-                                FormattingCap, DoTPMarkup, TPMarkupname, False,
-                                FileObject, DoPane, 0, NoFormatAndFieldSaving, DoNewDoc)
-
-                            ' throttle so Word doesn’t lock up
-                            Await System.Threading.Tasks.Task.Delay(500)
-                        End If
-                    Next
+                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck, AddDocs)
 
                 Else
 
-                    ' Sort tables by their start positions in the selection
-                    Dim tableList As New List(Of Microsoft.Office.Interop.Word.Table)
-                    For i As Integer = 1 To docTables.Count
-                        tableList.Add(docTables(i))
-                    Next
-                    tableList.Sort(Function(t1, t2) t1.Range.Start.CompareTo(t2.Range.Start))
+                    Dim userdialog As Integer = ShowCustomYesNoBox("Your text contains tables. Shall each text section and each cell content be processed separately to avoid the table falling apart? This will take more time." & If(ChunkSize > 0, $" Your '(iterate)' parameter will apply only outside the tables.", "") & If(DoMarkup And MarkupMethod <> 2, " For the markup, the Diff markup will be used instead of the markup method choosen by you.", "") & " If you want to abort, close this window.", "No", "Yes, process each cell individually", $"{AN} Table Processing")
 
-                    Dim lastPos As Integer = selRange.Start
+                    If userdialog = 0 Then Return ""
 
-                    Dim splash As New SLib.SplashScreen("Processing table(s)... press 'Esc' to abort")
-                    splash.Show()
-                    splash.Refresh()
+                    If userdialog = 2 Then
 
-                    Dim IsExit As Boolean = False
+                        MarkupMethod = 2
 
-                    For Each tbl As Microsoft.Office.Interop.Word.Table In tableList
+                        Dim selRange As Range = selection.Range
+                        Dim docTables As Tables = selRange.Tables
 
-                        System.Windows.Forms.Application.DoEvents()
+                        Dim isEntirelyWithinTable As Boolean = False
+                        Dim isWholeTable As Boolean = False
+                        Dim isPartialTableSelection As Boolean = False
 
-                        If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
-                            Exit For
+                        If selection.Tables.Count = 1 Then
+                            Dim tbl As Microsoft.Office.Interop.Word.Table = selRange.Tables(1)
+                            Dim tblRange As Range = tbl.Range
+
+                            ' Check if the selection is entirely within the table boundaries.
+                            isEntirelyWithinTable = (selRange.Start >= tblRange.Start AndAlso selRange.End <= tblRange.End)
+
+                            ' Get trimmed texts. Adjust the characters to trim as needed.
+                            Dim selText As String = selRange.Text.Trim(vbCr, vbLf, " "c)
+                            Dim tblText As String = tblRange.Text.Trim(vbCr, vbLf, " "c)
+
+                            ' Compare the texts. If they differ, then the selection is not the whole table.
+                            isWholeTable = (selText = tblText)
+
+                            ' If the selection is fully contained in the table but does not equal the entire table's text,
+                            ' then it is entirely within the table but is only a part of it.
+                            If isEntirelyWithinTable AndAlso Not isWholeTable Then
+                                isPartialTableSelection = True
+                            End If
                         End If
 
-                        If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
-                            Exit For
-                        End If
+                        If isEntirelyWithinTable Or isWholeTable Then
 
-                        Dim tblStart As Integer = tbl.Range.Start
-                        Dim tblEnd As Integer = tbl.Range.End
 
-                        ' Text chunk BEFORE the table
-                        If tblStart > lastPos Then
-                            Dim textChunk As Range = selRange.Duplicate
-                            textChunk.Start = lastPos
-                            textChunk.End = tblStart - 1
+                            ' Fully-qualified per your guidelines
+                            Dim sel As Word.Selection = application.Selection
+                            Dim selCRange As Word.Range = sel.Range
 
-                            ' Double-check you haven't snagged any table content
-                            If textChunk.Tables.Count = 0 Then
-                                ' Also verify it's not empty
-                                If textChunk.Start < textChunk.End Then
-                                    textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc)
+                            ' Loop _only_ the cells the user actually selected
+                            For Each cell As Word.Cell In sel.Cells
+                                ' Make a working copy of the cell’s range, minus its end‐of‐cell marker
+                                Dim cellRange As Word.Range = cell.Range.Duplicate
+                                cellRange.End -= 1
+
+                                ' Compute the overlap of selRange & cellRange
+                                Dim intersection As Word.Range = selCRange.Duplicate
+                                intersection.Start = System.Math.Max(cellRange.Start, selCRange.Start)
+                                intersection.End = System.Math.Min(cellRange.End, selCRange.End)
+
+                                ' If there is any overlap, process _only_ that text
+                                If intersection.Start < intersection.End Then
+                                    ' keep UI responsive
+                                    System.Windows.Forms.Application.DoEvents()
+
+                                    ' show exactly what's being processed
+                                    intersection.Select()
+
+                                    ' your async processing call
+                                    Dim result = Await TrueProcessSelectedText(
+                                        SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline,
+                                        InPlace, DoMarkup, MarkupMethod, PutInClipboard,
+                                        PutInBubbles, SelectionMandatory, UseSecondAPI,
+                                        FormattingCap, DoTPMarkup, TPMarkupname, False,
+                                        FileObject, DoPane, 0, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+
+                                    ' throttle so Word doesn’t lock up
                                     Await System.Threading.Tasks.Task.Delay(500)
                                 End If
-                            Else
+                            Next
 
-                                Do
-                                    textChunk.Start += 1
-                                Loop While textChunk.Tables.Count <> 0 And Not textChunk.Start = textChunk.End
+                        Else
 
-                                If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
-                                    textChunk.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc)
-                                    Await System.Threading.Tasks.Task.Delay(500)
-                                End If
+                            ' Sort tables by their start positions in the selection
+                            Dim tableList As New List(Of Microsoft.Office.Interop.Word.Table)
+                            For i As Integer = 1 To docTables.Count
+                                tableList.Add(docTables(i))
+                            Next
+                            tableList.Sort(Function(t1, t2) t1.Range.Start.CompareTo(t2.Range.Start))
 
-                            End If
-                        End If
+                            Dim lastPos As Integer = selRange.Start
 
-                        ' Process the table itself (cells)
-                        For Each row As Microsoft.Office.Interop.Word.Row In tbl.Rows
-                            System.Windows.Forms.Application.DoEvents()
+                            Dim splash As New SLib.SplashScreen("Processing table(s)... press 'Esc' to abort")
+                            splash.Show()
+                            splash.Refresh()
 
-                            If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
-                                Exit For
-                            End If
+                            Dim IsExit As Boolean = False
 
-                            If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
-                                Exit For
-                            End If
-                            For Each cell As Microsoft.Office.Interop.Word.Cell In row.Cells
+                            For Each tbl As Microsoft.Office.Interop.Word.Table In tableList
+
                                 System.Windows.Forms.Application.DoEvents()
 
                                 If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
@@ -5214,72 +5588,134 @@ Public Class ThisAddIn
                                 End If
 
                                 If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
-                                    ' Exit the loop
                                     Exit For
                                 End If
-                                Dim cellRange As Range = cell.Range
-                                cellRange.End -= 1  ' Exclude cell marker
-                                If cellRange.Start < cellRange.End Then
-                                    cellRange.Select()
-                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, 0, NoFormatAndFieldSaving, DoNewDoc)
-                                    Await System.Threading.Tasks.Task.Delay(500)
+
+                                Dim tblStart As Integer = tbl.Range.Start
+                                Dim tblEnd As Integer = tbl.Range.End
+
+                                ' Text chunk BEFORE the table
+                                If tblStart > lastPos Then
+                                    Dim textChunk As Range = selRange.Duplicate
+                                    textChunk.Start = lastPos
+                                    textChunk.End = tblStart - 1
+
+                                    ' Double-check you haven't snagged any table content
+                                    If textChunk.Tables.Count = 0 Then
+                                        ' Also verify it's not empty
+                                        If textChunk.Start < textChunk.End Then
+                                            textChunk.Select()
+                                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+                                            Await System.Threading.Tasks.Task.Delay(500)
+                                        End If
+                                    Else
+
+                                        Do
+                                            textChunk.Start += 1
+                                        Loop While textChunk.Tables.Count <> 0 And Not textChunk.Start = textChunk.End
+
+                                        If textChunk.Tables.Count = 0 AndAlso textChunk.Start < textChunk.End Then
+                                            textChunk.Select()
+                                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+                                            Await System.Threading.Tasks.Task.Delay(500)
+                                        End If
+
+                                    End If
                                 End If
+
+                                ' Process the table itself (cells)
+                                For Each row As Microsoft.Office.Interop.Word.Row In tbl.Rows
+                                    System.Windows.Forms.Application.DoEvents()
+
+                                    If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
+                                        Exit For
+                                    End If
+
+                                    If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
+                                        Exit For
+                                    End If
+                                    For Each cell As Microsoft.Office.Interop.Word.Cell In row.Cells
+                                        System.Windows.Forms.Application.DoEvents()
+
+                                        If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then
+                                            Exit For
+                                        End If
+
+                                        If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Or IsExit Then
+                                            ' Exit the loop
+                                            Exit For
+                                        End If
+                                        Dim cellRange As Range = cell.Range
+                                        cellRange.End -= 1  ' Exclude cell marker
+                                        If cellRange.Start < cellRange.End Then
+                                            cellRange.Select()
+                                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, 0, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+                                            Await System.Threading.Tasks.Task.Delay(500)
+                                        End If
+                                    Next
+                                Next
+
+                                ' Move lastPos to end of this table
+                                lastPos = tblEnd + 1
                             Next
-                        Next
 
-                        ' Move lastPos to end of this table
-                        lastPos = tblEnd + 1
-                    Next
+                            ' Text chunk AFTER the last table
+                            If lastPos <= selRange.End And Not IsExit Then
+                                Dim finalChunk As Range = selRange.Duplicate
+                                finalChunk.Start = lastPos
+                                finalChunk.End = selRange.End
 
-                    ' Text chunk AFTER the last table
-                    If lastPos <= selRange.End And Not IsExit Then
-                        Dim finalChunk As Range = selRange.Duplicate
-                        finalChunk.Start = lastPos
-                        finalChunk.End = selRange.End
+                                If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
 
-                        If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
+                                    finalChunk.Select()
+                                    Dim text = selection.Text
+                                    Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+                                Else
+                                    Do
+                                        finalChunk.Start += 1
+                                    Loop While finalChunk.Tables.Count <> 0 And Not finalChunk.Start = finalChunk.End
 
-                            finalChunk.Select()
-                            Dim text = selection.Text
-                            Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc)
-                        Else
-                            Do
-                                finalChunk.Start += 1
-                            Loop While finalChunk.Tables.Count <> 0 And Not finalChunk.Start = finalChunk.End
+                                    finalChunk.End = selRange.End
 
-                            finalChunk.End = selRange.End
-
-                            If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
-                                finalChunk.Select()
-                                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc)
+                                    If finalChunk.Tables.Count = 0 AndAlso finalChunk.Start < finalChunk.End Then
+                                        finalChunk.Select()
+                                        Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, False, FileObject, DoPane, ChunkSize * -1, NoFormatAndFieldSaving, DoNewDoc, "", AddDocs, DoMyStyle)
+                                    End If
+                                End If
                             End If
+
+                            splash.Close()
                         End If
+
+                    ElseIf userdialog = 1 Then
+
+                        Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc, SlideDeck, AddDocs, DoMyStyle)
+
                     End If
 
-                    splash.Close()
                 End If
 
-            ElseIf userdialog = 1 Then
+                InsertDocs = ""
 
-                Dim Result = Await TrueProcessSelectedText(SysCommand, CheckMaxToken, KeepFormat, ParaFormatInline, InPlace, DoMarkup, MarkupMethod, PutInClipboard, PutInBubbles, SelectionMandatory, UseSecondAPI, FormattingCap, DoTPMarkup, TPMarkupname, CreatePodcast, FileObject, DoPane, ChunkSize, NoFormatAndFieldSaving, DoNewDoc)
+                If Not PutInClipboard Then
+                    selection.Collapse(WdCollapseDirection.wdCollapseEnd)
+                    selection.MoveStart(WdUnits.wdCharacter, 0)
+                    selection.MoveEnd(WdUnits.wdCharacter, 0)
+                End If
 
-            End If
+                Return ""
 
-        End If
+            End Using
 
-        If Not PutInClipboard Then
-            selection.Collapse(WdCollapseDirection.wdCollapseEnd)
-            selection.MoveStart(WdUnits.wdCharacter, 0)
-            selection.MoveEnd(WdUnits.wdCharacter, 0)
-        End If
-
-        Return ""
+        Catch ex As System.Exception
+            Debug.WriteLine("Error in Undo: " & ex.Message)
+        End Try
 
     End Function
 
 
 
-    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "") As Task(Of String)
+    Private Async Function TrueProcessSelectedText(SysCommand As String, CheckMaxToken As Boolean, KeepFormat As Boolean, ParaFormatInline As Boolean, InPlace As Boolean, DoMarkup As Boolean, MarkupMethod As Integer, PutInClipboard As Boolean, PutInBubbles As Boolean, SelectionMandatory As Boolean, UseSecondAPI As Boolean, FormattingCap As Integer, Optional DoTPMarkup As Boolean = False, Optional TPMarkupname As String = "", Optional CreatePodcast As Boolean = False, Optional FileObject As String = "", Optional DoPane As Boolean = False, Optional ChunkSize As Integer = 0, Optional NoFormatAndFieldSaving As Boolean = False, Optional DoNewDoc As Boolean = False, Optional SlideDeck As String = "", Optional AddDocs As Boolean = False, Optional DoMyStyle As Boolean = False) As Task(Of String)
 
         Dim application As Word.Application = Globals.ThisAddIn.Application
         Dim selection As Microsoft.Office.Interop.Word.Selection = application.Selection
@@ -5302,7 +5738,9 @@ Public Class ThisAddIn
                     vbCrLf & "Chunksize=" & ChunkSize &
                     vbCrLf & "Fileobject=" & FileObject &
                     vbCrLf & "Slidedeck=" & SlideDeck &
-                    vbCrLf & "NoFormatAndFieldSaving=" & NoFormatAndFieldSaving
+                    vbCrLf & "NoFormatAndFieldSaving=" & NoFormatAndFieldSaving &
+                    vbCrLf & "AddDocs=" & AddDocs &
+                    vbCrLf & "DoMyStyle=" & DoMyStyle
                 )
 
         Try
@@ -5696,7 +6134,7 @@ Public Class ThisAddIn
                     End If
                 End If
 
-                Dim LLMResult = Await LLM(SysCommand & If(DoTPMarkup, " " & SP_Add_Revisions, "") & " " & If(SlideDeck = "", If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), " " & SP_Add_Slides), If(NoSelectedText, "" & SlideInsert, "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>" & SlideInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                Dim LLMResult = Await LLM(SysCommand & If(DoTPMarkup, " " & SP_Add_Revisions, "") & " " & If(SlideDeck = "", If(NoFormatting, "", If(KeepFormat, " " & SP_Add_KeepHTMLIntact, " " & SP_Add_KeepInlineIntact)), " " & SP_Add_Slides) & If(DoMyStyle, " " & MyStyleInsert, ""), If(NoSelectedText, If(AddDocs, " " & InsertDocs & " ", "") & SlideInsert, "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>" & If(AddDocs, " " & InsertDocs & " ", "") & SlideInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 OtherPrompt = ""
 
@@ -6229,7 +6667,7 @@ Public Class ThisAddIn
                                     Dim Pattern As String = ""
                                     If MarkupMethod = 3 Then
                                         Pattern = "\{\{.*?\}\}"
-                                        If System.Text.RegularExpressions.Regex.IsMatch(LLMResult, pattern) Then
+                                        If System.Text.RegularExpressions.Regex.IsMatch(LLMResult, Pattern) Then
                                             SLib.InsertTextWithBoldMarkers(selection, LLMResult)
                                             'If INI_MarkdownConvert Then LLMResult = RemoveMarkdownFormatting(LLMResult)
                                         Else
@@ -6244,7 +6682,7 @@ Public Class ThisAddIn
                                         ApplyParagraphFormat(rng)
                                     End If
                                     Pattern = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
-                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, pattern) Then
+                                    If Not NoFormatAndFieldSaving Or Regex.IsMatch(LLMResult, Pattern) Then
                                         RestoreSpecialTextElements(SaveRng)
                                         SaveRng.Document.Fields.Update()
                                     End If
@@ -11889,7 +12327,7 @@ Public Class ThisAddIn
                 {"PromptLibPath_Transcript", "Transcript prompt library file"},
                 {"ShortcutsWordExcel", "Key shortcuts (for direct access)"},
                 {"ChatCap", "Chat conversation memory (chars)"},
-                {"SpeechModelPath", "Path to the speech recognition models"}
+                {"MyStylePath", "Path to the MyStyle prompt file"}
             }
         Dim SettingsTips As New Dictionary(Of String, String) From {
                 {"Temperature", "The higher, the more creative the LLM will be (0.0-2.0)"},
@@ -11918,7 +12356,7 @@ Public Class ThisAddIn
                 {"PromptLibPath_Transcript", "The filename (including path, support environmental variables) for your transcript prompt library (if any)"},
                 {"ShortcutsWordExcel", "You can add key shortcuts by giving the name of the context menu, e.g., 'Correct=Ctrl-Shift-C', separated by ';' (only works if context menus are enabled and the Word helper is installed)"},
                 {"ChatCap", "Use this to limit how many characters of your past chat discussion the chatbot will memorize (for saving costs and time)"},
-                {"SpeechModelPath", "This is the path where you have to store the Vosk and Whisper models (and the Whisper.net runtime) for running the Transcriptor."}
+                {"MyStylePath", "This is the path where the prompts are stored that convey your writing style (if defined, see 'Analyze')."}
             }
 
         ShowSettingsWindow(Settings, SettingsTips)

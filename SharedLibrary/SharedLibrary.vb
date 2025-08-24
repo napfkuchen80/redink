@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 17.8.2025
+' 24.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -109,7 +109,6 @@ Namespace SharedLibrary
             Property INI_MarkupMethodOutlook As Integer
             Property INI_MarkupDiffCap As Integer
             Property INI_MarkupRegexCap As Integer
-
             Property INI_OpenSSLPath As String
             Property INI_OAuth2 As Boolean
             Property INI_OAuth2ClientMail As String
@@ -180,6 +179,9 @@ Namespace SharedLibrary
             Property SP_Convincing As String
             Property SP_NoFillers As String
             Property SP_Podcast As String
+            Property SP_MyStyle_Word As String
+            Property SP_MyStyle_Outlook As String
+            Property SP_MyStyle_Apply As String
             Property SP_Shorten As String
             Property SP_InsertClipboard As String
             Property SP_Summarize As String
@@ -233,6 +235,7 @@ Namespace SharedLibrary
             Property INI_ShortcutsWordExcel As String
             Property INI_PromptLib As Boolean
             Property INI_PromptLibPath As String
+            Property INI_MyStylePath As String
             Property INI_AlternateModelPath As String
             Property INI_SpecialServicePath As String
             Property INI_PromptLibPath_Transcript As String
@@ -349,6 +352,10 @@ Namespace SharedLibrary
         Public Property SP_Convincing As String Implements ISharedContext.SP_Convincing
         Public Property SP_NoFillers As String Implements ISharedContext.SP_NoFillers
         Public Property SP_Podcast As String Implements ISharedContext.SP_Podcast
+        Public Property SP_MyStyle_Word As String Implements ISharedContext.SP_MyStyle_Word
+        Public Property SP_MyStyle_Outlook As String Implements ISharedContext.SP_MyStyle_Outlook
+        Public Property SP_MyStyle_Apply As String Implements ISharedContext.SP_MyStyle_Apply
+
         Public Property SP_Shorten As String Implements ISharedContext.SP_Shorten
         Public Property SP_InsertClipboard As String Implements ISharedContext.SP_InsertClipboard
         Public Property SP_Summarize As String Implements ISharedContext.SP_Summarize
@@ -401,6 +408,7 @@ Namespace SharedLibrary
         Public Property INI_ShortcutsWordExcel As String Implements ISharedContext.INI_ShortcutsWordExcel
         Public Property INI_PromptLib As Boolean Implements ISharedContext.INI_PromptLib
         Public Property INI_PromptLibPath As String Implements ISharedContext.INI_PromptLibPath
+        Public Property INI_MyStylePath As String Implements ISharedContext.INI_MyStylePath
         Public Property INI_AlternateModelPath As String Implements ISharedContext.INI_AlternateModelPath
         Public Property INI_SpecialServicePath As String Implements ISharedContext.INI_SpecialServicePath
         Public Property INI_PromptLibPath_Transcript As String Implements ISharedContext.INI_PromptLibPath_Transcript
@@ -1436,6 +1444,10 @@ Namespace SharedLibrary
         Const Default_SP_ContextSearchMulti As String = "You are a very careful editor and legal professional that precisely complies with its instructions step by step. Your task is to help the user find within a text all words, sentences, or sections that match particular contextual information. To do so, follow these instructions precisely:\n\n1. Study the Search Context\nYou will be provided with a Search Context (between {SearchContext}) that describes what the user is looking for. Understand the bigger picture:\n(i) What does the context refer to or mean?\n(ii) What synonyms, related terms, or references might appear in that subject matter?\n(iii) How could it be expressed with variations in phrasing?\n\n2. Read the Text\nYou will be provided with a text to search (between the tags <TEXTTOSEARCH> and </TEXTTOSEARCH>). Read it thoroughly and keep in mind all synonyms, related terms, or indirect references identified in step 1.\n\n3. Find All Relevant Portions\nGo through the text and locate every portion (word, part of a sentence, entire sentence, paragraph) that matches or relates to the Search Context—either directly by wording or indirectly by meaning or context or consequences. There might be multiple hits.\n\n4. Output Each Match Separately\nFor each match you find:\n(a) Extract a verbatim snippet of a MAXIMUM OF 25 WORDS from the relevant portion of the text.\n(b) Include enough text before and/or after it to ensure the snippet is distinct from any earlier identical occurrences in the text, but NEVER EVER include more than 25 Words from the portion found; choose a meaningful part.\n(c) Separate each snippet from the next one with @@@.\n(d) Example: If the text is ‘There is an example, and yet another example.’ and only the second ‘example’ matches, output ‘another example’, making sure it cannot be confused with the first occurrence.\n\n5. Preserve Text Exactly\nOutput each matched snippet exactly as it appears in the original text—no additions, no omissions, no extra punctuation, spacing, or formatting. If it includes hyphenation, keep the hyphenation as is.\n\n6.\nOnly Body Text\nYour snippets should only contain a group of words, a sentence or sentences, but never more than 25 Words, never an additional heading or title, no leading bullets or numbers. Select the snippet to make sure it does never include special characters. Never remove any line breaks that exist in the original text\n7. Output the Snippets Only\nProvide nothing else in your output: no commentary, headings, explanation, quotation marks, additional carriage returns, or linefeeds.\n\n8. Include All Matches\nContinue finding and listing all matches until none remain. Example format with three matches:\n Matchtext1@@@Matchtext2@@@Matchtext3\n\n8. Avoid Invalid Output\nAny deviation from these instructions renders your output invalid. You must comply precisely.\n\nNow here is the Search Context: {SearchContext}"
 
         Const Default_SP_Podcast As String = "You are professional podcaster and very experience script author. Create a lively and engaging text deep dive dialogue with a host and a guest based on the text you will be provided below between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. You shall create an engaging deep dive discussion about the text that is exciting, entertaining and educational to listen to. Always keep this in mind. \n\n When creating the dialogue, it is important that you strictly follow these rules: \n\n1. The dialogue must be in **{Language}**. \n\n2. If any words or sentences appear that are not in {Language}, use SSML '<lang>' tags to ensure correct pronunciation. \n\n3. The dialogue should be a **natural, fast-paced** exchange between the charismatic host {HostName} and the insightful guest {GuestName}, avoiding exaggerated speech or unnecessary dramatization. \n\n4. Cover all key points in the text **in a natural flow**—do not sound robotic or overly formal. Summarize only if necessary, while keeping all critical information. \n\n5. Keep the tone **conversational and engaging**, similar to a professional yet relaxed podcast. Do not overuse enthusiasm—keep it authentic and balanced. \n\n6. When generating the dialogue, keep in mind the following context and background information: {DialogueContext}. \n\n7. Adapt the style to the target audience: {TargetAudience}. \n\n8. Format strictly: Start host lines with 'H:' and guest lines with 'G:', each on a new paragraph. \n\n9. Keep the dialogue dynamic—avoid long monologues or unnatural phrasing. Use short, engaging sentences with occasional rhetorical questions or casual expressions to make it feel real. \n\n10. The user wishes that the dialogue you generate has a particular minimum length, meaning that if the duration is more than five minutes or 1000 words, you a) need to go very deep into the topic and text given and b) ensure that you structure the dialogue to have an introduction, multiple chapters to cover each core topic of the text, and a summary and closing segment. For every five minutes of dialogue, create at least 1000 words. You MUST comply with the minimum lenght instruction given, and your output MUST include the ENTIRE dialogue. You may not end your output before you have provided the FULL dialogue (e.g., you are NOT PERMITTED to say that the dialogue continues without providing it). The minimum lenght instruction for the dialogue is: {Duration}. Make sure, you create a script that will result in speech of this duration (e.g., if the instruction is 10 minutes, then create text for ten minutes of discussion, and not only five minutes, which would be wrong, hence, you may need to do a deeper dive). \n\n11. Use SSML to improve pronunciation and pacing: '<say-as interpret-as=\""characters\"">' for abbreviations and acronyms of up to three letters or with numbers (e.g., <say-as interpret-as=\""characters\"">KI</say-as> where there are abbreviations acronyms of up to three or with numbers where you are not sure how they are spoken; abbreviations and acronyms of four or more letters, read them normally), '<lang xml:lang=\""en-US\"">' for foreign words (e.g., <lang xml:lang=\""en-US\"">Artificial Intelligence</lang>), and '<say-as>' for numbers, dates, and symbols. \n\n12. Apply '<emphasis level=\""moderate\"">' or '<emphasis level=\""strong\"">'only to **key words or very important points that should stand out naturally**—avoid artificial exaggeration. \n\n13. Use '<prosody rate=\""medium\"">' to **maintain a natural speaking rhythm** and prevent robotic speech—do not use 'slow' unless necessary for dramatic effect. \n\n14. When a dash ('-') appears, replace it with '<break time=\""500ms\"">' to introduce a natural pause and prevent rushed pronunciation. \n\n15. The final dialogue should sound like two real people having an **authentic and fluid conversation**, completely in the language in rule no. 1, without artificial slowness, exaggeration, or awkward phrasing. Keep in mind that your output will be spoken, not read. \n16. You shall use SSML tags, but never use any XML tags or XML headers and never provide any Markdown formatting.\n\17. It is important that you really comply with these rules, otherwise the output will be invalid. 18. Finally, here are additional instructions (if any) that override any other instructions given so far and are to be followed precisely: {ExtraInstructions} {INI_PreCorrection}\n\n\n"
+        Const Default_SP_MyStyle_Word As String = "Read and deeply analyze all sample documents provided between tags <DOCUMENT00> ... </DOCUMENT00> (00 is a number; there may be many) together with the following additional instructions if present: {OtherPrompt}. Your goals are (A) to produce a thorough, abstract, privacy-safe style analysis for the user without any verbatim or near-verbatim text and without unique named entities, and (B) to append a self-contained, reusable meta-prompt that can be pasted as an addon at the end of any writing instruction so an LLM will write in the same style without needing to reference the analysis. Requirements for (A) Analysis: 1) Cross-document synthesis: separate stable traits from context-specific quirks; cluster sub-styles by context (emails, reports, tutorials, marketing, technical notes) and state triggers. 2) Macro-structure: openings, thesis placement, argument or narrative arcs, section logic, signposting, introductions and conclusions, calls to action, scoping rules. 3) Tone and stance: formality, warmth, hedging vs assertion, confidence calibration, neutrality vs opinionated voice, empathy cues, humor or irony. 4) Audience modeling: assumed knowledge, jargon onboarding, teaching or persuasion patterns, questions, objection handling. 5) Rhetoric: analogies, metaphors, contrasts, problem-solution, story beats, example vs abstraction balance, use of evidence, citation habits, link style. 6) Syntax and rhythm: sentence length ranges and variance, clause chaining, voice balance active vs passive, preferred sentence types, cadence markers (commas, dashes, parentheses, semicolons), punctuation quirks, emoji usage, capitalization habits, list patterns, table or code-block usage. 7) Paragraphing and pacing: typical paragraph length, transition density, discourse markers, abstract-to-concrete flow, definition scaffolding, summary habits. 8) Lexicon without quoting passages: identify categories of favored verbs, adjectives, adverbs; register plain vs ornate; Latinate vs Anglo-Saxon preference; modality words; quantification habits. 9) Consistency rules and exceptions: what never appears, what rarely appears, conditions that trigger tone or structure shifts. 10) Formatting and stylebook: language variant, spelling conventions, Oxford comma, numerals, dates, units, acronyms, headings, figure or table captions, block vs inline quotes. 11) Uncertainty and ethics: how the author signals uncertainty, handles caveats, bias avoidance, disclaimers. 12) Quantified measurements: content-free metrics and ranges for the above (counts, percentages, ranges) without exemplar phrases. 13) Multi-source hygiene: ignore quoted third-party passages that are not the author’s voice, deduplicate near-identical segments, note contradictions and resolve by majority pattern with justification. 14) Output structure for (A): present a concise report in English with sections numbered (1) to (14); include a single inline Style DNA JSON line with generic keys and concrete values, for example {""Formality"":""medium high"",""AvgSentenceWords"":""18-26"",""Voice"":""active>passive"",""Transitions"":""frequent"",""Lists"":""often"",""Hedging"":""low"",""Humor"":""rare"",""Emoji"":""never""}; values must be abstract and safe. 15) Language fidelity for cited words: if you refer to specific single words or short expressions to illustrate lexical tendencies, reproduce them exactly in their original language and casing, including any non-ASCII characters like ä, ö, ü, é, ñ, etc., as-is and unescaped; include only generic, non-proprietary, non-unique words; replace unique terms with placeholders like [domain-term] or [brand-name]. Guardrails: never emit exact substrings beyond common stopwords; do not include proprietary names or confidential data; if browsing the web is possible and URLs are present in the additional instructions, consult them for extra style signals but weight them lower than the inline samples unless explicitly told otherwise; if browsing is unavailable, state that and proceed from local inputs only. Smarter style title generation: build a short, information-dense title that summarizes the overall style in 3-7 words by combining top-ranked attributes from these axes: (a) Formality (low/medium/high), (b) Evidence orientation (data-driven, example-led, principle-first), (c) Domain orientation (technical, business, marketing, educational, policy), (d) Pacing (brisk, moderate, leisurely), (e) Warmth (cool, neutral, warm), (f) Narrative vs analytical balance (story-forward, analysis-forward, hybrid). Title rules: capitalize major words, allow commas or hyphens, avoid brand or person names, avoid filler words, no emojis, ASCII punctuation only. Requirements for (B) Self-contained meta-prompt addon: After the analysis, generate the short descriptive title as above and use it as the [Title] field. Then append exactly two bracketed fields on one line: [Title = <generated style title>] [Prompt = When generating the draft for the user’s preceding task, act as a style emulator and produce the final text in the author’s style. Do not restate the task and do not ask for more information. Enforce the following self-contained Style DNA and rules without referring to any other document: 1) Style DNA JSON: include explicit key:value parameters you inferred covering macro-structure, tone, audience assumptions, rhetoric, syntax and rhythm, paragraphing, lexicon categories, formatting conventions, and uncertainty handling; include numeric ranges where applicable (e.g., AvgSentenceWords, ParagraphLength, TransitionDensity, VoiceBalance). If you list representative words, reproduce them exactly in their original language and casing and include only generic, non-unique words. 2) Structural rules: specify opening patterns, section ordering, signposting habits, and conclusion style to apply. 3) Tone rules: specify targets for formality, warmth, assertiveness vs hedging, and empathy markers. 4) Lexicon rules: specify categories of favored words and safe representative words; exclude unique names or rare proprietary phrases. 5) Punctuation and formatting rules: specify preferred punctuation, list usage, headings, numerals, dates, units, and citation style. 6) Rhetorical frequency: specify expected frequency or ranges for analogies, contrasts, examples, and data references. 7) Safety and ethics: specify how to signal uncertainty and include disclaimers if needed. 8) Fidelity checklist for self-review before output: confirm sentence-length distribution, transition density, voice balance, list usage, and formatting conventions match the specified ranges; confirm no unique terms from samples are reproduced. 9) Knobs: allow small adjustments for formality, pacing, and detail depth to fit the task, staying within the specified ranges by default. 10) Output policy: deliver only the final draft text aligned to the preceding task, with clean formatting, no meta-commentary, no checklists, and no references to any analysis.] Constraints for the entire response: English prose, UTF-8 encoding with readable non-ASCII characters, single line for the two bracketed fields, and include {OtherPrompt} only once as provided."
+        Const Default_SP_MyStyle_Outlook As String = "Read and deeply analyze all Outlook mails provided between tags <MAIL000> ... </MAIL000> (000 is a number; there may be many) together with the following additional instructions if present: {OtherPrompt}. Each <MAIL000> tag may contain a full mail chain. The person to analyze is {Username}, in the following referred to as ""the author"". Authorship filtering mandate: analyze ONLY the parts of each mail chain clearly written by the author; EXCLUDE all other participants’ content, quoted history, forwarded content, automated replies, system banners, and any segments where authorship is uncertain. Identify authored segments using sender information, display names, initials, and e-mail addresses matching {Username}. If unsure whether the author wrote a passage, ignore it. Detect and exclude quoted mail history using common Outlook patterns like ""From:"", ""Sent:"", ""To:"", ""Subject:"", ""-----Original Message-----"", ""On <date>, <name> wrote:"", HTML blockquotes, and lines starting with "">"". Strip automatically generated signatures, company footers, confidentiality notices, or device-specific lines like ""Sent from my iPhone"", but do analyze recurring greetings, closings, and valedictions when they are manually written. Your goals are (A) to produce a thorough, abstract, privacy-safe style analysis of the author’s Outlook mail writing, and (B) to append a self-contained, reusable meta-prompt addon that an LLM can use to imitate this style without needing access to the analysis. Requirements for (A) Analysis: 1) Cross-mail synthesis: derive stable traits across the author’s mails; cluster sub-styles by context (initial outreach, replies, escalations, scheduling, customer communications). 2) Subject line tendencies: capitalization, brevity, prefixes (RE/FW), use of action tags or brackets. 3) Macro-structure: greeting styles, opening patterns, sequencing of information, signposting, transitions, calls to action, and closing structure. 4) Greeting and closing patterns: analyze recurring salutations and valedictions, including variations by audience or time of day; exclude automated signatures. 5) Tone and stance: overall formality, warmth, directness vs. hedging, confidence, neutrality vs. persuasion, empathy markers, humor or irony. 6) Audience adaptation: describe how tone, detail, and formality shift for colleagues, managers, external stakeholders, or groups. 7) Rhetorical habits: summarizing previous threads, referencing attachments, bulleting key points, embedding links, quoting context, asking clarifying questions, managing deadlines, and escalation patterns. 8) Syntax and rhythm: sentence length ranges, variance, clause chaining, voice balance (active vs. passive), punctuation quirks, emoji usage, capitalization style, and typical bullet formatting. 9) Paragraphing and pacing: describe paragraph size, spacing habits, pacing between ideas, and conciseness vs. elaboration. 10) Lexicon categories: identify categories of favored verbs, adjectives, modal verbs, politeness markers, and hedging expressions; if representative words are included, reproduce them exactly in their original language and casing using UTF-8, and only if they are generic and non-unique (e.g., ""dürfte"", ""womöglich""). 11) Consistency rules and exceptions: note avoided constructions, rare usages, and triggers for switching tone or structure (urgent vs. routine cases). 12) Formatting conventions: describe usage of bullets, numbering, inline quotes, emphasis, links, and date/number formats. 13) Uncertainty and disclaimers: explain how the author signals uncertainty, provides caveats, or requests confirmation. 14) Quantified measurements: include abstract numeric metrics where applicable (e.g., AvgSentenceWords, GreetingVariants, ValedictionVariants, BulletsPerMail, HedgingFrequency, TransitionDensity). 15) Multi-source hygiene: deduplicate near-identical mails; ignore quoted third-party content; resolve inconsistencies using majority patterns and note uncertainty. 16) Output structure: deliver a concise English report with numbered sections and one inline Style DNA JSON block summarizing key parameters, e.g., {""Formality"":""medium-high"",""AvgSentenceWords"":""16-24"",""Voice"":""active>passive"",""Transitions"":""frequent"",""Bullets"":""occasional"",""Hedging"":""low"",""Emoji"":""never"",""GreetingStyle"":""Hi <first-name>"",""ValedictionStyle"":""Best,""}; values must be abstract and safe. Guardrails: never emit exact sentences or proprietary data; replace unique names or identifiers with placeholders like [person-name], [project-code], [domain-term]; analyze only authored segments; preserve representative words in UTF-8 readable form; use {OtherPrompt} exactly once and do not reference it elsewhere. Smarter style title generation: derive a short, information-dense title (3–7 words) summarizing the author’s overall Outlook mail style by combining top attributes such as formality, evidence orientation, domain focus, pacing, warmth, and narrative vs. analytical balance; capitalize major words, avoid names and emojis, and keep ASCII punctuation only. Requirements for (B) Self-contained meta-prompt addon: After the analysis, append exactly two bracketed fields on one line: [Title = <generated style title>] [Prompt = When generating the email for the user's preceding task, act as a style emulator for the author. Do not restate the task and do not ask for more information. Apply only the following self-contained rules without referencing any analysis: 1) Style DNA JSON: include explicit key:value parameters summarizing greeting and closing styles (excluding signatures), macro-structure, tone, audience adaptations, rhetoric, syntax and rhythm, paragraphing, lexicon categories, formatting conventions, uncertainty handling, and etiquette; include numeric ranges where applicable; representative words must be generic and reproduced exactly in their original language and casing using UTF-8. 2) Greeting and closing: enforce common salutation and valediction patterns without adding signatures. 3) Tone rules: replicate formality, warmth, directness, and empathy balance. 4) Lexicon rules: favor identified word categories while avoiding unique phrases or identifiers. 5) Formatting rules: apply punctuation, bullet/list style, link formatting, and inline quotes as extracted. 6) Rhetorical frequency: mirror expected rates for summaries, clarifications, deadlines, and calls to action. 7) Safety and ethics: follow the author’s approach to disclaimers and uncertainty. 8) Fidelity checklist: ensure greetings, closings, sentence lengths, transition density, bullet usage, and paragraph density match specified ranges; confirm no unique terms are reproduced. 9) Knobs: allow minor tone or pacing adjustments if required by the task while staying within inferred ranges. 10) Output: return only the final email body (and subject if relevant), formatted cleanly, with no meta-commentary, checklists, or references to this analysis.] Constraints: produce all outputs in English; represent words in UTF-8 without escaping; output the two bracketed fields on one line; analyze only the author’s authored mail segments; ignore signatures, disclaimers, and automatically generated content; include {OtherPrompt} only once at the start."
+        Const Default_SP_MyStyle_Apply As String = "You are a professional copy editor and writer with excellent language and drafting skills. Rewrite the text provided to you between the <TEXTTOPROCESS> tags as per the following style instructions. Do not change any substantive content, do not restructure, do not add or remove paragraphs, do not shorten or extend the text, just adapt the style as per the following style profile (and correct obvious spelling and grammar errors). "
+
         Const Default_SP_Explain As String = "You are a great thinker, a specialist in all fields, a philosoph and a teacher. You will analyze for me a Text (the Texttoprocess) that is provided to you between the tags <TEXTTOPROCESS> and </TEXTTOPROCESS>. Step 1: Thorougly analyze the text you have been given, its logic, identify any errors and fallacies of the author, understand the substance the author discusses and the way the author argues. Do not yet create any output. Once you have completed step 1, go to Step 2: Start your output with a one word summary (in bold, as a title) and a further title that captures all relevant substance and bottomline of the text (do not refer to it as a summary or title, just provide it as the title of your analysis). Then provide a summary of the various parts of the text and explain to me how the text is structured, so I can better navigate and understand it. Then provide me the key message of the text, explain in simple, short and consise terms what the author wants to say and expressly list any explicit or implicit 'Calls to Action' are. Now, insofar the author makes arguments, provide me a description of the logic and approach the author takes in making the point, and tell me how conclusive the logic is, and whether there are good counter-arguments or weaknesses. Then list material errors, ambiguities, contradictions and fallacies you can identify. Finally, insofar the author discusses a special field of knowledge, provide in detail the necessary background knowledge a layman needs to know to fully understand the text, the special terms and concepts used by the text, including technology, methods and art and sciences discussed in it. When acronyms, terms or other references could have different meanings and it is not absolutely clear what they are in the present context, express such uncertainty. If you make assumptions, say so, explain why and only where they are clear. Provide the output well structured, concise, short and simple, easy to understand text. Use the same language in which most of the text I provide as the Texttoprocess is drafted in; determine this language before you create the output (e.g., if the text has been mainly written in English, use English, if it is mainly in German use German). {INI_PreCorrection}"
         Const Default_SP_SuggestTitles As String = "You are a legal professional and a clever, astute and well-educated copy editor. You are in the following given a text, enclosed between <TEXTTOPROCESS> and </TEXTTOPROCESS>. Your goal is to read and analyze the content, then create multiple sets of possible titles in the same language as the original text, with three (3) distinct titles each for: (1) professional memo, (2) blog/news post, (3) informal, (4) humorous, and (5) ambiguous, cryptic but ingenious. The titles must be clever, easy to read, well-aligned with the text, and suitable for the stated purpose. Provide more than average results. Use the structure:\nProfessional Memo Titles:\n1) ...\n2) ...\n3) ...\nBlog or News Post Titles:\n1) ...\n2) ...\n3) ...\nInformal Titles:\n1) ...\n2) ...\n3) ...\nHumorous Titles:\n1) ...\n2) ...\n3) ...\nFood for Thought Titles:\n1) ...\n2) ...\n3) ...\n. It is mandatory that you provide your output and all titles provide in the original language of the Texttoprocess."
         Const Default_SP_Friendly As String = "You are a legal professional with exceptional language skills who follows instructions meticulously step by step. Your task is to refine the text labeled 'Texttoprocess' (in its original language) to make it more friendly, while otherwise preserving its substance, wording and style. Use rhetorical techniques and wording that is typically well received and generates a positive attitude by the recipient, but stay straightforward, and do neither exaggerate nor brownnose. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Also, only provide the revised text, never provide any explanations or comments on how you have fulfilled your instructions.  {INI_PreCorrection}"
@@ -1712,6 +1724,203 @@ Namespace SharedLibrary
                 Clipboard.SetData(DataFormats.Serializable, clipboardData)
             End If
         End Sub
+
+
+
+        Public NotInheritable Class MyStyleHelpers
+
+            ' Main entry point
+            Public Shared Function SelectPromptFromMyStyle(ByVal iniPath As System.String,
+                                                   ByVal callingApplication As System.String,
+                                                   Optional ByVal defaultValue As System.Int32 = 0,
+                                                   Optional ByVal promptText As System.String = "Please choose …",
+                                                   Optional ByVal headerText As System.String = Nothing,
+                                                   Optional ByVal AddNone As Boolean = True) As System.String
+                Try
+                    ' --- Validate inputs ---
+                    If iniPath Is Nothing OrElse iniPath.Trim().Length = 0 Then
+                        ShowCustomMessageBox($"Invalid MyStyle prompt file path ({iniPath}).")
+                        Return "ERROR"
+                    End If
+
+                    If callingApplication Is Nothing OrElse callingApplication.Trim().Length = 0 Then
+                        ShowCustomMessageBox("Invalid calling application (expected 'Word' or 'Outlook').")
+                        Return "ERROR"
+                    End If
+
+                    Dim appNorm As System.String = NormalizeAppName(callingApplication)
+                    If appNorm Is Nothing Then
+                        ShowCustomMessageBox("Unknown application '" & callingApplication & "'. Use 'Word' or 'Outlook'.")
+                        Return "ERROR"
+                    End If
+
+                    If System.IO.File.Exists(iniPath) = False Then
+                        ShowCustomMessageBox("MyStyle prompt file not found at: " & iniPath)
+                        Return "ERROR"
+                    End If
+
+                    ' --- Parse file into entries ---
+                    Dim entries As System.Collections.Generic.List(Of MyStyleEntry) = New System.Collections.Generic.List(Of MyStyleEntry)()
+                    For Each raw As System.String In System.IO.File.ReadLines(iniPath)
+                        If raw Is Nothing Then
+                            Continue For
+                        End If
+
+                        Dim line As System.String = raw.Trim()
+                        If line.Length = 0 Then
+                            Continue For
+                        End If
+                        If line.StartsWith(";", System.StringComparison.Ordinal) Then
+                            Continue For
+                        End If
+
+                        ' Parse into App|Title|Prompt (legacy Title|Prompt → All|Title|Prompt)
+                        Dim p1 As System.Int32 = line.IndexOf("|"c)
+                        If p1 < 0 Then
+                            Continue For
+                        End If
+                        Dim p2 As System.Int32 = line.IndexOf("|"c, p1 + 1)
+
+                        Dim app As System.String
+                        Dim title As System.String
+                        Dim prompt As System.String
+
+                        If p2 >= 0 Then
+                            app = line.Substring(0, p1).Trim()
+                            title = line.Substring(p1 + 1, p2 - (p1 + 1)).Trim()
+                            prompt = line.Substring(p2 + 1).Trim()
+                        Else
+                            app = "All"
+                            title = line.Substring(0, p1).Trim()
+                            prompt = line.Substring(p1 + 1).Trim()
+                        End If
+
+                        If title.Length = 0 OrElse prompt.Length = 0 Then
+                            Continue For
+                        End If
+
+                        Dim appForEntry As System.String = NormalizeAppName(app)
+                        If appForEntry Is Nothing Then
+                            Continue For
+                        End If
+
+                        If appForEntry.Equals("All", System.StringComparison.OrdinalIgnoreCase) _
+                   OrElse appForEntry.Equals(appNorm, System.StringComparison.OrdinalIgnoreCase) Then
+                            entries.Add(New MyStyleEntry With {.App = appForEntry, .Title = title, .Prompt = prompt})
+                        End If
+                    Next
+
+                    ' --- Build List(Of SharedMethods.SelectionItem) ---
+                    Dim items As System.Collections.Generic.List(Of SharedMethods.SelectionItem) =
+                New System.Collections.Generic.List(Of SharedMethods.SelectionItem)()
+
+                    ' ID → Prompt map
+                    Dim idToPrompt As System.Collections.Generic.Dictionary(Of System.Int32, System.String) =
+                New System.Collections.Generic.Dictionary(Of System.Int32, System.String)()
+
+                    ' Ensure unique display strings
+                    Dim seenDisplays As System.Collections.Generic.HashSet(Of System.String) =
+                New System.Collections.Generic.HashSet(Of System.String)(System.StringComparer.OrdinalIgnoreCase)
+
+                    If AddNone And items.Count > 0 Then
+                        ' add NONE (ID = 0)
+                        items.Add(New SharedMethods.SelectionItem("None", 0))
+                        seenDisplays.Add("None")
+                        idToPrompt(0) = "NONE"
+                    End If
+
+                    If entries.Count > 0 Then
+                        entries.Sort(Function(a As MyStyleEntry, b As MyStyleEntry) _
+                    System.String.Compare(a.Title, b.Title, System.StringComparison.OrdinalIgnoreCase))
+
+                        Dim nextId As System.Int32 = 1
+                        For Each e As MyStyleEntry In entries
+                            Dim display As System.String = e.Title & " (" & e.App & ")"
+                            display = MakeUniqueDisplay(display, seenDisplays)
+
+                            items.Add(New SharedMethods.SelectionItem(display, nextId))
+                            idToPrompt(nextId) = e.Prompt
+                            nextId += 1
+                        Next
+                    End If
+
+                    If items.Count = 0 Then
+                        ShowCustomMessageBox($"No styles applicable for {appNorm} found in your MyStyle prompt file ({iniPath}).",
+                                                                                                         extraButtonText:="Edit MyStyle prompt file",
+                                                            extraButtonAction:=Sub()
+                                                                                   ShowTextFileEditor(iniPath, "Edit your MyStyle prompt file (use 'Define MyStyle' to create new prompts automatically):")
+                                                                               End Sub)
+
+                        Return "NONE"
+                    End If
+
+                    ' --- Show picker (uses your SharedMethods.SelectValue) ---
+                    Dim chosenId As System.Int32 = SharedMethods.SelectValue(items, defaultValue, promptText, headerText)
+
+                    If chosenId = 0 Then
+                        Return "NONE"
+                    End If
+
+                    Dim outPrompt As System.String = Nothing
+                    If idToPrompt.TryGetValue(chosenId, outPrompt) Then
+                        Return outPrompt
+                    End If
+
+                    ShowCustomMessageBox("Unexpected selection result.")
+                    Return "ERROR"
+
+                Catch ex As System.Exception
+                    ShowCustomMessageBox($"Error reading the MyStyle prompt file ({iniPath}): " & ex.Message)
+                    Return "ERROR"
+                End Try
+            End Function
+
+            ' ------- Helpers (Shared) -------
+
+            Private Shared Function NormalizeAppName(ByVal input As System.String) As System.String
+                If input Is Nothing Then
+                    Return Nothing
+                End If
+                Dim s As System.String = input.Trim()
+                If s.Length = 0 Then
+                    Return Nothing
+                End If
+                If s.Equals("Word", System.StringComparison.OrdinalIgnoreCase) Then
+                    Return "Word"
+                ElseIf s.Equals("Outlook", System.StringComparison.OrdinalIgnoreCase) Then
+                    Return "Outlook"
+                ElseIf s.Equals("All", System.StringComparison.OrdinalIgnoreCase) Then
+                    Return "All"
+                End If
+                Return Nothing
+            End Function
+
+            Private Shared Function MakeUniqueDisplay(ByVal display As System.String,
+                                              ByVal seen As System.Collections.Generic.HashSet(Of System.String)) As System.String
+                If seen.Contains(display) = False Then
+                    seen.Add(display)
+                    Return display
+                End If
+                Dim n As System.Int32 = 2
+                While True
+                    Dim candidate As System.String = display & " [" & n.ToString(System.Globalization.CultureInfo.InvariantCulture) & "]"
+                    If seen.Contains(candidate) = False Then
+                        seen.Add(candidate)
+                        Return candidate
+                    End If
+                    n += 1
+                End While
+            End Function
+
+            ' Local container for parsed entries (not called directly)
+            Private NotInheritable Class MyStyleEntry
+                Public Property App As System.String
+                Public Property Title As System.String
+                Public Property Prompt As System.String
+            End Class
+
+        End Class
+
 
 
         Public Shared Sub InsertTextWithMarkdown(selection As Object, gptResult As String, TrailingCR As Boolean)
@@ -3916,7 +4125,112 @@ Namespace SharedLibrary
             End Try
         End Sub
 
-        Public Shared Function RemoveMarkdownFormatting(ByVal input As String) As String
+
+        Public Shared Function RemoveMarkdownFormatting(ByVal input As System.String) As System.String
+            Try
+                If input Is Nothing Then
+                    Return Nothing
+                End If
+                If input.Length = 0 Then
+                    Return System.String.Empty
+                End If
+
+                ' --- lazily-initialized, compiled regexes (cached across calls) ---
+                Static rxBoldItalic As System.Text.RegularExpressions.Regex = Nothing
+                Static rxBold As System.Text.RegularExpressions.Regex = Nothing
+                Static rxItalic As System.Text.RegularExpressions.Regex = Nothing
+                Static rxStrike As System.Text.RegularExpressions.Regex = Nothing
+                Static rxHeadings As System.Text.RegularExpressions.Regex = Nothing
+
+                If rxBoldItalic Is Nothing Then
+                    rxBoldItalic = New System.Text.RegularExpressions.Regex("\*\*\*(.+?)\*\*\*", System.Text.RegularExpressions.RegexOptions.Singleline Or System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                End If
+                If rxBold Is Nothing Then
+                    rxBold = New System.Text.RegularExpressions.Regex("\*\*(.+?)\*\*", System.Text.RegularExpressions.RegexOptions.Singleline Or System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                End If
+                If rxItalic Is Nothing Then
+                    rxItalic = New System.Text.RegularExpressions.Regex("(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", System.Text.RegularExpressions.RegexOptions.Singleline Or System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                End If
+                If rxStrike Is Nothing Then
+                    rxStrike = New System.Text.RegularExpressions.Regex("~~(.+?)~~", System.Text.RegularExpressions.RegexOptions.Singleline Or System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                End If
+                If rxHeadings Is Nothing Then
+                    rxHeadings = New System.Text.RegularExpressions.Regex("^[ \t]*#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*(\r?\n|$)", System.Text.RegularExpressions.RegexOptions.Multiline Or System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                End If
+                ' --- end regex cache ---
+
+                ' 1) Find protected regions ([...] and {...}) with nesting
+                Dim regions As System.Collections.Generic.List(Of System.ValueTuple(Of System.Int32, System.Int32)) = New System.Collections.Generic.List(Of System.ValueTuple(Of System.Int32, System.Int32))()
+                Dim stack As System.Collections.Generic.Stack(Of System.Char) = New System.Collections.Generic.Stack(Of System.Char)()
+                Dim startIdx As System.Int32 = -1
+
+                For i As System.Int32 = 0 To input.Length - 1
+                    Dim ch As System.Char = input(i)
+                    If ch = "["c OrElse ch = "{"c Then
+                        If stack.Count = 0 Then
+                            startIdx = i
+                        End If
+                        stack.Push(ch)
+                    ElseIf ch = "]"c OrElse ch = "}"c Then
+                        If stack.Count > 0 Then
+                            Dim opener As System.Char = stack.Peek()
+                            Dim matches As System.Boolean = (opener = "["c AndAlso ch = "]"c) OrElse (opener = "{"c AndAlso ch = "}"c)
+                            If matches Then
+                                stack.Pop()
+                                If stack.Count = 0 AndAlso startIdx >= 0 Then
+                                    regions.Add((startIdx, i)) ' inclusive
+                                    startIdx = -1
+                                End If
+                            End If
+                        End If
+                    End If
+                Next
+
+                ' 2) Mask protected regions with placeholders
+                Dim masked As System.Text.StringBuilder = New System.Text.StringBuilder(input.Length + (regions.Count * 16))
+                Dim placeholders As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)(regions.Count)
+                Dim originals As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)(regions.Count)
+
+                Dim lastPos As System.Int32 = 0
+                For idx As System.Int32 = 0 To regions.Count - 1
+                    Dim r = regions(idx)
+                    If r.Item1 > lastPos Then
+                        masked.Append(input, lastPos, r.Item1 - lastPos)
+                    End If
+                    Dim original As System.String = input.Substring(r.Item1, r.Item2 - r.Item1 + 1)
+                    Dim token As System.String = "__BRMASK_" & idx.ToString(System.Globalization.CultureInfo.InvariantCulture) & "_X__"
+                    masked.Append(token)
+                    placeholders.Add(token)
+                    originals.Add(original)
+                    lastPos = r.Item2 + 1
+                Next
+                If lastPos < input.Length Then
+                    masked.Append(input, lastPos, input.Length - lastPos)
+                End If
+
+                Dim work As System.String = masked.ToString()
+
+                ' 3) Strip markdown on the masked text (outside protected regions)
+                work = rxBoldItalic.Replace(work, "$1")
+                work = rxBold.Replace(work, "$1")
+                work = rxItalic.Replace(work, "$1")
+                work = rxStrike.Replace(work, "$1")
+                work = rxHeadings.Replace(work, "$1$2")
+
+                ' 4) Restore protected regions verbatim
+                For i As System.Int32 = 0 To placeholders.Count - 1
+                    work = work.Replace(placeholders(i), originals(i))
+                Next
+
+                Return work
+
+            Catch ex As System.Exception
+                Throw New System.Exception("Error in RemoveMarkdownFormatting: " & ex.Message, ex)
+            End Try
+        End Function
+
+
+        Public Shared Function OldRemoveMarkdownFormatting(ByVal input As String) As String
             Try
                 Dim output As String = input
 
@@ -4619,6 +4933,9 @@ Namespace SharedLibrary
                 context.SP_Convincing = If(configDict.ContainsKey("SP_Convincing"), configDict("SP_Convincing"), Default_SP_Convincing)
                 context.SP_NoFillers = If(configDict.ContainsKey("SP_NoFillers"), configDict("SP_NoFillers"), Default_SP_NoFillers)
                 context.SP_Podcast = If(configDict.ContainsKey("SP_Podcast"), configDict("SP_Podcast"), Default_SP_Podcast)
+                context.SP_MyStyle_Word = If(configDict.ContainsKey("SP_MyStyle_Word"), configDict("SP_MyStyle_Word"), Default_SP_MyStyle_Word)
+                context.SP_MyStyle_Outlook = If(configDict.ContainsKey("SP_MyStyle_Outlook"), configDict("SP_MyStyle_Outlook"), Default_SP_MyStyle_Outlook)
+                context.SP_MyStyle_Apply = If(configDict.ContainsKey("SP_MyStyle_Apply"), configDict("SP_MyStyle_Apply"), Default_SP_MyStyle_Apply)
                 context.SP_Shorten = If(configDict.ContainsKey("SP_Shorten"), configDict("SP_Shorten"), Default_SP_Shorten)
                 context.SP_InsertClipboard = If(configDict.ContainsKey("SP_InsertClipboard"), configDict("SP_InsertClipboard"), Default_SP_InsertClipboard)
                 context.SP_Summarize = If(configDict.ContainsKey("SP_Summarize"), configDict("SP_Summarize"), Default_SP_Summarize)
@@ -4694,6 +5011,7 @@ Namespace SharedLibrary
                 context.INI_LocalModelPath = If(configDict.ContainsKey("LocalModelPath"), configDict("LocalModelPath"), "")
 
                 context.INI_PromptLibPath = If(configDict.ContainsKey("PromptLib"), configDict("PromptLib"), "")
+                context.INI_MyStylePath = If(configDict.ContainsKey("MyStylePath"), configDict("MyStylePath"), "")
                 context.INI_AlternateModelPath = If(configDict.ContainsKey("AlternateModelPath"), configDict("AlternateModelPath"), "")
                 context.INI_SpecialServicePath = If(configDict.ContainsKey("SpecialServicePath"), configDict("SpecialServicePath"), "")
                 context.INI_PromptLibPath_Transcript = If(configDict.ContainsKey("PromptLib_Transcript"), configDict("PromptLib_Transcript"), "")
@@ -6112,7 +6430,10 @@ Namespace SharedLibrary
                         ByVal button2Text As String,
                         Optional header As String = AN,
                         Optional autoCloseSeconds As Integer? = Nothing,
-                        Optional Defaulttext As String = ""
+                        Optional Defaulttext As String = "",
+                        Optional extraButtonText As String = Nothing,
+                        Optional extraButtonAction As System.Action = Nothing,
+                        Optional CloseAfterExtra As Boolean = False
                     ) As Integer
 
             ' Truncate if too long
@@ -6216,6 +6537,33 @@ Namespace SharedLibrary
                     }
             bottomFlow.Controls.Add(button1)
             bottomFlow.Controls.Add(button2)
+
+            ' --- optional extra button, double distance from other buttons ---
+            If (Not autoCloseSeconds.HasValue) AndAlso
+       (Not String.IsNullOrEmpty(extraButtonText)) AndAlso
+       (extraButtonAction IsNot Nothing) Then
+
+                Dim extraButton As New System.Windows.Forms.Button() With {
+            .Text = extraButtonText,
+            .AutoSize = True,
+            .Font = standardFont,
+            .Margin = New System.Windows.Forms.Padding(10, 0, 0, 0)
+        }
+
+                AddHandler extraButton.Click,
+            Sub()
+                Try
+                    extraButtonAction.Invoke()
+                Catch ex As System.Exception
+                    ' Optional: log or handle exception
+                End Try
+                If CloseAfterExtra Then messageForm.Close()
+            End Sub
+
+                bottomFlow.Controls.Add(extraButton)
+            End If
+
+
             If autoCloseSeconds.HasValue Then
                 bottomFlow.Controls.Add(countdownLabel)
             End If
@@ -6251,12 +6599,16 @@ Namespace SharedLibrary
         End Function
 
 
+
         Public Shared Sub ShowCustomMessageBox(
                                     ByVal bodyText As String,
                                     Optional header As String = AN,
                                     Optional autoCloseSeconds As Integer? = Nothing,
                                     Optional Defaulttext As String = " - execution continues meanwhile",
-                                    Optional SeparateThread As Boolean = False
+                                    Optional SeparateThread As Boolean = False,
+                                    Optional extraButtonText As String = Nothing,
+                                    Optional extraButtonAction As System.Action = Nothing,
+                                    Optional CloseAfterExtra As Boolean = False
                                 )
             ' Truncate if too long
             If String.IsNullOrWhiteSpace(header) Then header = AN
@@ -6363,6 +6715,35 @@ Namespace SharedLibrary
             .Margin = New Padding(0, 20, 0, 0)
         }
             bottomFlow.Controls.Add(okButton)
+
+            bottomFlow.Controls.Add(okButton)
+
+            ' --- optional extra button (only when NOT auto-closing) ---
+            If (Not autoCloseSeconds.HasValue) AndAlso
+                   (Not String.IsNullOrEmpty(extraButtonText)) AndAlso
+                   (extraButtonAction IsNot Nothing) Then
+
+                Dim extraButton As New System.Windows.Forms.Button() With {
+                        .Text = extraButtonText,
+                        .AutoSize = True,
+                        .Font = standardFont
+                    }
+
+                AddHandler extraButton.Click,
+                        Sub()
+                            Try
+                                extraButtonAction.Invoke()
+                            Catch ex As System.Exception
+                                ' Optional: log or handle exception if needed
+                            End Try
+                            If CloseAfterExtra Then messageForm.Close()
+                        End Sub
+
+                bottomFlow.Controls.Add(extraButton)
+            End If
+
+
+
             If autoCloseSeconds.HasValue Then
                 bottomFlow.Controls.Add(countdownLabel)
             End If
@@ -6402,7 +6783,9 @@ Namespace SharedLibrary
             End If
         End Sub
 
-        Public Shared Sub OldShowCustomMessageBox(
+
+
+        Public Shared Sub oldShowCustomMessageBox(
                                     ByVal bodyText As String,
                                     Optional header As String = AN,
                                     Optional autoCloseSeconds As Integer? = Nothing,
@@ -6441,7 +6824,7 @@ Namespace SharedLibrary
             messageForm.Font = standardFont
 
             ' Layout
-            Dim maxLabelWidth = 650
+            Dim maxLabelWidth = 500
             Dim mainFlow As New FlowLayoutPanel() With {
             .FlowDirection = FlowDirection.TopDown,
             .Dock = DockStyle.Fill,
@@ -6452,13 +6835,41 @@ Namespace SharedLibrary
         }
 
             ' Body label
+            'Dim bodyLabel As New System.Windows.Forms.Label() With {
+            '.Text = bodyText,
+            '.Font = standardFont,
+            '.AutoSize = True,
+            '.MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
+            '}
+            'mainFlow.Controls.Add(bodyLabel)
+
+            ' Measure text to decide if scrolling is needed
+            Dim maxVisibleHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height \ 2
+            Dim measured As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(
+                    bodyText,
+                    standardFont,
+                    New System.Drawing.Size(maxLabelWidth, Integer.MaxValue),
+                    System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
+                )
+
+            ' Scrollable container that only shows scrollbars if content exceeds size
+            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
+                    .AutoScroll = True,
+                    .AutoSize = False,
+                    .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0),
+                    .Padding = New System.Windows.Forms.Padding(0),
+                    .Size = New System.Drawing.Size(maxLabelWidth, Math.Min(measured.Height, maxVisibleHeight))
+                }
+
+            ' Body label inside scroll panel
             Dim bodyLabel As New System.Windows.Forms.Label() With {
-            .Text = bodyText,
-            .Font = standardFont,
-            .AutoSize = True,
-            .MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
-        }
-            mainFlow.Controls.Add(bodyLabel)
+                    .Text = bodyText,
+                    .Font = standardFont,
+                    .AutoSize = True,
+                    .MaximumSize = New System.Drawing.Size(maxLabelWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth, 0)
+                }
+            bodyScrollPanel.Controls.Add(bodyLabel)
+            mainFlow.Controls.Add(bodyScrollPanel)
 
             ' OK button and countdown
             Dim okButton As New Button() With {
@@ -8668,6 +9079,8 @@ Namespace SharedLibrary
                     Return context.INI_ShortcutsWordExcel
                 Case "PromptLibPath"
                     Return context.INI_PromptLibPath
+                Case "MyStylePath"
+                    Return context.INI_MyStylePath
                 Case "AlternateModelPath"
                     Return context.INI_AlternateModelPath
                 Case "SpecialServicePath"
@@ -8846,6 +9259,8 @@ Namespace SharedLibrary
                     context.INI_ShortcutsWordExcel = value
                 Case "PromptLibPath"
                     context.INI_PromptLibPath = value
+                Case "MyStylePath"
+                    context.INI_MyStylePath = value
                 Case "PromptLibPath_Transcript"
                     context.INI_PromptLibPath_Transcript = value
                 Case "AlternateModelPath"
@@ -9144,6 +9559,7 @@ Namespace SharedLibrary
                     {"LocalModelPath", context.INI_LocalModelPath},
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
+                    {"MyStylePath", context.INI_MyStylePath},
                     {"AlternateModelPath", context.INI_AlternateModelPath},
                     {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript},
@@ -9156,6 +9572,9 @@ Namespace SharedLibrary
                     {"SP_Convincing", context.SP_Convincing},
                     {"SP_NoFillers", context.SP_NoFillers},
                     {"SP_Podcast", context.SP_Podcast},
+                    {"SP_MyStyle_Word", context.SP_MyStyle_Word},
+                    {"SP_MyStyle_Outlook", context.SP_MyStyle_Outlook},
+                    {"SP_MyStyle_Apply", context.SP_MyStyle_Apply},
                     {"SP_Shorten", context.SP_Shorten},
                     {"SP_InsertClipboard", context.SP_InsertClipboard},
                     {"SP_Summarize", context.SP_Summarize},
@@ -9200,6 +9619,9 @@ Namespace SharedLibrary
                     {"SP_Convincing", Default_SP_Convincing},
                     {"SP_NoFillers", Default_SP_NoFillers},
                     {"SP_Podcast", Default_SP_Podcast},
+                    {"SP_MyStyle_Word", Default_SP_MyStyle_Word},
+                    {"SP_MyStyle_Outlook", Default_SP_MyStyle_Outlook},
+                    {"SP_MyStyle_Apply", Default_SP_MyStyle_Apply},
                     {"SP_Shorten", Default_SP_Shorten},
                     {"SP_InsertClipboard", Default_SP_InsertClipboard},
                     {"SP_Summarize", Default_SP_Summarize},
@@ -9366,6 +9788,7 @@ Namespace SharedLibrary
                     {"LocalModelPath", context.INI_LocalModelPath},
                     {"TTSEndpoint", context.INI_TTSEndpoint},
                     {"PromptLib", context.INI_PromptLibPath},
+                    {"MyStylePath", context.INI_MyStylePath},
                     {"AlternateModelPath", context.INI_AlternateModelPath},
                     {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript}
@@ -9675,6 +10098,7 @@ Namespace SharedLibrary
             variableValues.Add("TTSEndpoint", context.INI_TTSEndpoint)
             variableValues.Add("ShortcutsWordExcel", context.INI_ShortcutsWordExcel)
             variableValues.Add("PromptLib", context.INI_PromptLibPath)
+            variableValues.Add("MyStylePath", context.INI_MyStylePath)
             variableValues.Add("AlternateModelPath", context.INI_AlternateModelPath)
             variableValues.Add("SpecialServicePath", context.INI_SpecialServicePath)
             variableValues.Add("PromptLib_Transcript", context.INI_PromptLibPath_Transcript)
@@ -9687,6 +10111,9 @@ Namespace SharedLibrary
             variableValues.Add("SP_Convincing", context.SP_Convincing)
             variableValues.Add("SP_NoFillers", context.SP_NoFillers)
             variableValues.Add("SP_Podcast", context.SP_Podcast)
+            variableValues.Add("SP_MyStyle_Word", context.SP_MyStyle_Word)
+            variableValues.Add("SP_MyStyle_Outlook", context.SP_MyStyle_Outlook)
+            variableValues.Add("SP_MyStyle_Apply", context.SP_MyStyle_Apply)
             variableValues.Add("SP_Shorten", context.SP_Shorten)
             variableValues.Add("SP_InsertClipboard", context.SP_InsertClipboard)
             variableValues.Add("SP_Summarize", context.SP_Summarize)
@@ -9799,6 +10226,9 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_Convincing") Then context.SP_Convincing = updatedValues("SP_Convincing")
                     If updatedValues.ContainsKey("SP_NoFillers") Then context.SP_NoFillers = updatedValues("SP_NoFillers")
                     If updatedValues.ContainsKey("SP_Podcast") Then context.SP_Podcast = updatedValues("SP_Podcast")
+                    If updatedValues.ContainsKey("SP_MyStyle_Word") Then context.SP_MyStyle_Word = updatedValues("SP_MyStyle_Word")
+                    If updatedValues.ContainsKey("SP_MyStyle_Outlook") Then context.SP_MyStyle_Outlook = updatedValues("SP_MyStyle_Outlook")
+                    If updatedValues.ContainsKey("SP_MyStyle_Apply") Then context.SP_MyStyle_Apply = updatedValues("SP_MyStyle_Apply")
                     If updatedValues.ContainsKey("SP_Shorten") Then context.SP_Shorten = updatedValues("SP_Shorten")
                     If updatedValues.ContainsKey("SP_InsertClipboard") Then context.SP_InsertClipboard = updatedValues("SP_InsertClipboard")
                     If updatedValues.ContainsKey("SP_Summarize") Then context.SP_Summarize = updatedValues("SP_Summarize")
@@ -9858,6 +10288,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("LocalModelPath") Then context.INI_LocalModelPath = updatedValues("LocalModelPath")
                     If updatedValues.ContainsKey("TTSEndpoint") Then context.INI_TTSEndpoint = updatedValues("TTSEndpoint")
                     If updatedValues.ContainsKey("PromptLib") Then context.INI_PromptLibPath = updatedValues("PromptLib")
+                    If updatedValues.ContainsKey("MyStylePath") Then context.INI_MyStylePath = updatedValues("MyStylePath")
                     If updatedValues.ContainsKey("AlternateModelPath") Then context.INI_AlternateModelPath = updatedValues("AlternateModelPath")
                     If updatedValues.ContainsKey("SpecialServicePath") Then context.INI_SpecialServicePath = updatedValues("SpecialServicePath")
                     If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
@@ -9989,8 +10420,254 @@ Namespace SharedLibrary
         End Sub
 
 
-
         Public Shared Function ShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean, Context As ISharedContext) As (String, Boolean, Boolean, Boolean)
+
+            filePath = ExpandEnvironmentVariables(filePath)
+
+            Dim LoadResult = LoadPrompts(filePath, Context)
+            Dim NoBubbles As Boolean = False
+            Dim NoMarkup As Boolean = False
+
+            If enableMarkup = Nothing Then
+                NoMarkup = True
+                enableMarkup = False
+            End If
+
+            If enableBubbles = Nothing Then
+                NoBubbles = True
+                enableBubbles = False
+            End If
+
+            If LoadResult <> 0 Then Return ("", False, False, False)
+
+            ' --- Form -----------------------------------------------------------------
+            Dim settingsForm As New System.Windows.Forms.Form With {
+        .Text = "Select Prompt",
+        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi,
+        .AutoScaleDimensions = New System.Drawing.SizeF(96.0F, 96.0F),
+        .AutoSize = False,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowOnly,
+        .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
+        .Padding = New System.Windows.Forms.Padding(10),
+        .MinimizeBox = True,
+        .MaximizeBox = True
+    }
+            settingsForm.MinimumSize = New System.Drawing.Size(900, 650)
+
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            settingsForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            settingsForm.Font = standardFont
+
+            ' --- Layout grid ----------------------------------------------------------
+            Dim layout As New System.Windows.Forms.TableLayoutPanel With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .ColumnCount = 2,
+        .RowCount = 3,
+        .Padding = New System.Windows.Forms.Padding(10)
+    }
+            layout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
+            layout.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50.0F))
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 70.0F))
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            layout.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            settingsForm.Controls.Add(layout)
+
+            ' --- Selector --------------------------------------------------------------
+            Dim titleListBox As New System.Windows.Forms.ListBox With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(10)
+    }
+            titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
+            layout.Controls.Add(titleListBox, 0, 0)
+
+            ' --- Preview ---------------------------------------------------------------
+            Dim promptTextBox As New System.Windows.Forms.TextBox With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Multiline = True,
+        .ReadOnly = True,
+        .ScrollBars = System.Windows.Forms.ScrollBars.Vertical,
+        .Margin = New System.Windows.Forms.Padding(10)
+    }
+            layout.Controls.Add(promptTextBox, 1, 0)
+
+            If Context.PromptTitles.Count > 0 Then
+                titleListBox.SelectedIndex = 0
+                promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
+            End If
+
+            AddHandler titleListBox.SelectedIndexChanged,
+        Sub()
+            Dim selectedIndex = titleListBox.SelectedIndex
+            If selectedIndex >= 0 Then
+                Dim selectedPrompt = Context.PromptLibrary(selectedIndex).Replace("\n", vbCrLf)
+                promptTextBox.Text = selectedPrompt
+            End If
+        End Sub
+
+            AddHandler titleListBox.KeyDown,
+        Sub(sender As Object, e As System.Windows.Forms.KeyEventArgs)
+            If e.KeyCode = System.Windows.Forms.Keys.Enter Then
+                settingsForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                settingsForm.Close()
+            End If
+        End Sub
+
+            ' --- Checkboxes (wrapping) ------------------------------------------------
+            Dim checkboxPanel As New System.Windows.Forms.FlowLayoutPanel With {
+        .FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+        .WrapContents = False,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(10),
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+    }
+            layout.Controls.Add(checkboxPanel, 0, 1)
+
+            Dim markupCheckbox As New System.Windows.Forms.CheckBox With {
+        .Text = "The output shall be provided as a markup",
+        .AutoSize = True,
+        .Enabled = enableMarkup,
+        .Visible = Not NoMarkup,
+        .Margin = New System.Windows.Forms.Padding(3, 3, 3, 6)
+    }
+
+            Dim clipboardCheckbox As New System.Windows.Forms.CheckBox With {
+        .Text = "The output shall be shown in a window",
+        .AutoSize = True,
+        .Checked = True,
+        .Margin = New System.Windows.Forms.Padding(3, 3, 3, 6)
+    }
+
+            Dim bubblesCheckbox As New System.Windows.Forms.CheckBox With {
+        .Text = "The output shall be in the form of bubbles",
+        .AutoSize = True,
+        .Enabled = enableBubbles,
+        .Visible = Not NoBubbles,
+        .Margin = New System.Windows.Forms.Padding(3, 3, 3, 6)
+    }
+
+            checkboxPanel.Controls.Add(markupCheckbox)
+            checkboxPanel.Controls.Add(clipboardCheckbox)
+            checkboxPanel.Controls.Add(bubblesCheckbox)
+
+            Dim ApplyCheckboxWrap As System.Action =
+        Sub()
+            Dim cellWidthLeft As Integer = CInt((layout.ClientSize.Width - layout.Padding.Horizontal) * layout.ColumnStyles(0).Width / 100.0F) - 20
+            If cellWidthLeft < 100 Then cellWidthLeft = 100
+            markupCheckbox.MaximumSize = New System.Drawing.Size(cellWidthLeft, 0)
+            clipboardCheckbox.MaximumSize = New System.Drawing.Size(cellWidthLeft, 0)
+            bubblesCheckbox.MaximumSize = New System.Drawing.Size(cellWidthLeft, 0)
+        End Sub
+            AddHandler layout.SizeChanged, Sub() ApplyCheckboxWrap()
+
+            ' Mutual exclusivity
+            AddHandler markupCheckbox.CheckedChanged, Sub() If markupCheckbox.Checked Then bubblesCheckbox.Checked = False : clipboardCheckbox.Checked = False
+            AddHandler bubblesCheckbox.CheckedChanged, Sub() If bubblesCheckbox.Checked Then markupCheckbox.Checked = False : clipboardCheckbox.Checked = False
+            AddHandler clipboardCheckbox.CheckedChanged, Sub() If clipboardCheckbox.Checked Then markupCheckbox.Checked = False : bubblesCheckbox.Checked = False
+
+            ' --- Source label (wrapping) ----------------------------------------------
+            Dim filePathLabel As New System.Windows.Forms.Label With {
+        .Text = $"Source: {filePath}",
+        .AutoSize = True,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .Margin = New System.Windows.Forms.Padding(10),
+        .AutoEllipsis = False
+    }
+            layout.Controls.Add(filePathLabel, 1, 1)
+
+            Dim ApplyFilePathWrap As System.Action =
+        Sub()
+            Dim cellWidthRight As Integer = CInt((layout.ClientSize.Width - layout.Padding.Horizontal) * layout.ColumnStyles(1).Width / 100.0F) - 20
+            If cellWidthRight < 100 Then cellWidthRight = 100
+            filePathLabel.MaximumSize = New System.Drawing.Size(cellWidthRight, 0)
+        End Sub
+            AddHandler layout.SizeChanged, Sub() ApplyFilePathWrap()
+
+            ' --- Buttons (LEFT aligned, OK | Cancel | Edit) ---------------------------
+            Dim buttonPanel As New System.Windows.Forms.FlowLayoutPanel With {
+    .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+    .WrapContents = False,
+    .Dock = System.Windows.Forms.DockStyle.Fill,
+    .AutoSize = True,
+    .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+    .Margin = New System.Windows.Forms.Padding(4),
+    .Padding = New System.Windows.Forms.Padding(4) ' Less outer padding
+}
+            layout.Controls.Add(buttonPanel, 0, 2)
+            layout.SetColumnSpan(buttonPanel, 2)
+
+            Dim okButton As New System.Windows.Forms.Button With {
+    .Text = "OK",
+    .AutoSize = True,
+    .DialogResult = System.Windows.Forms.DialogResult.OK,
+    .Margin = New System.Windows.Forms.Padding(3), ' Less gap between buttons
+    .Padding = New System.Windows.Forms.Padding(8, 4, 8, 4) ' Slimmer buttons
+}
+            Dim cancelButton As New System.Windows.Forms.Button With {
+    .Text = "Cancel",
+    .AutoSize = True,
+    .DialogResult = System.Windows.Forms.DialogResult.Cancel,
+    .Margin = New System.Windows.Forms.Padding(3),
+    .Padding = New System.Windows.Forms.Padding(8, 4, 8, 4)
+}
+            Dim editButton As New System.Windows.Forms.Button With {
+    .Text = "Edit",
+    .AutoSize = True,
+    .Margin = New System.Windows.Forms.Padding(3),
+    .Padding = New System.Windows.Forms.Padding(8, 4, 8, 4)
+}
+
+            buttonPanel.Controls.Add(okButton)
+            buttonPanel.Controls.Add(cancelButton)
+            buttonPanel.Controls.Add(editButton)
+
+
+            ' --- Edit button: show editor + reload list and preview afterwards --------
+            AddHandler editButton.Click,
+        Sub()
+            ShowTextFileEditor(filePath, $"You can now edit your prompts (stored at {filePath}). Make sure that on each line, the description and the prompt is separated by a '|'; you can use ';' for indicating comments.")
+
+            ' Reload prompts after editing
+            LoadPrompts(filePath, Context)
+            titleListBox.Items.Clear()
+            titleListBox.Items.AddRange(Context.PromptTitles.ToArray())
+
+            ' Select first prompt again if available
+            If Context.PromptTitles.Count > 0 Then
+                titleListBox.SelectedIndex = 0
+                promptTextBox.Text = Context.PromptLibrary(0).Replace("\n", vbCrLf)
+            Else
+                promptTextBox.Clear()
+            End If
+
+            titleListBox.Focus()
+        End Sub
+
+            ApplyCheckboxWrap()
+            ApplyFilePathWrap()
+
+            Dim result As System.Windows.Forms.DialogResult = settingsForm.ShowDialog()
+
+            If result = System.Windows.Forms.DialogResult.OK Then
+                Dim selectedIndex = titleListBox.SelectedIndex
+                If selectedIndex >= 0 Then
+                    Return (
+                Context.PromptLibrary(selectedIndex),
+                markupCheckbox.Checked,
+                bubblesCheckbox.Checked,
+                clipboardCheckbox.Checked
+            )
+                End If
+            End If
+
+            Return ("", False, False, False)
+        End Function
+
+
+
+        Public Shared Function oldShowPromptSelector(filePath As String, enableMarkup As Boolean, enableBubbles As Boolean, Context As ISharedContext) As (String, Boolean, Boolean, Boolean)
 
             filePath = ExpandEnvironmentVariables(filePath)
 
@@ -10199,6 +10876,11 @@ Namespace SharedLibrary
 
             ' Handle Edit button click
             AddHandler editButton.Click, Sub()
+
+                                             ShowTextFileEditor(filePath, $"You can now edit your prompts (stored at {filePath}). Make sure that on each line, the description and the prompt is separated by a '|'; you can use ';' for indicating comments.")
+
+                                             Return
+
                                              Dim editorForm As New Form With {
                                                  .Text = "Edit Prompt Library",
                                                  .Width = 800,
@@ -10366,6 +11048,188 @@ Namespace SharedLibrary
             Return returnCode
         End Function
 
+
+        ' Call example from your existing Sub:
+        ' ExtractAndStorePromptFromAnalysis(analysis, INI_MyStylePath)
+
+        Public Shared Sub ExtractAndStorePromptFromAnalysis(ByVal analysis As System.String, ByVal MyStylePath As System.String, ByVal Prefix As String)
+            Try
+                ' Basic input validation
+                If analysis Is Nothing OrElse analysis.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No analysis text was provided.")
+                    Return
+                End If
+                If MyStylePath Is Nothing OrElse MyStylePath.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No MyStyle file path ('INI_MyStylePath') is set in the configuration file.")
+                    Return
+                End If
+
+                ' Try to extract [Title = ...] and [Prompt = ...] near the end of the text (case-insensitive)
+                Dim title As System.String = TryGetMarkerValue(analysis, "Title")
+                Dim prompt As System.String = TryGetMarkerValue(analysis, "Prompt")
+
+                If title Is Nothing OrElse prompt Is Nothing Then
+                    ShowCustomMessageBox("Could not find both [Title = ...] and [Prompt = ...] markers in the analysis text (the text is in the clipboard, so you can manually add it to the file).")
+                    Return
+                End If
+
+                ' Sanitize to ensure single-line Title|Prompt format (no newlines; safe delimiter)
+                title = SanitizeForSingleLine(title)
+                prompt = SanitizeForSingleLine(prompt)
+
+                ' Ensure directory exists
+                Dim dir As System.String = System.IO.Path.GetDirectoryName(MyStylePath)
+                If dir IsNot Nothing AndAlso dir.Trim().Length > 0 AndAlso System.IO.Directory.Exists(dir) = False Then
+                    System.IO.Directory.CreateDirectory(dir)
+                End If
+
+                ' If file does not exist, create with header and an empty line
+                If System.IO.File.Exists(MyStylePath) = False Then
+                    Dim header As System.String = "; MyStyle prompt file" & System.Environment.NewLine & System.Environment.NewLine & "; Format: [All|Word|Outlook]|Title of style prompt|style prompt" & System.Environment.NewLine
+                    Dim enc As System.Text.Encoding = New System.Text.UTF8Encoding(False) ' UTF-8 without BOM
+                    System.IO.File.WriteAllText(MyStylePath, header, enc)
+                End If
+
+                If String.IsNullOrWhiteSpace(Prefix) Then Prefix = "All"
+
+                ' Append the new entry: Title|Prompt
+                Dim line As System.String = System.Environment.NewLine & Prefix & "|" & title & "|" & prompt & System.Environment.NewLine
+                System.IO.File.AppendAllText(MyStylePath, line, New System.Text.UTF8Encoding(False))
+
+                ShowCustomMessageBox($"Prompt saved to the MyStyle prompt file ({MyStylePath}).")
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox("An error occurred while saving the MyStyle prompt: " & ex.Message)
+            End Try
+        End Sub
+
+        ' --- Helpers ---
+
+        ''' <summary>
+        ''' Extracts the value for a given marker name (e.g., "Title" or "Prompt") from the analysis text.
+        ''' Supports formats like:
+        '''   [Title = Something]
+        '''   [Prompt = Something]
+        ''' Also accepts unbracketed fallbacks:
+        '''   Title = Something
+        '''   Prompt = Something
+        ''' Matching is case-insensitive and takes the **last** occurrence to favor the final summary.
+        ''' </summary>
+        ' --- Replacement for TryGetMarkerValue plus new helper ---
+
+        ''' <summary>
+        ''' Returns the value for [Title = ...] or [Prompt = ...] allowing nested brackets in the value.
+        ''' Falls back to unbracketed "Title = ..." / "Prompt = ..." (end of line).
+        ''' </summary>
+        Private Shared Function TryGetMarkerValue(ByVal analysis As System.String, ByVal markerName As System.String) As System.String
+            ' 1) Prefer bracketed form with balanced square brackets: [Marker = value-with-[nested]-brackets]
+            Dim bracketed As System.String = TryGetBracketedMarkerValue(analysis, markerName)
+            If bracketed IsNot Nothing Then
+                bracketed = bracketed.Trim()
+                If bracketed.Length > 0 Then
+                    Return bracketed
+                End If
+            End If
+
+            ' 2) Fallback: unbracketed "Marker = value" up to end of line
+            Dim patternLoose As System.String =
+        "(?im)^\s*" & System.Text.RegularExpressions.Regex.Escape(markerName) & "\s*=\s*(.+?)\s*$"
+            Dim options As System.Text.RegularExpressions.RegexOptions =
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase Or System.Text.RegularExpressions.RegexOptions.Singleline
+
+            Dim mCol2 As System.Text.RegularExpressions.MatchCollection =
+        System.Text.RegularExpressions.Regex.Matches(analysis, patternLoose, options)
+            If mCol2 IsNot Nothing AndAlso mCol2.Count > 0 Then
+                Dim value As System.String = mCol2(mCol2.Count - 1).Groups(1).Value
+                value = value.Trim()
+                If value.Length > 0 Then
+                    Return value
+                End If
+            End If
+
+            Return Nothing
+        End Function
+
+        ''' <summary>
+        ''' Finds the LAST occurrence of a bracketed marker like:
+        '''   [Marker = some text possibly containing [brackets], (parentheses), {braces}, <angles>]
+        ''' and returns the value portion ("some text ... <angles>") while correctly
+        ''' balancing the OUTER square brackets so ']' inside the value doesn't terminate early.
+        ''' Matching of the marker name is case-insensitive.
+        ''' </summary>
+        Private Shared Function TryGetBracketedMarkerValue(ByVal analysis As System.String, ByVal markerName As System.String) As System.String
+            If analysis Is Nothing OrElse analysis.Length = 0 Then
+                Return Nothing
+            End If
+
+            ' Find all occurrences of the opening token "[ marker ="
+            Dim openPattern As System.String = "\[\s*" & System.Text.RegularExpressions.Regex.Escape(markerName) & "\s*="
+            Dim options As System.Text.RegularExpressions.RegexOptions =
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase Or System.Text.RegularExpressions.RegexOptions.Singleline
+
+            Dim matches As System.Text.RegularExpressions.MatchCollection =
+        System.Text.RegularExpressions.Regex.Matches(analysis, openPattern, options)
+
+            If matches Is Nothing OrElse matches.Count = 0 Then
+                Return Nothing
+            End If
+
+            ' Use the LAST occurrence to prefer the final summary at the end of the LLM output
+            Dim m As System.Text.RegularExpressions.Match = matches(matches.Count - 1)
+
+            ' pos points just after the '='; allow optional spaces before the value
+            Dim pos As System.Int32 = m.Index + m.Length
+            While pos < analysis.Length AndAlso System.Char.IsWhiteSpace(analysis(pos))
+                pos += 1
+            End While
+
+            ' Balance square brackets starting from the initial '[' at m.Index
+            Dim depth As System.Int32 = 1 ' We are inside the first '['
+            Dim i As System.Int32 = pos
+
+            While i < analysis.Length
+                Dim ch As System.Char = analysis(i)
+
+                If ch = "["c Then
+                    depth += 1
+                ElseIf ch = "]"c Then
+                    depth -= 1
+                    If depth = 0 Then
+                        ' The value is everything from pos up to i (excluded)
+                        Dim raw As System.String = analysis.Substring(pos, i - pos)
+                        Return raw
+                    End If
+                End If
+
+                i += 1
+            End While
+
+            ' If we got here, we never closed the outer '['; treat as not found / malformed
+            Return Nothing
+        End Function
+
+
+        ''' <summary>
+        ''' Makes a value safe for a single-line "Title|Prompt" config:
+        ''' - Replaces CR/LF with spaces
+        ''' - Collapses consecutive whitespace
+        ''' - Replaces "|" with "¦" (broken bar) to avoid delimiter collision
+        ''' - Trims surrounding whitespace
+        ''' </summary>
+        Private Shared Function SanitizeForSingleLine(ByVal input As System.String) As System.String
+            If input Is Nothing Then
+                Return System.String.Empty
+            End If
+
+            Dim s As System.String = input.Replace(vbCr, " ").Replace(vbLf, " ")
+            s = System.Text.RegularExpressions.Regex.Replace(s, "\s+", " ")
+            s = s.Replace("|", "¦")
+            Return s.Trim()
+        End Function
+
+
+
+
         Public Shared Sub PutInClipboard(text As String)
             Dim thread As New Threading.Thread(Sub()
                                                    ' Check if the text is RTF formatted
@@ -10398,6 +11262,508 @@ Namespace SharedLibrary
             thread.Start()
             thread.Join()
 
+        End Sub
+
+        Public Shared Sub ShowTextFileEditor(ByVal filePath As System.String, ByVal headerText As System.String)
+            ' --- Guard & Input Validation ---
+            Try
+                If filePath Is Nothing OrElse filePath.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No file path was provided.")
+                    Return
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while validating input: " & ex.Message)
+                Return
+            End Try
+
+            ' --- Create Form & Controls ---
+            Dim editorForm As New System.Windows.Forms.Form()
+            editorForm.Text = "Text File Editor"
+            editorForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            editorForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            editorForm.MinimizeBox = True
+            editorForm.MaximizeBox = True
+            editorForm.ShowInTaskbar = True
+            editorForm.KeyPreview = True
+            editorForm.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+
+            ' Initial size based on screen (height = 60% of working area; width keeps 9:6 ratio)
+            Try
+                Dim scr As System.Windows.Forms.Screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position)
+                Dim wa As System.Drawing.Rectangle = scr.WorkingArea
+
+                Dim targetHeight As System.Int32 = System.Convert.ToInt32(System.Math.Floor(wa.Height * 0.6R))
+                If targetHeight < 540 Then targetHeight = 540
+
+                Dim targetWidth As System.Int32 = System.Convert.ToInt32(System.Math.Floor(targetHeight * 9.0R / 6.0R))
+                If targetWidth > wa.Width Then
+                    targetWidth = wa.Width
+                    targetHeight = System.Convert.ToInt32(System.Math.Floor(targetWidth * 6.0R / 9.0R))
+                End If
+
+                editorForm.ClientSize = New System.Drawing.Size(targetWidth, targetHeight)
+                Dim minW As System.Int32 = System.Math.Max(780, System.Convert.ToInt32(System.Math.Floor(targetWidth / 2.0R)))
+                Dim minH As System.Int32 = System.Math.Max(540, System.Convert.ToInt32(System.Math.Floor(targetHeight / 2.0R)))
+                editorForm.MinimumSize = New System.Drawing.Size(minW, minH)
+            Catch ex As System.Exception
+                editorForm.ClientSize = New System.Drawing.Size(1560, 1080)
+                editorForm.MinimumSize = New System.Drawing.Size(780, 540)
+            End Try
+
+            ' Set icon
+            Try
+                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                editorForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
+            ' Set predefined font
+            Try
+                Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                editorForm.Font = standardFont
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
+            ' Root container (15px padding left/right, bottom still 10)
+            Dim rootPanel As New System.Windows.Forms.TableLayoutPanel()
+            rootPanel.Dock = System.Windows.Forms.DockStyle.Fill
+            rootPanel.BackColor = System.Drawing.Color.Transparent
+            rootPanel.ColumnCount = 1
+            rootPanel.RowCount = 3
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Label
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Editor
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Buttons
+            rootPanel.Padding = New System.Windows.Forms.Padding(15, 12, 15, 10) ' left/right = 15
+            editorForm.Controls.Add(rootPanel)
+
+            ' Header label
+            Dim headerLabel As New System.Windows.Forms.Label()
+            headerLabel.AutoSize = True
+            headerLabel.Text = If(headerText, System.String.Empty)
+            headerLabel.UseCompatibleTextRendering = True
+            headerLabel.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+            headerLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right Or System.Windows.Forms.AnchorStyles.Top
+            rootPanel.Controls.Add(headerLabel, 0, 0)
+
+            ' Text editor (word-wrapped)
+            Dim textEditor As New System.Windows.Forms.TextBox()
+            textEditor.Multiline = True
+            textEditor.ScrollBars = System.Windows.Forms.ScrollBars.Vertical
+            textEditor.WordWrap = True
+            textEditor.AcceptsReturn = True
+            textEditor.AcceptsTab = True
+            textEditor.Dock = System.Windows.Forms.DockStyle.Fill
+            textEditor.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            textEditor.Font = New System.Drawing.Font("Consolas", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            rootPanel.Controls.Add(textEditor, 0, 1)
+
+            ' Bottom buttons (auto-size, extra padding top/left/bottom = 15)
+            Dim flowButtons As New System.Windows.Forms.FlowLayoutPanel()
+            flowButtons.AutoSize = True
+            flowButtons.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            flowButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight
+            flowButtons.WrapContents = False
+            flowButtons.Dock = System.Windows.Forms.DockStyle.Left
+            flowButtons.Margin = New System.Windows.Forms.Padding(15, 15, 0, 15) ' left/top/bottom = 15
+            flowButtons.Padding = New System.Windows.Forms.Padding(0)
+            rootPanel.Controls.Add(flowButtons, 0, 2)
+
+            ' Save button
+            Dim btnSave As New System.Windows.Forms.Button()
+            btnSave.Text = "&Save"
+            btnSave.AutoSize = True
+            btnSave.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnSave.Margin = New System.Windows.Forms.Padding(0, 0, 12, 0) ' spacing between buttons
+            btnSave.Padding = New System.Windows.Forms.Padding(5) ' internal padding around text
+
+            ' Cancel button
+            Dim btnCancel As New System.Windows.Forms.Button()
+            btnCancel.Text = "Cancel"
+            btnCancel.AutoSize = True
+            btnCancel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnCancel.Margin = New System.Windows.Forms.Padding(0)
+            btnCancel.Padding = New System.Windows.Forms.Padding(5)
+
+            flowButtons.Controls.Add(btnSave)
+            flowButtons.Controls.Add(btnCancel)
+
+            ' Enter = Save, Esc = Cancel
+            editorForm.AcceptButton = btnSave
+            editorForm.CancelButton = btnCancel
+
+            ' Adjust label wrapping on resize
+            AddHandler editorForm.Resize, Sub(sender As System.Object, e As System.EventArgs)
+                                              Try
+                                                  headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+                                              Catch ex As System.Exception
+                                                  ' Non-fatal
+                                              End Try
+                                          End Sub
+
+            ' Load file content
+            Try
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        textEditor.Text = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8)
+                    Catch exUtf8 As System.Exception
+                        Try
+                            textEditor.Text = System.IO.File.ReadAllText(filePath)
+                        Catch exDefault As System.Exception
+                            ShowCustomMessageBox("Failed to read file:" & System.Environment.NewLine & exDefault.Message)
+                            textEditor.Text = System.String.Empty
+                        End Try
+                    End Try
+                Else
+                    textEditor.Text = System.String.Empty
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while loading the file:" & System.Environment.NewLine & ex.Message)
+                textEditor.Text = System.String.Empty
+            End Try
+
+            ' Save logic
+            Dim doSave As System.Action =
+        Sub()
+            Try
+                Dim dir As System.String = System.IO.Path.GetDirectoryName(filePath)
+                If dir Is Nothing OrElse dir.Trim().Length = 0 Then
+                    ShowCustomMessageBox("Invalid file path or directory.")
+                    Return
+                End If
+                If Not System.IO.Directory.Exists(dir) Then
+                    ShowCustomMessageBox("Directory does not exist: " & dir)
+                    Return
+                End If
+
+                Dim bakPath As System.String = filePath & ".bak"
+
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        System.IO.File.Copy(filePath, bakPath, True)
+                    Catch exCopy As System.Exception
+                        ShowCustomMessageBox("Failed to create backup file:" & System.Environment.NewLine & exCopy.Message)
+                        Return
+                    End Try
+                End If
+
+                Try
+                    Dim enc As System.Text.Encoding = New System.Text.UTF8Encoding(True)
+                    System.IO.File.WriteAllText(filePath, textEditor.Text, enc)
+                Catch exWrite As System.Exception
+                    ShowCustomMessageBox("Failed to save file:" & System.Environment.NewLine & exWrite.Message)
+                    Return
+                End Try
+
+                editorForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                editorForm.Close()
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while saving:" & System.Environment.NewLine & ex.Message)
+            End Try
+        End Sub
+
+            ' Event bindings
+            AddHandler btnSave.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                          doSave()
+                                      End Sub
+
+            AddHandler btnCancel.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                            editorForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
+                                            editorForm.Close()
+                                        End Sub
+
+            ' Keyboard shortcuts (Ctrl+S)
+            AddHandler editorForm.KeyDown,
+        Sub(sender As System.Object, e As System.Windows.Forms.KeyEventArgs)
+            Try
+                If e.Control AndAlso e.KeyCode = System.Windows.Forms.Keys.S Then
+                    e.SuppressKeyPress = True
+                    doSave()
+                End If
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+        End Sub
+
+            AddHandler editorForm.Shown,
+    Sub(sender As System.Object, e As System.EventArgs)
+        Try
+            ' Place caret at start (position 0, no selection)
+            textEditor.SelectionStart = 0
+            textEditor.SelectionLength = 0
+
+            ' Or, if you prefer the caret at the end instead:
+            'textEditor.SelectionStart = textEditor.Text.Length
+            'textEditor.SelectionLength = 0
+        Catch ex As System.Exception
+            ' Non-fatal, ignore
+        End Try
+    End Sub
+
+
+            ' Show modal window
+            Try
+                Dim active As System.Windows.Forms.IWin32Window = System.Windows.Forms.Form.ActiveForm
+                If active IsNot Nothing Then
+                    editorForm.ShowDialog(active)
+                Else
+                    editorForm.ShowDialog()
+                End If
+            Catch ex As System.Exception
+                Try
+                    editorForm.Show()
+                Catch exShow As System.Exception
+                    ShowCustomMessageBox("Failed to display editor window:" & System.Environment.NewLine & exShow.Message)
+                End Try
+            End Try
+        End Sub
+
+
+        Public Shared Sub oldShowTextFileEditor(ByVal filePath As System.String, ByVal headerText As System.String)
+            ' --- Guard & Input Validation ---
+            Try
+                If filePath Is Nothing OrElse filePath.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No file path was provided.")
+                    Return
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while validating input: " & ex.Message)
+                Return
+            End Try
+
+            ' --- Create Form & Controls (all fully qualified) ---
+            Dim editorForm As New System.Windows.Forms.Form()
+            editorForm.Text = "Text File Editor"
+            editorForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            editorForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            editorForm.MinimizeBox = True
+            editorForm.MaximizeBox = True
+            editorForm.ShowInTaskbar = True
+            editorForm.KeyPreview = True
+            editorForm.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+
+            ' Initial size based on screen (height = 60% of working area; width keeps 9:6 ratio)
+            Try
+                Dim scr As System.Windows.Forms.Screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position)
+                Dim wa As System.Drawing.Rectangle = scr.WorkingArea
+
+                Dim targetHeight As System.Int32 = System.Convert.ToInt32(System.Math.Floor(wa.Height * 0.6R))
+                ' Keep a sensible minimum height
+                If targetHeight < 540 Then
+                    targetHeight = 540
+                End If
+
+                Dim targetWidth As System.Int32 = System.Convert.ToInt32(System.Math.Floor(targetHeight * 9.0R / 6.0R))
+
+                ' If width exceeds working area, clamp and recompute height to preserve 9:6
+                If targetWidth > wa.Width Then
+                    targetWidth = wa.Width
+                    targetHeight = System.Convert.ToInt32(System.Math.Floor(targetWidth * 6.0R / 9.0R))
+                End If
+
+                editorForm.ClientSize = New System.Drawing.Size(targetWidth, targetHeight)
+                ' Reasonable minimum size at half of initial (but at least 780x540)
+                Dim minW As System.Int32 = System.Math.Max(780, System.Convert.ToInt32(System.Math.Floor(targetWidth / 2.0R)))
+                Dim minH As System.Int32 = System.Math.Max(540, System.Convert.ToInt32(System.Math.Floor(targetHeight / 2.0R)))
+                editorForm.MinimumSize = New System.Drawing.Size(minW, minH)
+            Catch ex As System.Exception
+                ' Fallback if anything goes wrong determining screen size
+                editorForm.ClientSize = New System.Drawing.Size(1560, 1080)
+                editorForm.MinimumSize = New System.Drawing.Size(780, 540)
+            End Try
+
+            ' Set icon (as requested)
+            Try
+                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                editorForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
+            ' Set predefined font (as requested)
+            Try
+                Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                editorForm.Font = standardFont
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
+            ' Root container
+            Dim rootPanel As New System.Windows.Forms.TableLayoutPanel()
+            rootPanel.Dock = System.Windows.Forms.DockStyle.Fill
+            rootPanel.BackColor = System.Drawing.Color.Transparent
+            rootPanel.ColumnCount = 1
+            rootPanel.RowCount = 3
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Label
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Editor
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Buttons
+            rootPanel.Padding = New System.Windows.Forms.Padding(12, 12, 12, 10) ' bottom pad exactly 10
+            editorForm.Controls.Add(rootPanel)
+
+            ' Header label with wrapping & auto-size
+            Dim headerLabel As New System.Windows.Forms.Label()
+            headerLabel.AutoSize = True
+            headerLabel.Text = If(headerText, System.String.Empty)
+            headerLabel.UseCompatibleTextRendering = True
+            headerLabel.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+            headerLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right Or System.Windows.Forms.AnchorStyles.Top
+            rootPanel.Controls.Add(headerLabel, 0, 0)
+
+            ' Multiline text editor (word-wrapped)
+            Dim textEditor As New System.Windows.Forms.TextBox()
+            textEditor.Multiline = True
+            textEditor.ScrollBars = System.Windows.Forms.ScrollBars.Vertical
+            textEditor.WordWrap = True
+            textEditor.AcceptsReturn = True
+            textEditor.AcceptsTab = True
+            textEditor.Dock = System.Windows.Forms.DockStyle.Fill
+            textEditor.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            textEditor.Font = New System.Drawing.Font("Consolas", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            rootPanel.Controls.Add(textEditor, 0, 1)
+
+            ' Bottom buttons (left-aligned, auto-size; avoids extra bottom space)
+            Dim flowButtons As New System.Windows.Forms.FlowLayoutPanel()
+            flowButtons.AutoSize = True
+            flowButtons.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            flowButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight
+            flowButtons.WrapContents = False
+            flowButtons.Dock = System.Windows.Forms.DockStyle.Left
+            flowButtons.Margin = New System.Windows.Forms.Padding(0)
+            flowButtons.Padding = New System.Windows.Forms.Padding(0)
+            rootPanel.Controls.Add(flowButtons, 0, 2)
+
+            Dim btnSave As New System.Windows.Forms.Button()
+            btnSave.Text = "&Save"
+            btnSave.AutoSize = True
+            btnSave.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnSave.Margin = New System.Windows.Forms.Padding(0, 0, 8, 0)
+
+            Dim btnCancel As New System.Windows.Forms.Button()
+            btnCancel.Text = "Cancel"
+            btnCancel.AutoSize = True
+            btnCancel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnCancel.Margin = New System.Windows.Forms.Padding(0)
+
+            flowButtons.Controls.Add(btnSave)
+            flowButtons.Controls.Add(btnCancel)
+
+            ' Make Enter = Save, Esc = Cancel
+            editorForm.AcceptButton = btnSave
+            editorForm.CancelButton = btnCancel
+
+            ' Ensure label wraps correctly on resize by adjusting MaximumSize.Width
+            AddHandler editorForm.Resize, Sub(sender As System.Object, e As System.EventArgs)
+                                              Try
+                                                  headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+                                              Catch ex As System.Exception
+                                                  ' Non-fatal
+                                              End Try
+                                          End Sub
+
+            ' Load file content
+            Try
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        textEditor.Text = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8)
+                    Catch exUtf8 As System.Exception
+                        Try
+                            textEditor.Text = System.IO.File.ReadAllText(filePath)
+                        Catch exDefault As System.Exception
+                            ShowCustomMessageBox("Failed to read file:" & System.Environment.NewLine & exDefault.Message)
+                            textEditor.Text = System.String.Empty
+                        End Try
+                    End Try
+                Else
+                    textEditor.Text = System.String.Empty
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while loading the file:" & System.Environment.NewLine & ex.Message)
+                textEditor.Text = System.String.Empty
+            End Try
+
+            ' Save logic (creates/overwrites .bak, then writes file)
+            Dim doSave As System.Action =
+        Sub()
+            Try
+                Dim dir As System.String = System.IO.Path.GetDirectoryName(filePath)
+                If dir Is Nothing OrElse dir.Trim().Length = 0 Then
+                    ShowCustomMessageBox("Invalid file path or directory.")
+                    Return
+                End If
+                If Not System.IO.Directory.Exists(dir) Then
+                    ShowCustomMessageBox("Directory does not exist: " & dir)
+                    Return
+                End If
+
+                Dim bakPath As System.String = filePath & ".bak"
+
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        System.IO.File.Copy(filePath, bakPath, True)
+                    Catch exCopy As System.Exception
+                        ShowCustomMessageBox("Failed to create backup file:" & System.Environment.NewLine & exCopy.Message)
+                        Return
+                    End Try
+                End If
+
+                Try
+                    Dim enc As System.Text.Encoding = New System.Text.UTF8Encoding(True)
+                    System.IO.File.WriteAllText(filePath, textEditor.Text, enc)
+                Catch exWrite As System.Exception
+                    ShowCustomMessageBox("Failed to save file:" & System.Environment.NewLine & exWrite.Message)
+                    Return
+                End Try
+
+                editorForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                editorForm.Close()
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while saving:" & System.Environment.NewLine & ex.Message)
+            End Try
+        End Sub
+
+            ' Wire up events
+            AddHandler btnSave.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                          doSave()
+                                      End Sub
+
+            AddHandler btnCancel.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                            editorForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
+                                            editorForm.Close()
+                                        End Sub
+
+            ' Keyboard shortcuts (Ctrl+S)
+            AddHandler editorForm.KeyDown,
+        Sub(sender As System.Object, e As System.Windows.Forms.KeyEventArgs)
+            Try
+                If e.Control AndAlso e.KeyCode = System.Windows.Forms.Keys.S Then
+                    e.SuppressKeyPress = True
+                    doSave()
+                End If
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+        End Sub
+
+            ' Show the editor window modally relative to the active window (if any)
+            Try
+                Dim active As System.Windows.Forms.IWin32Window = System.Windows.Forms.Form.ActiveForm
+                If active IsNot Nothing Then
+                    editorForm.ShowDialog(active)
+                Else
+                    editorForm.ShowDialog()
+                End If
+            Catch ex As System.Exception
+                Try
+                    editorForm.Show()
+                Catch exShow As System.Exception
+                    ShowCustomMessageBox("Failed to display editor window:" & System.Environment.NewLine & exShow.Message)
+                End Try
+            End Try
         End Sub
 
 
@@ -14081,7 +15447,11 @@ Namespace MarkdownToRtf
 
             ' 2) RTF aufbauen
             Dim rtfBuilder As New System.Text.StringBuilder()
-            rtfBuilder.AppendLine("{\rtf1\ansi\deff0")
+            ' (1) Ein *einziger* RTF-Header mit Codepage, Fonttabelle und \uc1
+            rtfBuilder.AppendLine("{\rtf1\ansi\ansicpg1252\deff0")
+            rtfBuilder.AppendLine("{\fonttbl{\f0\fnil\fcharset0 Arial;}{\f1\fmodern\fcharset0 Courier New;}}")
+            ' \uc1 für konsistente Unicode-Ersatzdarstellung (\uN?)
+            rtfBuilder.AppendLine("\uc1")
 
             ' 3) Blöcke verarbeiten
             For Each block In document
@@ -14097,6 +15467,9 @@ Namespace MarkdownToRtf
                     ConvertQuoteBlock(rtfBuilder, CType(block, Markdig.Syntax.QuoteBlock), 1, fnDefs)
                 ElseIf TypeOf block Is Markdig.Syntax.FencedCodeBlock Then
                     ConvertCodeBlock(rtfBuilder, CType(block, Markdig.Syntax.FencedCodeBlock), fnDefs)
+                    ' (2) Auch generische (z. B. eingerückte) Codeblöcke konvertieren
+                ElseIf (TypeOf block Is Markdig.Syntax.CodeBlock) AndAlso Not (TypeOf block Is Markdig.Syntax.FencedCodeBlock) Then
+                    ConvertCodeBlock(rtfBuilder, CType(block, Markdig.Syntax.CodeBlock))
                 ElseIf TypeOf block Is Markdig.Syntax.ThematicBreakBlock Then
                     ConvertThematicBreakBlock(rtfBuilder)
                 ElseIf TypeOf block Is FootnoteGroup Then
@@ -14146,6 +15519,30 @@ Namespace MarkdownToRtf
             rtf.Append("\f0\fs20\par")
         End Sub
 
+        ' Overload für CodeBlock 
+        Private Sub ConvertCodeBlock(
+    rtf As System.Text.StringBuilder,
+    codeBlock As Markdig.Syntax.CodeBlock
+)
+            ' Monospace + kleinere Schrift
+            rtf.Append("\par\f1\fs18 ")
+            For Each lineInfo In codeBlock.Lines.Lines
+                Dim slice = lineInfo.Slice
+                If slice.Text Is Nothing Then
+                    ' leere Zeile
+                    ' rtf.Append("\line ")
+                    Continue For
+                End If
+                Dim raw As String = slice.Text.Substring(slice.Start, slice.Length)
+                Dim esc As String = EscapeRtf(raw)
+                rtf.Append(esc)
+                rtf.Append("\line ")
+            Next
+            rtf.Append("\f0\fs20\par")
+        End Sub
+
+
+
         Private Sub ConvertTableBlock(
     rtf As StringBuilder,
     table As Markdig.Extensions.Tables.Table,
@@ -14168,11 +15565,14 @@ Namespace MarkdownToRtf
 
                             Case TypeOf subBlock Is Markdig.Syntax.ListBlock
                                 ConvertListBlock(rtf:=rtf,
-                listBlock:=CType(subBlock, Markdig.Syntax.ListBlock),
-                level:=0,
-                fnDefs:=fnDefs)
+                                        listBlock:=CType(subBlock, Markdig.Syntax.ListBlock),
+                                        level:=0,
+                                        fnDefs:=fnDefs)
 
-                                ' → weitere Fälle: QuoteBlock, CodeBlock, etc.
+                            Case TypeOf subBlock Is Markdig.Syntax.CodeBlock
+                                ConvertCodeBlock(rtf, CType(subBlock, Markdig.Syntax.CodeBlock))
+
+                                ' → weitere Fälle: QuoteBlock, etc.
                         End Select
                     Next
 
@@ -14250,6 +15650,10 @@ Namespace MarkdownToRtf
                                 ConvertListBlock(rtf,
                                          CType(sb, Markdig.Syntax.ListBlock),
                                          level + 1, fnDefs)
+                            Case TypeOf sb Is Markdig.Syntax.CodeBlock
+                                rtf.AppendLine()
+                                ConvertCodeBlock(rtf, CType(sb, Markdig.Syntax.CodeBlock))
+
                         End Select
                     Next
 

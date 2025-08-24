@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 17.8.2025
+' 24.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -35,6 +35,7 @@ Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports System.Threading.Tasks
 Imports System.Windows.Forms
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
@@ -136,7 +137,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.170825 Gen2 Beta Test"
+    Public Const Version As String = "V.240825 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -152,6 +153,7 @@ Public Class ThisAddIn
     Private Const ClipboardPrefix As String = "Clipboard:"
     Private Const ClipboardPrefix2 As String = "Clip:"
     Private Const InsertPrefix As String = "Insert:"
+    Private Const MyStyleTrigger As String = "(mystyle)"
     Private Const NoFormatTrigger As String = "(noformat)"
     Private Const NoFormatTrigger2 As String = "(nf)"
     Private Const KFTrigger As String = "(keepformat)"
@@ -170,6 +172,8 @@ Public Class ThisAddIn
 
     Public TranslateLanguage As String = ""
     Public OtherPrompt As String = ""
+    Public Username As String = ""
+    Public MyStyleInsert As String = ""
     Public ShortenLength, SummaryLength As Long
     Public DateTimeNow As String
 
@@ -835,6 +839,35 @@ Public Class ThisAddIn
         End Set
     End Property
 
+
+    Public Shared Property SP_MyStyle_Word As String
+        Get
+            Return _context.SP_MyStyle_Word
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Word = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Outlook As String
+        Get
+            Return _context.SP_MyStyle_Outlook
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Outlook = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Apply As String
+        Get
+            Return _context.SP_MyStyle_Apply
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Apply = value
+        End Set
+    End Property
+
+
     Public Shared Property SP_Shorten As String
         Get
             Return _context.SP_Shorten
@@ -1409,6 +1442,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_MyStylePath As String
+        Get
+            Return _context.INI_MyStylePath
+        End Get
+        Set(value As String)
+            _context.INI_MyStylePath = value
+        End Set
+    End Property
+
     Public Shared Property INI_AlternateModelPath As String
         Get
             Return _context.INI_AlternateModelPath
@@ -1648,6 +1690,45 @@ Public Class ThisAddIn
         Equal = 3
     End Enum
 
+    Friend NotInheritable Class WordUndoScope
+        Implements System.IDisposable
+
+        Private ReadOnly _app As Microsoft.Office.Interop.Word.Application
+        Private ReadOnly _undo As Microsoft.Office.Interop.Word.UndoRecord
+        Private ReadOnly _iStarted As System.Boolean
+
+        Public Sub New(app As Microsoft.Office.Interop.Word.Application, Optional name As System.String = Nothing)
+            _app = app
+            _undo = _app.UndoRecord
+
+            ' Word < 2013 (Version < 15.0) hat kein UndoRecord.
+            Dim ver As System.Version = New System.Version(_app.Version)
+            If ver.Major < 15 Then
+                Return
+            End If
+
+            ' Nur starten, wenn gerade kein anderer Custom-Record läuft
+            If Not _undo.IsRecordingCustomRecord Then
+                If name IsNot Nothing AndAlso name.Length > 0 Then
+                    _undo.StartCustomRecord(name)
+                Else
+                    _undo.StartCustomRecord("VSTO-Aktion")
+                End If
+                _iStarted = True
+            End If
+        End Sub
+
+        Public Sub Dispose() Implements System.IDisposable.Dispose
+            Try
+                If _iStarted AndAlso _undo.IsRecordingCustomRecord Then
+                    _undo.EndCustomRecord()
+                End If
+            Catch ex As System.Exception
+                ' Nichts werfen – wir sind in Dispose
+            End Try
+        End Sub
+    End Class
+
     Public Sub MainMenu(RI_Command As String)
 
         If Not INIloaded Then
@@ -1745,6 +1826,32 @@ Public Class ThisAddIn
                         Command_InsertAfter(InterpolateAtRuntime(SP_Improve), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
                     Case "NoFillers"
                         Command_InsertAfter(InterpolateAtRuntime(SP_NoFillers), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                    Case "ApplyMyStyle"
+                        Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+
+                        If String.IsNullOrWhiteSpace(StylePath) Then
+                            ShowCustomMessageBox("You have not defined a MyStyle prompt file. Please do so first in the configuration file or using 'Settings'.")
+                            Return
+                        End If
+                        If Not IO.File.Exists(StylePath) Then
+                            ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                            Return
+                        End If
+
+                        Textlength = GetSelectedTextLength()
+                        If Textlength = 0 Then
+                            SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                            Return
+                        End If
+
+                        MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Outlook", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", False)
+                        If MyStyleInsert = "ERROR" Then Return
+                        If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then
+                            Return
+                        End If
+
+                        Command_InsertAfter(InterpolateAtRuntime(SP_MyStyle_Apply) & " " & MyStyleInsert, INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+
                     Case "Friendly"
                         Command_InsertAfter(InterpolateAtRuntime(SP_Friendly), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
                     Case "Convincing"
@@ -2327,6 +2434,177 @@ Public Class ThisAddIn
     End Sub
 
 
+    Public Async Sub DefineMyStyle()
+
+        Try
+            ' --- Check MyStyle path (like Word) ---
+            Dim stylePath As System.String = System.Environment.ExpandEnvironmentVariables(INI_MyStylePath)
+
+            If System.String.IsNullOrWhiteSpace(stylePath) Then
+                ShowCustomMessageBox("You have not configured a MyStyle prompt file path. Please do so in the configuration file or using 'Settings'.")
+                Return
+            End If
+
+            ' --- Intro info box (adapted to Outlook workflow) ---
+            Dim introLabel As System.String =
+                $"You are about to have {AN} create a profile of your writing style from selected emails. There are six steps:" & vbCrLf & vbCrLf &
+                "1. You will enter your name (used by the prompt to detect your mails)." & vbCrLf &
+                "2. All currently open emails (including those opened from .MSG files) will be gathered as samples." & vbCrLf &
+                "3. You can provide additional instructions (e.g., links or aspects to focus on)." & vbCrLf &
+                "4. You select the model to perform the analysis (e.g., a reasoning model, Internet access if links are to be consulted)." & vbCrLf &
+                "5. You can review and amend the analysis, including the final prompt for the AI to implement your style." & vbCrLf &
+                $"6. The analysis will be saved to your personal MyStyle prompt file ({stylePath})."
+
+            Dim answer As System.Int32 = ShowCustomYesNoBox(introLabel, "Continue", "Cancel", $"{AN} Define MyStyle (Outlook)",
+                                                            extraButtonText:="Edit MyStyle prompt file",
+                                                            extraButtonAction:=Sub()
+                                                                                   SLib.ShowTextFileEditor(stylePath, "Edit your MyStyle prompt file (use 'Define MyStyle' to create new prompts automatically):")
+                                                                               End Sub)
+            If answer <> 1 Then
+                Return
+            End If
+
+            ' --- Ask for Username (default = OS user) ---
+            Dim defaultUser As System.String = System.Environment.UserName
+            Username = SLib.ShowCustomInputBox("Please enter your name (will be used to identify your mails within mailchains):", $"{AN} Define MyStyle (Outlook)", True, defaultUser)
+            If Username Is Nothing OrElse Username.Trim().Length = 0 Then
+                ShowCustomMessageBox("No username provided - exiting.")
+                Return
+            End If
+            Username = Username.Trim()
+
+            ' --- Collect all open emails from Outlook inspectors ---
+            Dim app As Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspectors As Outlook.Inspectors = app.Inspectors
+
+            Dim mailItems As New System.Collections.Generic.List(Of Outlook.MailItem)()
+
+            For i As System.Int32 = 1 To inspectors.Count
+                Dim insp As Outlook.Inspector = inspectors.Item(i)
+                If insp IsNot Nothing AndAlso insp.CurrentItem IsNot Nothing Then
+                    If TypeOf insp.CurrentItem Is Outlook.MailItem Then
+                        Dim mi As Outlook.MailItem = CType(insp.CurrentItem, Outlook.MailItem)
+                        If mi IsNot Nothing Then
+                            mailItems.Add(mi)
+                        End If
+                    End If
+                End If
+            Next
+
+            If mailItems.Count = 0 Then
+                ShowCustomMessageBox("No open emails were found. Please open all emails you want to include and try again.")
+                Return
+            End If
+
+            ' --- Show list of all emails that will be included (via MessageBox), then explicit proceed confirm ---
+            Dim sbList As New System.Text.StringBuilder()
+            sbList.AppendLine("The following emails will be included:").AppendLine()
+            For idx As System.Int32 = 0 To mailItems.Count - 1
+                Dim mi As Outlook.MailItem = mailItems(idx)
+                Dim subj As System.String = If(mi.Subject, "(no subject)")
+                Dim sender As System.String = If(mi.SenderName, "(unknown sender)")
+                Dim sentOn As System.String
+                Try
+                    sentOn = If(mi.SentOn = Date.MinValue, "(no sent date)", mi.SentOn.ToString())
+                Catch ex As System.Exception
+                    sentOn = "(no sent date)"
+                End Try
+                sbList.AppendLine($"{(idx + 1).ToString("000")}. {subj} — {sender} — {sentOn}")
+            Next
+
+            ShowCustomMessageBox(sbList.ToString())
+            Dim confirm As System.Int32 = ShowCustomYesNoBox($"Proceed with these emails (the AI will get the full text and be instructed to learn only from those that refer to '{Username}')?", "Continue", "Cancel", $"{AN} Define MyStyle (Outlook)")
+            If confirm <> 1 Then
+                Return
+            End If
+
+            ' --- Additional instructions (like Word: ESC cancels) ---
+            OtherPrompt = ""
+            OtherPrompt = SLib.ShowCustomInputBox("You can provide additional instructions for the analysis (e.g., Internet links to check [if your model will understand so], aspects to focus on etc.). This is optional.",
+                                                    $"{AN} Define MyStyle (Outlook)", False).Trim()
+            If OtherPrompt = "ESC" Then
+                Return
+            End If
+
+            ' --- Optional: use alternate model (like Word) ---
+            Dim useSecondAPI As System.Boolean = False
+            If Not System.String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                answer = ShowCustomYesNoBox($"Do you want to use one of your alternate models?", "Yes, use alternate", "No, use primary", $"{AN} Define MyStyle (Outlook)")
+                If answer = 1 Then
+                    If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                        originalConfigLoaded = False
+                        Return
+                    End If
+                    useSecondAPI = True
+                ElseIf answer <> 2 Then
+                    Return
+                End If
+            End If
+
+            ' --- Build SelectedText from all open emails ---
+            ' Format: <EMAILxxx> Mailtext </EMAILxxx>, xxx = 001, 002, ...
+            Dim sbEmails As New System.Text.StringBuilder()
+
+            For idx As System.Int32 = 0 To mailItems.Count - 1
+                Dim mi As Outlook.MailItem = mailItems(idx)
+
+                Dim bodyText As System.String = If(mi.Body, System.String.Empty)
+
+                If System.String.IsNullOrWhiteSpace(bodyText) Then
+                    Dim html As System.String = If(mi.HTMLBody, System.String.Empty)
+                    If Not System.String.IsNullOrWhiteSpace(html) Then
+                        ' simple HTML -> text (strip tags, decode)
+                        Dim noTags As System.String = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", System.String.Empty)
+                        bodyText = System.Net.WebUtility.HtmlDecode(noTags)
+                    End If
+                End If
+
+                If bodyText Is Nothing Then
+                    bodyText = System.String.Empty
+                End If
+
+                bodyText = bodyText.Trim()
+
+                Dim tagId As System.String = (idx + 1).ToString("000")
+                sbEmails.Append("<EMAIL").Append(tagId).Append(">").AppendLine()
+                sbEmails.Append(bodyText).AppendLine()
+                sbEmails.Append("</EMAIL").Append(tagId).Append(">").AppendLine().AppendLine()
+            Next
+
+            Dim SelectedText As String = sbEmails.ToString()
+
+            ' --- Call LLM with SP_MyStyle_Outlook (like Word) ---
+            ' Hinweis: Dein SP_MyStyle_Outlook sollte {OtherPrompt} etc. bereits über InterpolateAtRuntime aufnehmen.
+            Dim llmResponse As System.String =
+                Await LLM(InterpolateAtRuntime(SP_MyStyle_Outlook), SelectedText, "", "", 0, useSecondAPI)
+
+            ' --- Show analysis and (on OK) save prompt + copy full report to clipboard (like Word) ---
+            If Not System.String.IsNullOrWhiteSpace(llmResponse) Then
+                Dim analysis As System.String = SLib.ShowCustomWindow($"The AI provided the following style analysis for {Username} and MyStyle prompt of your email samples:",
+                                                                        llmResponse,
+                                                                        "If you choose 'OK', the prompt and its title at the end of the analysis will be stored in your MyStyle prompt file for future usage (and the full report copied to the clipboard).",
+                                                                        AN, False, False, False, False)
+
+                If Not System.String.IsNullOrWhiteSpace(analysis) Then
+                    SLib.PutInClipboard(analysis)
+                    SLib.ExtractAndStorePromptFromAnalysis(analysis, stylePath, "Outlook")
+                End If
+            End If
+
+            If useSecondAPI AndAlso originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
+
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox($"An error occurred: {ex.Message}")
+        End Try
+
+    End Sub
+
+
+
 
     Private Async Sub FreeStyle_InsertBefore(Command As String, Optional AskForPrompt As Boolean = False)
         Try
@@ -2365,11 +2643,22 @@ Public Class ThisAddIn
             Dim LLMResult As String = ""
 
             If AskForPrompt Then
+
+                MyStyleInsert = ""
+                Dim DoMyStyle As Boolean = False
+                Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+                If Not String.IsNullOrWhiteSpace(StylePath) And IO.File.Exists(StylePath) Then DoMyStyle = True
+
                 ' Prompt for additional instructions
                 OtherPrompt = SLib.ShowCustomInputBox("Please provide additional instructions for drafting an answer (or leave it empty for the most likely substantive response):", $"{AN} Answers", False)
                 If OtherPrompt = "ESC" Then Return
+
+                MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
+                If MyStyleInsert = "ERROR" Then Return
+                If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then DoMyStyle = False
+
                 ' Call your LLM function with the selected text
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_MailReply), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_MailReply) & If(DoMyStyle, " " & MyStyleInsert, ""), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)
             Else
                 LLMResult = Await LLM(InterpolateAtRuntime(SP_MailSumup), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)
             End If
@@ -2461,139 +2750,151 @@ Public Class ThisAddIn
                 Return
             End If
 
+
+
             ' Get the selected text and range
             Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
-            Dim range As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate ' Duplicate to preserve original
-            Dim SelectedText As String
+                    Dim range As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate ' Duplicate to preserve original
+                    Dim SelectedText As String
+
+            'Try
+            'Using New WordUndoScope(wordEditor, $"{AN} Changes")
+
 
             If INI_KeepFormatCap > 0 Then If Len(selection.Text) > INI_KeepFormatCap Then KeepFormat = False
 
-            If KeepFormat Then
-                SelectedText = SLib.GetRangeHtml(selection.Range)
-            Else
-                If INI_MarkdownConvert Then ConvertRangeToMarkdown(selection.Range)
-                SelectedText = selection.Text
-            End If
-
-            If String.IsNullOrWhiteSpace(SelectedText) Then
-                ShowCustomMessageBox($"Please select the text to be processed.")
-                Return
-            End If
-
-            If DoMarkup And MarkupMethod = 2 And Len(SelectedText) > INI_MarkupDiffCap Then
-                Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
-                Select Case MarkupChange
-                    Case 1
-                        MarkupMethod = 3
-                    Case 2
-                        MarkupMethod = 2
-                    Case Else
-                        Exit Sub
-                End Select
-            End If
-
-            Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbCr) Or SelectedText.EndsWith(vbLf)
-
-            ' Call your LLM function with the selected text
-            Dim LLMResult As String = Await LLM(SysCommand & If(KeepFormat, " " & SP_Add_KeepHTMLIntact, SP_Add_KeepInlineIntact), "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0)
-
-            LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-
-            If INI_PostCorrection <> "" Then
-                LLMResult = Await PostCorrection(LLMResult)
-            End If
-
-            Debug.WriteLine("TrailingCR=" & trailingCR)
-            Debug.WriteLine($"Selection='{selection.Text}'")
-
-            ' Replace the selected text with the processed result
-            If Not String.IsNullOrWhiteSpace(LLMResult) Then
-                If KeepFormat Then
-
-                    Dim Plaintext As String = ""
-
-                    SelectedText = selection.Text
-                    SLib.InsertTextWithFormat(LLMResult, range, Inplace, Not trailingCR)
-                    If DoMarkup Then
-                        LLMResult = SLib.RemoveHTML(LLMResult)
-                        If MarkupMethod <> 3 Then
-                            range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf
-                        End If
-                        range.Collapse(WdCollapseDirection.wdCollapseEnd)
-                        selection.SetRange(range.Start, selection.End)
-
-                        CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
-                    End If
-
-                Else
-
-                    If Inplace Then
-                        If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
-                        If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
-                        If DoMarkup And MarkupMethod <> 3 Then
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
-                            'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                        Else
-                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-                            'selection.TypeText(LLMResult)
-                        End If
+                    If KeepFormat Then
+                        SelectedText = SLib.GetRangeHtml(selection.Range)
                     Else
-                        ' Replace this line:
-                        ' selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
-
-                        ' With the following code to insert two new lines and select the last one, preserving formatting:
-                        Dim selRange As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate
-                        Dim originalFont As Microsoft.Office.Interop.Word.Font = selRange.Font.Duplicate
-
-                        ' Insert two new lines at the end of the selection
-                        selRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
-                        selRange.Text = vbCrLf & vbCrLf
-
-                        ' Select the last new line
-                        Dim newStart As Integer = selRange.End - 2 ' Position at the start of the last vbCrLf
-                        Dim newEnd As Integer = selRange.End
-                        selection.SetRange(newStart, newEnd)
-
-                        ' Reapply the original formatting to the new selection
-                        selection.Font = originalFont
-
-                        If DoMarkup And MarkupMethod <> 3 Then
-                            'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>" & vbCrLf, trailingCR)
-                        Else
-                            'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
-                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-
-                        End If
+                        If INI_MarkdownConvert Then ConvertRangeToMarkdown(selection.Range)
+                        SelectedText = selection.Text
                     End If
 
-                    ' Use Find to locate the nearest line break backward and adjust selection
-                    range = selection.Range
-                    With range.Find
-                        .Text = vbCrLf
-                        .Forward = False
-                        .MatchWildcards = False
-                        If .Execute() Then
-                            selection.SetRange(range.Start, selection.End)
-                        End If
-                    End With
+                    If String.IsNullOrWhiteSpace(SelectedText) Then
+                        ShowCustomMessageBox($"Please select the text to be processed.")
+                        Return
+                    End If
 
-                    ' Perform markup comparison and insertion if necessary
-                    If DoMarkup Then
-                        If MarkupMethod = 2 Or MarkupMethod = 3 Then
-                            CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
+                    If DoMarkup And MarkupMethod = 2 And Len(SelectedText) > INI_MarkupDiffCap Then
+                        Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
+                        Select Case MarkupChange
+                            Case 1
+                                MarkupMethod = 3
+                            Case 2
+                                MarkupMethod = 2
+                            Case Else
+                                Exit Sub
+                        End Select
+                    End If
+
+                    Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbCr) Or SelectedText.EndsWith(vbLf)
+
+                    ' Call your LLM function with the selected text
+                    Dim LLMResult As String = Await LLM(SysCommand & If(KeepFormat, " " & SP_Add_KeepHTMLIntact, SP_Add_KeepInlineIntact), "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0)
+
+                    LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
+
+                    If INI_PostCorrection <> "" Then
+                        LLMResult = Await PostCorrection(LLMResult)
+                    End If
+
+                    Debug.WriteLine("TrailingCR=" & trailingCR)
+                    Debug.WriteLine($"Selection='{selection.Text}'")
+
+                    ' Replace the selected text with the processed result
+                    If Not String.IsNullOrWhiteSpace(LLMResult) Then
+                        If KeepFormat Then
+
+                            Dim Plaintext As String = ""
+
+                            SelectedText = selection.Text
+                            SLib.InsertTextWithFormat(LLMResult, range, Inplace, Not trailingCR)
+                            If DoMarkup Then
+                                LLMResult = SLib.RemoveHTML(LLMResult)
+                                If MarkupMethod <> 3 Then
+                                    range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf
+                                End If
+                                range.Collapse(WdCollapseDirection.wdCollapseEnd)
+                                selection.SetRange(range.Start, selection.End)
+
+                                CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
+                            End If
+
                         Else
-                            CompareAndInsertTextCompareDocs(SelectedText, LLMResult)
+
+                            If Inplace Then
+                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
+                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+                                If DoMarkup And MarkupMethod <> 3 Then
+                                    SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
+                                    'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                                Else
+                                    SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                                    'selection.TypeText(LLMResult)
+                                End If
+                            Else
+                                ' Replace this line:
+                                ' selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+
+                                ' With the following code to insert two new lines and select the last one, preserving formatting:
+                                Dim selRange As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate
+                                Dim originalFont As Microsoft.Office.Interop.Word.Font = selRange.Font.Duplicate
+
+                                ' Insert two new lines at the end of the selection
+                                selRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                                selRange.Text = vbCrLf & vbCrLf
+
+                                ' Select the last new line
+                                Dim newStart As Integer = selRange.End - 2 ' Position at the start of the last vbCrLf
+                                Dim newEnd As Integer = selRange.End
+                                selection.SetRange(newStart, newEnd)
+
+                                ' Reapply the original formatting to the new selection
+                                selection.Font = originalFont
+
+                                If DoMarkup And MarkupMethod <> 3 Then
+                                    'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                                    SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>" & vbCrLf, trailingCR)
+                                Else
+                                    'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
+                                    SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+
+                                End If
+                            End If
+
+                            ' Use Find to locate the nearest line break backward and adjust selection
+                            range = selection.Range
+                            With range.Find
+                                .Text = vbCrLf
+                                .Forward = False
+                                .MatchWildcards = False
+                                If .Execute() Then
+                                    selection.SetRange(range.Start, selection.End)
+                                End If
+                            End With
+
+                            ' Perform markup comparison and insertion if necessary
+                            If DoMarkup Then
+                                If MarkupMethod = 2 Or MarkupMethod = 3 Then
+                                    CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
+                                Else
+                                    CompareAndInsertTextCompareDocs(SelectedText, LLMResult)
+                                End If
+
+                            End If
+
                         End If
+
+                    Else
+                        ShowCustomMessageBox("The LLM did not return any content to insert.")
 
                     End If
 
-                End If
+            ' End Using
 
-            Else
-                ShowCustomMessageBox("The LLM did not return any content to insert.")
-
-            End If
+            'Catch ex As System.Exception
+            '   Debug.WriteLine("Error in Undo: " & ex.Message)
+            'End Try
 
             ' Refresh the inspector to show updated content
             inspector.Display()
@@ -2625,6 +2926,7 @@ Public Class ThisAddIn
             Dim DoFileObject As Boolean = False
             Dim FileObject As String = ""
             Dim DoNewDoc As Boolean = False
+            Dim DoMyStyle As Boolean = False
 
             Dim UseSecondAPI As Boolean = False
 
@@ -2633,6 +2935,7 @@ Public Class ThisAddIn
             Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}'/'{ClipboardPrefix2}' or '{NewDocPrefix}' to have the result in a window or new Word document"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}' for overriding formatting defaults"
+            Dim MyStyleInstruct As String = $"; add '{MyStyleTrigger}' to apply your personal style"
             Dim SecondAPIInstruct As String = If(INI_SecondAPI, $"'{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}", "")
             Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
             Dim ObjectInstruct As String = $"; add '{ObjectTrigger2}' for including a clipboard object"
@@ -2642,6 +2945,9 @@ Public Class ThisAddIn
             Dim lastCommaIndex As Integer = AddOnInstruct.LastIndexOf(","c)
             If lastCommaIndex <> -1 Then
                 AddOnInstruct = AddOnInstruct.Substring(0, lastCommaIndex) & ", and" & AddOnInstruct.Substring(lastCommaIndex + 1)
+            End If
+            If Not String.IsNullOrWhiteSpace(INI_MyStylePath) Then
+                AddOnInstruct += MyStyleInstruct.Replace("; add", ", ")
             End If
 
             Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
@@ -2792,6 +3098,19 @@ Public Class ThisAddIn
                 FileObject = "clipboard"
             End If
 
+            If Not String.IsNullOrWhiteSpace(INI_MyStylePath) And OtherPrompt.IndexOf(MyStyleTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+                Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+                If Not IO.File.Exists(StylePath) Then
+                    ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                    Return
+                End If
+                OtherPrompt = OtherPrompt.Replace(MyStyleTrigger, "").Trim()
+                MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
+                If MyStyleInsert = "ERROR" Then Return
+                If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then Return
+                DoMyStyle = True
+            End If
+
             If INI_SecondAPI Then
                 If OtherPrompt.Contains(SecondAPICode) Then
                     UseSecondAPI = True
@@ -2828,11 +3147,11 @@ Public Class ThisAddIn
             Dim LLMResult As String
 
             If Not NoText Then
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleText) & If(DoMyStyle, " " & MyStyleInsert, ""), "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
                 LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
             Else
-                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText), "", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                LLMResult = Await LLM(InterpolateAtRuntime(SP_FreestyleNoText) & If(DoMyStyle, " " & MyStyleInsert, ""), "", "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
             End If
 
             If INI_PostCorrection <> "" Then

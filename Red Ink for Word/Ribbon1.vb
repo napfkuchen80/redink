@@ -159,4 +159,12 @@ Public Class Ribbon1
     Private Sub RI_FreestyleRepeat_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_FreestyleRepeat.Click
         Globals.ThisAddIn.FreeStyleRepeat()
     End Sub
+
+    Private Sub RI_ApplyMyStyle_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_ApplyMyStyle.Click
+        Globals.ThisAddIn.ApplyMyStyle()
+    End Sub
+
+    Private Sub RI_DefineMyStyle_Click_1(sender As Object, e As RibbonControlEventArgs) Handles RI_DefineMyStyle.Click
+        Globals.ThisAddIn.DefineMyStyle()
+    End Sub
 End Class

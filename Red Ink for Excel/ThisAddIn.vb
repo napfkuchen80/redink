@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 17.8.2025
+' 24.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -205,7 +205,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.170825 Gen2 Beta Test"
+    Public Const Version As String = "V.240825 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -891,6 +891,34 @@ Public Class ThisAddIn
         End Set
     End Property
 
+
+    Public Shared Property SP_MyStyle_Word As String
+        Get
+            Return _context.SP_MyStyle_Word
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Word = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Outlook As String
+        Get
+            Return _context.SP_MyStyle_Outlook
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Outlook = value
+        End Set
+    End Property
+
+    Public Shared Property SP_MyStyle_Apply As String
+        Get
+            Return _context.SP_MyStyle_Apply
+        End Get
+        Set(value As String)
+            _context.SP_MyStyle_Apply = value
+        End Set
+    End Property
+
     Public Shared Property SP_Shorten As String
         Get
             Return _context.SP_Shorten
@@ -1436,6 +1464,15 @@ Public Class ThisAddIn
         End Get
         Set(value As Boolean)
             _context.INI_PromptLib = value
+        End Set
+    End Property
+
+    Public Shared Property INI_MyStylePath As String
+        Get
+            Return _context.INI_MyStylePath
+        End Get
+        Set(value As String)
+            _context.INI_MyStylePath = value
         End Set
     End Property
 
