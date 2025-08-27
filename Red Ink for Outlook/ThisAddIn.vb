@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.8.2025
+' 27.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -137,7 +137,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.240825 Gen2 Beta Test"
+    Public Const Version As String = "V.270825 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -2653,9 +2653,11 @@ Public Class ThisAddIn
                 OtherPrompt = SLib.ShowCustomInputBox("Please provide additional instructions for drafting an answer (or leave it empty for the most likely substantive response):", $"{AN} Answers", False)
                 If OtherPrompt = "ESC" Then Return
 
-                MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
-                If MyStyleInsert = "ERROR" Then Return
-                If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then DoMyStyle = False
+                If DoMyStyle Then
+                    MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
+                    If MyStyleInsert = "ERROR" Then Return
+                    If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then DoMyStyle = False
+                End If
 
                 ' Call your LLM function with the selected text
                 LLMResult = Await LLM(InterpolateAtRuntime(SP_MailReply) & If(DoMyStyle, " " & MyStyleInsert, ""), "<MAILCHAIN>" & selectedText & "</MAILCHAIN>", "", "", 0)

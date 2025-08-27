@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.8.2025
+' 25.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1822,7 +1822,7 @@ Namespace SharedLibrary
                     Dim seenDisplays As System.Collections.Generic.HashSet(Of System.String) =
                 New System.Collections.Generic.HashSet(Of System.String)(System.StringComparer.OrdinalIgnoreCase)
 
-                    If AddNone And items.Count > 0 Then
+                    If AddNone And entries.Count > 0 Then
                         ' add NONE (ID = 0)
                         items.Add(New SharedMethods.SelectionItem("None", 0))
                         seenDisplays.Add("None")
