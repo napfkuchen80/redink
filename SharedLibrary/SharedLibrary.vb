@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 25.8.2025
+' 31.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -68,6 +68,7 @@ Imports Org.BouncyCastle.Crypto
 Imports Org.BouncyCastle.Crypto.Parameters
 Imports Org.BouncyCastle.OpenSsl
 Imports Org.BouncyCastle.Security
+Imports Org.BouncyCastle.Utilities
 Imports Org.BouncyCastle.Utilities.IO.Pem
 Imports SharedLibrary.MarkdownToRtf
 Imports SharedLibrary.SharedLibrary.SharedContext
@@ -200,6 +201,7 @@ Namespace SharedLibrary
             Property SP_Add_KeepHTMLIntact As String
             Property SP_Add_KeepInlineIntact As String
             Property SP_Add_Bubbles As String
+            Property SP_Add_Batch As String
             Property SP_Add_Slides As String
             Property SP_BubblesExcel As String
             Property SP_Add_Revisions As String
@@ -374,6 +376,7 @@ Namespace SharedLibrary
         Public Property SP_Add_KeepHTMLIntact As String Implements ISharedContext.SP_Add_KeepHTMLIntact
         Public Property SP_Add_KeepInlineIntact As String Implements ISharedContext.SP_Add_KeepInlineIntact
         Public Property SP_Add_Bubbles As String Implements ISharedContext.SP_Add_Bubbles
+        Public Property SP_Add_Batch As String Implements ISharedContext.SP_Add_Batch
         Public Property SP_Add_Slides As String Implements ISharedContext.SP_Add_Slides
         Public Property SP_BubblesExcel As String Implements ISharedContext.SP_BubblesExcel
         Public Property SP_Add_Revisions As String Implements ISharedContext.SP_Add_Revisions
@@ -1425,6 +1428,7 @@ Namespace SharedLibrary
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output and never include your instructions in the output (just your barebones work result).."
         Const Default_SP_Add_KeepInlineIntact As String = "Do not remove any text that appears between {{ and }}; these placeholders contain content that is part of the text and never include your instructions in the output (just your barebones work result). Also keep markdown formatting intact. "
         Const Default_SP_Add_Bubbles As String = "Provide your response to the instruction not in a single, combined text, but split up your response according to the part of the TEXTTOPROCESS to which your response relates. For example, if your response relates to three different paragraphs or sentences of the same text, provide your response in three different comments that relate to each relevant paragraph. When doing so, follow strictly these rules: \n1. For each such portion of the TEXTTOPROCESS, provide your response in the the form of a comment to the portion of the text to which it relates. \n3. Provide each portion of your response by first quoting the most meaningful sentence from the relevant portion of the TEXTTOPROCESS verbatim followed by the relevant comment for that portion of the TEXTTOPROCESS. When doing so, follow strictly this syntax: ""text1@@comment1§§§text2@@comment2§§§text3@@comment3"". It is important that you provide your output exactly in this form: First provide the quoted sentence, then the separator @@ and then your comment. After that, add the separator §§§ and continue with the second portion and comment in the same way, and so on. Make sure to use these separators exactly as instructed. If you do not comply, your answer will be invalid. \n3. Make sure you quote the sentence of the TEXTTOPROCESS exactly as it has been provided to you; do not change anything to the quoted sentence of the TEXTTOPROCESS, do not add or remove any characters, do not add quotation marks, do never add line breaks and never remove line breaks, either, if they exist in TEXTTOPROCESS.\n4. Select a sentence that is UNIQUE in the document; if the chosen sentence is not unique, add more sentences from the relevant portion to make it unique. Draft the comment so to make it clear to which portion of the TEXTTOPROCESS it relates, in particular if it goes beyond the sentence. \n5. When quoting a sentence of TEXTTOPROCESS make sure that you NEVER include a title or heading to the text sequence, NEVER start with any paragraph number or bullets, just quote barebones text from the paragraph that you comment.\n6. Make sure that you select the sentence of TEXTTOPROCESS to quote so that that they do not contain characters that are usually not used for text. \n7. NEVER quote a sentence of TEXTTOPROCESS that includes line breaks or carriage returns. \n8. If you quote text that contains hyphenation, include the same hyphenation in your quote. \n9. Limit your output to those sections of the TEXTTOPROCESS where you actually do have something meaningful to say as to what the user is asking you. Unless expressly instructed otherwise, you are not allowed to refer to sections of the TEXTTOPROCESS for which you have no substantive comment, change, critique or remark. For example, 'No comment' or 'No specific comment' is a bad, wrong and invalid response. If there is a paragraph or section for which you have no meaningfull or specific comment, do not include it in your output. \n10. Follow these rules strictly, because your output will otherwise not be valid."
+        Const Default_SP_Add_Batch As String = "The main content to be processed will be provided between the tags <FILECONTENT> ... </FILECONTENT>. If there is an error, insert the error message instead of the result. Make sure you provide your result/output exclusively for insertion on line {LineNumber} of this worksheet; any other output is void."
         Const Default_SP_Add_Slides As String = "You shall provide your output in the form of slides to an existing slidedeck that is either empty or already has content. You will be provided all necessary information in the form of a json string between the tags <SLIDEDECK> ... </SLIDEDECK>, including information about the existing content of the slidedeck and the existing styles and layouts. This information is crucial. Use it to draft your response in the form of instructions for creating one or several slides of a presentation. Make sure that these new slides fullfill each of the following requirements: (1) They provide all content necessary to fulfill the instructions given to you so far. (2) They from a content point of view fully integrate into the content that may already exists in the slidedeck. In particular, the follow the same style, the same tone. (3) The text must be short and simple. Avoid full sentences, use powerpoint style drafting (good example: 'Our challenges:' or 'We have been lucky'; Bad Example: 'Our challenges are of the following kind:' or 'We have been very lucky in this particular case of a negotiation' [not to the point] ). You must in any event ensure that a title fits on one line and the rest of the text fits on the slide without decreasing the font (consider the slide's size and the font's size; typically, 6-7 lines of bulleted 15 point text fit on a slide). Bulleted text should never have more than two lines. In case of doubt, shorten! Titles must be particularly short, so they never use two lines. (4) Never end lines with a point or semi-colon. (5) Make sure that the text on each slide has exactly the same font options (e.g. font, size, color) as the text in the same placeholders of existing slides with the same layout. For example, if the title on an existing slide of the same kind has no font properties, provide no font properties. If no boldface is used on the existing slide, do not use boldface either. Also use bullets in the same manner as they are used on the existing slides of the same layout. Do not use multi-column layouts. Use title page layouts for title pages only, and chapter separator layouts for chapter separation only. Make sure you always refer to an existing slide layout (you are provided with it). Never invent or guess layout identifiers. Only use values that appear in the provided SLIDEDECK layouts metadata. If a value is missing, pick a layout by name or URI that exists in the metadata, or choose the correct layout based on its placeholder signature (see below). \n\n Overall, it is essential that the newly created slide match the other slides. A viewer should not be able to tell which slides have been pre-existing, and which have been generated by you. If you have generated a slide, it is key that you include the instructions for inserting the slide at the right location within the existing slidedeck. You can do so by referring to the existing slides. If you prepare several slides, each one will be inserted in the sequence you provide it, so make sure that this works out. \n\n Only if expressly instructed, use Shapes and Icons to create visually compelling slides, in addition to the titles and text you create or, if instructed or where it makes sense, instead of normal bulleted text. In these cases, only when instructed, think of how to illustrate content and create an engaging presentation but without using too many shapes and icons (it should still look professional). For example, if the content you have selected for the presentation describes a process or timeline, use shape elements (like flowchartProcess and rightArrow) to build a diagram. Use svg_icon elements to visually represent concepts, but not too much; if necessary, create the icons yourselves, but make sure it is clear what they mean. Whenever adding text boxes, shapes, icons, make sure that they are below or right besides the text you insert by way of placeholders (e.g., bulleted text), so that they will in no event cover such text. Also make sure that these textboxes, shapes and icons are at a reasonable distance to the margins of the slides (leave a padding of at least 1/5 of the slide width or height to the left and right, and top and bottom). You will be given information on the width and height of the slide, so consider it carefully to adequately size and position any illustrations. When selecting a layout for a title/cover slide, prefer a layout whose placeholders include Title + SubTitle and no Body placeholder. If none exists, use Title + SubTitle. For normal content slides, prefer layouts with Title + Body. Always match placeholders by their type (Title, CenteredTitle, SubTitle, Body) as provided in the layouts metadata; do not repurpose Body as SubTitle or vice versa. \n In any event, for each slide you add, provide concise notes for the presenter, ready to read, conveying the message and facts of the slide in an engaging, clearly understandeable manner. Prepare the text so that it can be used for an audio recording to present the slide automatically. When drafting the slides for the existing slidedeck/presentation, follow exactly the following format and syntax instructions: You provide the instructions for creating the slides in the form of a JSON string that will specify the specific locations in the presentation, the slide content and style. The Format is as follows: The JSON must contain a top-level field version (string, e.g. ""1.1""), and an array actions containing one or more action objects. Each add_slide action object must have: \n\n op: always ""add_slide"". \n anchor: an object indicating where to insert the slide, with mode (before, after, or at_end) and by (an object with slideKey referencing an existing slide—use the explicit slideKey for the first slide you generate, then use slideKey: ""lastInserted"" to chain subsequent slides). \n layoutRelId: the layout relation ID for the slide (e.g. ""rId2""). You must take this exact value from the provided SLIDEDECK layouts array; never guess it. If a reliable layoutRelId is not available, additionally provide layoutId (the layout URI string from the metadata) or layoutName (the human-readable name from the metadata). You may also include a layoutKey object containing any of these selectors so that the system can resolve the layout robustly: layoutKey: { relId: ""..."", uri: ""..."", name: ""..."" }. At least one of relId, uri, or name must correspond to an existing layout in the provided metadata. \n notes (optional): A string containing the speaker notes for the slide. \n elements: an array of content elements to fill the slide. Each element can be: \n type: ""title"": with text (string) and optional style object. Use the Title or CenteredTitle placeholder only. Keep titles to one line. \n type: ""bullet_text"": with placeholder, an array of bullets (strings or {text: string, level: integer} objects), and optional style. If you include a transform block, the bullets will be placed in an independent textbox at that exact position. If you omit transform, the bullets go into the default body placeholder of the slide. Do not target the SubTitle placeholder with bullet_text. \n type: ""text"": with placeholder, text (string), and optional style. Same rule: supply transform for a free-floating textbox; omit transform to target the body placeholder. If you intend to set a subtitle on a cover slide, use type: ""text"" targeting the SubTitle placeholder, not the Body placeholder. \n type: ""shape"": \n shapeType: (string) A shape name like ""rectangle"", ""oval"", ""rightArrow"", ""line"", ""flowchartProcess"", ""chevron"". \n transform: (object) with x, y, width, height in EMUs (914400 EMUs = 1 inch). Alternatively, when instructed, you may provide transform values as relative percentages (0–1); the system will convert them. \n fill: (optional object) with type: ""solid"" and color (hex string). \n outline: (optional object) with color (hex), width (in points, e.g., 1.5), and dashType (""solid"", ""dashed"", ""dotted""). \n text: (optional string) Text inside the shape. \n style: (optional object) Style for the text inside the shape. \n type: ""svg_icon"": \n transform: (object) with x, y, width, height in EMUs. Relative percentages (0–1) are also allowed when instructed. \n svg: (string) The desired SVG Icon by providing the full, raw XML content to construct the icon. Ensure colors are defined within the SVG code. \n Validation requirements: Before emitting your JSON, cross-check that every layoutRelId, layoutId (URI), or layoutName you reference exists in the provided layouts metadata inside <SLIDEDECK>. Do not reference placeholders that are not present in the chosen layout. Prefer using the exact placeholder types (Title, CenteredTitle, SubTitle, Body) described in the metadata. For a title/cover slide, ensure you choose a layout that best matches Title + SubTitle and avoid Body unless required by the provided layouts. \n Important: Output only a single JSON object, without comments or explanation. Use the correct anchor key and layoutRelId from the presentation metadata. Any deviation from this structure will cause processing to fail."
         Const Default_SP_BubblesExcel As String = "You are an expert in analyzing and explaining Excel worksheets to non-experts, you are very exact when reviewing Excel worksheets and are very good in both handling text and formulas. You precisely comply with your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided you between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your comments for a particular cell, follow this exact format for each comment: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For the text of your comment, use '[Comment: text of comment]' (e.g., [Comment: The value of this cell should be 5.32]). Do not use quotation marks for the text of your text of comment. 3. Each comment should start with the ""[Cell: X]"" marker followed by a [Comment: text of comment] in the next line, containg the content of your comment. 4. Ensure that each comment is on a new line. 5. If there is no or no meaninful comment for a cell, leave that part out and do not provide any response for that cell. I do not want you to say that there is no comment; only provide a response where there is a meaningful comment. {INI_PreCorrection}"
         Const Default_SP_Add_Revisions As String = "Where the instruction refers to markups, track-changes, changes, insertions, deletions or revisions in the text, they are found between the tags '<ins>' and '</ins>' for insertions and between the tags '<del>' and '</del>' for deletions. ONLY what is encapsulated by these tags has changed or been marked-up (but do not refer to the tags in your output, as the user does not see them; they just indicate to you where the revisions are)."
@@ -4954,6 +4958,7 @@ Namespace SharedLibrary
                 context.SP_Add_KeepHTMLIntact = If(configDict.ContainsKey("SP_Add_KeepHTMLIntact"), configDict("SP_Add_KeepHTMLIntact"), Default_SP_Add_KeepHTMLIntact)
                 context.SP_Add_KeepInlineIntact = If(configDict.ContainsKey("SP_Add_KeepInlineIntact"), configDict("SP_Add_KeepInlineIntact"), Default_SP_Add_KeepInlineIntact)
                 context.SP_Add_Bubbles = If(configDict.ContainsKey("SP_Add_Bubbles"), configDict("SP_Add_Bubbles"), Default_SP_Add_Bubbles)
+                context.SP_Add_Batch = If(configDict.ContainsKey("SP_Add_Batch"), configDict("SP_Add_Batch"), Default_SP_Add_Batch)
                 context.SP_Add_Slides = If(configDict.ContainsKey("SP_Add_Slides"), configDict("SP_Add_Slides"), Default_SP_Add_Slides)
                 context.SP_BubblesExcel = If(configDict.ContainsKey("SP_BubblesExcel"), configDict("SP_BubblesExcel"), Default_SP_BubblesExcel)
                 context.SP_Add_Revisions = If(configDict.ContainsKey("SP_Add_Revisions"), configDict("SP_Add_Revisions"), Default_SP_Add_Revisions)
@@ -6598,9 +6603,200 @@ Namespace SharedLibrary
             Return result
         End Function
 
-
-
         Public Shared Sub ShowCustomMessageBox(
+    ByVal bodyText As String,
+    Optional header As String = AN,
+    Optional autoCloseSeconds As Integer? = Nothing,
+    Optional Defaulttext As String = " - execution continues meanwhile",
+    Optional SeparateThread As Boolean = False,
+    Optional extraButtonText As String = Nothing,
+    Optional extraButtonAction As System.Action = Nothing,
+    Optional CloseAfterExtra As Boolean = False
+)
+            ' Normalize header and (optionally) truncate very long body
+            If String.IsNullOrWhiteSpace(header) Then header = AN
+            Dim isTruncated As Boolean = False
+            If bodyText.Length > 10000 Then
+                bodyText = bodyText.Substring(0, 10000) & "(...)"
+                isTruncated = True
+            End If
+
+            ' Create and configure form
+            Dim messageForm As New System.Windows.Forms.Form() With {
+        .Opacity = 0,
+        .Text = header,
+        .FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
+        .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .ShowInTaskbar = False,
+        .TopMost = True,
+        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+    }
+
+            ' Icon
+            Dim bmpIcon As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            messageForm.Icon = System.Drawing.Icon.FromHandle(bmpIcon.GetHicon())
+
+            ' Font
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            messageForm.Font = standardFont
+
+            ' Layout container
+            Dim maxLabelWidth As Integer = 500
+            Dim mainFlow As New System.Windows.Forms.FlowLayoutPanel() With {
+        .FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .Padding = New System.Windows.Forms.Padding(20),
+        .MaximumSize = New System.Drawing.Size(maxLabelWidth + 40, 0)
+    }
+
+            ' --- Measure text and build scroll container properly ---
+            Dim maxVisibleHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height \ 2
+
+            ' 1) Measure with intended width (no scrollbar)
+            Dim initialWidth As Integer = maxLabelWidth
+            Dim measuredNoScroll As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(
+        bodyText,
+        standardFont,
+        New System.Drawing.Size(initialWidth, Integer.MaxValue),
+        System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
+    )
+
+            ' 2) Decide if vertical scrolling is needed
+            Dim needScroll As Boolean = (measuredNoScroll.Height > maxVisibleHeight)
+
+            ' 3) If a vertical scrollbar will appear, usable text width shrinks.
+            Dim usableTextWidth As Integer = If(needScroll,
+        initialWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth,
+        initialWidth)
+
+            ' 4) If scrolling is needed, re-measure with reduced width for accurate height
+            Dim measuredFinal As System.Drawing.Size = If(needScroll,
+        System.Windows.Forms.TextRenderer.MeasureText(
+            bodyText,
+            standardFont,
+            New System.Drawing.Size(usableTextWidth, Integer.MaxValue),
+            System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
+        ),
+        measuredNoScroll)
+
+            ' Scrollable (or not) container sized from the final measurement
+            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
+        .AutoScroll = needScroll,
+        .AutoSize = False,
+        .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0),
+        .Padding = New System.Windows.Forms.Padding(0),
+        .Size = New System.Drawing.Size(initialWidth, Math.Min(measuredFinal.Height, maxVisibleHeight))
+    }
+
+            ' Content label sized to the actual usable width
+            Dim bodyLabel As New System.Windows.Forms.Label() With {
+        .Text = bodyText,
+        .Font = standardFont,
+        .AutoSize = True,
+        .MaximumSize = New System.Drawing.Size(usableTextWidth, 0)
+    }
+            bodyScrollPanel.Controls.Add(bodyLabel)
+            mainFlow.Controls.Add(bodyScrollPanel)
+
+            ' OK button and (optional) countdown
+            Dim okButton As New System.Windows.Forms.Button() With {
+        .Text = "OK",
+        .AutoSize = True,
+        .Font = standardFont
+    }
+            Dim countdownLabel As New System.Windows.Forms.Label() With {
+        .Font = standardFont,
+        .AutoSize = True
+    }
+
+            Dim userClicked As Boolean = False
+            AddHandler okButton.Click,
+        Sub()
+            userClicked = True
+            messageForm.Close()
+        End Sub
+
+            ' Bottom button row
+            Dim bottomFlow As New System.Windows.Forms.FlowLayoutPanel() With {
+        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .Margin = New System.Windows.Forms.Padding(0, 20, 0, 0)
+    }
+            bottomFlow.Controls.Add(okButton)
+
+            ' Optional extra button (only when NOT auto-closing)
+            If (Not autoCloseSeconds.HasValue) AndAlso
+       (Not String.IsNullOrEmpty(extraButtonText)) AndAlso
+       (extraButtonAction IsNot Nothing) Then
+
+                Dim extraButton As New System.Windows.Forms.Button() With {
+            .Text = extraButtonText,
+            .AutoSize = True,
+            .Font = standardFont
+        }
+
+                AddHandler extraButton.Click,
+            Sub()
+                Try
+                    extraButtonAction.Invoke()
+                Catch ex As System.Exception
+                    ' Optional: log or handle exception if needed
+                End Try
+                If CloseAfterExtra Then messageForm.Close()
+            End Sub
+
+                bottomFlow.Controls.Add(extraButton)
+            End If
+
+            If autoCloseSeconds.HasValue Then
+                bottomFlow.Controls.Add(countdownLabel)
+            End If
+
+            mainFlow.Controls.Add(bottomFlow)
+            messageForm.Controls.Add(mainFlow)
+
+            ' Auto-close logic and showing the form
+            If autoCloseSeconds.HasValue Then
+                Dim remaining As Integer = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
+                AddHandler t.Tick,
+            Sub()
+                remaining -= 1
+                If remaining > 0 Then
+                    countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Else
+                    t.Stop()
+                    If Not userClicked Then
+                        messageForm.Close()
+                    End If
+                End If
+            End Sub
+                t.Start()
+
+                messageForm.Opacity = 1
+                If SeparateThread Then
+                    messageForm.ShowDialog()
+                Else
+                    messageForm.Show()
+                    System.Windows.Forms.Application.DoEvents()
+                End If
+            Else
+                messageForm.Opacity = 1
+                messageForm.ShowDialog()
+            End If
+        End Sub
+
+
+
+        Public Shared Sub oldShowCustomMessageBox(
                                     ByVal bodyText As String,
                                     Optional header As String = AN,
                                     Optional autoCloseSeconds As Integer? = Nothing,
@@ -6785,7 +6981,7 @@ Namespace SharedLibrary
 
 
 
-        Public Shared Sub oldShowCustomMessageBox(
+        Public Shared Sub veryoldShowCustomMessageBox(
                                     ByVal bodyText As String,
                                     Optional header As String = AN,
                                     Optional autoCloseSeconds As Integer? = Nothing,
@@ -9593,6 +9789,7 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", context.SP_Add_Bubbles},
+                    {"SP_Add_Batch", context.SP_Add_Batch},
                     {"SP_Add_Slides", context.SP_Add_Slides},
                     {"SP_BubblesExcel", context.SP_BubblesExcel},
                     {"SP_Add_Revisions", context.SP_Add_Revisions},
@@ -9640,6 +9837,7 @@ Namespace SharedLibrary
                     {"SP_Add_KeepHTMLIntact", Default_SP_Add_KeepHTMLIntact},
                     {"SP_Add_KeepInlineIntact", Default_SP_Add_KeepInlineIntact},
                     {"SP_Add_Bubbles", Default_SP_Add_Bubbles},
+                    {"SP_Add_Batch", Default_SP_Add_Batch},
                     {"SP_Add_Slides", Default_SP_Add_Slides},
                     {"SP_BubblesExcel", Default_SP_BubblesExcel},
                     {"SP_Add_Revisions", Default_SP_Add_Revisions},
@@ -10132,6 +10330,7 @@ Namespace SharedLibrary
             variableValues.Add("SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact)
             variableValues.Add("SP_Add_KeepInlineIntact", context.SP_Add_KeepInlineIntact)
             variableValues.Add("SP_Add_Bubbles", context.SP_Add_Bubbles)
+            variableValues.Add("SP_Add_Batch", context.SP_Add_Batch)
             variableValues.Add("SP_Add_Slides", context.SP_Add_Slides)
             variableValues.Add("SP_BubblesExcel", context.SP_BubblesExcel)
             variableValues.Add("SP_Add_Revisions", context.SP_Add_Revisions)
@@ -10247,6 +10446,7 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("SP_Add_KeepHTMLIntact") Then context.SP_Add_KeepHTMLIntact = updatedValues("SP_Add_KeepHTMLIntact")
                     If updatedValues.ContainsKey("SP_Add_KeepInlineIntact") Then context.SP_Add_KeepInlineIntact = updatedValues("SP_Add_KeepInlineIntact")
                     If updatedValues.ContainsKey("SP_Add_Bubbles") Then context.SP_Add_Bubbles = updatedValues("SP_Add_Bubbles")
+                    If updatedValues.ContainsKey("SP_Add_Batch") Then context.SP_Add_Batch = updatedValues("SP_Add_Batch")
                     If updatedValues.ContainsKey("SP_Add_Slides") Then context.SP_Add_Slides = updatedValues("SP_Add_Slides")
                     If updatedValues.ContainsKey("SP_BubblesExcel") Then context.SP_BubblesExcel = updatedValues("SP_BubblesExcel")
                     If updatedValues.ContainsKey("SP_Add_Revisions") Then context.SP_Add_Revisions = updatedValues("SP_Add_Revisions")
@@ -11944,7 +12144,177 @@ Namespace SharedLibrary
         End Function
 
 
-        Public Shared Function ReadPdfAsText(ByVal pdfPath As String, Optional ReturnErrorInsteadOfEmpty As Boolean = True) As String
+
+        Public Shared Async Function ReadPdfAsText(ByVal pdfPath As String,
+                                            Optional ByVal ReturnErrorInsteadOfEmpty As Boolean = True,
+                                            Optional ByVal DoOCR As Boolean = False,
+                                            Optional ByVal AskUser As Boolean = True,
+                                            Optional ByVal context As ISharedContext = Nothing) As Task(Of String)
+            Try
+                Dim sb As New System.Text.StringBuilder()
+
+                If Not System.IO.File.Exists(pdfPath) Then
+                    Throw New System.IO.FileNotFoundException("PDF not found.", pdfPath)
+                End If
+
+                Dim pageCount As Integer = 0
+                Dim totalLetters As Integer = 0
+
+                ' Open the PDF document
+                Using document As UglyToad.PdfPig.PdfDocument = UglyToad.PdfPig.PdfDocument.Open(pdfPath)
+                    ' Loop through each page in the document
+                    For Each page In document.GetPages()
+                        pageCount += 1
+
+                        ' Extract text from the page
+                        Dim pageText As String = page.Text
+                        If pageText IsNot Nothing Then
+                            sb.AppendLine(pageText)
+                        End If
+
+                        ' Count letters available in the text layer (used only when DoOCR is True)
+                        If DoOCR Then
+                            Try
+                                totalLetters += page.Letters.Count()
+                            Catch ex As System.Exception
+                                ' Some builds or unusual pages might throw; ignore and keep heuristic conservative.
+                            End Try
+                        End If
+                    Next
+                End Using
+
+                Dim extractedText As String = sb.ToString()
+
+                If DoOCR AndAlso System.String.IsNullOrWhiteSpace(context.INI_APICall_Object) Then DoOCR = False
+
+                ' If DoOCR is disabled → just return whatever text we found (or empty string)
+                If Not DoOCR Then
+                    Return extractedText
+                End If
+
+                ' --- Heuristics only evaluated when DoOCR=True ---
+                Dim shouldSuggestOcr As Boolean = False
+                Dim reasons As New System.Collections.Generic.List(Of String)()
+
+                ' If there's already reasonable text, don't bother with OCR
+                If Not String.IsNullOrWhiteSpace(extractedText) Then
+                    ' Evaluate anyway in case the extracted text looks like garbage
+                    ' → if it's mostly whitespace/control, we still consider OCR.
+                End If
+
+                ' Gather metrics for heuristic evaluation
+                Dim fileLen As Long = New System.IO.FileInfo(pdfPath).Length
+                Dim bytesPerPage As Double = If(pageCount > 0, CDbl(fileLen) / CDbl(pageCount), CDbl(fileLen))
+
+                Dim textLen As Integer = If(extractedText IsNot Nothing, extractedText.Length, 0)
+
+                ' Analyze text quality
+                Dim alphaNumCount As Integer = 0
+                Dim letterCount As Integer = 0
+                Dim whiteCount As Integer = 0
+                Dim controlLikeCount As Integer = 0
+
+                For Each ch As Char In extractedText
+                    If System.Char.IsWhiteSpace(ch) Then
+                        whiteCount += 1
+                    End If
+                    If System.Char.IsLetterOrDigit(ch) Then
+                        alphaNumCount += 1
+                    End If
+                    If System.Char.IsLetter(ch) Then
+                        letterCount += 1
+                    End If
+                    If System.Char.IsControl(ch) AndAlso ch <> Microsoft.VisualBasic.ChrW(10) AndAlso ch <> Microsoft.VisualBasic.ChrW(13) AndAlso ch <> Microsoft.VisualBasic.ChrW(9) Then
+                        controlLikeCount += 1
+                    End If
+                Next
+
+                Dim alphaRatio As Double = If(textLen > 0, CDbl(alphaNumCount) / CDbl(textLen), 0.0)
+                Dim whiteRatio As Double = If(textLen > 0, CDbl(whiteCount) / CDbl(textLen), 1.0)
+                Dim controlRatio As Double = If(textLen > 0, CDbl(controlLikeCount) / CDbl(textLen), 0.0)
+
+                Dim lettersPerPage As Double = If(pageCount > 0, CDbl(totalLetters) / CDbl(pageCount), 0.0)
+
+                ' Threshold constants
+                Const MIN_TEXT_LEN_FOR_CONFIDENCE As Integer = 200
+                Const MIN_LETTERS_PER_PAGE As Double = 15.0
+                Const HIGH_BYTES_PER_PAGE As Double = 90_000
+                Const LOW_ALPHA_RATIO As Double = 0.2
+                Const HIGH_WHITE_RATIO As Double = 0.55
+                Const HIGH_CONTROL_RATIO As Double = 0.02
+                Const MANY_PAGES_FEW_LETTERS_PAGE_THRESHOLD As Integer = 5
+
+                ' Rule A: Empty/near-empty text and large images per page
+                If textLen < MIN_TEXT_LEN_FOR_CONFIDENCE AndAlso bytesPerPage >= HIGH_BYTES_PER_PAGE Then
+                    shouldSuggestOcr = True
+                    reasons.Add($"Low extracted text ({textLen} chars) but large size per page (~{CInt(bytesPerPage)} bytes/page).")
+                End If
+
+                ' Rule B: pdfpig saw very few letters per page
+                If lettersPerPage < MIN_LETTERS_PER_PAGE Then
+                    shouldSuggestOcr = True
+                    reasons.Add($"Very few letters detected by text layer (≈{lettersPerPage:N1} letters/page).")
+                End If
+
+                ' Rule C: Extracted text looks like junk (mostly whitespace/control or very low alpha)
+                If textLen > 0 AndAlso (alphaRatio < LOW_ALPHA_RATIO OrElse whiteRatio > HIGH_WHITE_RATIO OrElse controlRatio > HIGH_CONTROL_RATIO) Then
+                    shouldSuggestOcr = True
+                    reasons.Add($"Extracted text looks low-quality (alphaRatio={alphaRatio:P0}, whitespaceRatio={whiteRatio:P0}, controlRatio={controlRatio:P1}).")
+                End If
+
+                ' Rule D: Many pages but few letters overall
+                If pageCount >= MANY_PAGES_FEW_LETTERS_PAGE_THRESHOLD AndAlso lettersPerPage < MIN_LETTERS_PER_PAGE Then
+                    shouldSuggestOcr = True
+                    reasons.Add($"Many pages ({pageCount}) with very low letters/page (≈{lettersPerPage:N1}).")
+                End If
+
+                ' Log diagnostics if context available
+                Debug.WriteLine($"PDF '{pdfPath}': pages={pageCount}, bytesPerPage≈{CInt(bytesPerPage)}, textLen={textLen}, lettersPerPage≈{lettersPerPage:N1}, alphaRatio={alphaRatio:P0}, whitespaceRatio={whiteRatio:P0}, controlRatio={controlRatio:P1}.")
+                Debug.WriteLine("Heuristics suggest OCR. Reasons: " & String.Join(" | ", reasons))
+
+                ' If heuristics suggest OCR, call the placeholder OCR implementation.
+                If shouldSuggestOcr Then
+                    ' If AskUser=True, prompt the user to confirm OCR
+                    If AskUser Then
+                        Dim msg As String = $"The PDF appears to contain little or no extractable text:" & Environment.NewLine & Environment.NewLine &
+                                                        String.Join(Environment.NewLine, reasons.Select(Function(r) "- " & r)) & Environment.NewLine & Environment.NewLine &
+                                                        "It's likely that the document consists mainly of scanned images." & Environment.NewLine & Environment.NewLine &
+                                                        "Would you like to your primary model to perform OCR to extract text (if supported)?"
+                        Dim userChoice As Integer = ShowCustomYesNoBox(msg, "Yes, try OCR", "No, use what you have")
+                        If userChoice <> 1 Then
+                            Return extractedText
+                        End If
+                    End If
+
+                    Dim ocrText As String = Await PerformOCR(pdfPath, context)
+                    If Not String.IsNullOrWhiteSpace(ocrText) Then
+                        Return ocrText
+                    End If
+                End If
+
+                ' If no OCR triggered or OCR failed, just return the extracted text
+                Return extractedText
+
+            Catch ex As System.Exception
+                Return If(ReturnErrorInsteadOfEmpty, $"Error reading PDF: {ex.Message}", "")
+            End Try
+        End Function
+
+        Private Shared Async Function PerformOCR(ByVal pdfPath As String, context As ISharedContext) As Task(Of String)
+
+            If System.String.IsNullOrWhiteSpace(context.INI_APICall_Object) Then
+                ShowCustomMessageBox($"Your model ({context.INI_Model}) is not configured to process binary objects - aborting OCR.")
+                Return ""
+            End If
+            Dim result As System.String = Await LLM(context, context.SP_InsertClipboard, "", "", "", 0, False, False, "", pdfPath)
+            Return result
+
+        End Function
+
+
+
+
+        Public Shared Function OldReadPdfAsText(ByVal pdfPath As String, Optional ReturnErrorInsteadOfEmpty As Boolean = True, Optional DoOCR As Boolean = False, Optional _context As ISharedContext = Nothing) As String
             Try
                 Dim sb As New StringBuilder()
 

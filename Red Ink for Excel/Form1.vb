@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 31.7.2025
+' 30.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -250,6 +250,18 @@ Public Class frmAIChat
                 OldChat = ""
             End If
 
+            Dim appGuard As Microsoft.Office.Interop.Excel.Application = Globals.ThisAddIn.Application
+            If chkIncludeDocText.Checked Or chkIncludeselection.Checked AndAlso
+                                (appGuard Is Nothing _
+                               OrElse appGuard.Workbooks Is Nothing _
+                               OrElse appGuard.Workbooks.Count = 0 _
+                               OrElse appGuard.ActiveWorkbook Is Nothing _
+                               OrElse appGuard.ActiveSheet Is Nothing) Then
+
+                ShowCustomMessageBox("There is no active Excel worksheet. Please open or activate a workbook, then try again.")
+                Return
+            End If
+
             ' Optionally include Excel worksheet cells or selection
             Dim docText As String = ""
             Dim selectiontext As String = ""
@@ -485,22 +497,6 @@ Public Class frmAIChat
     End Function
 
 
-    Private Function xxxIsSelectionEmpty(selection As Excel.Range) As Boolean
-        If selection.Cells.Count = 1 Then
-            Dim value = selection.Value2
-            Return value Is Nothing OrElse String.IsNullOrWhiteSpace(value.ToString())
-        End If
-
-        ' For multi-cell selections, check if all cells are empty
-        For Each cell As Excel.Range In selection.Cells
-            Dim val = cell.Value2
-            If val IsNot Nothing AndAlso Not String.IsNullOrWhiteSpace(val.ToString()) Then
-                Return False
-            End If
-        Next
-
-        Return True
-    End Function
 
     Private Sub chkIncludeDocText_Click(sender As Object, e As EventArgs)
 

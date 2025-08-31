@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.8.2025
+' 31.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -26,22 +26,23 @@
 
 Option Explicit On
 
-Imports Microsoft.Office.Core
+Imports System.Diagnostics
+Imports System.Drawing
+Imports System.IO
+Imports System.Runtime.InteropServices
+Imports System.Text.RegularExpressions
 Imports System.Threading.Tasks
+Imports System.Web
+Imports System.Windows.Forms
+Imports Microsoft.Office.Core
 Imports Microsoft.Office.Interop
 Imports Microsoft.Office.Interop.Excel
+Imports Microsoft.Office.Tools
+Imports Microsoft.Vbe.Interop
 Imports SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedContext
-Imports System.Text.RegularExpressions
-Imports System.Windows.Forms
-Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
 Imports SharedLibrary.SharedLibrary.SharedMethods
-Imports System.Diagnostics
-Imports System.Runtime.InteropServices
-Imports System.IO
-Imports Microsoft.Vbe.Interop
-Imports Microsoft.Office.Tools
-Imports System.Drawing
+Imports SLib = SharedLibrary.SharedLibrary.SharedMethods
 
 
 Module Module1
@@ -143,7 +144,7 @@ Public Class BridgeSubs
                     Return ReadWordDocument(filePath, ReturnErrorInsteadOfEmpty)
 
                 Case ".pdf"
-                    Return ReadPdfAsText(filePath, ReturnErrorInsteadOfEmpty)
+                    Return ReadPdfAsText(filePath, ReturnErrorInsteadOfEmpty, False, False).Result
 
                 Case Else
                     Return If(ReturnErrorInsteadOfEmpty, "Error: File type not supported (not txt, rtf, doc, docx, pdf, ini, csv, log, json, xml, html or htm)", "")
@@ -205,7 +206,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.240825 Gen2 Beta Test"
+    Public Const Version As String = "V.310825 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -214,6 +215,7 @@ Public Class ThisAddIn
     Private Const ShortenPercent As Integer = 20
     Private Const TextPrefix As String = "TextOnly:"
     Private Const TextPrefix2 As String = "Text:"
+    Private Const BatchPrefix As String = "Batch:"
     Private Const CellByCellPrefix As String = "CellByCell:"
     Private Const CellByCellPrefix2 As String = "CBC:"
     Private Const PurePrefix As String = "Pure:"
@@ -230,6 +232,12 @@ Public Class ThisAddIn
 
     Public Shared DragDropFormLabel As String = ""
     Public Shared DragDropFormFilter As String = ""
+
+    Public Shared allowedExtensions As System.Collections.Generic.HashSet(Of System.String) =
+                        New System.Collections.Generic.HashSet(Of System.String)(
+                            New System.String() {".txt", ".ini", ".csv", ".log", ".json", ".xml", ".html", ".htm", ".rtf", ".doc", ".docx", ".pdf"},
+                            System.StringComparer.OrdinalIgnoreCase
+                        )
 
     ' Definition of the SharedProperties for context for exchanging values with the SharedLibrary
 
@@ -1079,6 +1087,16 @@ Public Class ThisAddIn
             _context.SP_Add_Bubbles = value
         End Set
     End Property
+
+    Public Shared Property SP_Add_Batch As String
+        Get
+            Return _context.SP_Add_Batch
+        End Get
+        Set(value As String)
+            _context.SP_Add_Batch = value
+        End Set
+    End Property
+
 
     Public Shared Property SP_Add_Revisions As String
         Get
@@ -2000,6 +2018,7 @@ Public Class ThisAddIn
     Public ShortenLength As Double
     Public SummaryLength As Integer
     Public OtherPrompt As String = ""
+    Public LineNumber As Integer = 0
     Public Context As String
     Public SysPrompt As String
     Public OldParty, NewParty As String
@@ -2220,6 +2239,8 @@ Public Class ThisAddIn
         Dim DoFileObject As Boolean = False
         Dim DoFileObjectClip As Boolean = False
         Dim DoPane As Boolean = False
+        Dim DoBatch As Boolean = False
+        Dim BatchPath As String = ""
 
         Dim LastPromptInstruct As String = If(String.IsNullOrWhiteSpace(My.Settings.LastPrompt), "", "; Ctrl-P for your last prompt")
         Dim PureInstruct As String = $"; use '{PurePrefix}' for direct prompting"
@@ -2231,6 +2252,7 @@ Public Class ThisAddIn
         Dim DoRange As Boolean = True
         Dim CBCInstruct As String = $"with '{CellByCellPrefix}' or '{CellByCellPrefix2} if the instruction should be executed cell-by-cell"
         Dim TextInstruct As String = $"use '{TextPrefix}' or '{TextPrefix2}' if the instruction should apply cell-by-cell, but only to text cells"
+        Dim BatchInstruct As String = $"use '{BatchPrefix}' if to process a directory of files"
         Dim BubblesInstruct As String = $"use '{BubblesPrefix}' for inserting comments only"
         Dim PaneInstruct As String = $"use '{PanePrefix}' for using the pane"
         Dim ExtInstruct As String = $"; insert '{ExtTrigger}' for text of a file (txt, docx, pdf) or '{ExtWSTrigger}' to add more worksheet(s)"
@@ -2261,9 +2283,9 @@ Public Class ThisAddIn
                         }
 
         If Not NoSelectedCells Then
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {PaneInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & ExtInstruct & AddonInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute on the selected cells (start {CBCInstruct}; {TextInstruct}; {PaneInstruct}; {BatchInstruct}; {BubblesInstruct})" & PromptLibInstruct & PureInstruct & ExtInstruct & AddonInstruct & LastPromptInstruct & ":", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons))
         Else
-            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet); {PaneInstruct}{PureInstruct}{ExtInstruct}{AddonInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons))
+            OtherPrompt = Trim(SLib.ShowCustomInputBox($"Please provide the prompt you wish to execute {PromptLibInstruct} (the result will be shown to you before inserting anything into your worksheet); {PaneInstruct}{BatchInstruct}{PureInstruct}{ExtInstruct}{AddonInstruct}{LastPromptInstruct}:", $"{AN} Freestyle (using " & If(UseSecondAPI, INI_Model_2, INI_Model) & ")", False, "", My.Settings.LastPrompt, OptionalButtons))
             DoRange = True
         End If
 
@@ -2314,6 +2336,114 @@ Public Class ThisAddIn
             DoPane = True
             DoRange = True
         End If
+        If OtherPrompt.StartsWith(BatchPrefix, StringComparison.OrdinalIgnoreCase) Then
+            OtherPrompt = OtherPrompt.Substring(BatchPrefix.Length).Trim()
+            DoPane = False
+            DoRange = True
+            DoBatch = True
+
+
+            Try
+                ' --- Excel context (as requested) ---
+                Dim activeCell As Microsoft.Office.Interop.Excel.Range = Application.ActiveCell
+                Dim ws As Microsoft.Office.Interop.Excel.Worksheet = CType(Application.ActiveSheet, Microsoft.Office.Interop.Excel.Worksheet)
+
+                Dim currentRow As System.Int32 = 1
+                If activeCell IsNot Nothing Then
+                    currentRow = System.Convert.ToInt32(activeCell.Row, System.Globalization.CultureInfo.InvariantCulture)
+                End If
+
+                Dim maxRow As System.Int32 = System.Convert.ToInt32(ws.Rows.Count, System.Globalization.CultureInfo.InvariantCulture)
+
+                ' --- Loop until user provides a valid line number or cancels/ESC ---
+                Dim lineNumberAnswer As System.String = System.String.Empty
+                Do
+                    lineNumberAnswer = ShowCustomInputBox(
+                    "Please provide the starting line number at which the results should be inserted (1 for first line, 2 for second line etc.):", $"{AN} Freestyle Batch",
+                    True,
+                    currentRow.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                )
+
+                    If lineNumberAnswer Is Nothing Then
+                        Return Nothing
+                    End If
+
+                    lineNumberAnswer = lineNumberAnswer.Trim()
+                    If lineNumberAnswer.Length = 0 Then
+                        Return Nothing
+                    End If
+
+                    If System.String.Compare(lineNumberAnswer, "ESC", System.StringComparison.OrdinalIgnoreCase) = 0 Then
+                        Return Nothing
+                    End If
+
+                    Dim parsedRow As System.Int32
+                    If Not System.Int32.TryParse(lineNumberAnswer, parsedRow) OrElse parsedRow < 1 OrElse parsedRow > maxRow Then
+                        ShowCustomMessageBox("The provided value is not a valid line number between 1 and " &
+                                         maxRow.ToString(System.Globalization.CultureInfo.InvariantCulture) & ".")
+                        ' Loop back to input box
+                    Else
+                        LineNumber = parsedRow
+                        Exit Do
+                    End If
+                Loop
+
+                ' --- Directory picker (browse or type) ---
+                Dim initialPath As System.String
+                If (Application.ActiveWorkbook IsNot Nothing) AndAlso
+               (Application.ActiveWorkbook.Path IsNot Nothing) AndAlso
+               (Application.ActiveWorkbook.Path.Length > 0) Then
+                    initialPath = Application.ActiveWorkbook.Path
+                Else
+                    initialPath = System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments)
+                End If
+
+                Using dlg As New System.Windows.Forms.FolderBrowserDialog()
+                    dlg.Description = "Select the directory that contains the batch text files."
+                    dlg.ShowNewFolderButton = False
+                    dlg.SelectedPath = initialPath
+
+                    Dim result As System.Windows.Forms.DialogResult = dlg.ShowDialog()
+                    If result <> System.Windows.Forms.DialogResult.OK Then
+                        Return Nothing
+                    End If
+
+                    Dim selectedPath As System.String = dlg.SelectedPath
+                    If System.String.IsNullOrWhiteSpace(selectedPath) OrElse Not System.IO.Directory.Exists(selectedPath) Then
+                        ShowCustomMessageBox("No directory was selected or it does not exist.")
+                        Return Nothing
+                    End If
+
+                    ' --- Check for expected text file types 
+
+                    Dim hasAny As System.Boolean = False
+
+                    ' Enumerate files and check extensions
+                    For Each filePath As System.String In System.IO.Directory.EnumerateFiles(selectedPath, "*.*", System.IO.SearchOption.TopDirectoryOnly)
+                        Dim ext As System.String = System.IO.Path.GetExtension(filePath)
+                        If allowedExtensions.Contains(ext) Then
+                            hasAny = True
+                            Exit For
+                        End If
+                    Next
+
+                    ' Handle case when no allowed files exist
+                    If Not hasAny Then
+                        ShowCustomMessageBox(
+                                        "The selected directory does not contain any files of the expected types: " &
+                                        System.String.Join(", ", allowedExtensions) & "."
+                                    )
+                        Return Nothing
+                    End If
+
+                    BatchPath = selectedPath
+                End Using
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox("GetLineNumber and Path resulted in an Error: " & ex.Message)
+                Return Nothing
+            End Try
+        End If
         If DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
             OtherPrompt = OtherPrompt.Replace(ObjectTrigger, "(a file object follows)").Trim()
         ElseIf DoFileObject AndAlso OtherPrompt.IndexOf(ObjectTrigger2, StringComparison.OrdinalIgnoreCase) >= 0 Then
@@ -2335,7 +2465,7 @@ Public Class ThisAddIn
         If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
             DragDropFormLabel = ""
             DragDropFormFilter = ""
-            Dim doc As String = GetFileContent()
+            Dim doc As String = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object), True)
             If String.IsNullOrWhiteSpace(doc) Then
                 ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
                 Return False
@@ -2386,12 +2516,12 @@ Public Class ThisAddIn
         Else
             If Not NoSelectedCells Then
                 If DoRange Then
-                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS)
+                    Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS, BatchPath)
                 Else
                     Dim result As Boolean = Await ProcessSelectedRange(SP_FreestyleText, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, DoColor, DoPane, FileObject, InsertWS)
                 End If
             Else
-                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS)
+                Dim result As Boolean = Await ProcessSelectedRange(SP_RangeOfCells, True, DoRange, DoFormulas, DoBubbles, False, UseSecondAPI, 0, True, DoColor, DoPane, FileObject, InsertWS, BatchPath)
             End If
         End If
 
@@ -2414,8 +2544,10 @@ Public Class ThisAddIn
     ' - Optional: DoColor: A boolean value indicating whether to check for color codes
     ' - Optional: DoPane: A boolean value indicating whether the output should go into the pane
     ' - Optional: FileObject: The name of the file (or clipboard) where to get an object to include in the LLM call
+    ' - Optional: InsertWS: The text representation of additional worksheets to be included in the prompt
+    ' - Optional: BatchFilePath: The path to a directory containing files to be processed in batch mode
 
-    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False, Optional DoPane As Boolean = False, Optional FileObject As String = "", Optional InsertWS As String = "") As Task(Of Boolean)
+    Private Async Function ProcessSelectedRange(ByVal SysCommand As String, CheckMaxToken As Boolean, DoRange As Boolean, DoFormulas As Boolean, DoBubbles As Boolean, SelectionMandatory As Boolean, ByVal UseSecondAPI As Boolean, Optional ShortenPercentValue As Integer = 0, Optional Freestyle As Boolean = False, Optional DoColor As Boolean = False, Optional DoPane As Boolean = False, Optional FileObject As String = "", Optional InsertWS As String = "", Optional BatchFilePath As String = "") As Task(Of Boolean)
 
         Dim excelApp As Excel.Application = CType(Runtime.InteropServices.Marshal.GetActiveObject("Excel.Application"), Excel.Application)
 
@@ -2476,7 +2608,7 @@ Public Class ThisAddIn
 
         End If
 
-        If Not DoShorten Then SysCommand = InterpolateAtRuntime(SysCommand)
+        If Not DoShorten And BatchFilePath = "" Then SysCommand = InterpolateAtRuntime(SysCommand)
 
         If DoBubbles Then SysCommand = InterpolateAtRuntime(SP_BubblesExcel)
 
@@ -2643,55 +2775,175 @@ Public Class ThisAddIn
                     RangeToInsert = "Currently active Worksheet: <RANGEOFCELLS>" & SelectedText & "</RANGEOFCELLS>  " & InsertWS
                 End If
 
-                Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, RangeToInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+                If BatchFilePath = "" Then
 
-                If InsertWS = "" Then
-                    LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
-                Else
-                    LLMResult = Regex.Replace(LLMResult, "</?RANGEOFCELLS\d*>", "", RegexOptions.IgnoreCase)
-                End If
+                    Dim LLMResult As String = Await LLM(SysCommand, If(NoSelectedCells, SelectedText, RangeToInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
 
-                OtherPrompt = ""
-
-                If Not String.IsNullOrEmpty(LLMResult) Then
-                    LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
-                End If
-
-                Dim instructions As New List(Of String)
-                instructions = ParseLLMResponse(LLMResult)
-
-                If instructions.Count > 0 Then
-
-                    If DoPane Then
-                        SP_MergePrompt_Cached = ""
-                        ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                    If InsertWS = "" Then
+                        LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
                     Else
-                        Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} insert the square backets into your worksheet, where possible?", AN, True, False, False, True)
+                        LLMResult = Regex.Replace(LLMResult, "</?RANGEOFCELLS\d*>", "", RegexOptions.IgnoreCase)
+                    End If
 
-                        ' Handle the user's response
-                        If FinalText = "Pane" Then
+                    OtherPrompt = ""
+
+                    If Not String.IsNullOrEmpty(LLMResult) Then
+                        LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
+                    End If
+
+                    Dim instructions As New List(Of String)
+                    instructions = ParseLLMResponse(LLMResult)
+
+                    If instructions.Count > 0 Then
+
+                        If DoPane Then
                             SP_MergePrompt_Cached = ""
                             ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
-                        ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
-                            instructions = ParseLLMResponse(FinalText)
-                            ApplyLLMInstructions(instructions, DoBubbles)
-                            PutInClipboard(FinalText)
-                            ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+                        Else
+                            Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} insert the square backets into your worksheet, where possible?", AN, True, False, False, True)
+
+                            ' Handle the user's response
+                            If FinalText = "Pane" Then
+                                SP_MergePrompt_Cached = ""
+                                ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                            ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
+                                instructions = ParseLLMResponse(FinalText)
+                                ApplyLLMInstructions(instructions, DoBubbles)
+                                PutInClipboard(FinalText)
+                                ShowCustomMessageBox("Implementation of the instructions completed (to the extent possible). They are also in the clipboard.")
+                            End If
+                        End If
+                    Else
+                        If DoPane Then
+                            SP_MergePrompt_Cached = ""
+                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
+                        Else
+                            Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "If you chose OK, it will be put in the clipboard.", AN)
+                            If FinalText = "Pane" Then
+                                SP_MergePrompt_Cached = ""
+                                ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
+                            ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
+                                PutInClipboard(FinalText)
+                            End If
                         End If
                     End If
                 Else
-                    If DoPane Then
-                        SP_MergePrompt_Cached = ""
-                        ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
-                    Else
-                        Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, "If you chose OK, it will be put in the clipboard.", AN)
-                        If FinalText = "Pane" Then
-                            SP_MergePrompt_Cached = ""
-                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, "Choose to copy your edited or original text to clipboard. You can also copy & paste from the pane.", AN, False, True)
-                        ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
-                            PutInClipboard(FinalText)
+
+                    Dim FileContentString As String = ""
+                    Dim TempSysCommand As String = ""
+
+                    ' Collect eligible files first (to know the maximum)
+                    Dim eligibleFiles As New System.Collections.Generic.List(Of System.String)()
+                    Dim DoOCR As Boolean = False
+                    Dim HasPDF As Boolean = False
+
+                    Try
+                        If Not System.String.IsNullOrWhiteSpace(BatchFilePath) AndAlso System.IO.Directory.Exists(BatchFilePath) Then
+                            For Each filePath As System.String In System.IO.Directory.EnumerateFiles(BatchFilePath, "*.*", System.IO.SearchOption.TopDirectoryOnly)
+                                Dim ext As System.String = System.IO.Path.GetExtension(filePath)
+                                If allowedExtensions.Contains(ext) Then
+                                    eligibleFiles.Add(filePath)
+                                    If String.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase) Then
+                                        HasPDF = True
+                                    End If
+                                End If
+                            Next
+                        Else
+                            ' Directory not available; nothing to process
+                            eligibleFiles.Clear()
+                        End If
+                    Catch ex As System.Exception
+                        ' If directory enumeration itself fails, proceed with empty list
+                        eligibleFiles.Clear()
+                    End Try
+
+                    If HasPDF Then
+                        If Not String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                            Dim answer As Integer = ShowCustomYesNoBox("The selected directory contains PDF files. Do you want to use your main model's OCR capabilities (if any) to extract text from PDFs that do not appear to contain searchable text?", "Yes, use OCR as needed", "No, do it without OCR")
+                            If answer = 1 Then
+                                DoOCR = True
+                            ElseIf answer <> 2 Then
+                                Return Nothing
+                            End If
+                        Else
+                            Dim Answer = ShowCustomYesNoBox("The selected directory contains PDF files. However, you have not configured a model that can do OCR. Therefore, only searchable text can be extracted from the PDFs. Continue anyway?", "Yes, continue", "No, abort")
+                            If Answer <> 1 Then
+                                Return Nothing
+                            End If
                         End If
                     End If
+
+                        ' Progress values
+                        Dim MaxEligibleFiles As System.Int32 = eligibleFiles.Count
+                    Dim FileCounter As System.Int32 = 0
+
+                    ShowProgressBarInSeparateThread($"{AN} Freestyle Batch", "Starting file processing...")
+                    ProgressBarModule.CancelOperation = False
+                    GlobalProgressValue = 0
+                    GlobalProgressMax = MaxEligibleFiles
+
+                    ' Main processing loop
+                    For Each filePath As System.String In eligibleFiles
+                        FileCounter += 1
+
+                        If ProgressBarModule.CancelOperation Then
+                            ShowCustomMessageBox("Batch processing cancelled by user.")
+                            Exit For
+                        End If
+
+                        ' Update the current progress value and status label.
+                        GlobalProgressValue = FileCounter
+                        GlobalProgressLabel = $"Processing {FileCounter} of {MaxEligibleFiles} files..."
+
+                        Try
+                            If Not System.IO.File.Exists(filePath) Then
+                                FileContentString = "Error: File not found: " & filePath
+                                Continue For
+                            End If
+
+                            ' Your provided content loader
+                            FileContentString = Await GetFileContent(filePath, True, DoOCR, False)
+
+                        Catch ex As System.Exception
+                            ' Do not throw; continue with next file
+                            FileContentString = "File Error: " & ex.Message
+                            ' Optionally log: ex.ToString()
+                        End Try
+
+                        TempSysCommand = InterpolateAtRuntime(SysCommand & " " & SP_Add_Batch)
+
+                        Debug.WriteLine(TempSysCommand)
+
+                        Dim LLMResult As String = Await LLM(TempSysCommand, $"File = '{System.IO.Path.GetFileName(filePath)}' <FILECONTENT>" & FileContentString & "</FILECONTENT>" & vbCrLf & "Other input to consider (if any): " & If(NoSelectedCells, SelectedText, RangeToInsert), "", "", 0, UseSecondAPI, False, OtherPrompt, FileObject)
+
+                        If InsertWS = "" Then
+                            LLMResult = LLMResult.Replace("<RANGEOFCELLS>", "").Replace("</RANGEOFCELLS>", "")
+                        Else
+                            LLMResult = Regex.Replace(LLMResult, "</?RANGEOFCELLS\d*>", "", RegexOptions.IgnoreCase)
+                        End If
+
+                        LLMResult = LLMResult.Replace("<FILECONTENT>", "").Replace("</FILECONTENT>", "")
+
+                        If Not String.IsNullOrEmpty(LLMResult) Then
+                            LLMResult = Await PostCorrection(LLMResult, UseSecondAPI)
+                        End If
+
+                        Dim instructions As New List(Of String)
+                        instructions = ParseLLMResponse(LLMResult)
+
+                        If instructions.Count > 0 Then
+                            ApplyLLMInstructions(instructions, DoBubbles)
+                        End If
+
+                        LineNumber += 1
+
+                    Next
+
+                    If Not ProgressBarModule.CancelOperation Then
+                        ProgressBarModule.CancelOperation = True
+                        ShowCustomMessageBox($"Batch processing completed (processed {FileCounter} files).")
+                    End If
+
                 End If
 
             Catch ex As Exception
@@ -3132,7 +3384,7 @@ Public Class ThisAddIn
 
 
 
-    Public Function GetFileContent(Optional ByVal optionalFilePath As String = Nothing, Optional Silent As Boolean = False) As String
+    Public Async Function GetFileContent(Optional ByVal optionalFilePath As String = Nothing, Optional Silent As Boolean = False, Optional DoOCR As Boolean = False, Optional AskUser As Boolean = True) As Task(Of String)
         Dim filePath As String = ""
         Try
 
@@ -3169,7 +3421,7 @@ Public Class ThisAddIn
                     Case ".doc", ".docx"
                         FromFile = ReadWordDocument(filePath)
                     Case ".pdf"
-                        FromFile = ReadPdfAsText(filePath)
+                        FromFile = Await ReadPdfAsText(filePath, True, DoOCR, AskUser, _context)
                     Case Else
                         FromFile = "Error: File type not supported."
                 End Select
@@ -3218,6 +3470,8 @@ Public Class ThisAddIn
 
         Return instructions
     End Function
+
+
     Sub ApplyLLMInstructions(ByVal instructions As List(Of String), DoAlsoBubbles As Boolean)
 
         Dim instruction As String
@@ -3241,30 +3495,41 @@ Public Class ThisAddIn
 
         Debug.WriteLine("Instructions: " & String.Join(Environment.NewLine, instructions))
 
-        ' Loop through the parsed instructions and ask for confirmation before applying
-        For Each instruction In instructions
+        Dim prevAutoFillFormulasInLists As Boolean = excelApp.AutoCorrect.AutoFillFormulasInLists
+        Dim prevAutoExpandListRange As Boolean = excelApp.AutoCorrect.AutoExpandListRange
+        Dim prevEnableAutoComplete As Boolean = excelApp.EnableAutoComplete
+        Dim prevExtendList As Boolean = excelApp.ExtendList
 
-            If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then Exit For
-            If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then Exit For
+        excelApp.AutoCorrect.AutoFillFormulasInLists = False
+        excelApp.AutoCorrect.AutoExpandListRange = False
+        excelApp.EnableAutoComplete = False
+        excelApp.ExtendList = False
 
-            cellAddress = GetCellFromInstruction(instruction)
-            formulaOrValue = GetFormulaOrValueFromInstruction(instruction)
+        Try
+            ' Loop through the parsed instructions and ask for confirmation before applying
+            For Each instruction In instructions
 
-            'If Not String.IsNullOrWhiteSpace(cellAddress) AndAlso Not String.IsNullOrWhiteSpace(formulaOrValue) Then
-            If Not String.IsNullOrWhiteSpace(cellAddress) Then
-                ii += 1
-                Debug.WriteLine($"Processing: Cell='{cellAddress}', Value='{formulaOrValue}'")
+                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then Exit For
+                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then Exit For
 
-                Try
-                    If activeSheet IsNot Nothing AndAlso activeSheet.Range(cellAddress) IsNot Nothing Then
-                        Dim targetRange As Range
-                        Try
-                            ' Ensure the address is valid before accessing it
-                            If Regex.IsMatch(cellAddress, "^[A-Z]+\d+$") Then
-                                targetRange = activeSheet.Range(cellAddress)
+                cellAddress = GetCellFromInstruction(instruction)
+                formulaOrValue = GetFormulaOrValueFromInstruction(instruction)
 
-                                ' Store the state BEFORE any changes
-                                Dim state As New CellState With {
+                'If Not String.IsNullOrWhiteSpace(cellAddress) AndAlso Not String.IsNullOrWhiteSpace(formulaOrValue) Then
+                If Not String.IsNullOrWhiteSpace(cellAddress) Then
+                    ii += 1
+                    Debug.WriteLine($"Processing: Cell='{cellAddress}', Value='{formulaOrValue}'")
+
+                    Try
+                        If activeSheet IsNot Nothing AndAlso activeSheet.Range(cellAddress) IsNot Nothing Then
+                            Dim targetRange As Range
+                            Try
+                                ' Ensure the address is valid before accessing it
+                                If Regex.IsMatch(cellAddress, "^[A-Z]+\d+$") Then
+                                    targetRange = activeSheet.Range(cellAddress)
+
+                                    ' Store the state BEFORE any changes
+                                    Dim state As New CellState With {
                                         .WorksheetName = targetRange.Worksheet.Name,
                                         .CellAddress = targetRange.Address,
                                         .OldValue = targetRange.Value,
@@ -3272,75 +3537,83 @@ Public Class ThisAddIn
                                         .OldFormula = If(targetRange.HasFormula, targetRange.Formula, "")
                                     }
 
-                                ' Handle merged cells properly
-                                If targetRange.MergeCells Then
-                                    targetRange = targetRange.MergeArea.Cells(1, 1)
-                                End If
+                                    ' Handle merged cells properly
+                                    If targetRange.MergeCells Then
+                                        targetRange = targetRange.MergeArea.Cells(1, 1)
+                                    End If
 
-                                ' Add the state to undoStates - do this BEFORE making changes
-                                undoStates.Add(state)
+                                    ' Add the state to undoStates - do this BEFORE making changes
+                                    undoStates.Add(state)
 
-                                ' Handle merged cells properly
-                                If targetRange.MergeCells Then
-                                    targetRange = targetRange.MergeArea.Cells(1, 1)
-                                End If
+                                    ' Handle merged cells properly
+                                    If targetRange.MergeCells Then
+                                        targetRange = targetRange.MergeArea.Cells(1, 1)
+                                    End If
 
 
-                                If DoAlsoBubbles And formulaOrValue.StartsWith($"{AN5}: ") Then
+                                    If DoAlsoBubbles And formulaOrValue.StartsWith($"{AN5}: ") Then
 
-                                    ' Add a comment to the cell
-                                    Dim commentText As String = formulaOrValue.Trim()
-                                    If commentText <> $"{AN5}: " Then
-                                        If targetRange.CommentThreaded Is Nothing Then
-                                            targetRange.AddCommentThreaded(Text:=$"{commentText}")
-                                        Else
-                                            targetRange.CommentThreaded.AddReply(Text:=$"{commentText}")
+                                        ' Add a comment to the cell
+                                        Dim commentText As String = formulaOrValue.Trim()
+                                        If commentText <> $"{AN5}: " Then
+                                            If targetRange.CommentThreaded Is Nothing Then
+                                                targetRange.AddCommentThreaded(Text:=$"{commentText}")
+                                            Else
+                                                targetRange.CommentThreaded.AddReply(Text:=$"{commentText}")
+                                            End If
                                         End If
-                                    End If
 
-                                ElseIf formulaOrValue.StartsWith("=") Then
+                                    ElseIf formulaOrValue.StartsWith("=") Then
 
-                                    ' Fix cell format issues
-                                    targetRange.Value = ""
-                                    targetRange.NumberFormat = "General"
+                                        ' Fix cell format issues
+                                        targetRange.Value = ""
+                                        targetRange.NumberFormat = "General"
 
-                                    SetFormulaSafe(targetRange, formulaOrValue, excelApp)
+                                        SetFormulaSafe(targetRange, formulaOrValue, excelApp)
 
-                                Else
-
-                                    ' Assign values properly
-                                    If IsNumeric(formulaOrValue) Then
-                                        targetRange.Value = formulaOrValue
                                     Else
-                                        ' Remove unwanted apostrophes
-                                        cleanedValue = CStr(formulaOrValue).Trim("'"c)
-                                        targetRange.NumberFormat = "@"
-                                        targetRange.Value = cleanedValue
-                                    End If
 
+                                        ' Assign values properly
+                                        If IsNumeric(formulaOrValue) Then
+                                            targetRange.Value = formulaOrValue
+                                        Else
+                                            ' Remove unwanted apostrophes
+                                            cleanedValue = CStr(formulaOrValue).Trim("'"c)
+                                            targetRange.NumberFormat = "@"
+                                            targetRange.Value = cleanedValue
+                                        End If
+
+                                    End If
+                                Else
+                                    Debug.WriteLine($"Invalid cell address: {cellAddress}")
                                 End If
-                            Else
-                                Debug.WriteLine($"Invalid cell address: {cellAddress}")
-                            End If
-                        Catch ex As Exception
-                            If ex.Message.Contains("HRESULT: 0x800A03EC") Then
-                                ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
-                            Else
-                                ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                            End If
-                        End Try
-                    Else
-                        Debug.WriteLine($"Invalid or missing cell address: {cellAddress}")
-                    End If
-                Catch ex As Exception
-                    If ex.Message.Contains("HRESULT: 0x800A03EC") Then
-                        ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
-                    Else
-                        ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
-                    End If
-                End Try
-            End If
-        Next
+                            Catch ex As Exception
+                                If ex.Message.Contains("HRESULT: 0x800A03EC") Then
+                                    ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
+                                Else
+                                    ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
+                                End If
+                            End Try
+                        Else
+                            Debug.WriteLine($"Invalid or missing cell address: {cellAddress}")
+                        End If
+                    Catch ex As Exception
+                        If ex.Message.Contains("HRESULT: 0x800A03EC") Then
+                            ShowCustomMessageBox($"Error: Excel rejected the formula '{formulaOrValue}' that {AN} tried to assign to the cell {cellAddress}.")
+                        Else
+                            ShowCustomMessageBox($"An error occurred when trying to insert the formula '{formulaOrValue}' in cell {cellAddress}: {ex.Message}")
+                        End If
+                    End Try
+                End If
+            Next
+
+        Finally
+            ' --- Always restore Excel settings, even if the loop exits early or errors ---
+            excelApp.AutoCorrect.AutoFillFormulasInLists = prevAutoFillFormulasInLists
+            excelApp.AutoCorrect.AutoExpandListRange = prevAutoExpandListRange
+            excelApp.EnableAutoComplete = prevEnableAutoComplete
+            excelApp.ExtendList = prevExtendList
+        End Try
         splash.Close()
 
     End Sub

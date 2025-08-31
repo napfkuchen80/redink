@@ -56,11 +56,12 @@ Public Class DragDropForm
 
             If Globals.ThisAddIn.DragDropFormFilter = "" Then
 
-                ofd.Filter = "Supported Files|*.txt;*.rtf;*.doc;*.docx;*.pdf;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm||" &
+                ofd.Filter = "Supported Files|*.txt;*.rtf;*.doc;*.docx;*.pdf;*.pptx;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm||" &
                              "Text Files (*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm|" &
                              "Rich Text Files (*.rtf)|*.rtf|" &
                              "Word Documents (*.doc;*.docx)|*.doc;*.docx|" &
-                             "PDF Files (*.pdf)|*.pdf"
+                             "PDF Files (*.pdf)|*.pdf|" &
+                             "Powerpoint Files (*.pptx)|*.pptx"
 
             Else
 

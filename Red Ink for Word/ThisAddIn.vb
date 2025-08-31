@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 24.8.2025
+' 31.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -872,7 +872,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.240825 Gen2 Beta Test"
+    Public Const Version As String = "V.310825 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -1924,6 +1924,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Add_Bubbles = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Add_Batch As String
+        Get
+            Return _context.SP_Add_Batch
+        End Get
+        Set(value As String)
+            _context.SP_Add_Batch = value
         End Set
     End Property
 
@@ -3167,6 +3176,8 @@ Public Class ThisAddIn
     End Sub
 
 
+
+
     Friend NotInheritable Class WordUndoScope
         Implements System.IDisposable
 
@@ -3347,7 +3358,40 @@ Public Class ThisAddIn
     End Sub
     Public Async Sub Explain()
         If INILoadFail() Then Return
-        Dim result As String = Await ProcessSelectedText(InterpolateAtRuntime(SP_Explain), True, INI_KeepFormat2, INI_KeepParaFormatInline, INI_ReplaceText2, INI_DoMarkupWord, INI_MarkupMethodWord, True, False, True, False, INI_KeepFormatCap, NoFormatAndFieldSaving:=Not INI_ReplaceText2)
+
+        Try
+            Dim app As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
+            Dim doc As Microsoft.Office.Interop.Word.Document = app.ActiveDocument
+            If doc Is Nothing Then Return
+
+            Dim sel As Microsoft.Office.Interop.Word.Selection = app.Selection
+            If sel Is Nothing Then Return
+
+            Dim rng As Microsoft.Office.Interop.Word.Range = sel.Range
+            ' No selection -> select the entire document content
+            If rng Is Nothing OrElse rng.Start = rng.End Then
+                doc.Content.Select()
+            End If
+
+            Dim result As System.String = Await ProcessSelectedText(
+            InterpolateAtRuntime(SP_Explain),
+            True,
+            INI_KeepFormat2,
+            INI_KeepParaFormatInline,
+            INI_ReplaceText2,
+            INI_DoMarkupWord,
+            INI_MarkupMethodWord,
+            True,
+            False,
+            True,
+            False,
+            INI_KeepFormatCap,
+            NoFormatAndFieldSaving:=Not INI_ReplaceText2
+        )
+
+        Catch ex As System.Exception
+            ' 
+        End Try
     End Sub
     Public Async Sub SuggestTitles()
         If INILoadFail() Then Return
@@ -3595,7 +3639,7 @@ Public Class ThisAddIn
                 Case ".doc", ".docx"
                     FromFile = ReadWordDocument(FilePath, True)
                 Case ".pdf"
-                    FromFile = ReadPdfAsText(FilePath, True)
+                    FromFile = Await ReadPdfAsText(FilePath, True, False, False, _context)
                 Case ".pptx"
                     FromFile = "pptx"
                 Case Else
@@ -4897,7 +4941,7 @@ Public Class ThisAddIn
             If Not String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
                 DragDropFormLabel = ""
                 DragDropFormFilter = ""
-                doc = GetFileContent()
+                doc = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object))
                 If String.IsNullOrWhiteSpace(doc) Then
                     ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
                     Return
@@ -10672,8 +10716,104 @@ Public Class ThisAddIn
 
     End Function
 
-
     Private Sub ReplaceWithinRange(
+    ByVal rng As Microsoft.Office.Interop.Word.Range,
+    ByVal configureFind As System.Action(Of Microsoft.Office.Interop.Word.Find),
+    ByVal replacementText As System.String,
+    ByVal tweakReplacement As System.Action(Of Microsoft.Office.Interop.Word.Font))
+
+        Dim doc As Microsoft.Office.Interop.Word.Document = rng.Document
+
+        ' Ursprungsgrenzen merken
+        Dim originalStart As System.Int32 = rng.Start
+        Dim originalEnd As System.Int32 = rng.End
+        Dim currentPosition As System.Int32 = originalStart
+
+        ' Wir arbeiten ohne Undo: Statt ReplaceOne -> erst Find (ohne Ersetzung), dann InsertBefore/After("**")
+        Do
+            ' 1) Suche vom aktuellen Punkt bis zum (dynamischen) Endpunkt
+            Dim searchRange As Microsoft.Office.Interop.Word.Range = doc.Range(currentPosition, originalEnd)
+            Dim f As Microsoft.Office.Interop.Word.Find = searchRange.Find
+
+            System.Diagnostics.Debug.WriteLine($"Searchrange = '{searchRange.Text}'")
+
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+
+            ' Suchkriterien vom Aufrufer (z. B. f.Font.Bold = -1)
+            configureFind(f)
+
+            f.Forward = True
+            f.Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+            f.Format = True
+
+            ' 2) Nur finden – KEINE Ersetzung ausführen
+            If Not f.Execute(Replace:=Microsoft.Office.Interop.Word.WdReplace.wdReplaceNone) Then
+                Exit Do ' Keine weiteren Treffer
+            End If
+
+            ' Nach erfolgreichem Execute zeigt searchRange jetzt GENAU auf den gefundenen Bereich.
+            Dim foundStart As System.Int32 = searchRange.Start
+            Dim foundEnd As System.Int32 = searchRange.End
+
+            ' 3) Replacement-Vorschau: wir fügen "**" + found + "**" ein (gesamt +4 Zeichen)
+            '    Prüfen, ob das über die erlaubte Grenze hinausginge.
+            Dim projectedEnd As System.Int32 = foundEnd + 4 ' zwei Sterne davor + zwei danach
+            If projectedEnd > originalEnd Then
+                System.Diagnostics.Debug.WriteLine("Went too far! (no-undo rollback)")
+                ' Kein Undo: Wir brechen ab, OHNE Änderungen vorzunehmen
+                Exit Do
+            End If
+
+            ' 4) Tweaks fürs Replacement-Format (hier: nur aus Höflichkeit, wir ändern ja nur Text um den Fund herum)
+            tweakReplacement(searchRange.Font)
+
+            ' 5) Tatsächliche Einfügung – bewahrt die Formatierung des gefundenen Textes
+            '    Reihenfolge: zuerst die führenden Sterne, dann die nachfolgenden.
+            '    Wichtig: searchRange verweist weiterhin auf den ursprünglichen Fund.
+            searchRange.InsertBefore("**")
+            searchRange.InsertAfter("**")
+
+            ' 6) Sicherheitscheck – falls der Einfügevorgang doch zu weit gegangen wäre (z. B. durch unerwartete Offsets),
+            '    entfernen wir GENAU die eingefügten Sternchen manuell (ohne Undo).
+            '    Wir verwenden die VOR der Einfügung gemerkten foundStart/foundEnd.
+            Dim actuallyTooFar As System.Boolean = (foundEnd + 4) > originalEnd
+            If actuallyTooFar Then
+                System.Diagnostics.Debug.WriteLine("Went too far after insert! (manual revert, no undo)")
+
+                ' Zuerst die nachfolgenden "**" entfernen (damit sich Indizes davor nicht verschieben)
+                Dim trailingAsterisks As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundEnd + 2, End:=foundEnd + 4)
+                trailingAsterisks.Text = System.String.Empty
+
+                ' Dann die führenden "**" entfernen
+                Dim leadingAsterisks As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=foundStart + 2)
+                leadingAsterisks.Text = System.String.Empty
+
+                Exit Do
+            End If
+
+            ' 7) Fortschritt updaten:
+            '    - Der ersetzte Block ist jetzt um 4 Zeichen länger.
+            '    - Nächste Suche startet hinter dem eingefassten Bereich.
+            currentPosition = foundEnd + 4
+
+            ' 8) Das Arbeitsende wächst mit (falls rng erweitert wurde). Wir lesen es dynamisch aus.
+            originalEnd = rng.End
+
+            ' Debug nach Änderung
+            Dim debugRange As Microsoft.Office.Interop.Word.Range = doc.Range(foundStart, currentPosition)
+            System.Diagnostics.Debug.WriteLine($"Searchrange = '{debugRange.Text}' (after change)")
+
+        Loop While currentPosition < originalEnd
+
+        ' Finale Anpassung des Eingangsbereichs
+        rng.SetRange(originalStart, originalEnd)
+    End Sub
+
+
+
+
+    Private Sub OldReplaceWithinRange(
     ByVal rng As Word.Range,
     ByVal configureFind As Action(Of Word.Find),
     ByVal replacementText As String,
@@ -10723,46 +10863,6 @@ Public Class ThisAddIn
 
         ' Update the original range to reflect the final processed area
         rng.SetRange(originalStart, originalEnd)
-    End Sub
-
-
-    Private Sub oldReplaceWithinRange(
-        ByVal rng As Word.Range,
-        ByVal configureFind As Action(Of Word.Find),
-        ByVal replacementText As String,
-        ByVal tweakReplacement As Action(Of Word.Font))
-
-        Dim doc As Word.Document = rng.Document
-        Dim startPos As Long = rng.Start
-        Dim limitPos As Long = rng.End
-        Dim cursor As Long = startPos
-
-        Do
-            Dim win As Word.Range = doc.Range(Start:=cursor, End:=limitPos)
-            Dim f As Word.Find = win.Find
-            Debug.WriteLine("Range: " & win.Text)
-
-            f.ClearFormatting()
-            f.Replacement.ClearFormatting()
-
-            configureFind(f)                 ' Suchformat & -Text
-            f.Replacement.Text = replacementText
-            tweakReplacement(f.Replacement.Font)  ' nur gewünschtes Attribut zurücksetzen
-
-            f.Forward = True
-            f.Wrap = Word.WdFindWrap.wdFindStop
-            f.Format = True
-
-            If Not f.Execute(Replace:=Word.WdReplace.wdReplaceOne) Then Exit Do
-
-            ' falls Ersatz über Limit hinausging → rückgängig & abbrechen
-            If win.End > limitPos Then
-                Debug.WriteLine("Went too far!")
-                doc.Undo() : Exit Do
-            End If
-
-            cursor = win.End                 ' weiter hinter dem letzten Treffer
-        Loop
     End Sub
 
 
@@ -10944,9 +11044,9 @@ Public Class ThisAddIn
 
     ' Word Helper Functions
 
-    Public Sub ImportTextFile()
+    Public Async Sub ImportTextFile()
         Dim sel As Word.Range = Globals.ThisAddIn.Application.Selection.Range
-        Dim Doc = GetFileContent()
+        Dim Doc = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object))
         sel.Collapse(Direction:=Word.WdCollapseDirection.wdCollapseEnd)
         sel.Text = Doc
         'sel.End = sel.Start + Doc.Length
@@ -12470,7 +12570,9 @@ Public Class ThisAddIn
 
         Return resultKey
     End Function
-    Public Function GetFileContent(Optional ByVal optionalFilePath As String = Nothing, Optional Silent As Boolean = False) As String
+
+
+    Public Async Function GetFileContent(Optional ByVal optionalFilePath As String = Nothing, Optional Silent As Boolean = False, Optional DoOCR As Boolean = False, Optional AskUser As Boolean = True) As Task(Of String)
         Dim filePath As String = ""
         Try
 
@@ -12507,7 +12609,9 @@ Public Class ThisAddIn
                     Case ".doc", ".docx"
                         FromFile = ReadWordDocument(filePath)
                     Case ".pdf"
-                        FromFile = ReadPdfAsText(filePath)
+                        FromFile = Await ReadPdfAsText(filePath, True, DoOCR, AskUser, _context)
+                    Case ".pptx"
+                        FromFile = GetPresentationJson(filePath)
                     Case Else
                         FromFile = "Error: File type not supported."
                 End Select

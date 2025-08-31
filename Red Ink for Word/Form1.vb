@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 14.7.2025
+' 30.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -235,6 +235,18 @@ Public Class frmAIChat
             If Not String.IsNullOrWhiteSpace(OldChat) Then
                 conversationSoFar += "\n" & OldChat
                 OldChat = ""
+            End If
+
+            Dim appGuard As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
+            If (chkIncludeDocText.Checked Or chkIncludeselection.Checked) AndAlso
+           (appGuard Is Nothing _
+            OrElse appGuard.Documents Is Nothing _
+            OrElse appGuard.Documents.Count = 0 _
+            OrElse appGuard.ActiveDocument Is Nothing _
+            OrElse appGuard.ActiveWindow Is Nothing) Then
+
+                ShowCustomMessageBox("There is no active Word document. Please open or activate a document, then try again.")
+                Return
             End If
 
             ' Optionally include Word document text or selection

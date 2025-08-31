@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 27.8.2025
+' 31.8.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -137,7 +137,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.270825 Gen2 Beta Test"
+    Public Const Version As String = "V.310825 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1027,6 +1027,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Add_Bubbles = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Add_Batch As String
+        Get
+            Return _context.SP_Add_Batch
+        End Get
+        Set(value As String)
+            _context.SP_Add_Batch = value
         End Set
     End Property
 
@@ -2373,7 +2382,68 @@ Public Class ThisAddIn
     End Sub
 
 
-    Private Async Sub InsertClipboard()
+    Private Async Function InsertClipboard() As System.Threading.Tasks.Task
+        Try
+            ' 1) Configure check
+            If System.String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                SLib.ShowCustomMessageBox($"Your model ({INI_Model}) is not configured to process clipboard data (i.e. binary objects).")
+                Return
+            End If
+
+            ' 2) Call LLM
+            Dim result As System.String = Await LLM(
+            InterpolateAtRuntime(SP_InsertClipboard),
+            "", "", "", 0, False, False, "", "clipboard"
+        ).ConfigureAwait(False)
+
+            If System.String.IsNullOrEmpty(result) Then Return
+
+            ' 3) Check for open MailItem (prefer the running instance)
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+
+            If inspector Is Nothing _
+           OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+
+                ' No open email: copy to clipboard (cut to 6000 chars + ellipsis)
+                Dim displayText As System.String = If(result.Length > 6000, result.Substring(0, 6000) & "…", result)
+
+                ' Ensure this runs on the Outlook UI STA thread:
+                Await SwitchToUi(
+                Sub()
+                    Dim rtfText As System.String = MarkdownToRtfConverter.Convert(result)
+                    Dim dataObj As System.Windows.Forms.DataObject = New System.Windows.Forms.DataObject()
+                    dataObj.SetData(System.Windows.Forms.DataFormats.Rtf, rtfText)
+                    dataObj.SetData(System.Windows.Forms.DataFormats.Text, result)
+                    System.Windows.Forms.Clipboard.SetDataObject(dataObj, True)
+                    SLib.ShowCustomMessageBox($"The content has been copied to the clipboard:{System.Environment.NewLine}{System.Environment.NewLine}{displayText}")
+                End Sub
+            ).ConfigureAwait(True)
+
+                Return
+            End If
+
+            ' 4) Insert into the current email at the cursor
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document =
+            CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
+
+            If selection.Start <> selection.End Then
+                selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+            End If
+
+            selection.TypeParagraph()
+            InsertTextWithMarkdown(selection, result, True)
+
+        Catch ex As System.Exception
+            ' Log and show a friendly message instead of crashing Outlook
+            SLib.ShowCustomMessageBox($"InsertClipboard failed: {ex.GetType().FullName}: {ex.Message}")
+        End Try
+    End Function
+
+
+
+    Private Async Sub OldInsertClipboard()
 
         ' 1) Configure check
         If String.IsNullOrWhiteSpace(INI_APICall_Object) Then

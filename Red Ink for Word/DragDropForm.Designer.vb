@@ -32,9 +32,10 @@ Partial Class DragDropForm
         'btnBrowse
         '
         Me.btnBrowse.Font = New System.Drawing.Font("Segoe UI", 9.0!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.btnBrowse.Location = New System.Drawing.Point(12, 166)
+        Me.btnBrowse.Location = New System.Drawing.Point(14, 208)
+        Me.btnBrowse.Margin = New System.Windows.Forms.Padding(3, 4, 3, 4)
         Me.btnBrowse.Name = "btnBrowse"
-        Me.btnBrowse.Size = New System.Drawing.Size(84, 35)
+        Me.btnBrowse.Size = New System.Drawing.Size(94, 44)
         Me.btnBrowse.TabIndex = 0
         Me.btnBrowse.Text = "Browse ..."
         Me.btnBrowse.UseVisualStyleBackColor = True
@@ -43,31 +44,33 @@ Partial Class DragDropForm
         '
         Me.Label1.AutoSize = True
         Me.Label1.Font = New System.Drawing.Font("Segoe UI", 9.0!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label1.Location = New System.Drawing.Point(12, 26)
+        Me.Label1.Location = New System.Drawing.Point(14, 32)
         Me.Label1.Name = "Label1"
-        Me.Label1.Size = New System.Drawing.Size(198, 20)
+        Me.Label1.Size = New System.Drawing.Size(238, 25)
         Me.Label1.TabIndex = 1
         Me.Label1.Text = "Drag and drop your file here"
         '
         'Label2
         '
         Me.Label2.Font = New System.Drawing.Font("Segoe UI", 9.0!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label2.Location = New System.Drawing.Point(12, 65)
+        Me.Label2.Location = New System.Drawing.Point(14, 81)
         Me.Label2.Name = "Label2"
-        Me.Label2.Size = New System.Drawing.Size(320, 80)
+        Me.Label2.Size = New System.Drawing.Size(360, 100)
         Me.Label2.TabIndex = 2
         Me.Label2.Text = "Supported are Text Files (*.txt; *.ini; *.csv; *.log; *.json; *.xml; *.html; *.ht" &
-    "m), RTF Files (*.rtf), Word Documents (*.doc; *.docx) and PDF Files (*.pdf)"
+    "m), RTF Files (*.rtf), Word Documents (*.doc; *.docx), PDF Files (*.pdf) and Pow" &
+    "erpoint Files (*.pptx)"
         '
         'DragDropForm
         '
-        Me.AutoScaleDimensions = New System.Drawing.SizeF(8.0!, 16.0!)
+        Me.AutoScaleDimensions = New System.Drawing.SizeF(9.0!, 20.0!)
         Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
-        Me.ClientSize = New System.Drawing.Size(354, 224)
+        Me.ClientSize = New System.Drawing.Size(398, 280)
         Me.Controls.Add(Me.Label2)
         Me.Controls.Add(Me.Label1)
         Me.Controls.Add(Me.btnBrowse)
         Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+        Me.Margin = New System.Windows.Forms.Padding(3, 4, 3, 4)
         Me.MaximizeBox = False
         Me.MinimizeBox = False
         Me.Name = "DragDropForm"
