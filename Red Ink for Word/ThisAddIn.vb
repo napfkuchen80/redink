@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 31.8.2025
+' 2.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -289,7 +289,7 @@ Public Module WordSearchHelper
                     .Font.Reset() : .ParagraphFormat.Reset()
                     .Text = litPat
                     .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                    .MatchCase = False : .MatchWildcards = False
+                    .MatchCase = False : .MatchWildcards = True
                     .Format = False : .IgnoreSpace = True
                 End With
                 If rngLit.Find.Execute() Then
@@ -387,7 +387,25 @@ Public Module WordSearchHelper
 
                         Debug.WriteLine(sliceTxt & vbCrLf)
 
-                        Dim canSlice As String = Canonicalise(sliceTxt, True)
+                        'Dim canSlice As String = Canonicalise(sliceTxt, True)
+                        'Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+
+                        '_dbgLastSlice = canSlice
+                        '_dbgLastIdx = idx
+                        '_dbgNeedle = canonNeedle
+
+                        'If idx >= 0 Then
+                        ''sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
+                        'Dim startIdx As Integer = System.Math.Max(0, System.Math.Min(idx, back.Count - 1))
+                        'Dim endIdx As Integer = System.Math.Max(0, System.Math.Min(idx + canonNeedle.Length - 1, back.Count - 1))
+                        'sel.SetRange(back(startIdx), back(endIdx) + 1)
+                        'Return True
+                        'End If
+
+                        Dim canSlice As String
+                        Dim backCanon As System.Collections.Generic.List(Of Integer)
+                        CanonicaliseWithBackMap(sliceTxt, True, back, canSlice, backCanon)
+
                         Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
 
                         _dbgLastSlice = canSlice
@@ -395,9 +413,12 @@ Public Module WordSearchHelper
                         _dbgNeedle = canonNeedle
 
                         If idx >= 0 Then
-                            sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
+                            Dim endIdx As Integer = System.Math.Min(idx + canonNeedle.Length - 1, backCanon.Count - 1)
+                            sel.SetRange(backCanon(idx), backCanon(endIdx) + 1)
                             Return True
                         End If
+
+
                     End If
 
                     sRng.CollapseEndPlusOne()
@@ -428,6 +449,44 @@ Public Module WordSearchHelper
             End If
             System.Diagnostics.Debug.WriteLine("===============================================")
 
+            '──────── X) Fallback: kanonische Volltextsuche in Fenstern (ß/ss-tolerant) ───────
+            Dim win As Integer = 5000
+            Dim overlap As Integer = 200
+            Dim p As Integer = area.Start
+            While p < area.End
+                If (System.DateTime.UtcNow - t0).TotalSeconds > timeoutSeconds Then
+                    Throw New System.Exception("Timeout while searching.")
+                End If
+                cancel.ThrowIfCancellationRequested()
+
+                Dim len As Integer = System.Math.Min(win, area.End - p)
+                Dim sliceTxt As String
+                Dim back As System.Collections.Generic.IReadOnlyList(Of Integer)
+                VisibleSlice(doc, p, len, skipDeleted, sliceTxt, back)
+
+                'Dim canSlice As String = Canonicalise(sliceTxt, True)
+                'Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+                'If idx >= 0 Then
+                'sel.SetRange(back(idx), back(idx + canonNeedle.Length - 1) + 1)
+                'Return True
+                'End If
+
+                Dim canSlice As String
+                Dim backCanon As System.Collections.Generic.List(Of Integer)
+                CanonicaliseWithBackMap(sliceTxt, True, back, canSlice, backCanon)
+
+                Dim idx As Integer = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+                If idx >= 0 Then
+                    Dim endIdx As Integer = System.Math.Min(idx + canonNeedle.Length - 1, backCanon.Count - 1)
+                    sel.SetRange(backCanon(idx), backCanon(endIdx) + 1)
+                    Return True
+                End If
+
+                ' überlappender Schritt, um Randtreffer nicht zu verpassen
+                p += System.Math.Max(1, win - overlap)
+            End While
+
+
             Return False
 
         Finally
@@ -447,6 +506,71 @@ Public Module WordSearchHelper
         End Try
 
     End Function
+
+    Private Sub CanonicaliseWithBackMap(
+    ByVal src As String,
+    ByVal collapseWS As Boolean,
+    ByVal backIn As System.Collections.Generic.IReadOnlyList(Of Integer),
+    ByRef canonOut As String,
+    ByRef canonBack As System.Collections.Generic.List(Of Integer))
+
+        src = PrepareNeedle(src).Normalize(System.Text.NormalizationForm.FormKC)
+
+        Dim sb As New System.Text.StringBuilder(src.Length)
+        Dim back As New System.Collections.Generic.List(Of Integer)(src.Length)
+        Dim pendingSpace As Boolean = False
+
+        For i As Integer = 0 To src.Length - 1
+            Dim ch As Char = src(i)
+            If IsDocNoise(ch) Then Continue For
+
+            Dim code As Integer = AscW(ch)
+            Dim isHyphenOrWs As Boolean = System.Char.IsWhiteSpace(ch) OrElse code = &HA0
+            If Not isHyphenOrWs Then
+                Select Case code
+                    Case &H2010, &H2011, &H2013, &H2014, &HAD, 45
+                        isHyphenOrWs = True
+                End Select
+            End If
+
+            If isHyphenOrWs Then
+                pendingSpace = True
+            Else
+                If pendingSpace AndAlso collapseWS Then
+                    sb.Append(" "c)
+                    Dim mapIdx As Integer = System.Math.Min(System.Math.Max(i - 1, 0), backIn.Count - 1)
+                    back.Add(If(backIn.Count > 0, backIn(mapIdx), 0))
+                End If
+                pendingSpace = False
+
+                Select Case AscW(ch)
+                    Case &HDF, &H1E9E
+                        sb.Append("S"c) : sb.Append("S"c)
+                        Dim mi As Integer = System.Math.Min(i, System.Math.Max(backIn.Count - 1, 0))
+                        Dim m As Integer = If(backIn.Count > 0, backIn(mi), 0)
+                        back.Add(m) : back.Add(m)          ' beide S zeigen auf dasselbe Originalzeichen
+                    Case Else
+                        Dim up As Char = System.Char.ToUpperInvariant(ch)
+                        sb.Append(up)
+                        Dim mi As Integer = System.Math.Min(i, System.Math.Max(backIn.Count - 1, 0))
+                        back.Add(If(backIn.Count > 0, backIn(mi), 0))
+                End Select
+            End If
+        Next
+
+        Dim s As String = sb.ToString()
+        Dim start As Integer = 0
+        While start < s.Length AndAlso System.Char.IsWhiteSpace(s.Chars(start))
+            start += 1
+        End While
+        Dim [end] As Integer = s.Length
+        While [end] > start AndAlso System.Char.IsWhiteSpace(s.Chars([end] - 1))
+            [end] -= 1
+        End While
+
+        canonOut = If([end] > start, s.Substring(start, [end] - start), System.String.Empty)
+        canonBack = If([end] > start, back.GetRange(start, [end] - start), New System.Collections.Generic.List(Of Integer)())
+    End Sub
 
 
     Private Function BuildWildcardProbe(ByVal words() As String) As String
@@ -536,18 +660,31 @@ Public Module WordSearchHelper
         End If
 
         '---- Deletions-Cache einmalig aufbauen ----------------------------
+
         If deletionsCache Is Nothing Then
             deletionsCache = New System.Collections.Generic.List(Of (Integer, Integer))()
             For Each rev As Microsoft.Office.Interop.Word.Revision In doc.Revisions
-                If rev.Type =
-               Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
-               OrElse rev.Type =
-               Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo Then _
-               Continue For
-                deletionsCache.Add((rev.Range.Start, rev.Range.End))
+                Dim t As Microsoft.Office.Interop.Word.WdRevisionType = rev.Type
+                If t = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionDelete _
+           OrElse t = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedFrom Then
+                    deletionsCache.Add((rev.Range.Start, rev.Range.End))
+                End If
             Next
             deletionsCache.Sort(Function(a, b) a.Item1.CompareTo(b.Item1))
         End If
+
+        'If deletionsCache Is Nothing Then
+        'deletionsCache = New System.Collections.Generic.List(Of (Integer, Integer))()
+        'For Each rev As Microsoft.Office.Interop.Word.Revision In doc.Revisions
+        'If rev.Type =
+        'Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionInsert _
+        '      OrElse rev.Type =
+        'Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionMovedTo Then _
+        'Continue For
+        'deletionsCache.Add((rev.Range.Start, rev.Range.End))
+        'Next
+        'deletionsCache.Sort(Function(a, b) a.Item1.CompareTo(b.Item1))
+        'End If
 
         '---- Nur Intervalle aufnehmen, die in unseren Slice fallen --------
         Dim intervals As New System.Collections.Generic.List(Of (Integer, Integer))()
@@ -872,7 +1009,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.310825 Gen2 Beta Test"
+    Public Const Version As String = "V.020925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"

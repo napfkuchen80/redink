@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 30.8.2025
+' 2.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -251,7 +251,7 @@ Public Class frmAIChat
             End If
 
             Dim appGuard As Microsoft.Office.Interop.Excel.Application = Globals.ThisAddIn.Application
-            If chkIncludeDocText.Checked Or chkIncludeselection.Checked AndAlso
+            If (chkIncludeDocText.Checked Or chkIncludeselection.Checked) AndAlso
                                 (appGuard Is Nothing _
                                OrElse appGuard.Workbooks Is Nothing _
                                OrElse appGuard.Workbooks.Count = 0 _
