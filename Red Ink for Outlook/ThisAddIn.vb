@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 31.8.2025
+' 2.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -137,7 +137,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.310825 Gen2 Beta Test"
+    Public Const Version As String = "V.020925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -2724,7 +2724,7 @@ Public Class ThisAddIn
                 If OtherPrompt = "ESC" Then Return
 
                 If DoMyStyle Then
-                    MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Word", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
+                    MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Outlook", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", True)
                     If MyStyleInsert = "ERROR" Then Return
                     If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then DoMyStyle = False
                 End If
