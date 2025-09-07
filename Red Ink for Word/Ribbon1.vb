@@ -164,7 +164,7 @@ Public Class Ribbon1
         Globals.ThisAddIn.ApplyMyStyle()
     End Sub
 
-    Private Sub RI_DefineMyStyle_Click_1(sender As Object, e As RibbonControlEventArgs) Handles RI_DefineMyStyle.Click
-        Globals.ThisAddIn.DefineMyStyle()
+    Private Sub RI_DocCheck_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_DocCheck.Click
+        Globals.ThisAddIn.RunDocCheck()
     End Sub
 End Class

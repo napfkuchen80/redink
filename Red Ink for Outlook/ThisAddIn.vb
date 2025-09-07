@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.9.2025
+' 7.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -137,7 +137,7 @@ Public Class ThisAddIn
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
 
-    Public Const Version As String = "V.020925 Gen2 Beta Test"
+    Public Const Version As String = "V.070925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -791,6 +791,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_Explain = value
+        End Set
+    End Property
+
+    Public Shared Property SP_DocCheck_Clause As String
+        Get
+            Return _context.SP_DocCheck_Clause
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_Clause = value
+        End Set
+    End Property
+
+    Public Shared Property SP_DocCheck_MultiClause As String
+        Get
+            Return _context.SP_DocCheck_MultiClause
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClause = value
         End Set
     End Property
 
@@ -1478,6 +1496,23 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_DocCheckPath As String
+        Get
+            Return _context.INI_DocCheckPath
+        End Get
+        Set(value As String)
+            _context.INI_DocCheckPath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_DocCheckPathLocal As String
+        Get
+            Return _context.INI_DocCheckPathLocal
+        End Get
+        Set(value As String)
+            _context.INI_DocCheckPathLocal = value
+        End Set
+    End Property
 
     Public Shared Property INI_PromptLibPath_Transcript As String
         Get

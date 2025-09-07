@@ -80,6 +80,7 @@ Partial Class Ribbon1
         Me.RI_Explain = Me.Factory.CreateRibbonButton
         Me.RI_SuggestTitles = Me.Factory.CreateRibbonButton
         Me.RI_SpecialModel = Me.Factory.CreateRibbonButton
+        Me.RI_DocCheck = Me.Factory.CreateRibbonButton
         Me.RI_CreatePodcast = Me.Factory.CreateRibbonButton
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
         Me.RI_DefineMyStyle = Me.Factory.CreateRibbonButton
@@ -308,6 +309,7 @@ Partial Class Ribbon1
         Me.Menu3.Items.Add(Me.RI_Explain)
         Me.Menu3.Items.Add(Me.RI_SuggestTitles)
         Me.Menu3.Items.Add(Me.RI_SpecialModel)
+        Me.Menu3.Items.Add(Me.RI_DocCheck)
         Me.Menu3.Items.Add(Me.RI_CreatePodcast)
         Me.Menu3.Items.Add(Me.RI_CreateAudio)
         Me.Menu3.Items.Add(Me.RI_DefineMyStyle)
@@ -349,6 +351,14 @@ Partial Class Ribbon1
         Me.RI_SpecialModel.OfficeImageId = "AutoFormatNow"
         Me.RI_SpecialModel.ScreenTip = "Query one of your special services with your selected text"
         Me.RI_SpecialModel.ShowImage = True
+        '
+        'RI_DocCheck
+        '
+        Me.RI_DocCheck.Label = "Document Check"
+        Me.RI_DocCheck.Name = "RI_DocCheck"
+        Me.RI_DocCheck.OfficeImageId = "FilePrepareMenu"
+        Me.RI_DocCheck.ScreenTip = "Check document or selection based on a predefined ruleset"
+        Me.RI_DocCheck.ShowImage = True
         '
         'RI_CreatePodcast
         '
@@ -682,6 +692,12 @@ Partial Class Ribbon1
             Me.RI_ApplyMyStyle.Visible = True
         End If
 
+        If Trim(ThisAddIn.INI_DocCheckPath) = "" And Trim(ThisAddIn.INI_DocCheckPathLocal) = "" Then
+            Me.RI_DocCheck.Visible = False
+        Else
+            Me.RI_DocCheck.Visible = True
+        End If
+
 
         Dim LastFreestylePrompt As String = My.Settings.LastFreestylePrompt
         If Trim(LastFreestylePrompt) = "" Then
@@ -749,6 +765,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_FreestyleRepeat As RibbonButton
     Friend WithEvents RI_ApplyMyStyle As RibbonButton
     Friend WithEvents RI_DefineMyStyle As RibbonButton
+    Friend WithEvents RI_DocCheck As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

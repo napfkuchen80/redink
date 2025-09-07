@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 2.9.2025
+' 7.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1009,7 +1009,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.020925 Gen2 Beta Test"
+    Public Const Version As String = "V.070925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -1828,6 +1828,24 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_Clause As String
+        Get
+            Return _context.SP_DocCheck_Clause
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_Clause = value
+        End Set
+    End Property
+
+    Public Shared Property SP_DocCheck_MultiClause As String
+        Get
+            Return _context.SP_DocCheck_MultiClause
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClause = value
+        End Set
+    End Property
+
     Public Shared Property SP_SuggestTitles As String
         Get
             Return _context.SP_SuggestTitles
@@ -2539,6 +2557,23 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_DocCheckPath As String
+        Get
+            Return _context.INI_DocCheckPath
+        End Get
+        Set(value As String)
+            _context.INI_DocCheckPath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_DocCheckPathLocal As String
+        Get
+            Return _context.INI_DocCheckPathLocal
+        End Get
+        Set(value As String)
+            _context.INI_DocCheckPathLocal = value
+        End Set
+    End Property
 
     Public Shared Property PromptLibrary() As List(Of String)
         Get
@@ -3852,15 +3887,6 @@ Public Class ThisAddIn
                         Dim outputPath As String = frm.SelectedOutputPath
                         If FromFile = "pptx" Then
                             GenerateAndPlayAudioFromSpeakerNotes(FilePath, selectedLanguage, selectedVoices(0).Replace(" (male)", "").Replace(" (female)", ""), If(Voices = 2, selectedVoices(1).Replace(" (male)", "").Replace(" (female)", ""), ""))
-
-                            'Dim TokenErrorResponse As String = ValidatePptx(FilePath)
-
-                            'If TokenErrorResponse = "" Then
-                            'ShowCustomMessageBox($"Your slide deck at '{FilePath}' has been amended. Check it out.")
-                            'Else
-                            'ShowCustomMessageBox($"Your slide deck at '{FilePath}' has been amended, but the file may show certain problems and may require a repair (internal error: {TokenErrorResponse}).")
-                            'End If
-
                         Else
                             GenerateAndPlayAudioFromSelectionParagraphs(outputPath, selectedLanguage, selectedVoices(0).Replace(" (male)", "").Replace(" (female)", ""), If(Voices = 2, selectedVoices(1).Replace(" (male)", "").Replace(" (female)", ""), ""))
                         End If
@@ -4846,6 +4872,11 @@ Public Class ThisAddIn
                     End If
                 End Using
 
+                Return
+            End If
+
+            If OtherPrompt.StartsWith("doccheck", StringComparison.OrdinalIgnoreCase) Then
+                RunDocCheck()
                 Return
             End If
 
@@ -6603,121 +6634,7 @@ Public Class ThisAddIn
 
                     ElseIf PutInBubbles Then
 
-                        Dim responseItems() As String = LLMResult.Split({"§§§"}, StringSplitOptions.RemoveEmptyEntries)
-                        Dim wrongformatresponse As New List(Of String)
-                        Dim notfoundresponse As New List(Of String)
-                        Dim originalRange As Word.Range = selection.Range.Duplicate ' Save the original selection range
-                        Dim BubblecutHappened As Boolean = False
-                        Dim BubbleCount As Integer = 0
-                        Dim MaxBubbles As Integer = responseItems.Count
-
-                        If MaxBubbles = 0 Then
-                            If Not DoSilent Then ShowCustomMessageBox($"The bubble command did Not result in any comment(s) by the LLM.")
-                        Else
-
-                            Dim splash As New SLib.SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
-                            splash.Show()
-                            splash.Refresh()
-
-                            For Each item In responseItems
-
-                                splash.UpdateMessage($"Adding {MaxBubbles - BubbleCount} bubble(s) to your text... press 'Esc' to abort")
-
-                                System.Windows.Forms.Application.DoEvents()
-
-                                If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then Exit For
-
-                                If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then
-                                    Exit For
-                                End If
-
-                                Dim parts() As String = item.Split({"@@"}, StringSplitOptions.None)
-                                If parts.Length = 2 Then
-
-                                    Dim findText As String = parts(0).Trim().Trim("'"c).Trim(""""c)
-                                    Dim commentText As String = parts(1).Trim()
-
-                                    Try
-                                        If findText.Length <= SearchChunkSize Then
-                                            ' Use the built-in Find directly if <= 255 characters
-                                            With selection.Find
-                                                .ClearFormatting()
-                                                .Text = NormalizeTextForSearch(findText, INI_Clean)
-                                                .Forward = True
-                                                .Wrap = Word.WdFindWrap.wdFindStop
-                                                .MatchWildcards = True
-                                            End With
-                                            Debug.WriteLine($"Searching for: '{findText}' with normalized text: '{selection.Find.Text}'")
-
-                                            If selection.Find.Execute() Then
-                                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
-                                                BubbleCount += 1
-                                            Else
-                                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
-                                            End If
-
-                                        Else
-                                            ' Use chunk-by-chunk search for > 255 characters
-                                            If FindLongTextInChunks(findText, SearchChunkSize, selection) Then
-                                                ' If found, selection now covers the entire matched text
-                                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & commentText)
-                                                BubbleCount += 1
-                                            Else
-                                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
-                                            End If
-                                        End If
-
-                                    Catch ex As Exception
-                                        notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & " [Error: " & ex.Message & "]" & vbCrLf & vbCrLf)
-                                    End Try
-
-                                Else
-                                    If Not String.IsNullOrWhiteSpace(item) Then
-                                        wrongformatresponse.Add(item)
-                                    End If
-                                End If
-
-                                selection.SetRange(originalRange.Start, originalRange.End) ' Restore the original selection
-                            Next
-
-                            splash.Close()
-
-                            Dim ErrorList As String = ""
-
-                            If notfoundresponse.Count > 0 Then
-                                ErrorList += "The following comments could not be assigned to your text (they were not found, typically because of formatting or markup issues):" & vbCrLf & vbCrLf
-                                For Each item In notfoundresponse
-                                    If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
-                                Next
-                                ErrorList += vbCrLf
-                            End If
-
-                            If wrongformatresponse.Count > 0 Then
-                                ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf & vbCrLf
-                                For Each item In wrongformatresponse
-                                    If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
-                                Next
-                                ErrorList += vbCrLf
-                            End If
-                            If Not String.IsNullOrWhiteSpace(ErrorList) Then
-                                If BubblecutHappened Then
-                                    ErrorList = $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable." & vbCrLf & vbCrLf & ErrorList
-                                End If
-
-                                If Not DoSilent Then
-                                    ErrorList = ShowCustomWindow($"{BubbleCount} bubble comment(s) applied (Warning: complicated formatting and markups may cause misalignments of the commented portions of the text). The following errors occurred when implementing the 'bubbles' feedback of the LLM:", ErrorList, "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN, True)
-                                End If
-                                If ErrorList <> "" And ErrorList.ToLower() <> "esc" Then
-                                    SLib.PutInClipboard(ErrorList)
-                                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                                    Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(selection.Range, $"{AN5}: " & ErrorList)
-                                End If
-
-                            Else
-
-                                If Not DoSilent Then ShowCustomMessageBox($"{BubbleCount} bubble comment(s) provided by the LLM applied to to your text (Warning: complicated formatting and markups may cause misalignments of the commented portions of the text)." & If(BubblecutHappened, $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable.", ""))
-                            End If
-                        End If
+                        SetBubbles(LLMResult, selection, DoSilent)
 
                     ElseIf MarkupMethod = 4 Then
 
@@ -6966,6 +6883,126 @@ Public Class ThisAddIn
         Return ""
 
     End Function
+
+    Public Sub SetBubbles(LLMResult As String, Selection As Microsoft.Office.Interop.Word.Selection, DoSilent As Boolean)
+
+        Dim responseItems() As String = LLMResult.Split({"§§§"}, StringSplitOptions.RemoveEmptyEntries)
+        Dim wrongformatresponse As New List(Of String)
+        Dim notfoundresponse As New List(Of String)
+        Dim originalRange As Word.Range = Selection.Range.Duplicate ' Save the original selection range
+        Dim BubblecutHappened As Boolean = False
+        Dim BubbleCount As Integer = 0
+        Dim MaxBubbles As Integer = responseItems.Count
+
+        If MaxBubbles = 0 Then
+            If Not DoSilent Then ShowCustomMessageBox($"The bubble command did Not result in any comment(s) by the LLM.")
+        Else
+
+            Dim splash As New SLib.SplashScreen($"Adding {MaxBubbles} bubble(s) to your text... press 'Esc' to abort")
+            splash.Show()
+            splash.Refresh()
+
+            For Each item In responseItems
+
+                splash.UpdateMessage($"Adding {MaxBubbles - BubbleCount} bubble(s) to your text... press 'Esc' to abort")
+
+                System.Windows.Forms.Application.DoEvents()
+
+                If (GetAsyncKeyState(VK_ESCAPE) And &H8000) <> 0 Then Exit For
+
+                If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then
+                    Exit For
+                End If
+
+                Dim parts() As String = item.Split({"@@"}, StringSplitOptions.None)
+                If parts.Length = 2 Then
+
+                    Dim findText As String = parts(0).Trim().Trim("'"c).Trim(""""c)
+                    Dim commentText As String = parts(1).Trim()
+
+                    Try
+                        If findText.Length <= SearchChunkSize Then
+                            ' Use the built-in Find directly if <= 255 characters
+                            With Selection.Find
+                                .ClearFormatting()
+                                .Text = NormalizeTextForSearch(findText, INI_Clean)
+                                .Forward = True
+                                .Wrap = Word.WdFindWrap.wdFindStop
+                                .MatchWildcards = True
+                            End With
+                            Debug.WriteLine($"Searching for: '{findText}' with normalized text: '{Selection.Find.Text}'")
+
+                            If Selection.Find.Execute() Then
+                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & commentText)
+                                BubbleCount += 1
+                            Else
+                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
+                            End If
+
+                        Else
+                            ' Use chunk-by-chunk search for > 255 characters
+                            If FindLongTextInChunks(findText, SearchChunkSize, Selection) Then
+                                ' If found, selection now covers the entire matched text
+                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & commentText)
+                                BubbleCount += 1
+                            Else
+                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
+                            End If
+                        End If
+
+                    Catch ex As Exception
+                        notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & " [Error: " & ex.Message & "]" & vbCrLf & vbCrLf)
+                    End Try
+
+                Else
+                    If Not String.IsNullOrWhiteSpace(item) Then
+                        wrongformatresponse.Add(item)
+                    End If
+                End If
+
+                Selection.SetRange(originalRange.Start, originalRange.End) ' Restore the original selection
+            Next
+
+            splash.Close()
+
+            Dim ErrorList As String = ""
+
+            If notfoundresponse.Count > 0 Then
+                ErrorList += "The following comments could not be assigned to your text (they were not found, typically because of formatting or markup issues):" & vbCrLf & vbCrLf
+                For Each item In notfoundresponse
+                    If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
+                Next
+                ErrorList += vbCrLf
+            End If
+
+            If wrongformatresponse.Count > 0 Then
+                ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf & vbCrLf
+                For Each item In wrongformatresponse
+                    If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
+                Next
+                ErrorList += vbCrLf
+            End If
+            If Not String.IsNullOrWhiteSpace(ErrorList) Then
+                If BubblecutHappened Then
+                    ErrorList = $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable." & vbCrLf & vbCrLf & ErrorList
+                End If
+
+                If Not DoSilent Then
+                    ErrorList = ShowCustomWindow($"{BubbleCount} bubble comment(s) applied (Warning: complicated formatting and markups may cause misalignments of the commented portions of the text). The following errors occurred when implementing the 'bubbles' feedback of the LLM:", ErrorList, "The above error list will be included in a final comment at the end of your selection (it will also be included in the clipboard). You can have the original list included, or you can now make changes and have this version used. If you select Cancel, nothing will be put added to the document.", AN, True)
+                End If
+                If ErrorList <> "" And ErrorList.ToLower() <> "esc" Then
+                    SLib.PutInClipboard(ErrorList)
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & ErrorList)
+                End If
+
+            Else
+
+                If Not DoSilent Then ShowCustomMessageBox($"{BubbleCount} bubble comment(s) provided by the LLM applied to to your text (Warning: complicated formatting and markups may cause misalignments of the commented portions of the text)." & If(BubblecutHappened, $"Some of the sections to which the bubble comments relate were too long for selecting. Only the initial part has been selected. This is indicated by '{BubbleCutText}' in the bubble comments, as applicable.", ""))
+            End If
+        End If
+
+    End Sub
 
 
     Public Sub ConvertRangeFormattingToMarkdown()
@@ -20387,6 +20424,561 @@ Public Class ThisAddIn
             If ppApp IsNot Nothing Then ppApp.Dispose()
         End Try
     End Function
+
+
+
+    ' DocCheck integration for Word
+
+
+    Public Async Sub RunDocCheck()
+
+        If INILoadFail() Then Return
+
+        ' Expand and normalize the configured paths
+        Dim DocCheckPath As System.String = ExpandEnvironmentVariables(INI_DocCheckPath)
+        If Not System.String.IsNullOrEmpty(DocCheckPath) AndAlso Not DocCheckPath.EndsWith("\", System.StringComparison.Ordinal) Then
+            DocCheckPath &= "\"
+        End If
+
+        Dim DocCheckPathLocal As System.String = ExpandEnvironmentVariables(INI_DocCheckPathLocal)
+        If Not System.String.IsNullOrEmpty(DocCheckPathLocal) AndAlso Not DocCheckPathLocal.EndsWith("\", System.StringComparison.Ordinal) Then
+            DocCheckPathLocal &= "\"
+        End If
+
+        Dim do2ndModel As System.Boolean = False
+
+        Try
+            ' 0) Validate paths (at least one must be defined and exist)
+            Dim hasGlobal As System.Boolean = (DocCheckPath IsNot Nothing AndAlso DocCheckPath.Trim().Length > 0 AndAlso System.IO.Directory.Exists(DocCheckPath) = True)
+            Dim hasLocal As System.Boolean = (DocCheckPathLocal IsNot Nothing AndAlso DocCheckPathLocal.Trim().Length > 0 AndAlso System.IO.Directory.Exists(DocCheckPathLocal) = True)
+
+            If hasGlobal = False AndAlso hasLocal = False Then
+                ShowCustomMessageBox("No DocCheck paths are configured or accessible. Please configure at least one path (using 'DocCheckPath' or 'DocCheckPathLocal').")
+                Return
+            End If
+
+            ' 1) Acquire text (selection → otherwise whole document), but KEEP a Selection (not just a Range)
+            Dim app As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
+            If app Is Nothing Then
+                ShowCustomMessageBox("Word application was not found.")
+                Return
+            End If
+            If app.Documents Is Nothing OrElse app.Documents.Count = 0 Then
+                ShowCustomMessageBox("No open document.")
+                Return
+            End If
+
+            Dim doc As Microsoft.Office.Interop.Word.Document = app.ActiveDocument
+            If doc Is Nothing Then
+                ShowCustomMessageBox("Active document was not found.")
+                Return
+            End If
+
+            Dim currentSelection As Microsoft.Office.Interop.Word.Selection = app.Selection
+            If currentSelection Is Nothing Then
+                ShowCustomMessageBox("No selection available.")
+                Return
+            End If
+
+            ' If selection has no usable text, select the whole story so we STILL have a Selection
+            Dim textToAnalyze As System.String = Nothing
+            If currentSelection.Range IsNot Nothing AndAlso currentSelection.Range.Text IsNot Nothing Then
+                Dim selectedText As System.String = currentSelection.Range.Text
+                If selectedText IsNot Nothing AndAlso selectedText.Trim().Length > 0 Then
+                    textToAnalyze = selectedText
+                End If
+            End If
+
+            If textToAnalyze Is Nothing Then
+                Dim fullText As System.String = doc.Content.Text
+                If fullText Is Nothing OrElse fullText.Trim().Length = 0 Then
+                    ShowCustomMessageBox("There is no text to analyze.")
+                    Return
+                End If
+                app.Selection.WholeStory() ' this updates app.Selection in-place
+                currentSelection = app.Selection                         ' keep the Selection object
+                textToAnalyze = currentSelection.Range.Text              ' and use its text
+            End If
+
+            ' 2) Load all RuleSets from provided paths
+            Dim allRuleSets As System.Collections.Generic.List(Of DocCheckRuleSet) = LoadRuleSets(DocCheckPath, DocCheckPathLocal)
+            If allRuleSets Is Nothing OrElse allRuleSets.Count = 0 Then
+                ShowCustomMessageBox("No DocCheck rule sets were found. Place files named 'redink-dc-*.txt' into your configured path(s).")
+                Return
+            End If
+
+            ' Build dropdown options (display) and map to objects
+            allRuleSets.Sort(Function(a As DocCheckRuleSet, b As DocCheckRuleSet) System.String.Compare(a.Title, b.Title, System.StringComparison.OrdinalIgnoreCase))
+            Dim displayToSet As System.Collections.Generic.Dictionary(Of System.String, DocCheckRuleSet) =
+            New System.Collections.Generic.Dictionary(Of System.String, DocCheckRuleSet)(System.StringComparer.OrdinalIgnoreCase)
+            Dim displayOptions As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)()
+            For Each rs As DocCheckRuleSet In allRuleSets
+                Dim display As System.String = rs.Title
+                If rs.IsLocal = True Then
+                    display &= " (local)"
+                End If
+                ' ensure uniqueness of display text
+                Dim uniqueDisplay As System.String = MakeUniqueDisplay(display, displayToSet.Keys)
+                displayToSet(uniqueDisplay) = rs
+                displayOptions.Add(uniqueDisplay)
+            Next
+
+            ' 3) Collect parameters in ONE form
+            Dim defaultRuleSetDisplay As System.String = If(displayOptions.Count > 0, displayOptions(0), System.String.Empty)
+            Dim checkOnlyOneClause As System.Boolean = False
+            Dim addAdditionalContext As System.Boolean = False
+            Dim doBubbles As System.Boolean = True
+
+
+            Dim p0 As SLib.InputParameter = New SLib.InputParameter("Rule Set to use", defaultRuleSetDisplay)
+            p0.Options = New System.Collections.Generic.List(Of System.String)(displayOptions)
+            Dim p1 As SLib.InputParameter = New SLib.InputParameter("Check as only one clause", checkOnlyOneClause)
+            Dim p2 As SLib.InputParameter = New SLib.InputParameter("Add additional context", addAdditionalContext)
+            Dim p3 As SLib.InputParameter = New SLib.InputParameter("Output as Word Bubbles", doBubbles)
+
+            Dim p4 As SLib.InputParameter
+            If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                p4 = New SLib.InputParameter("Use a secondary model", do2ndModel)
+            Else
+                p4 = New SLib.InputParameter("Use the secondary model", do2ndModel)
+            End If
+
+            Dim params() As SLib.InputParameter = {p0, p1, p2, p3, p4}
+
+            If ShowCustomVariableInputForm("Please set the DocCheck parameters:", AN & " DocCheck", params) = False Then
+                Return
+            End If
+
+            ' Read back values
+            Dim chosenDisplay As System.String = System.Convert.ToString(params(0).Value)
+            checkOnlyOneClause = System.Convert.ToBoolean(params(1).Value)
+            addAdditionalContext = System.Convert.ToBoolean(params(2).Value)
+            doBubbles = System.Convert.ToBoolean(params(3).Value)
+            do2ndModel = System.Convert.ToBoolean(params(4).Value)
+
+            ' Resolve selected rule set
+            Dim chosenRuleSet As DocCheckRuleSet = Nothing
+            If chosenDisplay IsNot Nothing AndAlso displayToSet.TryGetValue(chosenDisplay, chosenRuleSet) = False Then
+                ShowCustomMessageBox("Selected rule set could not be resolved (check file with rules) - aborting.")
+                Return
+            End If
+            If chosenRuleSet Is Nothing Then
+                ShowCustomMessageBox("No rule set was selected - aborting.")
+                Return
+            End If
+
+            ' 4) Only now gather additional context if requested
+            Dim insertDocs As System.String = ""
+            If addAdditionalContext = True Then
+                insertDocs = GatherSelectedDocuments(True, False)
+                If insertDocs Is Nothing OrElse insertDocs.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - exiting.")
+                    Return
+                ElseIf insertDocs.StartsWith("ERROR", System.StringComparison.OrdinalIgnoreCase) Then
+                    ShowCustomMessageBox("An error occured gathering the additional document(s) (" & insertDocs.Substring(6).Trim() & ") - exiting.")
+                    Return
+                ElseIf insertDocs.StartsWith("NONE", System.StringComparison.OrdinalIgnoreCase) Then
+                    ShowCustomMessageBox("There are no other documents to add - exiting.")
+                    Return
+                End If
+            End If
+
+            ' 5) Re-sync to the *current* selection right before running (user might have changed it)
+            currentSelection = app.Selection
+            If currentSelection Is Nothing Then
+                ShowCustomMessageBox("Word selection is not available.")
+                Return
+            End If
+            If currentSelection.Range Is Nothing OrElse currentSelection.Range.Text Is Nothing OrElse currentSelection.Range.Text.Trim().Length = 0 Then
+                ' If selection is empty now, keep earlier text; optionally, select whole story again:
+                ' app.Selection.WholeStory()
+                ' currentSelection = app.Selection
+                ' textToAnalyze = currentSelection.Range.Text
+            Else
+                textToAnalyze = currentSelection.Range.Text
+            End If
+
+            If do2ndModel Then
+
+                If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                    If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                        originalConfigLoaded = False
+                        ShowCustomMessageBox("The secondary model could not be loaded - aborting.")
+                        Return
+                    End If
+                    LastFreestyleModelConfig = GetCurrentConfig(_context)
+                End If
+
+            End If
+
+            ' 6) Run (pass the Selection as required by your SetBubbles pipeline)
+            If checkOnlyOneClause Then
+                Dim Response As String = Await RunIsolatedClause(chosenRuleSet, textToAnalyze, insertDocs, currentSelection, doBubbles, do2ndModel)
+            Else
+                Dim Response As String = Await RunSetOfClauses(chosenRuleSet, textToAnalyze, insertDocs, currentSelection, doBubbles, do2ndModel)
+            End If
+
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("Error in DocCheck procedure: " & ex.Message)
+        Finally
+            If do2ndModel AndAlso originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
+        End Try
+    End Sub
+
+
+    ' ========================= RuleSet Loading =========================
+    Private Function LoadRuleSets(ByVal pathGlobal As System.String, ByVal pathLocal As System.String) As System.Collections.Generic.List(Of DocCheckRuleSet)
+        Dim list As System.Collections.Generic.List(Of DocCheckRuleSet) = New System.Collections.Generic.List(Of DocCheckRuleSet)()
+
+        Dim candidates As System.Collections.Generic.List(Of System.Tuple(Of System.String, System.Boolean)) =
+        New System.Collections.Generic.List(Of System.Tuple(Of System.String, System.Boolean))()
+
+        If pathGlobal IsNot Nothing AndAlso pathGlobal.Trim().Length > 0 AndAlso System.IO.Directory.Exists(pathGlobal) = True Then
+            For Each f As System.String In EnumerateDocCheckFiles(pathGlobal)
+                candidates.Add(New System.Tuple(Of System.String, System.Boolean)(f, False))
+            Next
+        End If
+
+        If pathLocal IsNot Nothing AndAlso pathLocal.Trim().Length > 0 AndAlso System.IO.Directory.Exists(pathLocal) = True Then
+            For Each f As System.String In EnumerateDocCheckFiles(pathLocal)
+                candidates.Add(New System.Tuple(Of System.String, System.Boolean)(f, True))
+            Next
+        End If
+
+        For Each t As System.Tuple(Of System.String, System.Boolean) In candidates
+            list.AddRange(ParseDocCheckFile(t.Item1, t.Item2))
+        Next
+
+        Return list
+    End Function
+
+    Private Function EnumerateDocCheckFiles(ByVal folder As System.String) As System.Collections.Generic.IEnumerable(Of System.String)
+        Dim matches As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)()
+        Try
+            For Each f As System.String In System.IO.Directory.EnumerateFiles(folder, "redink-dc-*.txt", System.IO.SearchOption.TopDirectoryOnly)
+                matches.Add(f)
+            Next
+        Catch ex As System.Exception
+            ShowCustomMessageBox("Failed to enumerate files in '" & folder & "': " & ex.Message)
+        End Try
+        Return matches
+    End Function
+
+    Private Function ParseDocCheckFile(ByVal filePath As System.String, ByVal isLocal As System.Boolean) As System.Collections.Generic.List(Of DocCheckRuleSet)
+        Dim sets As System.Collections.Generic.List(Of DocCheckRuleSet) = New System.Collections.Generic.List(Of DocCheckRuleSet)()
+
+        Try
+            Dim currentTitle As System.String = Nothing
+            Dim jsonBuilder As System.Text.StringBuilder = New System.Text.StringBuilder()
+
+            Dim FlushCurrent As System.Action =
+            Sub()
+                Dim raw As System.String = jsonBuilder.ToString().Trim()
+                If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
+                    sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal))
+                End If
+                jsonBuilder.Clear()
+            End Sub
+
+            For Each rawLine As System.String In System.IO.File.ReadLines(filePath)
+                If rawLine Is Nothing Then
+                    Continue For
+                End If
+
+                Dim line As System.String = rawLine.Trim()
+
+                If line.StartsWith(";", System.StringComparison.Ordinal) Then
+                    Continue For
+                End If
+
+                If line.StartsWith("[", System.StringComparison.Ordinal) AndAlso line.EndsWith("]", System.StringComparison.Ordinal) Then
+                    FlushCurrent()
+                    currentTitle = line.Substring(1, line.Length - 2).Trim()
+                    Continue For
+                End If
+
+                If currentTitle IsNot Nothing Then
+                    jsonBuilder.AppendLine(rawLine)
+                End If
+            Next
+
+            FlushCurrent()
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("Failed to parse '" & filePath & "': " & ex.Message)
+        End Try
+
+        Return sets
+    End Function
+
+    Private Function CreateRuleSet(ByVal title As System.String,
+                                ByVal rawJson As System.String,
+                                ByVal sourcePath As System.String,
+                                ByVal isLocal As System.Boolean) As DocCheckRuleSet
+        Dim rs As DocCheckRuleSet = New DocCheckRuleSet()
+        rs.Title = title
+        rs.SourcePath = sourcePath
+        rs.IsLocal = isLocal
+        rs.RawJson = rawJson
+
+        ' Extract records into raw JSON strings (no schema binding; minimal structure)
+        rs.RecordJsons = ExtractRecordJsonStrings(rawJson)
+        Return rs
+    End Function
+
+    ' ========================= Execution =========================
+    Private Async Function RunIsolatedClause(ByVal ruleSet As DocCheckRuleSet,
+                                ByVal textToAnalyze As System.String,
+                                ByVal insertDocs As System.String,
+                                        ByVal Selection As Microsoft.Office.Interop.Word.Selection,
+                                        ByVal PutinBubbles As Boolean,
+                                      ByVal UseSecondAPI As Boolean) As Task(Of String)
+        Try
+            ' System prompt: SP_DC_Clause + SP_Add_Bubbles + the WHOLE RuleSet JSON (verbatim)
+            Dim systemPrompt As System.String = SP_DocCheck_Clause & System.Environment.NewLine &
+            (If(PutinBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
+            "<RULESET>" & ruleSet.RawJson & "</RULESET>"
+
+            Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
+            If Not String.IsNullOrWhiteSpace(insertDocs) Then
+                userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
+            End If
+
+            Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
+
+            ' Temporary output (replace with your parse→CreateBubble pipeline)
+            If PutinBubbles Then
+                SetBubbles(answer, Selection, False)
+            Else
+                ShowDocCheckResult(answer)
+            End If
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("DocCheck 'Single Clause' run failed: " & ex.Message)
+        End Try
+    End Function
+
+    Private Async Function RunSetOfClauses(ByVal ruleSet As DocCheckRuleSet,
+                            ByVal textToAnalyze As System.String,
+                            ByVal insertDocs As System.String,
+                                      ByVal Selection As Microsoft.Office.Interop.Word.Selection,
+                                      ByVal PutInBubbles As Boolean,
+                                      ByVal UseSecondAPI As Boolean) As Task(Of String)
+        Try
+            Dim records As System.Collections.Generic.List(Of System.String) = ruleSet.RecordJsons
+            If records Is Nothing OrElse records.Count = 0 Then
+                ' Try to extract lazily if not available
+                records = ExtractRecordJsonStrings(ruleSet.RawJson)
+                If records Is Nothing OrElse records.Count = 0 Then
+                    ShowCustomMessageBox("This rule set contains no valid records. Expected a JSON object with 'Records', or an array/object representing records.")
+                    Return String.Empty
+                End If
+            End If
+
+            ' Start progress UI
+            ShowProgressBarInSeparateThread(AN & " DocCheck", "Analyzing text...")
+            ProgressBarModule.CancelOperation = False
+
+            GlobalProgressMax = records.Count
+            GlobalProgressValue = 0
+            GlobalProgressLabel = "Analyzing rule 0 of " & records.Count
+
+            Dim userPromptBase As System.String = textToAnalyze
+            If insertDocs IsNot Nothing AndAlso insertDocs.Trim().Length > 0 Then
+                userPromptBase &= System.Environment.NewLine & System.Environment.NewLine & insertDocs
+            End If
+
+            Dim OverallAnswer As String = ""
+
+            Dim idx As System.Int32 = 0
+            For Each recordJson As System.String In records
+                If ProgressBarModule.CancelOperation = True Then
+                    ShowCustomMessageBox("Analysis aborted by user.")
+                    Exit For
+                End If
+
+                GlobalProgressValue = idx
+                GlobalProgressLabel = "Analyzing rule " & idx + 1 & " of " & records.Count
+
+                ' System prompt: SP_DC_Set + SP_Add_Bubbles + the SINGLE record JSON (verbatim)
+                Dim systemPrompt As System.String = SP_DocCheck_MultiClause & System.Environment.NewLine &
+                (If(PutInBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
+                "<RULESET>" & recordJson & "</RULESET>"
+
+                Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
+                If Not String.IsNullOrWhiteSpace(insertDocs) Then
+                    userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
+                End If
+
+                Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
+
+                If PutInBubbles Then
+                    SetBubbles(answer, Selection, True)
+                Else
+                    OverallAnswer &= $"Rule {idx + 1}: " & vbCrLf & vbCrLf & answer & vbCrLf & vbCrLf
+                End If
+
+                idx += 1
+
+            Next
+
+            If Not ProgressBarModule.CancelOperation Then
+                ProgressBarModule.CancelOperation = True
+                If PutInBubbles = False Then
+                    ShowDocCheckResult(OverallAnswer)
+                Else
+                    ShowCustomMessageBox("DocCheck analysis completed - check out the comments added (if any).")
+                End If
+            End If
+
+            ProgressBarModule.CancelOperation = True
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("DocCheck 'Multi Clause' run failed: " & ex.Message)
+        End Try
+    End Function
+
+    Private Sub ShowDocCheckResult(ByVal answer As System.String)
+        Dim result As String = SLib.ShowCustomWindow("The DocCheck resulted in the following findings:", answer, "", AN, False, True, True, True)
+        If result <> "" And result <> "Pane" Then
+            If result = "Markdown" Then
+                Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & result, False)
+                Dim patternx As String = "\{\{(WFLD|WENT|WFNT):.*?\}\}"
+                If Regex.IsMatch(result, patternx) Then
+                    Dim rng As Range = wordApp.Selection.Range
+                    RestoreSpecialTextElements(rng)
+                    rng.Document.Fields.Update()
+                End If
+            Else
+                SLib.PutInClipboard(result)
+            End If
+        ElseIf result = "Pane" Then
+
+            SP_MergePrompt_Cached = SP_MergePrompt
+            If _uiContext IsNot Nothing Then  ' Make sure we run in the UI Thread
+                _uiContext.Post(Sub(s)
+
+                                    ShowPaneAsync(
+                                                            "DocCheck Findings",
+                                                            answer,
+                                                            "",
+                                                            AN,
+                                                            noRTF:=False,
+                                                            insertMarkdown:=True
+                                                            )
+
+                                End Sub, Nothing)
+            Else
+
+                ShowPaneAsync(
+                                                                            "DocCheck Findings",
+                                                                            answer,
+                                                                            "",
+                                                                            AN,
+                                                                            noRTF:=False,
+                                                                            insertMarkdown:=True
+                                                                            )
+            End If
+
+        End If
+        Return
+    End Sub
+
+
+    ' Record schema:
+    '   {
+    '     "Topic": "String",
+    '     "Issue": "String",
+    '     "Criteria": [
+    '       {
+    '         "Condition": "String",
+    '         "IfTrue":    { "Consequence": "String", "Risk": 1..3 },
+    '         "IfFalse": { "Consequence": "String", "Risk": 1..3 }
+    '       },
+    '       ...
+    '     ]
+    '   }
+    '
+    ' We do NOT interpret record fields. We only extract per-record JSON as string
+    ' (compact) and hand it verbatim to the LLM. Supported RuleSet shapes:
+    '   1) { "Records": [ {record}, {record}, ... ] }
+    '   2) [ {record}, {record}, ... ]
+    '   3) {record}
+
+
+    Private Function ExtractRecordJsonStrings(ByVal rawJson As System.String) As System.Collections.Generic.List(Of System.String)
+        Dim list As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)()
+
+        If rawJson Is Nothing OrElse rawJson.Trim().Length = 0 Then
+            Return list
+        End If
+
+        Try
+            Dim token As Newtonsoft.Json.Linq.JToken = Newtonsoft.Json.Linq.JToken.Parse(rawJson)
+
+            If TypeOf token Is Newtonsoft.Json.Linq.JObject Then
+                Dim jo As Newtonsoft.Json.Linq.JObject = CType(token, Newtonsoft.Json.Linq.JObject)
+
+                ' Case 1: container with "Records"
+                Dim recordsToken As Newtonsoft.Json.Linq.JToken = Nothing
+                If jo.TryGetValue("Records", recordsToken) Then
+                    If TypeOf recordsToken Is Newtonsoft.Json.Linq.JArray Then
+                        For Each rec As Newtonsoft.Json.Linq.JToken In CType(recordsToken, Newtonsoft.Json.Linq.JArray)
+                            list.Add(rec.ToString(Newtonsoft.Json.Formatting.None))
+                        Next
+                        Return list
+                    End If
+                End If
+
+                ' Case 3: single record object
+                list.Add(jo.ToString(Newtonsoft.Json.Formatting.None))
+                Return list
+
+            ElseIf TypeOf token Is Newtonsoft.Json.Linq.JArray Then
+                ' Case 2: array of records
+                For Each rec As Newtonsoft.Json.Linq.JToken In CType(token, Newtonsoft.Json.Linq.JArray)
+                    list.Add(rec.ToString(Newtonsoft.Json.Formatting.None))
+                Next
+                Return list
+            End If
+
+        Catch ex As System.Exception
+            ' Let caller handle "no records found" UX.
+        End Try
+
+        Return list
+    End Function
+
+    ' ========================= Types =========================
+    Private Class DocCheckRuleSet
+        Public Property Title As System.String
+        Public Property SourcePath As System.String
+        Public Property IsLocal As System.Boolean
+        Public Property RawJson As System.String
+        Public Property RecordJsons As System.Collections.Generic.List(Of System.String)
+    End Class
+
+    ' ========================= Small utility =========================
+    Private Function MakeUniqueDisplay(ByVal baseText As System.String, ByVal existing As System.Collections.Generic.ICollection(Of System.String)) As System.String
+        If existing Is Nothing OrElse existing.Contains(baseText) = False Then
+            Return baseText
+        End If
+        Dim i As System.Int32 = 2
+        While existing.Contains(baseText & " [" & i & "]")
+            i += 1
+        End While
+        Return baseText & " [" & i & "]"
+    End Function
+
+
+
 
 
 End Class
