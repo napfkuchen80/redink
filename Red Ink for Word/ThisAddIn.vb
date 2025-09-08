@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.9.2025
+' 8.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1009,7 +1009,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.070925 Gen2 Beta Test"
+    Public Const Version As String = "V.080925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -20528,7 +20528,7 @@ Public Class ThisAddIn
             Dim checkOnlyOneClause As System.Boolean = False
             Dim addAdditionalContext As System.Boolean = False
             Dim doBubbles As System.Boolean = True
-
+            OtherPrompt = ""
 
             Dim p0 As SLib.InputParameter = New SLib.InputParameter("Rule Set to use", defaultRuleSetDisplay)
             p0.Options = New System.Collections.Generic.List(Of System.String)(displayOptions)
@@ -20543,7 +20543,9 @@ Public Class ThisAddIn
                 p4 = New SLib.InputParameter("Use the secondary model", do2ndModel)
             End If
 
-            Dim params() As SLib.InputParameter = {p0, p1, p2, p3, p4}
+            Dim p5 As SLib.InputParameter = New SLib.InputParameter("Other instructions", OtherPrompt)
+
+            Dim params() As SLib.InputParameter = {p0, p1, p2, p3, p4, p5}
 
             If ShowCustomVariableInputForm("Please set the DocCheck parameters:", AN & " DocCheck", params) = False Then
                 Return
@@ -20555,6 +20557,7 @@ Public Class ThisAddIn
             addAdditionalContext = System.Convert.ToBoolean(params(2).Value)
             doBubbles = System.Convert.ToBoolean(params(3).Value)
             do2ndModel = System.Convert.ToBoolean(params(4).Value)
+            OtherPrompt = System.Convert.ToString(params(5).Value)
 
             ' Resolve selected rule set
             Dim chosenRuleSet As DocCheckRuleSet = Nothing
@@ -20672,17 +20675,30 @@ Public Class ThisAddIn
         Dim sets As System.Collections.Generic.List(Of DocCheckRuleSet) = New System.Collections.Generic.List(Of DocCheckRuleSet)()
 
         Try
+            ' Datei-Default-Prompts (gelten als Fallback in dieser Datei)
+            Dim fileDefaultClausePrompt As System.String = Nothing
+            Dim fileDefaultMultiPrompt As System.String = Nothing
+
+            ' Aktueller Segment-Status
             Dim currentTitle As System.String = Nothing
             Dim jsonBuilder As System.Text.StringBuilder = New System.Text.StringBuilder()
+            Dim segClausePrompt As System.String = Nothing
+            Dim segMultiPrompt As System.String = Nothing
 
+            ' Lokale Routine: aktuelles Segment flushen
             Dim FlushCurrent As System.Action =
-            Sub()
-                Dim raw As System.String = jsonBuilder.ToString().Trim()
-                If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
-                    sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal))
-                End If
-                jsonBuilder.Clear()
-            End Sub
+        Sub()
+            Dim raw As System.String = jsonBuilder.ToString().Trim()
+            If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
+                ' Effektive Prompts bestimmen: Segment > Datei-Default > globaler Default (in CreateRuleSet finalisiert)
+                Dim effClause As System.String = If(segClausePrompt, fileDefaultClausePrompt)
+                Dim effMulti As System.String = If(segMultiPrompt, fileDefaultMultiPrompt)
+                sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal, effClause, effMulti))
+            End If
+            jsonBuilder.Clear()
+            segClausePrompt = Nothing
+            segMultiPrompt = Nothing
+        End Sub
 
             For Each rawLine As System.String In System.IO.File.ReadLines(filePath)
                 If rawLine Is Nothing Then
@@ -20691,21 +20707,49 @@ Public Class ThisAddIn
 
                 Dim line As System.String = rawLine.Trim()
 
+                ' Kommentarzeilen überspringen
                 If line.StartsWith(";", System.StringComparison.Ordinal) Then
                     Continue For
                 End If
 
+                ' Prompt-Zeile?
+                Dim k As System.String = Nothing
+                Dim v As System.String = Nothing
+                If TryParsePromptLine(line, k, v) Then
+                    ' Innerhalb eines Segments -> segment-spezifische Prompts setzen
+                    If currentTitle IsNot Nothing Then
+                        If k.Equals("SP_DocCheck_Clause", System.StringComparison.OrdinalIgnoreCase) Then
+                            segClausePrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClause", System.StringComparison.OrdinalIgnoreCase) Then
+                            segMultiPrompt = v
+                        End If
+                    Else
+                        ' Vor dem ersten [Titel] -> Datei-Default setzen
+                        If k.Equals("SP_DocCheck_Clause", System.StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultClausePrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClause", System.StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultMultiPrompt = v
+                        End If
+                    End If
+                    ' Prompt-Zeilen NICHT ins JSON übernehmen
+                    Continue For
+                End If
+
+                ' Segment-Beginn?
                 If line.StartsWith("[", System.StringComparison.Ordinal) AndAlso line.EndsWith("]", System.StringComparison.Ordinal) Then
+                    ' vorheriges Segment abschließen
                     FlushCurrent()
                     currentTitle = line.Substring(1, line.Length - 2).Trim()
                     Continue For
                 End If
 
+                ' Inhalt nur sammeln, wenn wir innerhalb eines Segments sind
                 If currentTitle IsNot Nothing Then
                     jsonBuilder.AppendLine(rawLine)
                 End If
             Next
 
+            ' letztes Segment flushen
             FlushCurrent()
 
         Catch ex As System.Exception
@@ -20715,71 +20759,118 @@ Public Class ThisAddIn
         Return sets
     End Function
 
+
+
     Private Function CreateRuleSet(ByVal title As System.String,
-                                ByVal rawJson As System.String,
-                                ByVal sourcePath As System.String,
-                                ByVal isLocal As System.Boolean) As DocCheckRuleSet
+                               ByVal rawJson As System.String,
+                               ByVal sourcePath As System.String,
+                               ByVal isLocal As System.Boolean,
+                               ByVal fileOrSegmentClausePrompt As System.String,
+                               ByVal fileOrSegmentMultiPrompt As System.String) As DocCheckRuleSet
+
         Dim rs As DocCheckRuleSet = New DocCheckRuleSet()
         rs.Title = title
         rs.SourcePath = sourcePath
         rs.IsLocal = isLocal
         rs.RawJson = rawJson
 
-        ' Extract records into raw JSON strings (no schema binding; minimal structure)
+        ' Records (unverändert)
         rs.RecordJsons = ExtractRecordJsonStrings(rawJson)
+
+        ' Effektive Prompts finalisieren:
+        '   - Wenn weder Segment- noch Datei-Default vorhanden, auf globale Defaults zurückfallen
+        rs.ClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentClausePrompt), fileOrSegmentClausePrompt, SP_DocCheck_Clause)
+        rs.MultiClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentMultiPrompt), fileOrSegmentMultiPrompt, SP_DocCheck_MultiClause)
+
         Return rs
     End Function
 
+
+
+    Private Function TryParsePromptLine(ByVal line As System.String,
+                                    ByRef keyOut As System.String,
+                                    ByRef valueOut As System.String) As System.Boolean
+        keyOut = Nothing
+        valueOut = Nothing
+
+        If line Is Nothing Then
+            Return False
+        End If
+
+        Dim m As System.Text.RegularExpressions.Match =
+        System.Text.RegularExpressions.Regex.Match(
+            line,
+            "^\s*(SP_DocCheck_(Clause|MultiClause))\s*=\s*(.*)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        )
+
+        If m IsNot Nothing AndAlso m.Success = True Then
+            keyOut = m.Groups(1).Value ' kompletter Key-Name
+            ' Wert ohne führende/trailing Whitespaces übernehmen (Inhalt sonst unverändert)
+            valueOut = m.Groups(3).Value.Trim()
+            Return True
+        End If
+
+        Return False
+    End Function
+
+
     ' ========================= Execution =========================
+
     Private Async Function RunIsolatedClause(ByVal ruleSet As DocCheckRuleSet,
-                                ByVal textToAnalyze As System.String,
-                                ByVal insertDocs As System.String,
-                                        ByVal Selection As Microsoft.Office.Interop.Word.Selection,
-                                        ByVal PutinBubbles As Boolean,
-                                      ByVal UseSecondAPI As Boolean) As Task(Of String)
+                                         ByVal textToAnalyze As System.String,
+                                         ByVal insertDocs As System.String,
+                                         ByVal Selection As Microsoft.Office.Interop.Word.Selection,
+                                         ByVal PutinBubbles As System.Boolean,
+                                         ByVal UseSecondAPI As System.Boolean) As System.Threading.Tasks.Task(Of System.String)
         Try
-            ' System prompt: SP_DC_Clause + SP_Add_Bubbles + the WHOLE RuleSet JSON (verbatim)
-            Dim systemPrompt As System.String = SP_DocCheck_Clause & System.Environment.NewLine &
+            ' System-Prompt: pro-RuleSet effektiver Prompt + optional Bubbles + gesamtes RuleSet (verbatim)
+            Dim systemPrompt As System.String =
+            ruleSet.ClausePrompt & System.Environment.NewLine &
             (If(PutinBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
             "<RULESET>" & ruleSet.RawJson & "</RULESET>"
 
             Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
-            If Not String.IsNullOrWhiteSpace(insertDocs) Then
+            If Not System.String.IsNullOrWhiteSpace(insertDocs) Then
                 userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
             End If
 
             Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
 
-            ' Temporary output (replace with your parse→CreateBubble pipeline)
             If PutinBubbles Then
                 SetBubbles(answer, Selection, False)
             Else
                 ShowDocCheckResult(answer)
             End If
 
+            Return answer
+
         Catch ex As System.Exception
             ShowCustomMessageBox("DocCheck 'Single Clause' run failed: " & ex.Message)
+            Return System.String.Empty
         End Try
     End Function
 
+
+
     Private Async Function RunSetOfClauses(ByVal ruleSet As DocCheckRuleSet,
-                            ByVal textToAnalyze As System.String,
-                            ByVal insertDocs As System.String,
-                                      ByVal Selection As Microsoft.Office.Interop.Word.Selection,
-                                      ByVal PutInBubbles As Boolean,
-                                      ByVal UseSecondAPI As Boolean) As Task(Of String)
+                                       ByVal textToAnalyze As System.String,
+                                       ByVal insertDocs As System.String,
+                                       ByVal Selection As Microsoft.Office.Interop.Word.Selection,
+                                       ByVal PutInBubbles As System.Boolean,
+                                       ByVal UseSecondAPI As System.Boolean) As System.Threading.Tasks.Task(Of System.String)
         Try
             Dim records As System.Collections.Generic.List(Of System.String) = ruleSet.RecordJsons
             If records Is Nothing OrElse records.Count = 0 Then
-                ' Try to extract lazily if not available
+                ' Lazy Extract
                 records = ExtractRecordJsonStrings(ruleSet.RawJson)
                 If records Is Nothing OrElse records.Count = 0 Then
                     ShowCustomMessageBox("This rule set contains no valid records. Expected a JSON object with 'Records', or an array/object representing records.")
-                    Return String.Empty
+                    Return System.String.Empty
                 End If
             End If
 
-            ' Start progress UI
+            ' Progress UI
             ShowProgressBarInSeparateThread(AN & " DocCheck", "Analyzing text...")
             ProgressBarModule.CancelOperation = False
 
@@ -20787,14 +20878,9 @@ Public Class ThisAddIn
             GlobalProgressValue = 0
             GlobalProgressLabel = "Analyzing rule 0 of " & records.Count
 
-            Dim userPromptBase As System.String = textToAnalyze
-            If insertDocs IsNot Nothing AndAlso insertDocs.Trim().Length > 0 Then
-                userPromptBase &= System.Environment.NewLine & System.Environment.NewLine & insertDocs
-            End If
-
-            Dim OverallAnswer As String = ""
-
+            Dim OverallAnswer As System.String = System.String.Empty
             Dim idx As System.Int32 = 0
+
             For Each recordJson As System.String In records
                 If ProgressBarModule.CancelOperation = True Then
                     ShowCustomMessageBox("Analysis aborted by user.")
@@ -20802,15 +20888,16 @@ Public Class ThisAddIn
                 End If
 
                 GlobalProgressValue = idx
-                GlobalProgressLabel = "Analyzing rule " & idx + 1 & " of " & records.Count
+                GlobalProgressLabel = "Analyzing rule " & (idx + 1).ToString() & " of " & records.Count.ToString()
 
-                ' System prompt: SP_DC_Set + SP_Add_Bubbles + the SINGLE record JSON (verbatim)
-                Dim systemPrompt As System.String = SP_DocCheck_MultiClause & System.Environment.NewLine &
+                ' System-Prompt: pro-RuleSet effektiver MultiClause-Prompt + optional Bubbles + einzelne Record JSON
+                Dim systemPrompt As System.String =
+                ruleSet.MultiClausePrompt & System.Environment.NewLine &
                 (If(PutInBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
                 "<RULESET>" & recordJson & "</RULESET>"
 
                 Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
-                If Not String.IsNullOrWhiteSpace(insertDocs) Then
+                If Not System.String.IsNullOrWhiteSpace(insertDocs) Then
                     userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
                 End If
 
@@ -20819,14 +20906,13 @@ Public Class ThisAddIn
                 If PutInBubbles Then
                     SetBubbles(answer, Selection, True)
                 Else
-                    OverallAnswer &= $"Rule {idx + 1}: " & vbCrLf & vbCrLf & answer & vbCrLf & vbCrLf
+                    OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
                 End If
 
                 idx += 1
-
             Next
 
-            If Not ProgressBarModule.CancelOperation Then
+            If ProgressBarModule.CancelOperation = False Then
                 ProgressBarModule.CancelOperation = True
                 If PutInBubbles = False Then
                     ShowDocCheckResult(OverallAnswer)
@@ -20836,11 +20922,16 @@ Public Class ThisAddIn
             End If
 
             ProgressBarModule.CancelOperation = True
+            Return OverallAnswer
 
         Catch ex As System.Exception
             ShowCustomMessageBox("DocCheck 'Multi Clause' run failed: " & ex.Message)
+            Return System.String.Empty
         End Try
     End Function
+
+
+
 
     Private Sub ShowDocCheckResult(ByVal answer As System.String)
         Dim result As String = SLib.ShowCustomWindow("The DocCheck resulted in the following findings:", answer, "", AN, False, True, True, True)
@@ -20963,8 +21054,9 @@ Public Class ThisAddIn
         Public Property IsLocal As System.Boolean
         Public Property RawJson As System.String
         Public Property RecordJsons As System.Collections.Generic.List(Of System.String)
+        Public Property ClausePrompt As System.String
+        Public Property MultiClausePrompt As System.String
     End Class
-
     ' ========================= Small utility =========================
     Private Function MakeUniqueDisplay(ByVal baseText As System.String, ByVal existing As System.Collections.Generic.ICollection(Of System.String)) As System.String
         If existing Is Nothing OrElse existing.Contains(baseText) = False Then
