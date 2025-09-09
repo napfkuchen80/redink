@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.9.2025
+' 9.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1009,7 +1009,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.080925 Gen2 Beta Test"
+    Public Const Version As String = "V.090925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -1846,6 +1846,16 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_MultiClauseSum As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum = value
+        End Set
+    End Property
+
+
     Public Shared Property SP_SuggestTitles As String
         Get
             Return _context.SP_SuggestTitles
@@ -2133,6 +2143,14 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_ChatWord = value
+        End Set
+    End Property
+    Public Shared Property SP_Chat As String
+        Get
+            Return _context.SP_Chat
+        End Get
+        Set(value As String)
+            _context.SP_Chat = value
         End Set
     End Property
 
@@ -20906,17 +20924,26 @@ Public Class ThisAddIn
                 If PutInBubbles Then
                     SetBubbles(answer, Selection, True)
                 Else
-                    OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
+                    'OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
+                    OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
                 End If
 
                 idx += 1
             Next
 
             If ProgressBarModule.CancelOperation = False Then
-                ProgressBarModule.CancelOperation = True
                 If PutInBubbles = False Then
-                    ShowDocCheckResult(OverallAnswer)
+                    GlobalProgressLabel = "Creating final report..."
+                    GlobalProgressValue = idx
+                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SP_DocCheck_MulticlauseSum), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                    ProgressBarModule.CancelOperation = True
+                    If OverallAnswer2.Trim() = "" Then
+                        ShowDocCheckResult(OverallAnswer)
+                    Else
+                        ShowDocCheckResult(OverallAnswer2)
+                    End If
                 Else
+                    ProgressBarModule.CancelOperation = True
                     ShowCustomMessageBox("DocCheck analysis completed - check out the comments added (if any).")
                 End If
             End If

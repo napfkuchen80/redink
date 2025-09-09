@@ -65,6 +65,54 @@ Namespace My
                 Me("LastPrompt") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property ChatHistory_Inky() As String
+            Get
+                Return CType(Me("ChatHistory_Inky"),String)
+            End Get
+            Set
+                Me("ChatHistory_Inky") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property Inky_SelectedModelKey() As String
+            Get
+                Return CType(Me("Inky_SelectedModelKey"),String)
+            End Get
+            Set
+                Me("Inky_SelectedModelKey") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property Inky_UseSecondApiSelected() As Boolean
+            Get
+                Return CType(Me("Inky_UseSecondApiSelected"),Boolean)
+            End Get
+            Set
+                Me("Inky_UseSecondApiSelected") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property Inky_DarkMode() As Boolean
+            Get
+                Return CType(Me("Inky_DarkMode"),Boolean)
+            End Get
+            Set
+                Me("Inky_DarkMode") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.9.2025
+' 9.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -136,8 +136,9 @@ Public Class ThisAddIn
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "red_ink"
+    Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.070925 Gen2 Beta Test"
+    Public Const Version As String = "V.090925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -812,6 +813,16 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_MultiClauseSum As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum = value
+        End Set
+    End Property
+
+
     Public Shared Property SP_SuggestTitles As String
         Get
             Return _context.SP_SuggestTitles
@@ -1091,6 +1102,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_ChatWord = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Chat As String
+        Get
+            Return _context.SP_Chat
+        End Get
+        Set(value As String)
+            _context.SP_Chat = value
         End Set
     End Property
 
@@ -4306,7 +4326,122 @@ Public Class ThisAddIn
     End Function
     ' ---------------------------------------------------------------------------
 
+    Private Const InkyBasePath As String = "/inky"
+    Private Const InkyUiRoute As String = "/inky"          ' GET → serves HTML
+    Private Const InkyApiRoute As String = "/inky/api"      ' POST (JSON) → commands
+    Private Const InkyName As String = "Inky"               ' Fallback; AN6 preferred
+
+    ' ===== (B) MODIFY HandleHttpRequest to short-circuit GET /inky and set content types =====
     Private Async Function HandleHttpRequest(
+        ctx As System.Net.HttpListenerContext) As System.Threading.Tasks.Task
+
+        Dim req As System.Net.HttpListenerRequest = ctx.Request
+        Dim res As System.Net.HttpListenerResponse = ctx.Response
+
+        Try
+            ' CORS preflight stays as-is
+            If req.HttpMethod = "OPTIONS" Then
+                res.AddHeader("Access-Control-Allow-Origin", "*")
+                res.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+                res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                res.StatusCode = 204 : res.Close() : Return
+            End If
+
+            ' ---- Favicon for the browser tab ----
+            If req.HttpMethod.Equals("GET", System.StringComparison.OrdinalIgnoreCase) AndAlso
+                     (req.RawUrl.Equals("/favicon.ico", System.StringComparison.OrdinalIgnoreCase)) Then
+
+                Dim png() As System.Byte = GetLogoPngBytes()
+                ' Some browsers accept PNG at /favicon.ico; if you prefer ICO, see note below.
+                res.ContentType = "image/png"
+                res.AddHeader("Cache-Control", "public, max-age=86400")
+                res.ContentLength64 = png.Length
+                Using os As System.IO.Stream = res.OutputStream
+                    os.Write(png, 0, png.Length)
+                End Using
+                res.Close()
+                Return
+            End If
+
+
+            ' ---- NEW: Serve the Inky UI over GET /inky ----
+            If req.HttpMethod.Equals("GET", System.StringComparison.OrdinalIgnoreCase) AndAlso
+           (req.RawUrl.Equals(InkyUiRoute, System.StringComparison.OrdinalIgnoreCase) OrElse
+            req.RawUrl.Equals(InkyUiRoute & "/", System.StringComparison.OrdinalIgnoreCase)) Then
+
+                Dim html As System.String = BuildInkyHtmlPage()
+                Dim bufUi() As System.Byte = System.Text.Encoding.UTF8.GetBytes(html)
+                res.ContentLength64 = bufUi.Length
+                res.ContentType = "text/html; charset=utf-8"
+                res.AddHeader("Cache-Control", "no-store")
+                Using os = res.OutputStream
+                    Await os.WriteAsync(bufUi, 0, bufUi.Length).ConfigureAwait(False)
+                End Using
+                res.Close()
+                Return
+            End If
+
+            ' ---- Normal flow (POST JSON to /inky/api or your existing commands) ----
+            Dim body As System.String = ""
+            If req.HasEntityBody Then
+                Using rdr As New System.IO.StreamReader(req.InputStream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks:=False)
+                    body = rdr.ReadToEnd()
+                End Using
+            End If
+
+            Dim responseText As System.String = Await ProcessRequestInAddIn(body, req.RawUrl).ConfigureAwait(False)
+
+            ' NEW: light-weight content-type hinting (keeps old behavior defaulting to text/plain)
+            Dim contentType As System.String = "text/plain; charset=utf-8"
+            If responseText IsNot Nothing AndAlso responseText.StartsWith("CT:html" & vbLf, System.StringComparison.Ordinal) Then
+                contentType = "text/html; charset=utf-8"
+                responseText = responseText.Substring(("CT:html" & vbLf).Length)
+            ElseIf responseText IsNot Nothing AndAlso responseText.StartsWith("CT:json" & vbLf, System.StringComparison.Ordinal) Then
+                contentType = "application/json; charset=utf-8"
+                responseText = responseText.Substring(("CT:json" & vbLf).Length)
+            End If
+
+            Dim buf() As System.Byte = System.Text.Encoding.UTF8.GetBytes(responseText)
+            res.ContentLength64 = buf.Length
+            res.ContentType = contentType
+            res.AddHeader("Access-Control-Allow-Origin", "*")
+            Using os = res.OutputStream
+                os.Write(buf, 0, buf.Length)
+            End Using
+            res.Close()
+
+        Catch ex As System.Exception
+            Try
+                res.StatusCode = 500
+                Dim err As System.String = "Internal server error: " & ex.Message
+                Dim buf() As System.Byte = System.Text.Encoding.UTF8.GetBytes(err)
+                res.ContentLength64 = buf.Length
+                res.ContentType = "text/plain; charset=utf-8"
+                Using os = res.OutputStream
+                    os.Write(buf, 0, buf.Length)
+                End Using
+                res.Close()
+            Catch
+                ' swallow
+            End Try
+        End Try
+    End Function
+
+    Private Function GetLogoPngBytes() As System.Byte()
+        Try
+            Dim bmp As System.Drawing.Bitmap = My.Resources.Red_Ink_Logo
+            Using ms As New System.IO.MemoryStream()
+                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                Return ms.ToArray()
+            End Using
+        Catch
+            ' 1x1 transparent PNG fallback
+            Return System.Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGD4DwABdQF+8m3rXQAAAABJRU5ErkJggg==")
+        End Try
+    End Function
+
+
+    Private Async Function OldHandleHttpRequest(
             ctx As System.Net.HttpListenerContext) As System.Threading.Tasks.Task
 
         Dim req = ctx.Request
@@ -4525,7 +4660,7 @@ Public Class ThisAddIn
 
 
     ' ---------------- MAIN REQUEST DISPATCH ------------------------------------
-    Private Async Function ProcessRequestInAddIn(
+    Private Async Function OldProcessRequestInAddIn(
             body As String,
             rawUrl As String) As System.Threading.Tasks.Task(Of String)
 
@@ -4665,34 +4800,34 @@ Public Class ThisAddIn
                 Dim DoNewDoc As Boolean = False
 
                 '─── prompt library branch ─────────────────────────────────────
-                If String.IsNullOrEmpty(otherPrompt) AndAlso otherPrompt <> "ESC" AndAlso INI_PromptLib Then
+                If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
                     Dim sel = Await SwitchToUi(Function()
                                                    Return ShowPromptSelector(INI_PromptLibPath, Not noText, Nothing)
                                                End Function)                         ' (prompt, doMarkup, doInsert, canceled)
 
-                    otherPrompt = sel.Item1
+                    OtherPrompt = sel.Item1
                     doMarkupFlag = sel.Item2
                     doInsertFlag = Not sel.Item4         ' library’s “canceled” → insert = False
                 End If
 
                 ' user cancelled
-                If String.IsNullOrWhiteSpace(otherPrompt) OrElse otherPrompt = "ESC" Then
+                If String.IsNullOrWhiteSpace(OtherPrompt) OrElse OtherPrompt = "ESC" Then
                     Return ""
                 End If
 
                 ' remember last prompt
-                My.Settings.LastPrompt = otherPrompt
+                My.Settings.LastPrompt = OtherPrompt
                 My.Settings.Save()
 
                 '─── decode prefix flags ───────────────────────────────────────
-                If otherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
-                    otherPrompt = otherPrompt.Substring(InsertPrefix.Length).Trim()
+                If OtherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
+                    OtherPrompt = OtherPrompt.Substring(InsertPrefix.Length).Trim()
                     doInsertFlag = True
-                ElseIf otherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
-                    otherPrompt = otherPrompt.Substring(MarkupPrefix.Length).Trim()
+                ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
                     doMarkupFlag = True
                     doInsertFlag = True          ' old logic: markup implies insert
-                ElseIf otherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                ElseIf OtherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
                     OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
                     DoNewDoc = True
                     doMarkupFlag = False
@@ -4797,6 +4932,1040 @@ Public Class ThisAddIn
                 Return ""                                   ' old behaviour: no body sent
 
         End Select
+    End Function
+
+
+    ' ===== Chatbot 
+
+    ' ---------- Safe accessors & utilities ----------
+    Private Function TryGetAppSetting(Of T)(ByVal key As System.String, ByVal fallback As T) As T
+        Try
+            Dim p = GetType(My.MySettings).GetProperty(key, System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Instance)
+            If p IsNot Nothing Then
+                Dim v = DirectCast(p.GetValue(My.Settings, Nothing), Object)
+                If v IsNot Nothing Then Return DirectCast(v, T)
+            End If
+        Catch
+        End Try
+        Return fallback
+    End Function
+
+    Private Function GetBotName() As System.String
+        ' Try: My.Settings("AN6") → else "Inky"
+        Dim v As System.String = TryGetAppSetting(Of System.String)("AN6", Nothing)
+        If Not System.String.IsNullOrWhiteSpace(v) Then Return v
+        Return "Inky"
+    End Function
+
+    Private Function GetLogoDataUrl() As System.String
+        Try
+            Dim bmp As System.Drawing.Bitmap = My.Resources.Red_Ink_Logo
+            Using ms As New System.IO.MemoryStream()
+                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                Dim b64 As System.String = System.Convert.ToBase64String(ms.ToArray())
+                Return "data:image/png;base64," & b64
+            End Using
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    Private Function GetSystemPromptChat() As System.String
+        ' Try: My.Settings("SP_Chat") → else fallback        
+        Dim v As System.String = TryGetAppSetting(Of System.String)("SP_Chat", Nothing)
+        If Not System.String.IsNullOrWhiteSpace(v) Then Return v
+        Return "You are a helpful assistant."
+    End Function
+
+    ' Extract a human label/key from ModelConfig even if it lacks “Description”.
+    ' --------- DROP-IN: ersetzt GetModelDisplayKey ---------
+    Private Function GetModelDisplayKey(ByVal model As SharedLibrary.SharedLibrary.ModelConfig) As System.String
+        If model Is Nothing Then Return ""
+        ' Bevorzugt die sprechende Bezeichnung:
+        If Not System.String.IsNullOrWhiteSpace(model.ModelDescription) Then
+            Return model.ModelDescription
+        End If
+        ' Fallback: der interne Modellname
+        If Not System.String.IsNullOrWhiteSpace(model.Model) Then
+            Return model.Model
+        End If
+        Return "Model"
+    End Function
+
+
+    Private Function GetFriendlyGreeting() As System.String
+        Dim name As System.String = GetBotName()
+        Dim tl As System.String
+        Try
+            tl = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+        Catch
+            tl = "en"
+        End Try
+
+        Select Case tl
+            Case "de" : Return $"Hallo! Ich bin {name}. Wie kann ich helfen?"
+            Case "fr" : Return $"Salut ! Je suis {name}. Comment puis-je aider ?"
+            Case "it" : Return $"Ciao! Sono {name}. In cosa posso aiutarti?"
+            Case "es" : Return $"¡Hola! Soy {name}. ¿En qué puedo ayudarte?"
+            Case Else : Return $"Hi! I’m {name}. How can I help?"
+        End Select
+    End Function
+
+    Dim botName As System.String = GetBotName()
+    Dim brandName As System.String = AN
+    Dim logoUrl As System.String = GetLogoDataUrl()
+    Dim greet As System.String = GetFriendlyGreeting()
+
+
+    ' Simple persisted state container for chat.
+    <Serializable>
+    Private Class InkyState
+        Public History As System.Collections.Generic.List(Of ChatTurn) = New System.Collections.Generic.List(Of ChatTurn)()
+        Public SelectedModelKey As System.String = ""
+        Public UseSecondApi As System.Boolean = False
+        Public LastAssistantText As System.String = ""
+        Public DarkMode As System.Boolean = False
+    End Class
+
+    <Serializable>
+    Private Class ChatTurn
+        Public Role As System.String   ' "user" or "assistant"
+        Public Markdown As System.String
+        Public Html As System.String
+        Public Utc As System.DateTime
+    End Class
+
+    Private Function GetUserLanguageTwoLetter() As System.String
+        Try
+            Return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+        Catch
+            Return "en"
+        End Try
+    End Function
+
+
+    Private Function LoadInkyState() As InkyState
+        Try
+            Dim raw As System.String = My.Settings.ChatHistory_Inky
+            If System.String.IsNullOrWhiteSpace(raw) Then Return New InkyState()
+            Return Newtonsoft.Json.JsonConvert.DeserializeObject(Of InkyState)(raw)
+        Catch
+            Return New InkyState()
+        End Try
+    End Function
+
+    Private Sub SaveInkyState(ByVal st As InkyState)
+        Try
+            My.Settings.ChatHistory_Inky = Newtonsoft.Json.JsonConvert.SerializeObject(st)
+            My.Settings.Save()
+        Catch
+            ' ignore persistence failures silently to never break Outlook
+        End Try
+    End Sub
+
+    Private Function MarkdownToHtml(ByVal md As System.String) As System.String
+        Try
+            Dim pipeline As Markdig.MarkdownPipeline = New Markdig.MarkdownPipelineBuilder().
+            UseAdvancedExtensions().
+            Build()
+            Dim html As System.String = Markdig.Markdown.ToHtml(md, pipeline)
+            Return html
+        Catch ex As System.Exception
+            ' Fallback: HTML-encode plaintext to be safe
+            Return System.Net.WebUtility.HtmlEncode(md)
+        End Try
+    End Function
+
+    Private Function CapHistoryToChars(ByVal st As InkyState, ByVal maxChars As System.Int32) As System.Collections.Generic.List(Of ChatTurn)
+        If maxChars <= 0 Then Return New System.Collections.Generic.List(Of ChatTurn)(st.History)
+        Dim acc As New System.Text.StringBuilder()
+        Dim clipped As New System.Collections.Generic.List(Of ChatTurn)()
+        ' iterate from the end (most recent) backwards until cap reached
+        For i As System.Int32 = st.History.Count - 1 To 0 Step -1
+            Dim turn As ChatTurn = st.History(i)
+            Dim piece As System.String = $"[{turn.Role}]{turn.Markdown}" & vbLf
+            If acc.Length + piece.Length > maxChars Then Exit For
+            acc.Insert(0, piece)
+            clipped.Insert(0, turn)
+        Next
+        Return clipped
+    End Function
+
+    Private Function GetSelectedModelLabel(ByVal useSecond As System.Boolean, ByVal selectedKey As System.String) As System.String
+        If Not useSecond Then
+            Return If(System.String.IsNullOrWhiteSpace(INI_Model), "Default model", INI_Model)
+        End If
+        If Not System.String.IsNullOrWhiteSpace(selectedKey) Then
+            Return selectedKey
+        End If
+        Return If(System.String.IsNullOrWhiteSpace(INI_Model_2), "Second API model", INI_Model_2)
+    End Function
+
+    ' Builds the entire HTML UI (single file; no external assets)
+    Private Function BuildInkyHtmlPage() As System.String
+        ' Namen/Brand/Logo vorbereiten
+        Dim botName As System.String = GetBotName()
+        Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)  ' AN direkt verwenden
+        Dim logoUrl As System.String = GetLogoDataUrl()                                             ' data:image/png;base64,...
+        Dim greet As System.String = GetFriendlyGreeting()
+
+        Dim html As New System.Text.StringBuilder()
+
+        html.AppendLine("<!doctype html>")
+        html.AppendLine("<html lang=""en""><head><meta charset=""utf-8"">")
+        html.AppendLine("<meta name=""viewport"" content=""width=device-width, initial-scale=1"">")
+        html.AppendLine("<link rel=""shortcut icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        ' Titel: AN – Local Chat
+        html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
+
+        ' ---------- CSS ----------
+        html.AppendLine("<style>")
+        html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
+        ' Dark-Theme Defaults auf :root
+        html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9fb0c3;--acc:#2ea043;--border:#1b2430;}")
+        ' Light-Theme-Variablen korrekt überschreiben: Klasse auf <html> (documentElement)
+        html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5b6a79;--acc:#0969da;--border:#e5e7eb;}")
+        html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
+        html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
+        html.AppendLine(".topline{display:flex;align-items:center;gap:.6rem}")
+        html.AppendLine(".topline img.logo{width:24px;height:24px;border-radius:6px;display:block}")
+        html.AppendLine(".topline .brandbig{font-weight:700}")
+        html.AppendLine(".topline .sub{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".muted{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".spacer{flex:1}")
+        html.AppendLine("select,button,input,textarea{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.6rem;}")
+        html.AppendLine("select,button,input{padding:.5rem .7rem;}")
+        html.AppendLine("button:hover{filter:brightness(1.1)}")
+        html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
+        html.AppendLine(".row{display:flex;margin:0 auto 1rem auto;max-width:1000px;padding:0 .25rem;}")
+        ' <<< Ausrichtung: Bot links, User rechts >>>
+        html.AppendLine(".row.bot{justify-content:flex-start;}")   ' Inky links
+        html.AppendLine(".row.user{justify-content:flex-end;}")    ' Du rechts
+        html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}")
+        ' Ecken passend "spitz"
+        html.AppendLine(".bot .bubble{border-top-right-radius:.3rem}")   ' Bot links → rechte obere Ecke „spitz“
+        html.AppendLine(".user .bubble{border-top-left-radius:.3rem}")   ' User rechts → linke obere Ecke „spitz“
+        html.AppendLine(".role{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}")
+        html.AppendLine(".inputbar{display:flex;gap:.5rem;padding:1rem;border-top:1px solid var(--border);background:var(--card)}")
+        html.AppendLine("textarea{flex:1;resize:vertical;min-height:48px;max-height:200px;border-radius:.8rem;padding:.7rem;}")
+        html.AppendLine(".mono{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
+        html.AppendLine(".actions{display:flex;gap:.5rem}")
+        html.AppendLine(".hint{font-size:.8rem;color:var(--muted);padding:.25rem 1rem 1rem}")
+        html.AppendLine(".system{opacity:.85;border-style:dashed}")
+        html.AppendLine("a{color:var(--acc)} code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.9em}")
+        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem}")
+        ' Typing Indicator deutlich sichtbar (Farbe + Hintergrund)
+        html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;color:var(--muted);opacity:.5;animation:ping 1s ease-in-out infinite;}")
+        html.AppendLine("@keyframes ping{0%{transform:scale(0.9);opacity:.25}50%{transform:scale(1.15);opacity:.95}100%{transform:scale(0.9);opacity:.25}}")
+        html.AppendLine("</style>")
+
+        html.AppendLine("</head><body>")
+        html.AppendLine("<div class=""wrap"">")
+
+        ' ---------- Topbar ----------
+        html.AppendLine("  <div class=""topbar"">")
+        html.AppendLine("    <div class=""topline"">")
+        If Not System.String.IsNullOrWhiteSpace(logoUrl) Then
+            html.AppendLine("      <img class=""logo"" src=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """ alt=""logo"">")
+        End If
+        html.AppendLine("      <div class=""brandbig"">" & System.Net.WebUtility.HtmlEncode(brandName) & "</div>")
+        html.AppendLine("      <div class=""sub"">Local Chat</div>") ' <- Text geändert
+        html.AppendLine("    </div>")
+        html.AppendLine("    <div class=""spacer""></div>")
+        html.AppendLine("    <select id=""modelSel"" title=""Model""></select>")
+        html.AppendLine("    <button id=""copyBtn"" title=""Copy last answer to clipboard"">Copy last</button>")
+        html.AppendLine("    <button id=""clearBtn"" title=""Clear conversation"">Clear</button>")
+        html.AppendLine("    <button id=""themeBtn"" title=""Toggle theme"">Theme</button>")
+        html.AppendLine("  </div>")
+
+        html.AppendLine("  <div id=""chat"" class=""chat""></div>")
+
+        ' ---------- Input ----------
+        html.AppendLine("  <div class=""inputbar"">")
+        html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
+        html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button></div>")
+        html.AppendLine("  </div>")
+        html.AppendLine("  <div class=""hint"">Enter to send • Shift+Enter for newline • Ctrl+L to clear • Model applies on next message</div>")
+        html.AppendLine("</div>")
+
+        ' ---------- JS ----------
+        html.AppendLine("<script>")
+        ' Ohne System.Web: sicheres JS-Stringliteral via JSON-Serializer
+        html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
+
+        html.AppendLine("const api = async (cmd, data={}) => {")
+        html.AppendLine("  const res = await fetch('" & InkyApiRoute & "', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd}, data))});")
+        html.AppendLine("  const txt = await res.text();")
+        html.AppendLine("  try { return JSON.parse(txt); } catch { return {ok:false,error:txt}; }")
+        html.AppendLine("};")
+
+        html.AppendLine("const chatEl = document.getElementById('chat');")
+        html.AppendLine("const msgEl  = document.getElementById('msg');")
+        html.AppendLine("const modelSel = document.getElementById('modelSel');")
+        html.AppendLine("const copyBtn = document.getElementById('copyBtn');")
+        html.AppendLine("const clearBtn = document.getElementById('clearBtn');")
+        html.AppendLine("const themeBtn = document.getElementById('themeBtn');")
+        html.AppendLine("let dark = false;")
+        html.AppendLine("function setTheme(d){dark=d;document.documentElement.classList.toggle('light',!!d);}")
+
+        ' Render: nutzt row bot/user (BOT LINKS / USER RECHTS), html bevorzugt
+        html.AppendLine("function render(turns){")
+        html.AppendLine("  chatEl.innerHTML='';")
+        html.AppendLine("  for(const t of (turns||[])){")
+        html.AppendLine("    const row = document.createElement('div'); row.className='row ' + (t.role==='user'?'user':'bot');")
+        html.AppendLine("    const b = document.createElement('div'); b.className='bubble';")
+        html.AppendLine("    const r = document.createElement('div'); r.className='role'; r.textContent = (t.role==='user'?'You':(window.__botName||'Bot'));")
+        html.AppendLine("    b.appendChild(r);")
+        html.AppendLine("    const c = document.createElement('div');")
+        html.AppendLine("    if (t && typeof t.html === 'string' && t.html.length){")
+        html.AppendLine("      c.innerHTML = t.html;")
+        html.AppendLine("    } else if (t && typeof t.markdown === 'string' && t.markdown.length){")
+        html.AppendLine("      const safe = t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');")
+        html.AppendLine("      c.innerHTML = safe;")
+        html.AppendLine("    } else {")
+        html.AppendLine("      c.textContent = '';")
+        html.AppendLine("    }")
+        html.AppendLine("    b.appendChild(c);")
+        html.AppendLine("    row.appendChild(b); chatEl.appendChild(row);")
+        html.AppendLine("  }")
+        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
+        html.AppendLine("}")
+
+        ' Boot
+        html.AppendLine("async function boot(){")
+        html.AppendLine("  const st = await api('inky_getstate');")
+        html.AppendLine("  if(!st.ok){alert(st.error||'Failed to initialize');return}")
+        html.AppendLine("  setTheme(st.darkMode===true);")
+        html.AppendLine("  render(st.history||[]);")
+        html.AppendLine("  modelSel.innerHTML='';")
+        html.AppendLine("  for(const m of (st.models||[])){")
+        html.AppendLine("    const opt = document.createElement('option');")
+        html.AppendLine("    opt.value = m.key || '';")
+        html.AppendLine("    opt.textContent = m.label || '';")
+        html.AppendLine("    if (m.disabled) opt.disabled = true;")
+        html.AppendLine("    if (m.isSeparator) {")
+        html.AppendLine("      opt.style.fontFamily = 'ui-monospace,Consolas,monospace';")
+        html.AppendLine("    }")
+        html.AppendLine("    if (m.selected && !m.disabled) opt.selected = true;")
+        html.AppendLine("    modelSel.appendChild(opt);")
+        html.AppendLine("  }")
+        html.AppendLine("  if (!modelSel.value) {")
+        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
+        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
+        html.AppendLine("  }")
+        html.AppendLine("  if(st && st.greeting && (!Array.isArray(st.history) || (Array.isArray(st.history) && st.history.length===0))){")
+        html.AppendLine("     msgEl.placeholder = st.greeting;")
+        html.AppendLine("  }")
+        html.AppendLine("}")
+
+        ' Sofortiges Anzeigen + Typing-Indikator (in Inky-Bubble, also links)
+        html.AppendLine("async function send(){")
+        html.AppendLine("  const t = msgEl.value.trim(); if(!t) return;")
+        html.AppendLine("  msgEl.value='';")
+        ' 1) Nutzer-Bubble sofort (rechts)
+        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
+        html.AppendLine("    `<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t")
+        html.AppendLine("      .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);")
+        ' 2) Typing-Bubble in Inky-Reihe (links)
+        html.AppendLine("  const typingId = 'typing-' + Math.random().toString(36).slice(2);")
+        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
+        html.AppendLine("    `<div class=""row bot"" id=""${typingId}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div><span class=""typing""></span></div></div></div>`);")
+        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
+        ' 3) Anfrage an Server
+        html.AppendLine("  const res = await api('inky_send',{Text:t});")
+        ' 4) Typing entfernen
+        html.AppendLine("  const ty = document.getElementById(typingId); if(ty) ty.remove();")
+        html.AppendLine("  if(!res.ok){alert(res.error||'Error'); return}")
+        html.AppendLine("  render(res.history||[]);")
+        html.AppendLine("}")
+
+        ' Events
+        html.AppendLine("modelSel.addEventListener('change', async ()=>{")
+        html.AppendLine("  const opt = modelSel.options[modelSel.selectedIndex];")
+        html.AppendLine("  if (!opt || opt.disabled || !opt.value) {")
+        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
+        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
+        html.AppendLine("    return;")
+        html.AppendLine("  }")
+        html.AppendLine("  const key = opt.value;")
+        html.AppendLine("  const r = await api('inky_setmodel',{Key:key});")
+        html.AppendLine("  if(!r.ok){alert(r.error||'Failed to set model')}")
+        html.AppendLine("});")
+        html.AppendLine("copyBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const r = await api('inky_copylast'); if(!r.ok){alert(r.error||'Nothing to copy')}")
+        html.AppendLine("});")
+        html.AppendLine("clearBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const r = await api('inky_clear'); if(r.ok){render([])} else {alert(r.error||'Failed to clear')}")
+        html.AppendLine("});")
+        html.AppendLine("themeBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const r = await api('inky_toggletheme'); if(r.ok){ setTheme(r.darkMode===true);} else {alert(r.error||'Theme switch failed')}")
+        html.AppendLine("});")
+        html.AppendLine("msgEl.addEventListener('keydown', (e)=>{")
+        html.AppendLine("  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }")
+        html.AppendLine("  if(e.key.toLowerCase()==='l' && e.ctrlKey){ e.preventDefault(); clearBtn.click(); }")
+        html.AppendLine("});")
+        html.AppendLine("document.getElementById('sendBtn').addEventListener('click', send);")
+        html.AppendLine("boot();")
+        html.AppendLine("</script>")
+
+        html.AppendLine("</body></html>")
+        Return html.ToString()
+    End Function
+
+
+
+
+    ' Builds a simple JSON response
+    Private Function JsonOk(o As Object) As System.String
+        Return "CT:json" & vbLf & Newtonsoft.Json.JsonConvert.SerializeObject(o)
+    End Function
+    Private Function JsonErr(msg As System.String) As System.String
+        Return JsonOk(New With {.ok = False, .error = msg})
+    End Function
+
+    ' ===== (D) EXTEND ProcessRequestInAddIn with the Inky commands =====
+
+    Private Async Function ProcessRequestInAddIn(
+        body As System.String,
+        rawUrl As System.String) As System.Threading.Tasks.Task(Of System.String)
+
+        ' If this is a browser POST to our Inky API, j may be JSON; otherwise keep your existing flow
+        If rawUrl IsNot Nothing AndAlso rawUrl.StartsWith(InkyApiRoute, System.StringComparison.OrdinalIgnoreCase) Then
+            Try
+                Dim j As Newtonsoft.Json.Linq.JObject = If(
+                Not System.String.IsNullOrWhiteSpace(body),
+                Newtonsoft.Json.Linq.JObject.Parse(body),
+                New Newtonsoft.Json.Linq.JObject())
+                Dim cmd As System.String = j("Command")?.ToString()
+
+                Select Case cmd
+                    Case "inky_getstate"
+                        Dim st As InkyState = LoadInkyState()
+                        ' Adopt persisted theme if present
+                        Try
+                            st.DarkMode = st.DarkMode = My.Settings.Inky_DarkMode
+
+                        Catch
+                        End Try
+
+                        ' If first startup → greet with a system bubble (not counted for memory)
+                        Dim greeting As System.String = Nothing
+                        If st.History.Count = 0 Then greeting = GetFriendlyGreeting()
+
+                        ' models list
+                        Dim models As System.Collections.Generic.List(Of Object) =
+                        Await GetModelListForBrowserAsync(st)
+
+                        Return JsonOk(New With {
+                            .ok = True,
+                            .history = ToBrowserTurns(LoadInkyState().History),
+                            .greeting = greeting,
+                            .models = models,
+                            .modelLabel = GetSelectedModelLabel(st.UseSecondApi, st.SelectedModelKey),
+                            .darkMode = st.DarkMode
+                        })
+
+
+                    Case "inky_send"
+                        Dim textBody As System.String = j("Text")?.ToString()
+                        If System.String.IsNullOrWhiteSpace(textBody) Then
+                            Return JsonErr("Please enter a message.")
+                        End If
+
+                        Dim st As InkyState = LoadInkyState()
+
+                        ' 1) Nutzerzug sofort in History (damit History-Kappung den aktuellen Prompt enthält)
+                        Dim userTurn As New ChatTurn With {
+                            .Role = "user",
+                            .Markdown = textBody,
+                            .Html = MarkdownToHtml(System.Net.WebUtility.HtmlEncode(textBody)),
+                            .Utc = System.DateTime.UtcNow
+                        }
+                        st.History.Add(userTurn)
+
+                        ' 2) Memory-Kappung
+                        Dim cap As System.Int32 = 0
+                        Try : cap = INI_ChatCap : Catch : cap = 4000 : End Try
+                        Dim clipped As System.Collections.Generic.List(Of ChatTurn) = CapHistoryToChars(st, cap)
+
+                        ' 3) Dialog für den Assistant zusammensetzen
+                        Dim sb As New System.Text.StringBuilder()
+                        sb.AppendLine("<DIALOG>")
+                        For Each t In clipped
+                            If t.Role = "user" Then
+                                sb.AppendLine("[USER] " & t.Markdown)
+                            Else
+                                sb.AppendLine("[ASSISTANT] " & t.Markdown)
+                            End If
+                        Next
+                        sb.AppendLine("</DIALOG>")
+
+                        ' 4) System-Prompt + Zeitstempel
+                        Dim sysPrompt As System.String = GetSystemPromptChat()
+                        Dim nowLocal As System.String = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture)
+                        sysPrompt &= vbCrLf & "Current local date/time: " & nowLocal
+                        sysPrompt &= vbCrLf & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
+
+                        ' 5) Modelwahl (Second API + Alternate Models) temporär anwenden
+                        Dim useSecond As System.Boolean = st.UseSecondApi
+                        Dim usedAlt As System.Boolean = False
+                        Dim origLoaded As System.Boolean = False
+
+                        If useSecond AndAlso Not System.String.IsNullOrWhiteSpace(st.SelectedModelKey) Then
+                            Try
+                                originalConfig = GetCurrentConfig(_context) : originalConfigLoaded = True
+
+                                Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) =
+            LoadAlternativeModels(INI_AlternateModelPath, _context)
+
+                                Dim sel As SharedLibrary.SharedLibrary.ModelConfig =
+            alts.FirstOrDefault(Function(m As SharedLibrary.SharedLibrary.ModelConfig)
+                                    If m Is Nothing Then Return False
+                                    ' 1) Match auf ModelDescription
+                                    If Not System.String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
+                                       System.String.Equals(m.ModelDescription, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                        Return True
+                                    End If
+                                    ' 2) Fallback: Match auf Model
+                                    If Not System.String.IsNullOrWhiteSpace(m.Model) AndAlso
+                                       System.String.Equals(m.Model, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                        Return True
+                                    End If
+                                    Return False
+                                End Function)
+
+                                If sel IsNot Nothing Then
+                                    ' WICHTIG: Ganze Config temporär anwenden
+                                    ApplyModelConfig(_context, sel)
+                                    usedAlt = True
+                                End If
+                            Catch
+                                ' Soft-fail: weiter mit Second-API-Default
+                            End Try
+                        End If
+
+
+
+                        ' 6) LLM-Aufruf (STA-sicher), Konfiguration am Ende ggf. zurücksetzen
+                        Dim llmOut As System.String = ""
+                        Try
+                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond).ConfigureAwait(False)
+                        Catch ex As System.Exception
+                            Return JsonErr("LLM error: " & ex.Message)
+                        Finally
+                            Try
+                                If useSecond AndAlso (usedAlt OrElse origLoaded) AndAlso originalConfigLoaded Then
+                                    RestoreDefaults(_context, originalConfig)
+                                    originalConfigLoaded = False
+                                End If
+                            Catch
+                                ' nie Outlook stören
+                            End Try
+                        End Try
+
+                        If llmOut Is Nothing Then llmOut = ""
+
+                        ' 7) Antwort säubern + Markdown→HTML
+                        Dim cleaned As System.String = llmOut.Trim()
+                        Dim htmlOut As System.String = MarkdownToHtml(cleaned)
+
+                        ' 8) Assistant-Zug in History
+                        Dim botTurn As New ChatTurn With {
+                            .Role = "assistant",
+                            .Markdown = cleaned,
+                            .Html = htmlOut,
+                            .Utc = System.DateTime.UtcNow
+                        }
+                        st.History.Add(botTurn)
+                        st.LastAssistantText = cleaned
+                        SaveInkyState(st)
+
+                        ' 9) Browser erwartet camelCase
+                        Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
+
+
+                    Case "inky_clear"
+                        Dim st As New InkyState()
+                        SaveInkyState(st)
+                        Return JsonOk(New With {.ok = True})
+
+                    Case "inky_copylast"
+                        Dim stCopy As InkyState = LoadInkyState()
+                        If System.String.IsNullOrWhiteSpace(stCopy.LastAssistantText) Then
+                            Return JsonErr("No assistant response available to copy.")
+                        End If
+
+                        ' Synchronous wait on UI switch to avoid Await in environments that warn here
+                        SwitchToUi(Sub()
+                                       SLib.PutInClipboard(MarkdownToRtfConverter.Convert(stCopy.LastAssistantText))
+                                   End Sub).Wait()
+
+                        Return JsonOk(New With {.ok = True})
+
+
+                    Case "inky_setmodel"
+                        Dim key As System.String = j("Key")?.ToString()
+                        Dim st As InkyState = LoadInkyState()
+
+                        ' Key semantics:
+                        '  - "" or "default"  → primary API / default model
+                        '  - "__second__"      → second API (INI_Model_2 default)
+                        '  - Any other string  → alternate model under Second API
+                        If System.String.IsNullOrWhiteSpace(key) OrElse System.String.Equals(key, "default", System.StringComparison.OrdinalIgnoreCase) Then
+                            st.UseSecondApi = False
+                            st.SelectedModelKey = ""
+                        ElseIf System.String.Equals(key, "__second__", System.StringComparison.OrdinalIgnoreCase) Then
+                            st.UseSecondApi = True
+                            st.SelectedModelKey = ""      ' use INI_Model_2
+                        Else
+                            st.UseSecondApi = True
+                            st.SelectedModelKey = key
+                        End If
+
+                        ' Persist user preference (for next session)
+                        Try
+                            My.Settings.Inky_UseSecondApiSelected = st.UseSecondApi
+                            My.Settings.Inky_SelectedModelKey = st.SelectedModelKey
+                            My.Settings.Save()
+                        Catch
+                        End Try
+
+                        SaveInkyState(st)
+                        Return JsonOk(New With {.ok = True})
+
+                    Case "inky_toggletheme"
+                        Dim st As InkyState = LoadInkyState()
+                        st.DarkMode = Not st.DarkMode
+                        SaveInkyState(st)
+                        Try
+                            My.Settings.Inky_DarkMode = st.DarkMode
+                            My.Settings.Save()
+                        Catch
+                        End Try
+                        Return JsonOk(New With {.ok = True, .darkMode = st.DarkMode})
+
+                    Case Else
+                        Return JsonErr("Unknown command.")
+                End Select
+
+            Catch ex As System.Exception
+                Return JsonErr("Bad request: " & ex.Message)
+            End Try
+        End If
+
+        ' ---- FALLBACK to your existing command dispatcher (unchanged) ----
+        ' (Your original Select Case ... from earlier)
+        ' NOTE: keep all your existing cases here. Below is your original body:
+
+        Dim j0 = Newtonsoft.Json.Linq.JObject.Parse(If(body, "{}"))
+        Dim cmd0 = j0("Command")?.ToString()
+        Dim textBody0 = j0("Text")?.ToString()
+        Dim sourceUrl = j0("URL")?.ToString()
+
+        Select Case cmd0
+
+            Case "redink_sendtooutlook"
+                If String.IsNullOrWhiteSpace(textBody0) Then Return ""
+                ' All Outlook automation on UI thread
+                Await SwitchToUi(Sub()
+                                     Dim olApp = Globals.ThisAddIn.Application
+                                     Dim insp = olApp.ActiveInspector()
+                                     If insp Is Nothing Then Exit Sub
+                                     If Not TypeOf insp.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then Exit Sub
+                                     Dim mail = CType(insp.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+                                     If mail.Sent Then Exit Sub
+                                     Dim doc = CType(insp.WordEditor, Microsoft.Office.Interop.Word.Document)
+                                     Dim rng = doc.Application.Selection.Range
+                                     doc.Application.ScreenUpdating = False
+                                     rng.Text = textBody0 & " (" & sourceUrl & ")"
+                                     doc.Application.ScreenUpdating = True
+                                     ' release COM objects
+                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(rng)
+                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(doc)
+                                 End Sub)
+                Return ""
+        ' -------------------------------------------------------------------
+            Case "redink_translate"
+                ' ─── 1  guard clauses ─────────────────────────────────────────
+                If String.IsNullOrWhiteSpace(textBody0) Then Return ""
+
+                ' Ask the user for a target language (UI thread)
+                Dim targetLang As String = Await SwitchToUi(Function()
+                                                                Return SLib.ShowCustomInputBox(
+                       "Enter your target language:",
+                       AN & " Translate (for Browser)",
+                       True, INI_Language1)
+                                                            End Function)
+
+                If String.IsNullOrWhiteSpace(targetLang) OrElse targetLang = "ESC" Then
+                    Return ""                                   ' user cancelled
+                End If
+
+                ' ─── 2  call the LLM on the UI thread, get Task(Of String) ─────
+                Dim llmOut As String = Await RunLlmAsync(
+                        InterpolateAtRuntime(SP_Translate),
+                        $"<TEXTTOPROCESS>{textBody0}</TEXTTOPROCESS>")
+
+                ' ─── 3  clean up the wrapper tags / markdown ──────────────────
+                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "") _
+                       .Replace("</TEXTTOPROCESS>", "") _
+                       .Replace("**", "").Trim()
+
+                If llmOut = "" Then Return ""                  ' safety net
+
+                ' Optional: copy to clipboard so the user can paste manually
+                Await SwitchToUi(Sub() SLib.PutInClipboard(llmOut))
+
+                ' ─── 4  SEND the translation back to the caller ───────────────
+                Return llmOut
+
+            ' -------------------------------------------------------------------
+            Case "redink_correct"
+
+                If String.IsNullOrWhiteSpace(textBody0) Then Return ""
+
+                ' 1)  Run the LLM on the UI thread
+                Dim llmOut As String = Await RunLlmAsync(
+                                                        InterpolateAtRuntime(SP_Correct),
+                                                        $"<TEXTTOPROCESS>{textBody0}</TEXTTOPROCESS>")
+                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
+
+                If llmOut = "" Then Return ""
+
+                ' 2)  Show the compare / preview window (synchronous)
+                Await SwitchToUi(Sub()
+                                     CompareAndInsertText(textBody0, llmOut, True)
+                                 End Sub)
+
+                ' 3)  
+                Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
+
+                If Not accepted Then Return ""          ' Esc pressed → abort
+
+                Return llmOut
+
+        ' -------------------------------------------------------------------
+            Case "redink_freestyle"
+
+                '─── A  gather prompt on UI thread ──────────────────────────────
+                Dim noText As Boolean = String.IsNullOrWhiteSpace(textBody0)
+
+                Dim promptCaption As String = AN & " Freestyle (for Browser)"
+                Dim wordInstalled As Boolean = False
+                Try
+                    Dim wordApp As Object = CreateObject("Word.Application")
+                    wordInstalled = True
+                    wordApp.Quit()
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp)
+                Catch ex As System.Exception
+                    wordInstalled = False
+                End Try
+
+                Dim sb As New System.Text.StringBuilder()
+                If noText Then
+                    sb.Append("Please provide the prompt you wish to execute ")
+                Else
+                    sb.Append("Please provide the prompt you wish to execute using the selected text ")
+                End If
+
+                sb.Append("('" & MarkupPrefix & "' for markups, '" & InsertPrefix & "' for direct insert" & If(wordInstalled, " and '" & NewDocPrefix & "' to put the output in a new Word document)", ")"))
+                If INI_PromptLib Then sb.Append(" or press 'OK' for the prompt library")
+                If INI_SecondAPI Then sb.Append($"; add '{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}")
+
+                If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then sb.Append("; ctrl-p for your last prompt")
+                sb.Append(":")
+                Dim promptMsg As String = sb.ToString()
+
+                Dim OptionalButtons As System.Tuple(Of String, String, String)()
+                If wordInstalled Then
+                    OptionalButtons = {
+                                System.Tuple.Create("OK, do a new doc", $"Use this to automatically insert '{NewDocPrefix}' as a prefix.", NewDocPrefix)
+                            }
+                End If
+
+                OtherPrompt = Await SwitchToUi(Function()
+                                                   Return SLib.ShowCustomInputBox(promptMsg, promptCaption, False, "", My.Settings.LastPrompt, If(wordInstalled, OptionalButtons, Nothing))
+                                               End Function)
+
+                Dim doMarkupFlag As Boolean = False
+                Dim doInsertFlag As Boolean = False
+                Dim UseSecondAPI As Boolean = False
+                Dim DoNewDoc As Boolean = False
+
+                '─── prompt library branch ─────────────────────────────────────
+                If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
+                    Dim sel = Await SwitchToUi(Function()
+                                                   Return ShowPromptSelector(INI_PromptLibPath, Not noText, Nothing)
+                                               End Function)                         ' (prompt, doMarkup, doInsert, canceled)
+
+                    OtherPrompt = sel.Item1
+                    doMarkupFlag = sel.Item2
+                    doInsertFlag = Not sel.Item4         ' library’s “canceled” → insert = False
+                End If
+
+                ' user cancelled
+                If String.IsNullOrWhiteSpace(OtherPrompt) OrElse OtherPrompt = "ESC" Then
+                    Return ""
+                End If
+
+                ' remember last prompt
+                My.Settings.LastPrompt = OtherPrompt
+                My.Settings.Save()
+
+                '─── decode prefix flags ───────────────────────────────────────
+                If OtherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
+                    OtherPrompt = OtherPrompt.Substring(InsertPrefix.Length).Trim()
+                    doInsertFlag = True
+                ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                    OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
+                    doMarkupFlag = True
+                    doInsertFlag = True          ' old logic: markup implies insert
+                ElseIf OtherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
+                    OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
+                    DoNewDoc = True
+                    doMarkupFlag = False
+                End If
+
+                If INI_SecondAPI Then
+                    If OtherPrompt.Contains(SecondAPICode) Then
+                        UseSecondAPI = True
+                        OtherPrompt = OtherPrompt.Replace(SecondAPICode, "").Trim()
+
+                        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+                            Dim sel = Await SwitchToUi(Function()
+                                                           Return Not ShowModelSelection(_context, INI_AlternateModelPath)
+                                                       End Function)                         ' (prompt, doMarkup, doInsert, canceled)
+                            If sel Then
+                                originalConfigLoaded = False
+                                Return ""
+                            End If
+
+                        End If
+
+                    End If
+                End If
+
+                '─── B  call the LLM on UI thread (async) ──────────────────────
+                Dim llmResult As String
+                If noText Then
+                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleNoText), "", UseSecondAPI)
+                Else
+                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleText), $"<TEXTTOPROCESS>{textBody0}</TEXTTOPROCESS>", UseSecondAPI)
+                End If
+
+                llmResult = llmResult.Replace("<TEXTTOPROCESS>", "") _
+                             .Replace("</TEXTTOPROCESS>", "") _
+                             .Trim()
+
+                If String.IsNullOrEmpty(llmResult) Then Return ""
+
+                '─── C  present / insert / clipboard exactly like old code ─────
+
+                ' A) markup path (implies insert)  -----------------------------
+                If doMarkupFlag Then
+                    Await SwitchToUi(Sub()
+                                         CompareAndInsertText(textBody0, llmResult, True)
+                                     End Sub)
+
+                    Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
+
+                    If Not accepted Then Return ""          ' Esc pressed → abort
+
+                    Return llmResult                    ' user accepted
+                End If
+
+                ' B) plain insert path  ----------------------------------------
+                If doInsertFlag Then
+                    'Await InsertTextIntoCurrentMailAsync(llmResult)
+                    Return llmResult                        ' send text back
+                End If
+
+                If DoNewDoc And wordInstalled Then
+
+                    ' Create a new instance of Word
+                    Try
+                        Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+                        wordApp.Visible = True
+
+                        ' Add a new document
+                        Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
+
+                        ' Insert your text (LLMResult) at the beginning
+                        Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
+                        InsertTextWithMarkdown(docSelection, llmResult, True)
+                        Await SwitchToUi(Sub()
+                                             ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
+                                         End Sub)
+
+                        Return ""
+
+                    Catch ex As System.Exception
+                        '
+                    End Try
+                    Await SwitchToUi(Sub()
+                                         ShowCustomMessageBox("Could not create new Word document and insert the LLM output; providing your output to a separate window.")
+                                     End Sub)
+
+                End If
+
+                ' C) clipboard-only path  --------------------------------------
+                Dim finalTxt As String = Await SwitchToUi(Function()
+                                                              Return SLib.ShowCustomWindow(
+                                                                      "The LLM has provided the following result (you can edit it):",
+                                                                      llmResult,
+                                                                      "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting). If you select Cancel, nothing will be put into the clipboard (you can yourself copy it to the clipboard).",
+                                                                      AN, False, True)
+                                                          End Function)
+
+                If Not String.IsNullOrWhiteSpace(finalTxt) Then
+                    Await SwitchToUi(Sub() SLib.PutInClipboard(finalTxt))
+                End If
+
+                Return ""                                   ' old behaviour: no body sent
+
+        End Select
+
+        Return ""
+    End Function
+
+    ' Provide model list for the browser dropdown (default, second, alternates)
+    ' --------- DROP-IN: kompletter Ersatz von GetModelListForBrowserAsync ---------
+    Private Async Function GetModelListForBrowserAsync(ByVal st As InkyState) _
+    As System.Threading.Tasks.Task(Of System.Collections.Generic.List(Of Object))
+
+        Dim list As New System.Collections.Generic.List(Of Object)()
+
+        ' Verfügbarkeiten ermitteln
+        Dim hasPrimary As System.Boolean = Not System.String.IsNullOrWhiteSpace(INI_Model)
+        Dim hasSecondApi As System.Boolean = INI_SecondAPI
+        Dim hasSecondModelName As System.Boolean = Not System.String.IsNullOrWhiteSpace(INI_Model_2)
+        Dim hasSecondary As System.Boolean = hasSecondApi AndAlso hasSecondModelName
+
+        Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) = Nothing
+        Dim altCount As System.Int32 = 0
+        Try
+            If hasSecondApi AndAlso Not System.String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                alts = LoadAlternativeModels(INI_AlternateModelPath, _context)
+                If alts IsNot Nothing Then altCount = alts.Count
+            End If
+        Catch
+            altCount = 0
+            alts = Nothing
+        End Try
+
+        ' Fall 1: Nur Primary vorhanden → nur dieses anzeigen
+        If hasPrimary AndAlso (Not hasSecondary) AndAlso altCount = 0 Then
+            Dim defLabel As System.String = INI_Model
+            list.Add(New With {
+            .key = "default",
+            .label = defLabel,
+            .selected = (Not st.UseSecondApi),
+            .disabled = False,
+            .isSeparator = False
+        })
+            Return list
+        End If
+
+        ' Fall 2: Labels + Modelle rendern
+        If hasPrimary Then
+            ' Label: Primary
+            list.Add(New With {
+            .key = "__hdr_primary__",
+            .label = "Primary model:",
+            .selected = False,
+            .disabled = True,
+            .isSeparator = False
+        })
+            ' Option: Primary
+            Dim defLabel As System.String = INI_Model
+            list.Add(New With {
+            .key = "default",
+            .label = defLabel,
+            .selected = (Not st.UseSecondApi),
+            .disabled = False,
+            .isSeparator = False
+        })
+        End If
+
+        If hasSecondary Then
+            ' Label: Secondary
+            list.Add(New With {
+            .key = "__hdr_secondary__",
+            .label = "Secondary model:",
+            .selected = False,
+            .disabled = True,
+            .isSeparator = False
+        })
+            ' Option: Secondary
+            Dim secondLabel As System.String = INI_Model_2
+            list.Add(New With {
+            .key = "__second__",
+            .label = secondLabel,
+            .selected = (st.UseSecondApi AndAlso System.String.IsNullOrWhiteSpace(st.SelectedModelKey)),
+            .disabled = False,
+            .isSeparator = False
+        })
+        End If
+
+        ' Alternative Modelle
+        If altCount > 0 AndAlso alts IsNot Nothing Then
+            ' Trennstrich
+            list.Add(New With {
+            .key = "__sep__",
+            .label = "Alternative models:",
+            .selected = False,
+            .disabled = True,
+            .isSeparator = True
+        })
+
+            For Each m As SharedLibrary.SharedLibrary.ModelConfig In alts
+                If m Is Nothing Then Continue For
+                Dim label As System.String = If(Not System.String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
+                If System.String.IsNullOrWhiteSpace(label) Then label = "Model"
+                ' key = Anzeige-Label (wir matchen später wieder darauf)
+                list.Add(New With {
+                .key = label,
+                .label = label,
+                .selected = (st.UseSecondApi AndAlso System.String.Equals(st.SelectedModelKey, label, System.StringComparison.OrdinalIgnoreCase)),
+                .disabled = False,
+                .isSeparator = False
+            })
+            Next
+        End If
+
+        ' Gespeicherte Präferenzen sanft übernehmen (falls abweichend)
+        Try
+            Dim savedSecond As System.Boolean = My.Settings.Inky_UseSecondApiSelected
+            Dim savedKey As System.String = My.Settings.Inky_SelectedModelKey
+            If savedSecond <> st.UseSecondApi OrElse (savedSecond AndAlso Not System.String.Equals(savedKey, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase)) Then
+                st.UseSecondApi = savedSecond
+                st.SelectedModelKey = savedKey
+                SaveInkyState(st)
+            End If
+        Catch
+        End Try
+
+        Return list
+    End Function
+
+
+
+    ' Maps ChatTurn → browser DTO (camelCase)
+    Private Function ToBrowserTurns(list As System.Collections.Generic.List(Of ChatTurn)) _
+        As System.Collections.Generic.List(Of Object)
+
+        Dim out As New System.Collections.Generic.List(Of Object)()
+        For Each t In list
+            out.Add(New With {
+            .role = t.Role,
+            .markdown = t.Markdown,
+            .html = t.Html,
+            .utc = t.Utc
+        })
+        Next
+        Return out
     End Function
 
 

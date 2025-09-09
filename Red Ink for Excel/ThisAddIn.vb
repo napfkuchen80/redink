@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 7.9.2025
+' 8.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -206,7 +206,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.070925 Gen2 Beta Test"
+    Public Const Version As String = "V.080925 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -872,6 +872,16 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_MultiClauseSum As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum = value
+        End Set
+    End Property
+
+
     Public Shared Property SP_SuggestTitles As String
         Get
             Return _context.SP_SuggestTitles
@@ -1141,6 +1151,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_ChatWord = value
+        End Set
+    End Property
+
+    Public Shared Property SP_Chat As String
+        Get
+            Return _context.SP_Chat
+        End Get
+        Set(value As String)
+            _context.SP_Chat = value
         End Set
     End Property
 
@@ -2515,7 +2534,7 @@ Public Class ThisAddIn
                 ShowCustomMessageBox($"{ExtWSTrigger} cannot be combined with cell by cell processing - exiting.")
                 Return False
             End If
-            InsertWS = GatherSelectedWorksheets()
+            InsertWS = GatherSelectedWorksheets(True)
             Debug.WriteLine($"GatherSelectedWorksheets returned: {Left(InsertWS, 3000)}")
             If String.IsNullOrWhiteSpace(InsertWS) Then
                 ShowCustomMessageBox("No content was found or an error occurred in gathering the additional worksheet(s) - exiting.")
@@ -3027,7 +3046,87 @@ Public Class ThisAddIn
     End Sub
 
 
-    Public Function GatherSelectedWorksheets() As String
+    Public Function GatherSelectedWorksheets(
+    Optional ByVal includeActiveWorksheet As System.Boolean = False
+) As System.String
+        Try
+            Dim app As Microsoft.Office.Interop.Excel.Application =
+            Globals.ThisAddIn.Application
+            Dim activeWs As Microsoft.Office.Interop.Excel.Worksheet =
+            TryCast(app.ActiveSheet, Microsoft.Office.Interop.Excel.Worksheet)
+
+            ' build list of worksheets (optionally including the active one)
+            Dim sheetList As New System.Collections.Generic.List(
+            Of Microsoft.Office.Interop.Excel.Worksheet)()
+            Dim selItems As New System.Collections.Generic.List(Of SelectionItem)()
+
+            For Each wb As Microsoft.Office.Interop.Excel.Workbook In app.Workbooks
+                For Each ws As Microsoft.Office.Interop.Excel.Worksheet In wb.Worksheets
+                    If includeActiveWorksheet OrElse ws IsNot activeWs Then
+                        sheetList.Add(ws)
+                        selItems.Add(New SelectionItem(
+                        $"{ws.Name} ({wb.FullName})",
+                        sheetList.Count))
+                    End If
+                Next
+            Next
+
+            ' if no sheets matched the filter, bail
+            If sheetList.Count = 0 Then Return "NONE"
+
+            ' add “All worksheets …” option
+            Dim allOptionIndex As System.Int32 = selItems.Count + 1
+            Dim allOptionText As System.String = If(
+            includeActiveWorksheet,
+            "Add all worksheets",
+            "Add all other worksheets")
+            selItems.Add(New SelectionItem(allOptionText, allOptionIndex))
+
+            ' prompt user
+            Dim itemsArray As SelectionItem() = selItems.ToArray()
+            Dim picked As System.Int32 = SelectValue(itemsArray, allOptionIndex, "Choose worksheet to add …")
+            If picked < 1 Then Return System.String.Empty
+
+            ' determine targets
+            Dim targets As New System.Collections.Generic.List(
+            Of Microsoft.Office.Interop.Excel.Worksheet)()
+            If picked = allOptionIndex Then
+                targets.AddRange(sheetList)
+            Else
+                targets.Add(sheetList(picked - 1))
+            End If
+
+            ' build the result string
+            Dim InsertedWorksheet As System.String = System.String.Empty
+            Dim tagIndex As System.Int32 = 2
+            For Each ws As Microsoft.Office.Interop.Excel.Worksheet In targets
+                InsertedWorksheet &= $"<RANGEOFCELLS{tagIndex}>" & vbCrLf
+
+                ' now just call your converter (which itself inserts the sheet/file header)
+                InsertedWorksheet &= ConvertRangeToString(
+                CellRange:=CType(ws.UsedRange, Microsoft.Office.Interop.Excel.Range),
+                IncludeFormulas:=True,
+                DoColor:=False,
+                TargetWorksheet:=ws) & vbCrLf
+
+                InsertedWorksheet &= $"</RANGEOFCELLS{tagIndex}>" & vbCrLf
+                tagIndex += 1
+            Next
+
+            If System.String.IsNullOrEmpty(InsertedWorksheet) Then
+                ShowCustomMessageBox("No content could be retrieved from the selected worksheet(s).")
+                Return System.String.Empty
+            End If
+
+            Return InsertedWorksheet
+
+        Catch ex As System.Exception
+            Return "ERROR " & ex.Message
+        End Try
+    End Function
+
+
+    Public Function oldGatherSelectedWorksheets() As String
         Try
             Dim app As Microsoft.Office.Interop.Excel.Application =
             Globals.ThisAddIn.Application

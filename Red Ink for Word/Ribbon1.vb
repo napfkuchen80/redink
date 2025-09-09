@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 8.2.2025
+' 8.9.2025
 
 Imports Microsoft.Office.Tools.Ribbon
 
@@ -162,6 +162,10 @@ Public Class Ribbon1
 
     Private Sub RI_ApplyMyStyle_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_ApplyMyStyle.Click
         Globals.ThisAddIn.ApplyMyStyle()
+    End Sub
+
+    Private Sub RI_DefineMyStyle_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_DefineMyStyle.Click
+        Globals.ThisAddIn.DefineMyStyle()
     End Sub
 
     Private Sub RI_DocCheck_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_DocCheck.Click
