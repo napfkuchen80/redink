@@ -1337,6 +1337,7 @@ Namespace SharedLibrary
         Public Const AN3 As String = "Red Ink" ' Name used for Visual Studio Project 
         Public Const AN4 As String = "https://vischer.com/redink"  ' Name of sub-directory on Website of vischer.com/...  
         Public Const AN5 As String = "Red%20Ink"  ' Name of sub-directory on Website of vischer.com/...  
+        Public Const AN7 As String = "http://127.0.0.1:12333/inky"  ' Localhost URL for Inky
         Public Const MaxUseDate As Date = #12/31/2025#
 
         Private Const ISearch_MaxTries = 30          ' maximum number of search hits to be tried
@@ -10663,7 +10664,7 @@ Namespace SharedLibrary
             aboutForm.Controls.Add(aboutTextBox)
 
             Dim aboutContent As String =
-        $"{AN}<P>{context.RDV}{ExpireText}<P><P>Created by David Rosenthal<P>david.rosenthal@vischer.com<P><P>VISCHER AG, Zürich, Switzerland<P>Swiss Law & Tax<P><P>All rights reserved.<P><P>{AN4}"
+        $"{AN}<P>{context.RDV}{ExpireText}<P><P>Created by David Rosenthal<P>david.rosenthal@vischer.com<P>VISCHER AG, Zürich, Switzerland<P><P>All rights reserved.<P><P>{AN4}<P><P>Local Chat: {AN7}"
 
             ' Replace <P> with vbCrLf
             Dim plainText As New System.Text.StringBuilder()

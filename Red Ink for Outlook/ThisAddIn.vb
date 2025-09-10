@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 9.9.2025
+' 10.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -138,7 +138,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.090925 Gen2 Beta Test"
+    Public Const Version As String = "V.100925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -4253,63 +4253,289 @@ Public Class ThisAddIn
     Private isShuttingDown As Boolean = False
     Private listenerTask As System.Threading.Tasks.Task
 
+
+    ' --- Threading & Listener State (Klassenebene) ---
+    Private llmSyncContext As System.Threading.SynchronizationContext
+    Private llmThread As System.Threading.Thread
+    Private cts As System.Threading.CancellationTokenSource
+
+
     Private Sub StartupHttpListener()
+        ' kooperativen Abbruch vorbereiten
+        cts = New System.Threading.CancellationTokenSource()
+
+        ' fire-and-forget, aber referenziert in listenerTask (für Shutdown-Await)
+        listenerTask = StartHttpListener(cts.Token)
+    End Sub
+
+
+    Private Sub OldStartupHttpListener()
         ' fire-and-forget – no raw Thread needed
-        listenerTask = StartHttpListener()          ' <— this compiles
+        listenerTask = OldStartHttpListener()          ' <— this compiles
     End Sub
 
-
-    Private Sub ShutdownHttpListener()
-        ' Cleanly stop the listener if it's running.
+    Private Async Sub ShutdownHttpListener()
         isShuttingDown = True
-        If httpListener IsNot Nothing AndAlso httpListener.IsListening Then
-            httpListener.Stop()
-            httpListener.Close()
-        End If
+
+        ' Listener abbrechen
+        Try
+            If cts IsNot Nothing Then
+                cts.Cancel()
+            End If
+        Catch
+        End Try
+
+        Try
+            If httpListener IsNot Nothing Then
+                If httpListener.IsListening Then httpListener.Stop()
+                httpListener.Close()
+            End If
+        Catch
+        Finally
+            httpListener = Nothing
+        End Try
+
+        ' Taskende abwarten (kein Zombie-Loop)
+        Try
+            If listenerTask IsNot Nothing Then
+                Await listenerTask.ConfigureAwait(False)
+            End If
+        Catch
+        End Try
+
+        ' Den separaten STA-UI-Thread für RunLlmAsync deterministisch stoppen
+        StopLlmUiThread()
     End Sub
 
 
-    Private Async Function StartHttpListener() As System.Threading.Tasks.Task
+
+    Private Sub OldShutdownHttpListener()
+        isShuttingDown = True
+        Try
+            If httpListener IsNot Nothing Then
+                If httpListener.IsListening Then httpListener.Stop()
+                httpListener.Close()
+            End If
+        Catch
+        Finally
+            httpListener = Nothing   ' <— hinzufügen
+        End Try
+    End Sub
+
+    Private Async Function StartHttpListener(
+    ByVal token As System.Threading.CancellationToken) _
+    As System.Threading.Tasks.Task
+
+        Const prefix As System.String = "http://127.0.0.1:12333/"
+        Dim consecutiveFailures As System.Int32 = 0
+        Dim lastMetrics As System.DateTime = System.DateTime.UtcNow
+
+        While (Not isShuttingDown) AndAlso (Not token.IsCancellationRequested)
+            Dim needShortDelay As System.Boolean = False
+
+            Try
+                ' ensure listener is alive
+                If httpListener Is Nothing Then
+                    httpListener = New System.Net.HttpListener()
+                    httpListener.IgnoreWriteExceptions = True
+
+                    With httpListener.TimeoutManager
+                        .IdleConnection = System.TimeSpan.FromSeconds(15)
+                        .HeaderWait = System.TimeSpan.FromSeconds(5)
+                        .EntityBody = System.TimeSpan.FromSeconds(30)
+                        .DrainEntityBody = System.TimeSpan.FromSeconds(5)
+                        .MinSendBytesPerSecond = CType(256UL, System.UInt64)
+                    End With
+
+                    httpListener.Prefixes.Add(prefix)
+                    httpListener.Start()
+                    System.Diagnostics.Debug.WriteLine("HttpListener started.")
+                ElseIf Not httpListener.IsListening Then
+                    Try
+                        httpListener.Close()
+                    Catch
+                    End Try
+                    httpListener = Nothing
+                    Continue While
+                End If
+
+                ' get next request (bricht durch Stop/Close mit ODE)
+                Dim ctx As System.Net.HttpListenerContext =
+                Await httpListener.GetContextAsync().ConfigureAwait(False)
+
+                ' fire-and-forget handler
+                System.Threading.Tasks.Task.Run(
+                Async Function()
+                    Try
+                        Await HandleHttpRequest(ctx).ConfigureAwait(False)
+                    Catch
+                        System.Diagnostics.Debug.WriteLine("HandleHttpRequest error")
+                        Try
+                            Dim res As System.Net.HttpListenerResponse = ctx.Response
+                            res.StatusCode = 500
+                            res.KeepAlive = False
+                            res.Headers("Connection") = "close"
+                            res.SendChunked = False
+                            Dim bufErr() As System.Byte = System.Text.Encoding.UTF8.GetBytes("Internal server error.")
+                            res.ContentType = "text/plain; charset=utf-8"
+                            res.ContentLength64 = bufErr.LongLength
+                            Using os As System.IO.Stream = res.OutputStream
+                                os.Write(bufErr, 0, bufErr.Length)
+                            End Using
+                            res.Close()
+                        Catch
+                        End Try
+                    End Try
+                End Function)
+
+                ' --- Metriken (alle 10s) ---
+                Dim now As System.DateTime = System.DateTime.UtcNow
+                If (now - lastMetrics).TotalSeconds >= 10.0 Then
+                    Dim gdi As System.UInt32 = GetGdiCount()
+                    Dim usr As System.UInt32 = GetUserCount()
+                    System.Diagnostics.Debug.WriteLine(
+                    System.String.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "RES {0:HH:mm:ss}: GDI={1}  USER={2}",
+                        now, gdi, usr))
+                    If gdi >= 8000UI OrElse usr >= 8000UI Then
+                        System.Diagnostics.Debug.WriteLine("WARN: Hohe Handle-Zahl – prüfe GDI/USER-Leaks.")
+                    End If
+                    lastMetrics = now
+                End If
+
+                consecutiveFailures = 0  ' success
+
+            Catch ex As System.ObjectDisposedException
+                ' tritt bei Stop/Close auf → kurze Pause & Loop-Bedingung prüft Shutdown/Cancel
+                consecutiveFailures += 1
+                needShortDelay = True
+
+            Catch ex As System.Exception
+                consecutiveFailures += 1
+                System.Diagnostics.Debug.WriteLine(System.String.Concat("Listener error: ", ex.Message))
+            End Try
+
+            If needShortDelay Then
+                Await System.Threading.Tasks.Task.Delay(50, token).ConfigureAwait(False)
+            End If
+
+            If consecutiveFailures >= 10 AndAlso (Not isShuttingDown) AndAlso (Not token.IsCancellationRequested) Then
+                System.Diagnostics.Debug.WriteLine("Restarting HttpListener after 10 failures.")
+                Try
+                    If httpListener IsNot Nothing Then httpListener.Close()
+                Catch
+                End Try
+                httpListener = Nothing
+                consecutiveFailures = 0
+                Await System.Threading.Tasks.Task.Delay(5000, token).ConfigureAwait(False)
+            End If
+        End While
+    End Function
+
+
+    Private Async Function OldStartHttpListener() As System.Threading.Tasks.Task
         Const prefix As String = "http://127.0.0.1:12333/"
         Dim consecutiveFailures As Integer = 0
+        Dim lastMetrics As System.DateTime = System.DateTime.UtcNow
 
         While Not isShuttingDown
+            ' Flag, weil Await in Catch verboten ist
+            Dim needShortDelay As Boolean = False
+
             Try
                 ' ensure listener is alive
                 If httpListener Is Nothing Then
                     httpListener = New HttpListener()
+                    httpListener.IgnoreWriteExceptions = True
+
+                    ' Timeouts gegen idle/slow Clients
+                    With httpListener.TimeoutManager
+                        .IdleConnection = System.TimeSpan.FromSeconds(15)
+                        .HeaderWait = System.TimeSpan.FromSeconds(5)
+                        .EntityBody = System.TimeSpan.FromSeconds(30)
+                        .DrainEntityBody = System.TimeSpan.FromSeconds(5)
+                        .MinSendBytesPerSecond = CType(256UL, ULong)
+                    End With
+
                     httpListener.Prefixes.Add(prefix)
                     httpListener.Start()
                     Debug.WriteLine("HttpListener started.")
                 ElseIf Not httpListener.IsListening Then
-                    httpListener.Close()
+                    Try
+                        httpListener.Close()
+                    Catch
+                    End Try
                     httpListener = Nothing
                     Continue While   ' next loop will recreate
                 End If
 
                 ' wait for a request
-                Dim ctx As HttpListenerContext = Await httpListener.GetContextAsync()
+                Dim ctx As HttpListenerContext = Await httpListener.GetContextAsync().ConfigureAwait(False)
 
-                ' fire-and-forget handler
-                Call HandleHttpRequest(ctx) _                        ' ignore returned Task
-                        .ContinueWith( _                                 ' line-continuation
-                            Sub(tResult As System.Threading.Tasks.Task)
-                                If tResult.IsFaulted AndAlso
-                                   tResult.Exception IsNot Nothing Then
+                ' fire-and-forget handler auf ThreadPool (robust, eigener Try/Catch)
+                Call System.Threading.Tasks.Task.Run(
+                Async Function()
+                    Try
+                        Await HandleHttpRequest(ctx).ConfigureAwait(False)
+                    Catch
+                        ' Kein String-Konkatenations-Klimmzug – schlank halten
+                        Debug.WriteLine("HandleHttpRequest error")
+                        ' Best-effort 500 synchron (kein Await im Catch)
+                        Try
+                            Dim res As System.Net.HttpListenerResponse = ctx.Response
+                            res.StatusCode = 500
+                            res.KeepAlive = False
+                            res.Headers("Connection") = "close"
+                            res.SendChunked = False
+                            Dim bufErr() As Byte = System.Text.Encoding.UTF8.GetBytes("Internal server error.")
+                            res.ContentType = "text/plain; charset=utf-8"
+                            res.ContentLength64 = bufErr.LongLength
+                            Using os As System.IO.Stream = res.OutputStream
+                                os.Write(bufErr, 0, bufErr.Length)
+                            End Using
+                            res.Close()
+                        Catch
+                            ' ignore
+                        End Try
+                    End Try
+                End Function)
 
-                                    Debug.WriteLine("HandleHttpRequest error: " &
-                                                    tResult.Exception.GetBaseException().Message)
-                                End If
-                            End Sub, _                                   ' ← underscore
-                            System.Threading.Tasks.TaskScheduler.Default)
+                ' --- Metriken (alle 10s) ---
+                Dim now As System.DateTime = System.DateTime.UtcNow
+                If (now - lastMetrics).TotalSeconds >= 10.0 Then
+                    Dim gdi As System.UInt32 = GetGdiCount()
+                    Dim usr As System.UInt32 = GetUserCount()
 
-                consecutiveFailures = 0                        ' success
+                    System.Diagnostics.Debug.WriteLine(
+                    System.String.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "RES {0:HH:mm:ss}: GDI={1}  USER={2}",
+                        now, gdi, usr))
+
+                    If gdi >= 8000UI OrElse usr >= 8000UI Then
+                        System.Diagnostics.Debug.WriteLine("WARN: Hohe Handle-Zahl – prüfe GDI/USER-Leaks.")
+                    End If
+
+                    lastMetrics = now
+                End If
+
+                consecutiveFailures = 0  ' success
+
             Catch ex As ObjectDisposedException
                 consecutiveFailures += 1
+                needShortDelay = True   ' Delay NACH dem Try/Catch
+
             Catch ex As System.Exception
                 consecutiveFailures += 1
-                Debug.WriteLine("Listener error: " & ex.Message)
+                ' Falls hier die Konkatenation Ärger macht, ersetze durch String.Concat
+                Debug.WriteLine(String.Concat("Listener error: ", ex.Message))
             End Try
+
+            ' kurze Pause außerhalb des Catch (VB erlaubt Await nicht im Catch)
+            If needShortDelay Then
+                Await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(False)
+            End If
 
             ' if we hit 10 failures in a row, recycle the listener
             If consecutiveFailures >= 10 AndAlso Not isShuttingDown Then
@@ -4320,10 +4546,12 @@ Public Class ThisAddIn
                 End Try
                 httpListener = Nothing
                 consecutiveFailures = 0
-                Await System.Threading.Tasks.Task.Delay(5000)  ' back-off pause
+                Await System.Threading.Tasks.Task.Delay(5000).ConfigureAwait(False)  ' back-off pause
             End If
         End While
     End Function
+
+
     ' ---------------------------------------------------------------------------
 
     Private Const InkyBasePath As String = "/inky"
@@ -4331,108 +4559,137 @@ Public Class ThisAddIn
     Private Const InkyApiRoute As String = "/inky/api"      ' POST (JSON) → commands
     Private Const InkyName As String = "Inky"               ' Fallback; AN6 preferred
 
-    ' ===== (B) MODIFY HandleHttpRequest to short-circuit GET /inky and set content types =====
+
     Private Async Function HandleHttpRequest(
-        ctx As System.Net.HttpListenerContext) As System.Threading.Tasks.Task
+    ByVal ctx As System.Net.HttpListenerContext
+) As System.Threading.Tasks.Task
 
         Dim req As System.Net.HttpListenerRequest = ctx.Request
         Dim res As System.Net.HttpListenerResponse = ctx.Response
 
         Try
-            ' CORS preflight stays as-is
-            If req.HttpMethod = "OPTIONS" Then
+            ' ---- CORS Preflight ---------------------------------------------------
+            If req.HttpMethod.Equals("OPTIONS", System.StringComparison.OrdinalIgnoreCase) Then
                 res.AddHeader("Access-Control-Allow-Origin", "*")
                 res.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
                 res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
-                res.StatusCode = 204 : res.Close() : Return
+                res.StatusCode = 204
+                res.KeepAlive = False
+                res.Headers("Connection") = "close"
+                res.SendChunked = False
+                res.Close()
+                Return
             End If
 
-            ' ---- Favicon for the browser tab ----
+            ' ---- Favicon ----------------------------------------------------------
             If req.HttpMethod.Equals("GET", System.StringComparison.OrdinalIgnoreCase) AndAlso
-                     (req.RawUrl.Equals("/favicon.ico", System.StringComparison.OrdinalIgnoreCase)) Then
+           req.RawUrl.Equals("/favicon.ico", System.StringComparison.OrdinalIgnoreCase) Then
 
                 Dim png() As System.Byte = GetLogoPngBytes()
-                ' Some browsers accept PNG at /favicon.ico; if you prefer ICO, see note below.
+
                 res.ContentType = "image/png"
                 res.AddHeader("Cache-Control", "public, max-age=86400")
-                res.ContentLength64 = png.Length
+                res.KeepAlive = False
+                res.Headers("Connection") = "close"
+                res.SendChunked = False
+                res.ContentLength64 = png.LongLength
+
                 Using os As System.IO.Stream = res.OutputStream
-                    os.Write(png, 0, png.Length)
+                    Await os.WriteAsync(png, 0, png.Length).ConfigureAwait(False)
                 End Using
                 res.Close()
                 Return
             End If
 
-
-            ' ---- NEW: Serve the Inky UI over GET /inky ----
+            ' ---- Inky UI (GET /inky[/]) ------------------------------------------
             If req.HttpMethod.Equals("GET", System.StringComparison.OrdinalIgnoreCase) AndAlso
            (req.RawUrl.Equals(InkyUiRoute, System.StringComparison.OrdinalIgnoreCase) OrElse
             req.RawUrl.Equals(InkyUiRoute & "/", System.StringComparison.OrdinalIgnoreCase)) Then
 
                 Dim html As System.String = BuildInkyHtmlPage()
                 Dim bufUi() As System.Byte = System.Text.Encoding.UTF8.GetBytes(html)
-                res.ContentLength64 = bufUi.Length
+
                 res.ContentType = "text/html; charset=utf-8"
                 res.AddHeader("Cache-Control", "no-store")
-                Using os = res.OutputStream
+                res.KeepAlive = False
+                res.Headers("Connection") = "close"
+                res.SendChunked = False
+                res.ContentLength64 = bufUi.LongLength
+
+                Using os As System.IO.Stream = res.OutputStream
                     Await os.WriteAsync(bufUi, 0, bufUi.Length).ConfigureAwait(False)
                 End Using
                 res.Close()
                 Return
             End If
 
-            ' ---- Normal flow (POST JSON to /inky/api or your existing commands) ----
-            Dim body As System.String = ""
+            ' ---- Normal flow (POST JSON / API) -----------------------------------
+            Dim body As System.String = System.String.Empty
             If req.HasEntityBody Then
-                Using rdr As New System.IO.StreamReader(req.InputStream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks:=False)
-                    body = rdr.ReadToEnd()
+                Using rdr As New System.IO.StreamReader(req.InputStream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks:=False, bufferSize:=8192, leaveOpen:=False)
+                    body = Await rdr.ReadToEndAsync().ConfigureAwait(False)
                 End Using
             End If
 
             Dim responseText As System.String = Await ProcessRequestInAddIn(body, req.RawUrl).ConfigureAwait(False)
+            If responseText Is Nothing Then responseText = System.String.Empty
 
-            ' NEW: light-weight content-type hinting (keeps old behavior defaulting to text/plain)
+            ' Content-Type Hints
             Dim contentType As System.String = "text/plain; charset=utf-8"
-            If responseText IsNot Nothing AndAlso responseText.StartsWith("CT:html" & vbLf, System.StringComparison.Ordinal) Then
+            If responseText.StartsWith("CT:html" & vbLf, System.StringComparison.Ordinal) Then
                 contentType = "text/html; charset=utf-8"
                 responseText = responseText.Substring(("CT:html" & vbLf).Length)
-            ElseIf responseText IsNot Nothing AndAlso responseText.StartsWith("CT:json" & vbLf, System.StringComparison.Ordinal) Then
+            ElseIf responseText.StartsWith("CT:json" & vbLf, System.StringComparison.Ordinal) Then
                 contentType = "application/json; charset=utf-8"
                 responseText = responseText.Substring(("CT:json" & vbLf).Length)
             End If
 
             Dim buf() As System.Byte = System.Text.Encoding.UTF8.GetBytes(responseText)
-            res.ContentLength64 = buf.Length
-            res.ContentType = contentType
+
             res.AddHeader("Access-Control-Allow-Origin", "*")
-            Using os = res.OutputStream
-                os.Write(buf, 0, buf.Length)
+            res.ContentType = contentType
+            res.KeepAlive = False
+            res.Headers("Connection") = "close"
+            res.SendChunked = False
+            res.ContentLength64 = buf.LongLength
+
+            Using os As System.IO.Stream = res.OutputStream
+                Await os.WriteAsync(buf, 0, buf.Length).ConfigureAwait(False)
             End Using
             res.Close()
 
         Catch ex As System.Exception
             Try
-                res.StatusCode = 500
                 Dim err As System.String = "Internal server error: " & ex.Message
-                Dim buf() As System.Byte = System.Text.Encoding.UTF8.GetBytes(err)
-                res.ContentLength64 = buf.Length
+                Dim bufErr() As System.Byte = System.Text.Encoding.UTF8.GetBytes(err)
+
+                res.StatusCode = 500
+                res.AddHeader("Access-Control-Allow-Origin", "*")   ' <— optional
                 res.ContentType = "text/plain; charset=utf-8"
-                Using os = res.OutputStream
-                    os.Write(buf, 0, buf.Length)
+                res.KeepAlive = False
+                res.Headers("Connection") = "close"
+                res.SendChunked = False
+                res.ContentLength64 = bufErr.LongLength
+                Using os As System.IO.Stream = res.OutputStream
+                    os.Write(bufErr, 0, bufErr.Length)
                 End Using
                 res.Close()
             Catch
-                ' swallow
             End Try
         End Try
+
     End Function
+
+
+
 
     Private Function GetLogoPngBytes() As System.Byte()
         Try
-            Dim bmp As System.Drawing.Bitmap = My.Resources.Red_Ink_Logo
-            Using ms As New System.IO.MemoryStream()
-                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
-                Return ms.ToArray()
+            Using src As System.Drawing.Bitmap = CType(My.Resources.Red_Ink_Logo.Clone(), System.Drawing.Bitmap)
+                Using ms As New System.IO.MemoryStream()
+                    src.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                    Return ms.ToArray()
+                End Using
             End Using
         Catch
             ' 1x1 transparent PNG fallback
@@ -4440,40 +4697,6 @@ Public Class ThisAddIn
         End Try
     End Function
 
-
-    Private Async Function OldHandleHttpRequest(
-            ctx As System.Net.HttpListenerContext) As System.Threading.Tasks.Task
-
-        Dim req = ctx.Request
-        Dim res = ctx.Response
-
-        If req.HttpMethod = "OPTIONS" Then
-            res.AddHeader("Access-Control-Allow-Origin", "*")
-            res.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
-            res.StatusCode = 204 : res.Close() : Return
-        End If
-
-        Dim body As String = ""
-        If req.HasEntityBody Then
-            Using rdr As New IO.StreamReader(req.InputStream, System.Text.Encoding.UTF8)
-                body = Await rdr.ReadToEndAsync().ConfigureAwait(False)
-            End Using
-        End If
-
-        Dim responseText As String =
-            Await ProcessRequestInAddIn(body, req.RawUrl).ConfigureAwait(False)
-
-        Dim buf = System.Text.Encoding.UTF8.GetBytes(responseText)
-        res.ContentLength64 = buf.Length
-        res.ContentType = "text/plain; charset=utf-8"
-        res.AddHeader("Access-Control-Allow-Origin", "*")
-        Using os = res.OutputStream
-            Await os.WriteAsync(buf, 0, buf.Length).ConfigureAwait(False)
-        End Using
-        res.Close()
-    End Function
-    ' ---------------------------------------------------------------------------
 
     ' --------------- LLM helper (runs off the UI thread) -----------------------
 
@@ -4486,7 +4709,37 @@ Public Class ThisAddIn
     ' ----------------------------------------
     ' 2) STA-Thread mit eigener WinForms-Message-Loop initialisieren
     ' ----------------------------------------
+
     Private Sub EnsureLlmUiThread()
+        If llmScheduler IsNot Nothing Then
+            Return
+        End If
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.Threading.Tasks.TaskScheduler)()
+
+        llmThread = New System.Threading.Thread(
+        Sub()
+            System.Threading.SynchronizationContext.SetSynchronizationContext(
+                New System.Windows.Forms.WindowsFormsSynchronizationContext())
+
+            llmSyncContext = System.Threading.SynchronizationContext.Current
+
+            ' Scheduler aus aktuellem SyncContext
+            tcs.SetResult(System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext())
+
+            ' Eigene Message-Loop starten (wird über ExitThread beendet)
+            System.Windows.Forms.Application.Run()
+        End Sub)
+
+        llmThread.SetApartmentState(System.Threading.ApartmentState.STA)
+        llmThread.IsBackground = True
+        llmThread.Start()
+
+        ' Warten bis der Scheduler steht
+        llmScheduler = tcs.Task.Result
+    End Sub
+
+    Private Sub OldEnsureLlmUiThread()
         If llmScheduler IsNot Nothing Then
             Return
         End If
@@ -4516,6 +4769,32 @@ Public Class ThisAddIn
         llmScheduler = tcs.Task.Result
     End Sub
 
+    Private Sub StopLlmUiThread()
+        Try
+            If llmSyncContext IsNot Nothing Then
+                ' Signal zum Beenden der Message-Loop
+                llmSyncContext.Post(
+                Sub()
+                    System.Windows.Forms.Application.ExitThread()
+                End Sub, Nothing)
+            End If
+        Catch
+        End Try
+
+        Try
+            If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then
+                ' kurze endliche Wartezeit
+                llmThread.Join(2000)
+            End If
+        Catch
+        End Try
+
+        llmScheduler = Nothing
+        llmSyncContext = Nothing
+        llmThread = Nothing
+    End Sub
+
+
     ' ----------------------------------------
     ' 3) Neues RunLlmAsync (Drop-in für Deine alte Methode)
     ' ----------------------------------------
@@ -4527,7 +4806,9 @@ Public Class ThisAddIn
     Public Function RunLlmAsync(
     sysPrompt As String,
     userPrompt As String,
-    Optional UseSecondAPI As Boolean = False
+    Optional UseSecondAPI As Boolean = False,
+    Optional ShowTimer As Boolean = True,
+    Optional FileObject As String = ""
 ) As Task(Of String)
 
         ' Stelle sicher, dass unser STA-Thread und Scheduler bereit sind
@@ -4544,7 +4825,7 @@ Public Class ThisAddIn
                     ' Hier kommt Dein bisheriger LLM-Aufruf hin:
                     ' er darf HTTP machen und beliebige WinForms-Dialogs öffnen.
 
-                    Dim LLMResult As String = Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI)
+                    Dim LLMResult As String = Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject)
 
                     If UseSecondAPI And originalConfigLoaded Then
                         RestoreDefaults(_context, originalConfig)
@@ -4608,331 +4889,61 @@ Public Class ThisAddIn
     '                     or Esc is pressed       → returns False
     ' Works even though the preview window is created on its own worker thread.
     '───────────────────────────────────────────────────────────────────────────
-    Private Function WaitForPreviewDecisionAsync() _
-        As System.Threading.Tasks.Task(Of Boolean)
+    Private Async Function WaitForPreviewDecisionAsync() _
+    As System.Threading.Tasks.Task(Of System.Boolean)
 
-        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Boolean)()
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.Boolean)()
 
-        ' Run once on the UI thread: attach handlers when the form appears
-        SwitchToUi(Sub()
+        ' Handler-Anheftung einmalig auf dem UI-Thread
+        Await SwitchToUi(Sub()
 
-                       ' 1) keep checking until the preview form exists
-                       Dim previewForm As System.Windows.Forms.Form = Nothing
-                       Dim searchTimer As New System.Windows.Forms.Timer() With {.Interval = 100}
+                             Dim previewForm As System.Windows.Forms.Form = Nothing
+                             Dim searchTimer As New System.Windows.Forms.Timer() With {.Interval = 100}
 
-                       AddHandler searchTimer.Tick,
-            Sub()
+                             AddHandler searchTimer.Tick,
+                             Sub()
+                                 If previewForm Is Nothing OrElse previewForm.IsDisposed Then
+                                     previewForm = System.Windows.Forms.Application.OpenForms _
+                                         .Cast(Of System.Windows.Forms.Form)() _
+                                         .FirstOrDefault(Function(f As System.Windows.Forms.Form) f.Name = "ShowRTFCustomMessageBox" _
+                                                             OrElse f.Text.StartsWith(AN))
 
-                If previewForm Is Nothing OrElse previewForm.IsDisposed Then
-                    previewForm = System.Windows.Forms.Application.OpenForms _
-                                      .Cast(Of System.Windows.Forms.Form)() _
-                                      .FirstOrDefault(Function(f) f.Name = "ShowRTFCustomMessageBox" _
-                                                          OrElse f.Text.StartsWith(AN))
+                                     If previewForm Is Nothing Then Return
 
-                    If previewForm Is Nothing Then Return  ' continue searching
-                    ' found the form ⇒ attach handlers ------------------------
-                    previewForm.KeyPreview = True
+                                     previewForm.KeyPreview = True
 
-                    AddHandler previewForm.KeyDown,
-                        Sub(_s, e)
-                            If e.KeyCode = System.Windows.Forms.Keys.Escape Then
-                                tcs.TrySetResult(False)     ' user cancelled
-                            End If
-                        End Sub
+                                     AddHandler previewForm.KeyDown,
+                                         Sub(_s As System.Object, e As System.Windows.Forms.KeyEventArgs)
+                                             If e.KeyCode = System.Windows.Forms.Keys.Escape Then
+                                                 tcs.TrySetResult(False)
+                                             End If
+                                         End Sub
 
-                    AddHandler previewForm.FormClosed,
-                        Sub(_s, _e)
-                            tcs.TrySetResult(True)          ' user accepted (OK)
-                        End Sub
-                End If
+                                     AddHandler previewForm.FormClosed,
+                                         Sub(_s As System.Object, _e As System.Windows.Forms.FormClosedEventArgs)
+                                             tcs.TrySetResult(True)
+                                             ' Failsafe: Timer aufräumen
+                                             If searchTimer.Enabled Then
+                                                 searchTimer.Stop()
+                                                 searchTimer.Dispose()
+                                             End If
+                                         End Sub
+                                 End If
 
-                ' stop searching once the Task is completed
-                If tcs.Task.IsCompleted Then searchTimer.Stop()
-            End Sub
+                                 If tcs.Task.IsCompleted Then
+                                     searchTimer.Stop()
+                                     searchTimer.Dispose() ' Patch C
+                                 End If
+                             End Sub
 
-                       searchTimer.Start()
-                   End Sub).Wait()   ' Wait only for handler-attachment setup
+                             searchTimer.Start()
+                         End Sub).ConfigureAwait(False)
 
-        Return tcs.Task    ' listener awaits without polling or blocking UI
+        ' WICHTIG: In Async-Funktion Task(Of Boolean) ==>> "Await tcs.Task"
+        Return Await tcs.Task.ConfigureAwait(False)
     End Function
 
 
-
-
-    ' ---------------- MAIN REQUEST DISPATCH ------------------------------------
-    Private Async Function OldProcessRequestInAddIn(
-            body As String,
-            rawUrl As String) As System.Threading.Tasks.Task(Of String)
-
-        Dim j = Newtonsoft.Json.Linq.JObject.Parse(body)
-        Dim cmd = j("Command")?.ToString()
-        Dim textBody = j("Text")?.ToString()
-        Dim sourceUrl = j("URL")?.ToString()
-
-        Select Case cmd
-        ' -------------------------------------------------------------------
-            Case "redink_sendtooutlook"
-                If String.IsNullOrWhiteSpace(textBody) Then Return ""
-                ' All Outlook automation on UI thread
-                Await SwitchToUi(Sub()
-                                     Dim olApp = Globals.ThisAddIn.Application
-                                     Dim insp = olApp.ActiveInspector()
-                                     If insp Is Nothing Then Exit Sub
-                                     If Not TypeOf insp.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then Exit Sub
-                                     Dim mail = CType(insp.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
-                                     If mail.Sent Then Exit Sub
-                                     Dim doc = CType(insp.WordEditor, Microsoft.Office.Interop.Word.Document)
-                                     Dim rng = doc.Application.Selection.Range
-                                     doc.Application.ScreenUpdating = False
-                                     rng.Text = textBody & " (" & sourceUrl & ")"
-                                     doc.Application.ScreenUpdating = True
-                                     ' release COM objects
-                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(rng)
-                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(doc)
-                                 End Sub)
-                Return ""
-        ' -------------------------------------------------------------------
-            Case "redink_translate"
-                ' ─── 1  guard clauses ─────────────────────────────────────────
-                If String.IsNullOrWhiteSpace(textBody) Then Return ""
-
-                ' Ask the user for a target language (UI thread)
-                Dim targetLang As String = Await SwitchToUi(Function()
-                                                                Return SLib.ShowCustomInputBox(
-                   "Enter your target language:",
-                   AN & " Translate (for Browser)",
-                   True, INI_Language1)
-                                                            End Function)
-
-                If String.IsNullOrWhiteSpace(targetLang) OrElse targetLang = "ESC" Then
-                    Return ""                                   ' user cancelled
-                End If
-
-                ' ─── 2  call the LLM on the UI thread, get Task(Of String) ─────
-                Dim llmOut As String = Await RunLlmAsync(
-                    InterpolateAtRuntime(SP_Translate),
-                    $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
-
-                ' ─── 3  clean up the wrapper tags / markdown ──────────────────
-                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "") _
-                   .Replace("</TEXTTOPROCESS>", "") _
-                   .Replace("**", "").Trim()
-
-                If llmOut = "" Then Return ""                  ' safety net
-
-                ' Optional: copy to clipboard so the user can paste manually
-                Await SwitchToUi(Sub() SLib.PutInClipboard(llmOut))
-
-                ' ─── 4  SEND the translation back to the caller ───────────────
-                Return llmOut
-
-            ' -------------------------------------------------------------------
-            Case "redink_correct"
-
-                If String.IsNullOrWhiteSpace(textBody) Then Return ""
-
-                ' 1)  Run the LLM on the UI thread
-                Dim llmOut As String = Await RunLlmAsync(
-                                                    InterpolateAtRuntime(SP_Correct),
-                                                    $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>")
-                llmOut = llmOut.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-
-                If llmOut = "" Then Return ""
-
-                ' 2)  Show the compare / preview window (synchronous)
-                Await SwitchToUi(Sub()
-                                     CompareAndInsertText(textBody, llmOut, True)
-                                 End Sub)
-
-                ' 3)  
-                Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
-
-                If Not accepted Then Return ""          ' Esc pressed → abort
-
-                Return llmOut
-
-        ' -------------------------------------------------------------------
-            Case "redink_freestyle"
-
-                '─── A  gather prompt on UI thread ──────────────────────────────
-                Dim noText As Boolean = String.IsNullOrWhiteSpace(textBody)
-
-                Dim promptCaption As String = AN & " Freestyle (for Browser)"
-                Dim wordInstalled As Boolean = False
-                Try
-                    Dim wordApp As Object = CreateObject("Word.Application")
-                    wordInstalled = True
-                    wordApp.Quit()
-                    System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp)
-                Catch ex As System.Exception
-                    wordInstalled = False
-                End Try
-
-                Dim sb As New System.Text.StringBuilder()
-                If noText Then
-                    sb.Append("Please provide the prompt you wish to execute ")
-                Else
-                    sb.Append("Please provide the prompt you wish to execute using the selected text ")
-                End If
-
-                sb.Append("('" & MarkupPrefix & "' for markups, '" & InsertPrefix & "' for direct insert" & If(wordInstalled, " and '" & NewDocPrefix & "' to put the output in a new Word document)", ")"))
-                If INI_PromptLib Then sb.Append(" or press 'OK' for the prompt library")
-                If INI_SecondAPI Then sb.Append($"; add '{SecondAPICode}' to use {If(String.IsNullOrWhiteSpace(INI_AlternateModelPath), $"the secondary model ({INI_Model_2})", "one of the other models")}")
-
-                If Not String.IsNullOrWhiteSpace(My.Settings.LastPrompt) Then sb.Append("; ctrl-p for your last prompt")
-                sb.Append(":")
-                Dim promptMsg As String = sb.ToString()
-
-                Dim OptionalButtons As System.Tuple(Of String, String, String)()
-                If wordInstalled Then
-                    OptionalButtons = {
-                            System.Tuple.Create("OK, do a new doc", $"Use this to automatically insert '{NewDocPrefix}' as a prefix.", NewDocPrefix)
-                        }
-                End If
-
-                OtherPrompt = Await SwitchToUi(Function()
-                                                   Return SLib.ShowCustomInputBox(promptMsg, promptCaption, False, "", My.Settings.LastPrompt, If(wordInstalled, OptionalButtons, Nothing))
-                                               End Function)
-
-                Dim doMarkupFlag As Boolean = False
-                Dim doInsertFlag As Boolean = False
-                Dim UseSecondAPI As Boolean = False
-                Dim DoNewDoc As Boolean = False
-
-                '─── prompt library branch ─────────────────────────────────────
-                If String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt <> "ESC" AndAlso INI_PromptLib Then
-                    Dim sel = Await SwitchToUi(Function()
-                                                   Return ShowPromptSelector(INI_PromptLibPath, Not noText, Nothing)
-                                               End Function)                         ' (prompt, doMarkup, doInsert, canceled)
-
-                    OtherPrompt = sel.Item1
-                    doMarkupFlag = sel.Item2
-                    doInsertFlag = Not sel.Item4         ' library’s “canceled” → insert = False
-                End If
-
-                ' user cancelled
-                If String.IsNullOrWhiteSpace(OtherPrompt) OrElse OtherPrompt = "ESC" Then
-                    Return ""
-                End If
-
-                ' remember last prompt
-                My.Settings.LastPrompt = OtherPrompt
-                My.Settings.Save()
-
-                '─── decode prefix flags ───────────────────────────────────────
-                If OtherPrompt.StartsWith(InsertPrefix, StringComparison.OrdinalIgnoreCase) Then
-                    OtherPrompt = OtherPrompt.Substring(InsertPrefix.Length).Trim()
-                    doInsertFlag = True
-                ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
-                    OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
-                    doMarkupFlag = True
-                    doInsertFlag = True          ' old logic: markup implies insert
-                ElseIf OtherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) AndAlso Not noText Then
-                    OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
-                    DoNewDoc = True
-                    doMarkupFlag = False
-                End If
-
-                If INI_SecondAPI Then
-                    If OtherPrompt.Contains(SecondAPICode) Then
-                        UseSecondAPI = True
-                        OtherPrompt = OtherPrompt.Replace(SecondAPICode, "").Trim()
-
-                        If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
-
-                            Dim sel = Await SwitchToUi(Function()
-                                                           Return Not ShowModelSelection(_context, INI_AlternateModelPath)
-                                                       End Function)                         ' (prompt, doMarkup, doInsert, canceled)
-                            If sel Then
-                                originalConfigLoaded = False
-                                Return ""
-                            End If
-
-                        End If
-
-                    End If
-                End If
-
-                '─── B  call the LLM on UI thread (async) ──────────────────────
-                Dim llmResult As String
-                If noText Then
-                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleNoText), "", UseSecondAPI)
-                Else
-                    llmResult = Await RunLlmAsync(InterpolateAtRuntime(SP_FreestyleText), $"<TEXTTOPROCESS>{textBody}</TEXTTOPROCESS>", UseSecondAPI)
-                End If
-
-                llmResult = llmResult.Replace("<TEXTTOPROCESS>", "") _
-                         .Replace("</TEXTTOPROCESS>", "") _
-                         .Trim()
-
-                If String.IsNullOrEmpty(llmResult) Then Return ""
-
-                '─── C  present / insert / clipboard exactly like old code ─────
-
-                ' A) markup path (implies insert)  -----------------------------
-                If doMarkupFlag Then
-                    Await SwitchToUi(Sub()
-                                         CompareAndInsertText(textBody, llmResult, True)
-                                     End Sub)
-
-                    Dim accepted As Boolean = Await WaitForPreviewDecisionAsync()
-
-                    If Not accepted Then Return ""          ' Esc pressed → abort
-
-                    Return llmResult                    ' user accepted
-                End If
-
-                ' B) plain insert path  ----------------------------------------
-                If doInsertFlag Then
-                    'Await InsertTextIntoCurrentMailAsync(llmResult)
-                    Return llmResult                        ' send text back
-                End If
-
-                If DoNewDoc And wordInstalled Then
-
-                    ' Create a new instance of Word
-                    Try
-                        Dim wordApp As New Microsoft.Office.Interop.Word.Application()
-                        wordApp.Visible = True
-
-                        ' Add a new document
-                        Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
-
-                        ' Insert your text (LLMResult) at the beginning
-                        Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
-                        InsertTextWithMarkdown(docSelection, llmResult, True)
-                        Await SwitchToUi(Sub()
-                                             ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
-                                         End Sub)
-
-                        Return ""
-
-                    Catch ex As System.Exception
-                        '
-                    End Try
-                    Await SwitchToUi(Sub()
-                                         ShowCustomMessageBox("Could not create new Word document and insert the LLM output; providing your output to a separate window.")
-                                     End Sub)
-
-                End If
-
-                ' C) clipboard-only path  --------------------------------------
-                Dim finalTxt As String = Await SwitchToUi(Function()
-                                                              Return SLib.ShowCustomWindow(
-                                                                  "The LLM has provided the following result (you can edit it):",
-                                                                  llmResult,
-                                                                  "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting). If you select Cancel, nothing will be put into the clipboard (you can yourself copy it to the clipboard).",
-                                                                  AN, False, True)
-                                                          End Function)
-
-                If Not String.IsNullOrWhiteSpace(finalTxt) Then
-                    Await SwitchToUi(Sub() SLib.PutInClipboard(finalTxt))
-                End If
-
-                Return ""                                   ' old behaviour: no body sent
-
-        End Select
-    End Function
 
 
     ' ===== Chatbot 
@@ -4959,11 +4970,12 @@ Public Class ThisAddIn
 
     Private Function GetLogoDataUrl() As System.String
         Try
-            Dim bmp As System.Drawing.Bitmap = My.Resources.Red_Ink_Logo
-            Using ms As New System.IO.MemoryStream()
-                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
-                Dim b64 As System.String = System.Convert.ToBase64String(ms.ToArray())
-                Return "data:image/png;base64," & b64
+            Using src As System.Drawing.Bitmap = CType(My.Resources.Red_Ink_Logo.Clone(), System.Drawing.Bitmap)
+                Using ms As New System.IO.MemoryStream()
+                    src.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                    Dim b64 As System.String = System.Convert.ToBase64String(ms.ToArray())
+                    Return "data:image/png;base64," & b64
+                End Using
             End Using
         Catch
             Return ""
@@ -5025,6 +5037,7 @@ Public Class ThisAddIn
         Public UseSecondApi As System.Boolean = False
         Public LastAssistantText As System.String = ""
         Public DarkMode As System.Boolean = False
+        Public SupportsFileUploads As System.Boolean = False
     End Class
 
     <Serializable>
@@ -5042,6 +5055,69 @@ Public Class ThisAddIn
             Return "en"
         End Try
     End Function
+
+
+    Private Function ComputeSupportsFiles(ByVal useSecond As System.Boolean,
+                                      ByVal selectedKey As System.String) As System.Boolean
+        Try
+            ' Primary API (kein Alternate gewählt)
+            If Not useSecond Then
+                Return Not System.String.IsNullOrWhiteSpace(INI_APICall_Object)
+            End If
+
+            ' Second API, Default-Modell
+            If System.String.IsNullOrWhiteSpace(selectedKey) Then
+                Return Not System.String.IsNullOrWhiteSpace(INI_APICall_Object_2)
+            End If
+
+            ' Second API, Alternate-Modell -> aus ModelConfig.APICall_Object lesen
+            Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) = Nothing
+            Try
+                alts = LoadAlternativeModels(INI_AlternateModelPath, _context)
+            Catch
+                alts = Nothing
+            End Try
+            If alts Is Nothing Then Return False
+
+            Dim sel As SharedLibrary.SharedLibrary.ModelConfig =
+            alts.FirstOrDefault(Function(m As SharedLibrary.SharedLibrary.ModelConfig)
+                                    If m Is Nothing Then Return False
+                                    If Not System.String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
+                                       System.String.Equals(m.ModelDescription, selectedKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                        Return True
+                                    End If
+                                    If Not System.String.IsNullOrWhiteSpace(m.Model) AndAlso
+                                       System.String.Equals(m.Model, selectedKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                        Return True
+                                    End If
+                                    Return False
+                                End Function)
+
+            If sel Is Nothing Then Return False
+
+            ' Direkter Zugriff – falls Property fehlt, fallback via Reflection
+            Dim v As System.String = Nothing
+            Try
+                v = sel.APICall_Object
+            Catch
+                Try
+                    Dim p As System.Reflection.PropertyInfo =
+                    GetType(SharedLibrary.SharedLibrary.ModelConfig).GetProperty("APICall_Object",
+                        System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Instance)
+                    If p IsNot Nothing Then
+                        Dim o As System.Object = p.GetValue(sel, Nothing)
+                        If o IsNot Nothing Then v = System.Convert.ToString(o, System.Globalization.CultureInfo.InvariantCulture)
+                    End If
+                Catch
+                End Try
+            End Try
+
+            Return Not System.String.IsNullOrWhiteSpace(v)
+        Catch
+            Return False
+        End Try
+    End Function
+
 
 
     Private Function LoadInkyState() As InkyState
@@ -5065,14 +5141,29 @@ Public Class ThisAddIn
 
     Private Function MarkdownToHtml(ByVal md As System.String) As System.String
         Try
-            Dim pipeline As Markdig.MarkdownPipeline = New Markdig.MarkdownPipelineBuilder().
-            UseAdvancedExtensions().
-            Build()
-            Dim html As System.String = Markdig.Markdown.ToHtml(md, pipeline)
-            Return html
+            ' Maximale Markdown-Funktionalität + SoftlineBreaks als <br/>
+            Dim pipeline As Markdig.MarkdownPipeline =
+            New Markdig.MarkdownPipelineBuilder().
+                UseAdvancedExtensions().
+                UseSoftlineBreakAsHardlineBreak().
+                UsePipeTables().
+                UseGridTables().
+                UseListExtras().
+                UseFootnotes().
+                UseDefinitionLists().
+                UseAbbreviations().
+                UseAutoLinks().
+                UseTaskLists().
+                UseEmojiAndSmiley().
+                UseMathematics().
+                UseFigures().
+                UseGenericAttributes().
+                Build()
+
+            Return Markdig.Markdown.ToHtml(md, pipeline)
         Catch ex As System.Exception
-            ' Fallback: HTML-encode plaintext to be safe
-            Return System.Net.WebUtility.HtmlEncode(md)
+            ' Fallback: sicher encoden UND Zeilenumbrüche erhalten
+            Return System.Net.WebUtility.HtmlEncode(md).Replace(vbLf, "<br>")
         End Try
     End Function
 
@@ -5105,8 +5196,8 @@ Public Class ThisAddIn
     Private Function BuildInkyHtmlPage() As System.String
         ' Namen/Brand/Logo vorbereiten
         Dim botName As System.String = GetBotName()
-        Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)  ' AN direkt verwenden
-        Dim logoUrl As System.String = GetLogoDataUrl()                                             ' data:image/png;base64,...
+        Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)
+        Dim logoUrl As System.String = GetLogoDataUrl()
         Dim greet As System.String = GetFriendlyGreeting()
 
         Dim html As New System.Text.StringBuilder()
@@ -5116,15 +5207,12 @@ Public Class ThisAddIn
         html.AppendLine("<meta name=""viewport"" content=""width=device-width, initial-scale=1"">")
         html.AppendLine("<link rel=""shortcut icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
         html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
-        ' Titel: AN – Local Chat
         html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
 
         ' ---------- CSS ----------
         html.AppendLine("<style>")
         html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
-        ' Dark-Theme Defaults auf :root
         html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9fb0c3;--acc:#2ea043;--border:#1b2430;}")
-        ' Light-Theme-Variablen korrekt überschreiben: Klasse auf <html> (documentElement)
         html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5b6a79;--acc:#0969da;--border:#e5e7eb;}")
         html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
         html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
@@ -5138,14 +5226,13 @@ Public Class ThisAddIn
         html.AppendLine("select,button,input{padding:.5rem .7rem;}")
         html.AppendLine("button:hover{filter:brightness(1.1)}")
         html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
+        html.AppendLine(".chat.dragging{outline:2px dashed var(--acc); outline-offset:-8px;}")
         html.AppendLine(".row{display:flex;margin:0 auto 1rem auto;max-width:1000px;padding:0 .25rem;}")
-        ' <<< Ausrichtung: Bot links, User rechts >>>
-        html.AppendLine(".row.bot{justify-content:flex-start;}")   ' Inky links
-        html.AppendLine(".row.user{justify-content:flex-end;}")    ' Du rechts
+        html.AppendLine(".row.bot{justify-content:flex-start;}")
+        html.AppendLine(".row.user{justify-content:flex-end;}")
         html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}")
-        ' Ecken passend "spitz"
-        html.AppendLine(".bot .bubble{border-top-right-radius:.3rem}")   ' Bot links → rechte obere Ecke „spitz“
-        html.AppendLine(".user .bubble{border-top-left-radius:.3rem}")   ' User rechts → linke obere Ecke „spitz“
+        html.AppendLine(".bot .bubble{border-top-right-radius:.3rem}")
+        html.AppendLine(".user .bubble{border-top-left-radius:.3rem}")
         html.AppendLine(".role{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}")
         html.AppendLine(".inputbar{display:flex;gap:.5rem;padding:1rem;border-top:1px solid var(--border);background:var(--card)}")
         html.AppendLine("textarea{flex:1;resize:vertical;min-height:48px;max-height:200px;border-radius:.8rem;padding:.7rem;}")
@@ -5155,7 +5242,6 @@ Public Class ThisAddIn
         html.AppendLine(".system{opacity:.85;border-style:dashed}")
         html.AppendLine("a{color:var(--acc)} code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.9em}")
         html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem}")
-        ' Typing Indicator deutlich sichtbar (Farbe + Hintergrund)
         html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;color:var(--muted);opacity:.5;animation:ping 1s ease-in-out infinite;}")
         html.AppendLine("@keyframes ping{0%{transform:scale(0.9);opacity:.25}50%{transform:scale(1.15);opacity:.95}100%{transform:scale(0.9);opacity:.25}}")
         html.AppendLine("</style>")
@@ -5170,7 +5256,7 @@ Public Class ThisAddIn
             html.AppendLine("      <img class=""logo"" src=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """ alt=""logo"">")
         End If
         html.AppendLine("      <div class=""brandbig"">" & System.Net.WebUtility.HtmlEncode(brandName) & "</div>")
-        html.AppendLine("      <div class=""sub"">Local Chat</div>") ' <- Text geändert
+        html.AppendLine("      <div class=""sub"">Local Chat</div>")
         html.AppendLine("    </div>")
         html.AppendLine("    <div class=""spacer""></div>")
         html.AppendLine("    <select id=""modelSel"" title=""Model""></select>")
@@ -5186,20 +5272,21 @@ Public Class ThisAddIn
         html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
         html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button></div>")
         html.AppendLine("  </div>")
-        html.AppendLine("  <div class=""hint"">Enter to send • Shift+Enter for newline • Ctrl+L to clear • Model applies on next message</div>")
+        html.AppendLine("  <div class=""hint"">Drag & drop a file anywhere in the chat to attach • Enter to send • Shift+Enter newline • Ctrl+L clear</div>")
         html.AppendLine("</div>")
 
         ' ---------- JS ----------
         html.AppendLine("<script>")
-        ' Ohne System.Web: sicheres JS-Stringliteral via JSON-Serializer
         html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
-
+        html.AppendLine("let __supportsFiles = false;")
+        html.AppendLine("let __pendingFilePath = '';")
+        html.AppendLine("")
         html.AppendLine("const api = async (cmd, data={}) => {")
         html.AppendLine("  const res = await fetch('" & InkyApiRoute & "', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd}, data))});")
         html.AppendLine("  const txt = await res.text();")
         html.AppendLine("  try { return JSON.parse(txt); } catch { return {ok:false,error:txt}; }")
         html.AppendLine("};")
-
+        html.AppendLine("")
         html.AppendLine("const chatEl = document.getElementById('chat');")
         html.AppendLine("const msgEl  = document.getElementById('msg');")
         html.AppendLine("const modelSel = document.getElementById('modelSel');")
@@ -5207,9 +5294,19 @@ Public Class ThisAddIn
         html.AppendLine("const clearBtn = document.getElementById('clearBtn');")
         html.AppendLine("const themeBtn = document.getElementById('themeBtn');")
         html.AppendLine("let dark = false;")
-        html.AppendLine("function setTheme(d){dark=d;document.documentElement.classList.toggle('light',!!d);}")
-
-        ' Render: nutzt row bot/user (BOT LINKS / USER RECHTS), html bevorzugt
+        html.AppendLine("function setTheme(isDark){")
+        html.AppendLine("  dark = !!isDark;")
+        html.AppendLine("  document.documentElement.classList.toggle('light', !dark);")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("function formatBytes(b){")
+        html.AppendLine("  const u=['B','KB','MB','GB','TB'];")
+        html.AppendLine("  if(!Number.isFinite(b)||b<=0) return '0 B';")
+        html.AppendLine("  const i = Math.min(u.length-1, Math.floor(Math.log(b)/Math.log(1024)));")
+        html.AppendLine("  return (b/Math.pow(1024,i)).toFixed(i?1:0) + ' ' + u[i];")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Renders the full history returned by the server")
         html.AppendLine("function render(turns){")
         html.AppendLine("  chatEl.innerHTML='';")
         html.AppendLine("  for(const t of (turns||[])){")
@@ -5223,19 +5320,33 @@ Public Class ThisAddIn
         html.AppendLine("    } else if (t && typeof t.markdown === 'string' && t.markdown.length){")
         html.AppendLine("      const safe = t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');")
         html.AppendLine("      c.innerHTML = safe;")
-        html.AppendLine("    } else {")
-        html.AppendLine("      c.textContent = '';")
-        html.AppendLine("    }")
-        html.AppendLine("    b.appendChild(c);")
-        html.AppendLine("    row.appendChild(b); chatEl.appendChild(row);")
+        html.AppendLine("    } else { c.textContent = ''; }")
+        html.AppendLine("    b.appendChild(c); row.appendChild(b); chatEl.appendChild(row);")
         html.AppendLine("  }")
         html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
         html.AppendLine("}")
-
-        ' Boot
+        html.AppendLine("")
+        html.AppendLine("// Create a temporary assistant bubble and return its element id")
+        html.AppendLine("function addTempAssistantBubble(html){")
+        html.AppendLine("  const id = 'tmp-' + Math.random().toString(36).slice(2);")
+        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
+        html.AppendLine("    `<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);")
+        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
+        html.AppendLine("  return id;")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Replace the text/body of an existing bubble by id")
+        html.AppendLine("function replaceAssistantBubble(id, html){")
+        html.AppendLine("  const row = document.getElementById(id);")
+        html.AppendLine("  if(!row) return;")
+        html.AppendLine("  const c = row.querySelector('.bubble > div:nth-child(2)');")
+        html.AppendLine("  if(c) c.innerHTML = html;")
+        html.AppendLine("}")
+        html.AppendLine("")
         html.AppendLine("async function boot(){")
         html.AppendLine("  const st = await api('inky_getstate');")
         html.AppendLine("  if(!st.ok){alert(st.error||'Failed to initialize');return}")
+        html.AppendLine("  __supportsFiles = (st.supportsFiles===true);")
         html.AppendLine("  setTheme(st.darkMode===true);")
         html.AppendLine("  render(st.history||[]);")
         html.AppendLine("  modelSel.innerHTML='';")
@@ -5244,9 +5355,7 @@ Public Class ThisAddIn
         html.AppendLine("    opt.value = m.key || '';")
         html.AppendLine("    opt.textContent = m.label || '';")
         html.AppendLine("    if (m.disabled) opt.disabled = true;")
-        html.AppendLine("    if (m.isSeparator) {")
-        html.AppendLine("      opt.style.fontFamily = 'ui-monospace,Consolas,monospace';")
-        html.AppendLine("    }")
+        html.AppendLine("    if (m.isSeparator) opt.style.fontFamily='ui-sans-serif,system-ui,Segoe UI,Roboto,Arial';")
         html.AppendLine("    if (m.selected && !m.disabled) opt.selected = true;")
         html.AppendLine("    modelSel.appendChild(opt);")
         html.AppendLine("  }")
@@ -5258,29 +5367,67 @@ Public Class ThisAddIn
         html.AppendLine("     msgEl.placeholder = st.greeting;")
         html.AppendLine("  }")
         html.AppendLine("}")
-
-        ' Sofortiges Anzeigen + Typing-Indikator (in Inky-Bubble, also links)
+        html.AppendLine("")
         html.AppendLine("async function send(){")
         html.AppendLine("  const t = msgEl.value.trim(); if(!t) return;")
         html.AppendLine("  msgEl.value='';")
-        ' 1) Nutzer-Bubble sofort (rechts)
         html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
-        html.AppendLine("    `<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t")
-        html.AppendLine("      .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);")
-        ' 2) Typing-Bubble in Inky-Reihe (links)
-        html.AppendLine("  const typingId = 'typing-' + Math.random().toString(36).slice(2);")
-        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
-        html.AppendLine("    `<div class=""row bot"" id=""${typingId}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div><span class=""typing""></span></div></div></div>`);")
-        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
-        ' 3) Anfrage an Server
-        html.AppendLine("  const res = await api('inky_send',{Text:t});")
-        ' 4) Typing entfernen
+        html.AppendLine("    `<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);")
+        html.AppendLine("  const typingId = addTempAssistantBubble('<span class=""typing""></span>');")
+        html.AppendLine("  const payload = { Text:t };")
+        html.AppendLine("  if (__pendingFilePath) payload.FileObject = __pendingFilePath;")
+        html.AppendLine("  const res = await api('inky_send', payload);")
         html.AppendLine("  const ty = document.getElementById(typingId); if(ty) ty.remove();")
-        html.AppendLine("  if(!res.ok){alert(res.error||'Error'); return}")
+        html.AppendLine("  if(!res.ok){ alert(res.error||'Error'); return }")
+        html.AppendLine("  __pendingFilePath = '';")
         html.AppendLine("  render(res.history||[]);")
         html.AppendLine("}")
-
-        ' Events
+        html.AppendLine("")
+        html.AppendLine("// Drag & Drop (no paper-clip, single bubble that gets replaced)")
+        html.AppendLine(";(function(){")
+        html.AppendLine("  const prevent = e=>{ e.preventDefault(); e.stopPropagation(); };")
+        html.AppendLine("  ['dragenter','dragover','dragleave','drop'].forEach(ev=>{")
+        html.AppendLine("    document.addEventListener(ev, prevent, false);")
+        html.AppendLine("  });")
+        html.AppendLine("")
+        html.AppendLine("  document.addEventListener('drop', async (e)=>{")
+        html.AppendLine("    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);")
+        html.AppendLine("    if(!files.length) return;")
+        html.AppendLine("    const f = files[0];")
+        html.AppendLine("")
+        html.AppendLine("    // If not supported -> single info bubble, no upload attempt")
+        html.AppendLine("    if(!__supportsFiles){")
+        html.AppendLine("      addTempAssistantBubble('File uploads are not supported for the current model.');")
+        html.AppendLine("      return;")
+        html.AppendLine("    }")
+        html.AppendLine("")
+        html.AppendLine("    const tempId = addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${formatBytes(f.size)}) …`);")
+        html.AppendLine("    try {")
+        html.AppendLine("      const fr = new FileReader();")
+        html.AppendLine("      const dataUrl = await new Promise((resolve,reject)=>{")
+        html.AppendLine("        fr.onerror = ()=>reject(new Error('read error'));")
+        html.AppendLine("        fr.onload = ()=>resolve(fr.result);")
+        html.AppendLine("        fr.readAsDataURL(f);")
+        html.AppendLine("      });")
+        html.AppendLine("")
+        html.AppendLine("      const r = await api('inky_upload', { Name:f.name, DataUrl:String(dataUrl||'') });")
+        html.AppendLine("      if(!r.ok){")
+        html.AppendLine("        replaceAssistantBubble(tempId, 'Upload failed: ' + (r.error||'unknown'));")
+        html.AppendLine("        return;")
+        html.AppendLine("      }")
+        html.AppendLine("      if(r.supported === false){")
+        html.AppendLine("        replaceAssistantBubble(tempId, 'File uploads are not supported for the current model.');")
+        html.AppendLine("        return;")
+        html.AppendLine("      }")
+        html.AppendLine("      // Success: keep ONE bubble, just change its text")
+        html.AppendLine("      __pendingFilePath = r.path || '';")
+        html.AppendLine("      replaceAssistantBubble(tempId, `Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b> (${formatBytes(Number(r.size)||f.size)})`);")
+        html.AppendLine("    } catch (err) {")
+        html.AppendLine("      replaceAssistantBubble(tempId, 'Upload failed: ' + (err && err.message ? err.message : 'unknown'));")
+        html.AppendLine("    }")
+        html.AppendLine("  }, false);")
+        html.AppendLine("})();")
+        html.AppendLine("")
         html.AppendLine("modelSel.addEventListener('change', async ()=>{")
         html.AppendLine("  const opt = modelSel.options[modelSel.selectedIndex];")
         html.AppendLine("  if (!opt || opt.disabled || !opt.value) {")
@@ -5290,8 +5437,10 @@ Public Class ThisAddIn
         html.AppendLine("  }")
         html.AppendLine("  const key = opt.value;")
         html.AppendLine("  const r = await api('inky_setmodel',{Key:key});")
-        html.AppendLine("  if(!r.ok){alert(r.error||'Failed to set model')}")
+        html.AppendLine("  if(!r.ok){alert(r.error||'Failed to set model'); return}")
+        html.AppendLine("  if(typeof r.supportsFiles === 'boolean') __supportsFiles = r.supportsFiles;")
         html.AppendLine("});")
+        html.AppendLine("")
         html.AppendLine("copyBtn.addEventListener('click', async ()=>{")
         html.AppendLine("  const r = await api('inky_copylast'); if(!r.ok){alert(r.error||'Nothing to copy')}")
         html.AppendLine("});")
@@ -5299,7 +5448,10 @@ Public Class ThisAddIn
         html.AppendLine("  const r = await api('inky_clear'); if(r.ok){render([])} else {alert(r.error||'Failed to clear')}")
         html.AppendLine("});")
         html.AppendLine("themeBtn.addEventListener('click', async ()=>{")
-        html.AppendLine("  const r = await api('inky_toggletheme'); if(r.ok){ setTheme(r.darkMode===true);} else {alert(r.error||'Theme switch failed')}")
+        html.AppendLine("  const target = !dark; setTheme(target);")
+        html.AppendLine("  const r = await api('inky_toggletheme');")
+        html.AppendLine("  if(!r.ok){ setTheme(!target); alert(r.error||'Theme switch failed'); return }")
+        html.AppendLine("  if(typeof r.darkMode === 'boolean') setTheme(r.darkMode===true);")
         html.AppendLine("});")
         html.AppendLine("msgEl.addEventListener('keydown', (e)=>{")
         html.AppendLine("  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }")
@@ -5309,9 +5461,11 @@ Public Class ThisAddIn
         html.AppendLine("boot();")
         html.AppendLine("</script>")
 
+
         html.AppendLine("</body></html>")
         Return html.ToString()
     End Function
+
 
 
 
@@ -5342,32 +5496,94 @@ Public Class ThisAddIn
                 Select Case cmd
                     Case "inky_getstate"
                         Dim st As InkyState = LoadInkyState()
-                        ' Adopt persisted theme if present
-                        Try
-                            st.DarkMode = st.DarkMode = My.Settings.Inky_DarkMode
 
+                        Try
+                            st.DarkMode = My.Settings.Inky_DarkMode
                         Catch
                         End Try
 
-                        ' If first startup → greet with a system bubble (not counted for memory)
+                        ' Re-compute per current selection on every getstate
+                        Try
+                            st.SupportsFileUploads = ComputeSupportsFiles(st.UseSecondApi, st.SelectedModelKey)
+                            SaveInkyState(st)
+                        Catch
+                            st.SupportsFileUploads = False
+                        End Try
+
                         Dim greeting As System.String = Nothing
                         If st.History.Count = 0 Then greeting = GetFriendlyGreeting()
 
-                        ' models list
-                        Dim models As System.Collections.Generic.List(Of Object) =
-                        Await GetModelListForBrowserAsync(st)
+                        Dim models As System.Collections.Generic.List(Of System.Object) =
+        Await GetModelListForBrowserAsync(st)
 
                         Return JsonOk(New With {
-                            .ok = True,
-                            .history = ToBrowserTurns(LoadInkyState().History),
-                            .greeting = greeting,
-                            .models = models,
-                            .modelLabel = GetSelectedModelLabel(st.UseSecondApi, st.SelectedModelKey),
-                            .darkMode = st.DarkMode
-                        })
+        .ok = True,
+        .history = ToBrowserTurns(LoadInkyState().History),
+        .greeting = greeting,
+        .models = models,
+        .modelLabel = GetSelectedModelLabel(st.UseSecondApi, st.SelectedModelKey),
+        .darkMode = st.DarkMode,
+        .supportsFiles = st.SupportsFileUploads
+    })
+
+
+                    Case "inky_upload"
+                        Try
+                            Dim stU As InkyState = LoadInkyState()
+
+                            ' Hard-enforce on server: do not accept data when unsupported
+                            Dim supports As System.Boolean = False
+                            Try
+                                supports = ComputeSupportsFiles(stU.UseSecondApi, stU.SelectedModelKey)
+                            Catch
+                                supports = False
+                            End Try
+                            If Not supports Then
+                                ' Tell client it is not supported; do NOT create any temp file
+                                Return JsonOk(New With {.ok = True, .supported = False})
+                            End If
+
+                            Dim name As System.String = j("Name")?.ToString()
+                            Dim dataUrl As System.String = j("DataUrl")?.ToString()
+                            If System.String.IsNullOrWhiteSpace(name) OrElse System.String.IsNullOrWhiteSpace(dataUrl) Then
+                                Return JsonErr("Missing file data.")
+                            End If
+
+                            Dim commaIx As System.Int32 = dataUrl.IndexOf(","c)
+                            If commaIx < 0 Then Return JsonErr("Bad DataURL.")
+                            Dim b64 As System.String = dataUrl.Substring(commaIx + 1)
+
+                            Dim bytes() As System.Byte
+                            Try
+                                bytes = System.Convert.FromBase64String(b64)
+                            Catch exB64 As System.Exception
+                                Return JsonErr("Invalid base64: " & exB64.Message)
+                            End Try
+
+                            Dim dir As System.String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "InkyUploads")
+                            If Not System.IO.Directory.Exists(dir) Then System.IO.Directory.CreateDirectory(dir)
+
+                            Dim safeName As System.String = System.IO.Path.GetFileName(name)
+                            For Each c As System.Char In System.IO.Path.GetInvalidFileNameChars()
+                                safeName = safeName.Replace(c, "_"c)
+                            Next
+
+                            Dim unique As System.String = System.Guid.NewGuid().ToString("N")
+                            Dim target As System.String = System.IO.Path.Combine(dir, unique & "_" & safeName)
+
+                            System.IO.File.WriteAllBytes(target, bytes)
+
+                            Return JsonOk(New With {.ok = True, .supported = True, .path = target, .name = safeName, .size = bytes.LongLength})
+                        Catch exUp As System.Exception
+                            Return JsonErr("Upload failed: " & exUp.Message)
+                        End Try
+
 
 
                     Case "inky_send"
+
+                        Dim fileObject As System.String = j("FileObject")?.ToString()
+
                         Dim textBody As System.String = j("Text")?.ToString()
                         If System.String.IsNullOrWhiteSpace(textBody) Then
                             Return JsonErr("Please enter a message.")
@@ -5375,21 +5591,37 @@ Public Class ThisAddIn
 
                         Dim st As InkyState = LoadInkyState()
 
-                        ' 1) Nutzerzug sofort in History (damit History-Kappung den aktuellen Prompt enthält)
+                        ' Recompute here as well (in case client state is stale)
+                        Dim supportsFilesNow As System.Boolean = False
+                        Try
+                            supportsFilesNow = ComputeSupportsFiles(st.UseSecondApi, st.SelectedModelKey)
+                        Catch
+                            supportsFilesNow = False
+                        End Try
+
+                        If (Not supportsFilesNow) AndAlso (Not System.String.IsNullOrWhiteSpace(fileObject)) Then
+                            st.History.Add(New ChatTurn With {
+                                .Role = "assistant",
+                                .Markdown = "This model does not support file attachments.",
+                                .Html = MarkdownToHtml("This model does not support file attachments."),
+                                .Utc = System.DateTime.UtcNow
+                            })
+                            fileObject = Nothing
+                            SaveInkyState(st)
+                        End If
+
                         Dim userTurn As New ChatTurn With {
                             .Role = "user",
                             .Markdown = textBody,
-                            .Html = MarkdownToHtml(System.Net.WebUtility.HtmlEncode(textBody)),
+                            .Html = MarkdownToHtml(textBody),
                             .Utc = System.DateTime.UtcNow
                         }
                         st.History.Add(userTurn)
 
-                        ' 2) Memory-Kappung
                         Dim cap As System.Int32 = 0
                         Try : cap = INI_ChatCap : Catch : cap = 4000 : End Try
                         Dim clipped As System.Collections.Generic.List(Of ChatTurn) = CapHistoryToChars(st, cap)
 
-                        ' 3) Dialog für den Assistant zusammensetzen
                         Dim sb As New System.Text.StringBuilder()
                         sb.AppendLine("<DIALOG>")
                         For Each t In clipped
@@ -5401,13 +5633,11 @@ Public Class ThisAddIn
                         Next
                         sb.AppendLine("</DIALOG>")
 
-                        ' 4) System-Prompt + Zeitstempel
                         Dim sysPrompt As System.String = GetSystemPromptChat()
                         Dim nowLocal As System.String = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture)
                         sysPrompt &= vbCrLf & "Current local date/time: " & nowLocal
                         sysPrompt &= vbCrLf & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
 
-                        ' 5) Modelwahl (Second API + Alternate Models) temporär anwenden
                         Dim useSecond As System.Boolean = st.UseSecondApi
                         Dim usedAlt As System.Boolean = False
                         Dim origLoaded As System.Boolean = False
@@ -5417,60 +5647,72 @@ Public Class ThisAddIn
                                 originalConfig = GetCurrentConfig(_context) : originalConfigLoaded = True
 
                                 Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) =
-            LoadAlternativeModels(INI_AlternateModelPath, _context)
+                                    LoadAlternativeModels(INI_AlternateModelPath, _context)
 
                                 Dim sel As SharedLibrary.SharedLibrary.ModelConfig =
-            alts.FirstOrDefault(Function(m As SharedLibrary.SharedLibrary.ModelConfig)
-                                    If m Is Nothing Then Return False
-                                    ' 1) Match auf ModelDescription
-                                    If Not System.String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
-                                       System.String.Equals(m.ModelDescription, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
-                                        Return True
-                                    End If
-                                    ' 2) Fallback: Match auf Model
-                                    If Not System.String.IsNullOrWhiteSpace(m.Model) AndAlso
-                                       System.String.Equals(m.Model, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
-                                        Return True
-                                    End If
-                                    Return False
-                                End Function)
+                                    alts.FirstOrDefault(Function(m As SharedLibrary.SharedLibrary.ModelConfig)
+                                                            If m Is Nothing Then Return False
+                                                            If Not System.String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
+                                                               System.String.Equals(m.ModelDescription, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                                                Return True
+                                                            End If
+                                                            If Not System.String.IsNullOrWhiteSpace(m.Model) AndAlso
+                                                               System.String.Equals(m.Model, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
+                                                                Return True
+                                                            End If
+                                                            Return False
+                                                        End Function)
 
                                 If sel IsNot Nothing Then
-                                    ' WICHTIG: Ganze Config temporär anwenden
                                     ApplyModelConfig(_context, sel)
                                     usedAlt = True
                                 End If
                             Catch
-                                ' Soft-fail: weiter mit Second-API-Default
                             End Try
                         End If
 
-
-
-                        ' 6) LLM-Aufruf (STA-sicher), Konfiguration am Ende ggf. zurücksetzen
                         Dim llmOut As System.String = ""
                         Try
-                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond).ConfigureAwait(False)
+                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond, False, fileObject).ConfigureAwait(False)
                         Catch ex As System.Exception
                             Return JsonErr("LLM error: " & ex.Message)
                         Finally
+                            ' Always delete temp file if present
+                            Try
+                                If Not System.String.IsNullOrWhiteSpace(fileObject) AndAlso System.IO.File.Exists(fileObject) Then
+                                    System.IO.File.Delete(fileObject)
+                                End If
+                            Catch
+                            End Try
+
                             Try
                                 If useSecond AndAlso (usedAlt OrElse origLoaded) AndAlso originalConfigLoaded Then
                                     RestoreDefaults(_context, originalConfig)
                                     originalConfigLoaded = False
                                 End If
                             Catch
-                                ' nie Outlook stören
                             End Try
                         End Try
 
-                        If llmOut Is Nothing Then llmOut = ""
-
-                        ' 7) Antwort säubern + Markdown→HTML
+                        If llmOut Is Nothing Then llmOut = System.String.Empty
                         Dim cleaned As System.String = llmOut.Trim()
-                        Dim htmlOut As System.String = MarkdownToHtml(cleaned)
 
-                        ' 8) Assistant-Zug in History
+                        If cleaned.Length = 0 Then
+                            Dim errMsg As System.String =
+                                "Error: The model did not provide a response."
+                            Dim botErr As New ChatTurn With {
+                                .Role = "assistant",
+                                .Markdown = errMsg,
+                                .Html = MarkdownToHtml(errMsg),
+                                .Utc = System.DateTime.UtcNow
+                            }
+                            st.History.Add(botErr)
+                            st.LastAssistantText = errMsg
+                            SaveInkyState(st)
+                            Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
+                        End If
+
+                        Dim htmlOut As System.String = MarkdownToHtml(cleaned)
                         Dim botTurn As New ChatTurn With {
                             .Role = "assistant",
                             .Markdown = cleaned,
@@ -5481,8 +5723,9 @@ Public Class ThisAddIn
                         st.LastAssistantText = cleaned
                         SaveInkyState(st)
 
-                        ' 9) Browser erwartet camelCase
                         Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
+
+
 
 
                     Case "inky_clear"
@@ -5508,22 +5751,17 @@ Public Class ThisAddIn
                         Dim key As System.String = j("Key")?.ToString()
                         Dim st As InkyState = LoadInkyState()
 
-                        ' Key semantics:
-                        '  - "" or "default"  → primary API / default model
-                        '  - "__second__"      → second API (INI_Model_2 default)
-                        '  - Any other string  → alternate model under Second API
                         If System.String.IsNullOrWhiteSpace(key) OrElse System.String.Equals(key, "default", System.StringComparison.OrdinalIgnoreCase) Then
                             st.UseSecondApi = False
                             st.SelectedModelKey = ""
                         ElseIf System.String.Equals(key, "__second__", System.StringComparison.OrdinalIgnoreCase) Then
                             st.UseSecondApi = True
-                            st.SelectedModelKey = ""      ' use INI_Model_2
+                            st.SelectedModelKey = ""
                         Else
                             st.UseSecondApi = True
                             st.SelectedModelKey = key
                         End If
 
-                        ' Persist user preference (for next session)
                         Try
                             My.Settings.Inky_UseSecondApiSelected = st.UseSecondApi
                             My.Settings.Inky_SelectedModelKey = st.SelectedModelKey
@@ -5531,8 +5769,17 @@ Public Class ThisAddIn
                         Catch
                         End Try
 
+                        ' Re-evaluate upload capability for selected model
+                        Try
+                            st.SupportsFileUploads = ComputeSupportsFiles(st.UseSecondApi, st.SelectedModelKey)
+                        Catch
+                            st.SupportsFileUploads = False
+                        End Try
                         SaveInkyState(st)
-                        Return JsonOk(New With {.ok = True})
+
+                        Return JsonOk(New With {.ok = True, .supportsFiles = st.SupportsFileUploads})
+
+
 
                     Case "inky_toggletheme"
                         Dim st As InkyState = LoadInkyState()
@@ -5967,6 +6214,17 @@ Public Class ThisAddIn
         Next
         Return out
     End Function
+
+    <System.Runtime.InteropServices.DllImport("user32.dll")>
+    Private Shared Function GetGuiResources(hProcess As System.IntPtr, uiFlags As System.Int32) As System.UInt32
+    End Function
+    Private Shared Function GetGdiCount() As System.UInt32
+        Return GetGuiResources(System.Diagnostics.Process.GetCurrentProcess().Handle, 0UI)
+    End Function
+    Private Shared Function GetUserCount() As System.UInt32
+        Return GetGuiResources(System.Diagnostics.Process.GetCurrentProcess().Handle, 1UI)
+    End Function
+
 
 
 End Class
