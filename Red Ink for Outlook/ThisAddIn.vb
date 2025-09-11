@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 10.9.2025
+' 11.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -43,6 +43,8 @@ Imports Markdig
 Imports Microsoft.Office.Interop
 Imports Microsoft.Office.Interop.Outlook
 Imports Microsoft.Office.Interop.Word
+Imports Microsoft.Office.Interop.Powerpoint
+Imports Microsoft.Office.Interop.Excel
 Imports Microsoft.VisualBasic.FileIO
 Imports Nito.AsyncEx
 Imports SharedLibrary.MarkdownToRtf
@@ -138,7 +140,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.100925 Gen2 Beta Test"
+    Public Const Version As String = "V.110925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -3524,7 +3526,7 @@ Public Class ThisAddIn
     End Sub
 
 
-    Private Shared Sub ConvertRangeToMarkdown(WorkingRange As Range)
+    Private Shared Sub ConvertRangeToMarkdown(WorkingRange As Word.Range)
 
         Dim listRegex As New Regex("^(\s*)([-*+]|\d+[\.\)])\s+", RegexOptions.Compiled)
 
@@ -4259,29 +4261,22 @@ Public Class ThisAddIn
     Private llmThread As System.Threading.Thread
     Private cts As System.Threading.CancellationTokenSource
 
+    Private powerWatchStarted As System.Boolean = False
+    Private wasListenerRunningBeforeSleep As System.Boolean = False
+    Private wasLlmThreadAliveBeforeSleep As System.Boolean = False
+    Private restartingAfterResume As System.Int32 = 0  ' 0/1 via Interlocked
+
 
     Private Sub StartupHttpListener()
-        ' kooperativen Abbruch vorbereiten
         cts = New System.Threading.CancellationTokenSource()
-
-        ' fire-and-forget, aber referenziert in listenerTask (für Shutdown-Await)
-        listenerTask = StartHttpListener(cts.Token)
-    End Sub
-
-
-    Private Sub OldStartupHttpListener()
-        ' fire-and-forget – no raw Thread needed
-        listenerTask = OldStartHttpListener()          ' <— this compiles
+        listenerTask = StartHttpListener(cts.Token)   ' deine StartHttpListener-Schleife nimmt jetzt ein Token
     End Sub
 
     Private Async Sub ShutdownHttpListener()
         isShuttingDown = True
 
-        ' Listener abbrechen
         Try
-            If cts IsNot Nothing Then
-                cts.Cancel()
-            End If
+            If cts IsNot Nothing Then cts.Cancel()
         Catch
         End Try
 
@@ -4295,7 +4290,6 @@ Public Class ThisAddIn
             httpListener = Nothing
         End Try
 
-        ' Taskende abwarten (kein Zombie-Loop)
         Try
             If listenerTask IsNot Nothing Then
                 Await listenerTask.ConfigureAwait(False)
@@ -4303,24 +4297,12 @@ Public Class ThisAddIn
         Catch
         End Try
 
-        ' Den separaten STA-UI-Thread für RunLlmAsync deterministisch stoppen
+        ' GANZ wichtig: den zusätzlichen UI-STA-Thread jetzt deterministisch stoppen
         StopLlmUiThread()
     End Sub
 
 
 
-    Private Sub OldShutdownHttpListener()
-        isShuttingDown = True
-        Try
-            If httpListener IsNot Nothing Then
-                If httpListener.IsListening Then httpListener.Stop()
-                httpListener.Close()
-            End If
-        Catch
-        Finally
-            httpListener = Nothing   ' <— hinzufügen
-        End Try
-    End Sub
 
     Private Async Function StartHttpListener(
     ByVal token As System.Threading.CancellationToken) _
@@ -4334,11 +4316,9 @@ Public Class ThisAddIn
             Dim needShortDelay As System.Boolean = False
 
             Try
-                ' ensure listener is alive
                 If httpListener Is Nothing Then
                     httpListener = New System.Net.HttpListener()
                     httpListener.IgnoreWriteExceptions = True
-
                     With httpListener.TimeoutManager
                         .IdleConnection = System.TimeSpan.FromSeconds(15)
                         .HeaderWait = System.TimeSpan.FromSeconds(5)
@@ -4346,24 +4326,18 @@ Public Class ThisAddIn
                         .DrainEntityBody = System.TimeSpan.FromSeconds(5)
                         .MinSendBytesPerSecond = CType(256UL, System.UInt64)
                     End With
-
                     httpListener.Prefixes.Add(prefix)
                     httpListener.Start()
                     System.Diagnostics.Debug.WriteLine("HttpListener started.")
                 ElseIf Not httpListener.IsListening Then
-                    Try
-                        httpListener.Close()
-                    Catch
-                    End Try
+                    Try : httpListener.Close() : Catch : End Try
                     httpListener = Nothing
                     Continue While
                 End If
 
-                ' get next request (bricht durch Stop/Close mit ODE)
                 Dim ctx As System.Net.HttpListenerContext =
                 Await httpListener.GetContextAsync().ConfigureAwait(False)
 
-                ' fire-and-forget handler
                 System.Threading.Tasks.Task.Run(
                 Async Function()
                     Try
@@ -4388,7 +4362,7 @@ Public Class ThisAddIn
                     End Try
                 End Function)
 
-                ' --- Metriken (alle 10s) ---
+                ' --- Metriken (optional) ---
                 Dim now As System.DateTime = System.DateTime.UtcNow
                 If (now - lastMetrics).TotalSeconds >= 10.0 Then
                     Dim gdi As System.UInt32 = GetGdiCount()
@@ -4404,10 +4378,9 @@ Public Class ThisAddIn
                     lastMetrics = now
                 End If
 
-                consecutiveFailures = 0  ' success
+                consecutiveFailures = 0
 
             Catch ex As System.ObjectDisposedException
-                ' tritt bei Stop/Close auf → kurze Pause & Loop-Bedingung prüft Shutdown/Cancel
                 consecutiveFailures += 1
                 needShortDelay = True
 
@@ -4416,8 +4389,11 @@ Public Class ThisAddIn
                 System.Diagnostics.Debug.WriteLine(System.String.Concat("Listener error: ", ex.Message))
             End Try
 
-            If needShortDelay Then
-                Await System.Threading.Tasks.Task.Delay(50, token).ConfigureAwait(False)
+            If needShortDelay AndAlso (Not token.IsCancellationRequested) Then
+                Try
+                    Await System.Threading.Tasks.Task.Delay(50, token).ConfigureAwait(False)
+                Catch
+                End Try
             End If
 
             If consecutiveFailures >= 10 AndAlso (Not isShuttingDown) AndAlso (Not token.IsCancellationRequested) Then
@@ -4428,128 +4404,97 @@ Public Class ThisAddIn
                 End Try
                 httpListener = Nothing
                 consecutiveFailures = 0
-                Await System.Threading.Tasks.Task.Delay(5000, token).ConfigureAwait(False)
-            End If
-        End While
-    End Function
-
-
-    Private Async Function OldStartHttpListener() As System.Threading.Tasks.Task
-        Const prefix As String = "http://127.0.0.1:12333/"
-        Dim consecutiveFailures As Integer = 0
-        Dim lastMetrics As System.DateTime = System.DateTime.UtcNow
-
-        While Not isShuttingDown
-            ' Flag, weil Await in Catch verboten ist
-            Dim needShortDelay As Boolean = False
-
-            Try
-                ' ensure listener is alive
-                If httpListener Is Nothing Then
-                    httpListener = New HttpListener()
-                    httpListener.IgnoreWriteExceptions = True
-
-                    ' Timeouts gegen idle/slow Clients
-                    With httpListener.TimeoutManager
-                        .IdleConnection = System.TimeSpan.FromSeconds(15)
-                        .HeaderWait = System.TimeSpan.FromSeconds(5)
-                        .EntityBody = System.TimeSpan.FromSeconds(30)
-                        .DrainEntityBody = System.TimeSpan.FromSeconds(5)
-                        .MinSendBytesPerSecond = CType(256UL, ULong)
-                    End With
-
-                    httpListener.Prefixes.Add(prefix)
-                    httpListener.Start()
-                    Debug.WriteLine("HttpListener started.")
-                ElseIf Not httpListener.IsListening Then
-                    Try
-                        httpListener.Close()
-                    Catch
-                    End Try
-                    httpListener = Nothing
-                    Continue While   ' next loop will recreate
-                End If
-
-                ' wait for a request
-                Dim ctx As HttpListenerContext = Await httpListener.GetContextAsync().ConfigureAwait(False)
-
-                ' fire-and-forget handler auf ThreadPool (robust, eigener Try/Catch)
-                Call System.Threading.Tasks.Task.Run(
-                Async Function()
-                    Try
-                        Await HandleHttpRequest(ctx).ConfigureAwait(False)
-                    Catch
-                        ' Kein String-Konkatenations-Klimmzug – schlank halten
-                        Debug.WriteLine("HandleHttpRequest error")
-                        ' Best-effort 500 synchron (kein Await im Catch)
-                        Try
-                            Dim res As System.Net.HttpListenerResponse = ctx.Response
-                            res.StatusCode = 500
-                            res.KeepAlive = False
-                            res.Headers("Connection") = "close"
-                            res.SendChunked = False
-                            Dim bufErr() As Byte = System.Text.Encoding.UTF8.GetBytes("Internal server error.")
-                            res.ContentType = "text/plain; charset=utf-8"
-                            res.ContentLength64 = bufErr.LongLength
-                            Using os As System.IO.Stream = res.OutputStream
-                                os.Write(bufErr, 0, bufErr.Length)
-                            End Using
-                            res.Close()
-                        Catch
-                            ' ignore
-                        End Try
-                    End Try
-                End Function)
-
-                ' --- Metriken (alle 10s) ---
-                Dim now As System.DateTime = System.DateTime.UtcNow
-                If (now - lastMetrics).TotalSeconds >= 10.0 Then
-                    Dim gdi As System.UInt32 = GetGdiCount()
-                    Dim usr As System.UInt32 = GetUserCount()
-
-                    System.Diagnostics.Debug.WriteLine(
-                    System.String.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "RES {0:HH:mm:ss}: GDI={1}  USER={2}",
-                        now, gdi, usr))
-
-                    If gdi >= 8000UI OrElse usr >= 8000UI Then
-                        System.Diagnostics.Debug.WriteLine("WARN: Hohe Handle-Zahl – prüfe GDI/USER-Leaks.")
-                    End If
-
-                    lastMetrics = now
-                End If
-
-                consecutiveFailures = 0  ' success
-
-            Catch ex As ObjectDisposedException
-                consecutiveFailures += 1
-                needShortDelay = True   ' Delay NACH dem Try/Catch
-
-            Catch ex As System.Exception
-                consecutiveFailures += 1
-                ' Falls hier die Konkatenation Ärger macht, ersetze durch String.Concat
-                Debug.WriteLine(String.Concat("Listener error: ", ex.Message))
-            End Try
-
-            ' kurze Pause außerhalb des Catch (VB erlaubt Await nicht im Catch)
-            If needShortDelay Then
-                Await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(False)
-            End If
-
-            ' if we hit 10 failures in a row, recycle the listener
-            If consecutiveFailures >= 10 AndAlso Not isShuttingDown Then
-                Debug.WriteLine("Restarting HttpListener after 10 failures.")
                 Try
-                    If httpListener IsNot Nothing Then httpListener.Close()
+                    Await System.Threading.Tasks.Task.Delay(5000, token).ConfigureAwait(False)
                 Catch
                 End Try
-                httpListener = Nothing
-                consecutiveFailures = 0
-                Await System.Threading.Tasks.Task.Delay(5000).ConfigureAwait(False)  ' back-off pause
             End If
         End While
     End Function
+
+
+
+    Private Sub StartPowerWatch()
+        If powerWatchStarted Then Return
+        AddHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
+        powerWatchStarted = True
+    End Sub
+
+    Private Sub StopPowerWatch()
+        If Not powerWatchStarted Then Return
+        RemoveHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
+        powerWatchStarted = False
+    End Sub
+
+    Private Sub OnPowerModeChanged(ByVal sender As System.Object,
+                               ByVal e As Microsoft.Win32.PowerModeChangedEventArgs)
+        If e Is Nothing Then Return
+
+        Select Case e.Mode
+
+            Case Microsoft.Win32.PowerModes.Suspend
+                ' Zustand merken
+                Try
+                    wasListenerRunningBeforeSleep =
+                    (httpListener IsNot Nothing AndAlso httpListener.IsListening)
+                Catch
+                    wasListenerRunningBeforeSleep = False
+                End Try
+                Try
+                    wasLlmThreadAliveBeforeSleep =
+                    (llmThread IsNot Nothing AndAlso llmThread.IsAlive)
+                Catch
+                    wasLlmThreadAliveBeforeSleep = False
+                End Try
+
+                ' Sauber herunterfahren
+                Try : ShutdownHttpListener() : Catch : End Try
+                Try
+                    If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then
+                        StopLlmUiThread()
+                    End If
+                Catch
+                End Try
+
+            Case Microsoft.Win32.PowerModes.Resume
+                If System.Threading.Interlocked.Exchange(restartingAfterResume, 1) = 1 Then Return
+
+                System.Threading.Tasks.Task.Run(
+                Sub()
+                    Try
+                        System.Threading.Thread.Sleep(400) ' kurzer Puffer
+
+                        ' Listener hart freigeben
+                        Try
+                            If httpListener IsNot Nothing Then
+                                Try
+                                    If httpListener.IsListening Then httpListener.Stop()
+                                Catch
+                                End Try
+                                Try : httpListener.Close() : Catch : End Try
+                            End If
+                        Catch
+                        Finally
+                            httpListener = Nothing
+                        End Try
+
+                        ' Nur neu starten, wenn zuvor aktiv
+                        If wasListenerRunningBeforeSleep Then
+                            Try : StartupHttpListener() : Catch : End Try
+                        End If
+
+                        ' Persistenten UI-STA nur wieder aufbauen, wenn er vorher lebte
+                        If wasLlmThreadAliveBeforeSleep Then
+                            Try : EnsureLlmUiThread() : Catch : End Try
+                        End If
+
+                    Finally
+                        System.Threading.Interlocked.Exchange(restartingAfterResume, 0)
+                    End Try
+                End Sub)
+        End Select
+    End Sub
+
 
 
     ' ---------------------------------------------------------------------------
@@ -4711,9 +4656,7 @@ Public Class ThisAddIn
     ' ----------------------------------------
 
     Private Sub EnsureLlmUiThread()
-        If llmScheduler IsNot Nothing Then
-            Return
-        End If
+        If llmScheduler IsNot Nothing Then Return
 
         Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.Threading.Tasks.TaskScheduler)()
 
@@ -4723,11 +4666,8 @@ Public Class ThisAddIn
                 New System.Windows.Forms.WindowsFormsSynchronizationContext())
 
             llmSyncContext = System.Threading.SynchronizationContext.Current
-
-            ' Scheduler aus aktuellem SyncContext
             tcs.SetResult(System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext())
 
-            ' Eigene Message-Loop starten (wird über ExitThread beendet)
             System.Windows.Forms.Application.Run()
         End Sub)
 
@@ -4735,55 +4675,20 @@ Public Class ThisAddIn
         llmThread.IsBackground = True
         llmThread.Start()
 
-        ' Warten bis der Scheduler steht
-        llmScheduler = tcs.Task.Result
-    End Sub
-
-    Private Sub OldEnsureLlmUiThread()
-        If llmScheduler IsNot Nothing Then
-            Return
-        End If
-
-        ' TaskCompletionSource liefert uns den Scheduler, sobald der STA-Thread
-        ' seinen SynchronizationContext gesetzt hat.
-        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.Threading.Tasks.TaskScheduler)()
-
-        ' Thread-Start
-        Dim th As New System.Threading.Thread(Sub()
-                                                  ' 1) SyncContext für WinForms in diesem Thread setzen
-                                                  System.Threading.SynchronizationContext.SetSynchronizationContext(
-                                                  New System.Windows.Forms.WindowsFormsSynchronizationContext())
-
-                                                  ' 2) Scheduler aus dem aktuellen Context erzeugen
-                                                  tcs.SetResult(System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext())
-
-                                                  ' 3) Message-Loop starten (Application.Run pumpt Meldungen)
-                                                  System.Windows.Forms.Application.Run()
-                                              End Sub)
-
-        th.SetApartmentState(System.Threading.ApartmentState.STA)
-        th.IsBackground = True
-        th.Start()
-
-        ' blockierend warten, bis wir den Scheduler erhalten haben
         llmScheduler = tcs.Task.Result
     End Sub
 
     Private Sub StopLlmUiThread()
         Try
             If llmSyncContext IsNot Nothing Then
-                ' Signal zum Beenden der Message-Loop
                 llmSyncContext.Post(
-                Sub()
-                    System.Windows.Forms.Application.ExitThread()
-                End Sub, Nothing)
+                Sub() System.Windows.Forms.Application.ExitThread(),
+                Nothing)
             End If
         Catch
         End Try
-
         Try
             If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then
-                ' kurze endliche Wartezeit
                 llmThread.Join(2000)
             End If
         Catch
@@ -4795,15 +4700,70 @@ Public Class ThisAddIn
     End Sub
 
 
-    ' ----------------------------------------
-    ' 3) Neues RunLlmAsync (Drop-in für Deine alte Methode)
-    ' ----------------------------------------
+
+    Public Function RunLlmAsync(
+    ByVal sysPrompt As System.String,
+    ByVal userPrompt As System.String,
+    Optional ByVal UseSecondAPI As System.Boolean = False,
+    Optional ByVal ShowTimer As System.Boolean = True,
+    Optional ByVal FileObject As System.String = ""
+) As System.Threading.Tasks.Task(Of System.String)
+
+        ' Continuations asynchron fortsetzen, verhindert Inline-Deadlocks
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.String)(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously)
+
+        Dim th As New System.Threading.Thread(
+        Sub()
+            Try
+                ' Eigener STA-Thread mit WinForms-SyncContext (UI-fähig)
+                System.Threading.SynchronizationContext.SetSynchronizationContext(
+                    New System.Windows.Forms.WindowsFormsSynchronizationContext())
+
+                ' Pumpt Message-Loop NUR für diese eine LLM-Interaktion
+                Dim result As System.String = Nito.AsyncEx.AsyncContext.Run(
+                    Async Function() As System.Threading.Tasks.Task(Of System.String)
+
+                        ' Dein bestehender LLM-Aufruf (darf UI öffnen)
+                        Dim llmOut As System.String =
+                            Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject) _
+                                  .ConfigureAwait(True)   ' TRUE: Continuations zurück auf diesen UI-STA
+
+                        If UseSecondAPI AndAlso originalConfigLoaded Then
+                            RestoreDefaults(_context, originalConfig)
+                            originalConfigLoaded = False
+                        End If
+
+                        Return If(llmOut, System.String.Empty)
+                    End Function)
+
+                tcs.SetResult(result)
+
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+
+            Finally
+                ' Sicherstellen, dass keine Loop übrig bleibt
+                Try
+                    System.Windows.Forms.Application.ExitThread()
+                Catch
+                End Try
+            End Try
+        End Sub)
+
+        th.SetApartmentState(System.Threading.ApartmentState.STA)
+        th.IsBackground = True
+        th.Start()
+
+        Return tcs.Task
+    End Function
+
+
 
     ''' <summary>
     ''' Führt Deinen LLM-Call (mit HTTP + UI-Dialogs) komplett
     ''' auf einem eigenen STA-Thread mit Message-Loop aus.
     ''' </summary>
-    Public Function RunLlmAsync(
+    Public Function OldRunLlmAsync(
     sysPrompt As String,
     userPrompt As String,
     Optional UseSecondAPI As Boolean = False,
@@ -5579,10 +5539,10 @@ Public Class ThisAddIn
                         End Try
 
 
-
                     Case "inky_send"
 
                         Dim fileObject As System.String = j("FileObject")?.ToString()
+                        Dim uploadedTempPath As System.String = fileObject
 
                         Dim textBody As System.String = j("Text")?.ToString()
                         If System.String.IsNullOrWhiteSpace(textBody) Then
@@ -5591,7 +5551,7 @@ Public Class ThisAddIn
 
                         Dim st As InkyState = LoadInkyState()
 
-                        ' Recompute here as well (in case client state is stale)
+                        ' Recompute upload capability (falls Client-State alt ist)
                         Dim supportsFilesNow As System.Boolean = False
                         Try
                             supportsFilesNow = ComputeSupportsFiles(st.UseSecondApi, st.SelectedModelKey)
@@ -5599,17 +5559,64 @@ Public Class ThisAddIn
                             supportsFilesNow = False
                         End Try
 
-                        If (Not supportsFilesNow) AndAlso (Not System.String.IsNullOrWhiteSpace(fileObject)) Then
-                            st.History.Add(New ChatTurn With {
-                                .Role = "assistant",
-                                .Markdown = "This model does not support file attachments.",
-                                .Html = MarkdownToHtml("This model does not support file attachments."),
-                                .Utc = System.DateTime.UtcNow
-                            })
-                            fileObject = Nothing
-                            SaveInkyState(st)
+                        Dim extractedDoc As System.String = Nothing
+                        Dim extractedLabel As System.String = Nothing
+                        Dim attachedType As System.String = Nothing
+                        Dim hadInlineExtraction As System.Boolean = False
+
+                        If Not System.String.IsNullOrWhiteSpace(fileObject) Then
+                            Dim okOffice As System.Boolean = False
+                            Try
+                                okOffice = TryExtractOfficeText(fileObject, extractedDoc, extractedLabel)
+                            Catch exOff As System.Exception
+                                okOffice = False
+                            End Try
+
+                            If okOffice Then
+                                hadInlineExtraction = True
+                                attachedType = "office"
+                                fileObject = Nothing        ' Wichtig: KEIN Pfad ans Modell geben
+                            Else
+                                ' Kein (oder fehlgeschlagenes) Office → Text-/Code-/CSV-Erkennung
+                                Dim okText As System.Boolean = False
+                                Try
+                                    okText = TryExtractTextLike(fileObject, extractedDoc, extractedLabel)
+                                Catch exTxt As System.Exception
+                                    okText = False
+                                End Try
+
+                                If okText Then
+                                    hadInlineExtraction = True
+                                    attachedType = "text"
+                                    fileObject = Nothing    ' ebenfalls KEIN Pfad ans Modell
+                                Else
+                                    ' Weder Office noch Text/Code extrahierbar:
+                                    ' Wenn das Modell KEINE FileObjects unterstützt, geben wir eine freundliche Meldung aus.
+                                    If (Not supportsFilesNow) AndAlso (Not System.String.IsNullOrWhiteSpace(fileObject)) Then
+                                        st.History.Add(New ChatTurn With {
+                                            .Role = "assistant",
+                                            .Markdown = "This model does not support file attachments.",
+                                            .Html = MarkdownToHtml("This model does not support file attachments."),
+                                            .Utc = System.DateTime.UtcNow
+                                        })
+                                        SaveInkyState(st)
+
+                                        ' Tempdatei trotzdem wegräumen
+                                        Try
+                                            If Not System.String.IsNullOrWhiteSpace(uploadedTempPath) AndAlso System.IO.File.Exists(uploadedTempPath) Then
+                                                System.IO.File.Delete(uploadedTempPath)
+                                            End If
+                                        Catch
+                                        End Try
+
+                                        Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
+                                    End If
+                                    ' andernfalls: PDFs/sonstige bleiben via FileObject (wie bisher)
+                                End If
+                            End If
                         End If
 
+                        ' Benutzerturn in History
                         Dim userTurn As New ChatTurn With {
                             .Role = "user",
                             .Markdown = textBody,
@@ -5618,10 +5625,12 @@ Public Class ThisAddIn
                         }
                         st.History.Add(userTurn)
 
+                        ' History kürzen
                         Dim cap As System.Int32 = 0
                         Try : cap = INI_ChatCap : Catch : cap = 4000 : End Try
                         Dim clipped As System.Collections.Generic.List(Of ChatTurn) = CapHistoryToChars(st, cap)
 
+                        ' Prompt zusammenstellen
                         Dim sb As New System.Text.StringBuilder()
                         sb.AppendLine("<DIALOG>")
                         For Each t In clipped
@@ -5633,11 +5642,23 @@ Public Class ThisAddIn
                         Next
                         sb.AppendLine("</DIALOG>")
 
+                        ' ── NEU: Einmaliger, nicht-persistenter Anhangsblock ──
+                        If hadInlineExtraction AndAlso Not System.String.IsNullOrWhiteSpace(extractedDoc) Then
+                            sb.AppendLine()
+                            Dim lbl As System.String = EscapeForXml(If(extractedLabel, "Attached document"))
+                            Dim typ As System.String = If(System.String.IsNullOrWhiteSpace(attachedType), "text", attachedType)
+                            sb.AppendLine("<ATTACHED_DOCUMENT type=""" & typ & """ label=""" & lbl & """>")
+                            sb.AppendLine(extractedDoc)
+                            sb.AppendLine("</ATTACHED_DOCUMENT>")
+                        End If
+
+                        ' Systemprompt
                         Dim sysPrompt As System.String = GetSystemPromptChat()
                         Dim nowLocal As System.String = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture)
-                        sysPrompt &= vbCrLf & "Current local date/time: " & nowLocal
-                        sysPrompt &= vbCrLf & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
+                        sysPrompt &= System.Environment.NewLine & "Current local date/time: " & nowLocal
+                        sysPrompt &= System.Environment.NewLine & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
 
+                        ' Model-Konfiguration (Second API / Alternates)
                         Dim useSecond As System.Boolean = st.UseSecondApi
                         Dim usedAlt As System.Boolean = False
                         Dim origLoaded As System.Boolean = False
@@ -5671,20 +5692,22 @@ Public Class ThisAddIn
                             End Try
                         End If
 
+                        ' LLM ausführen
                         Dim llmOut As System.String = ""
                         Try
                             llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond, False, fileObject).ConfigureAwait(False)
                         Catch ex As System.Exception
                             Return JsonErr("LLM error: " & ex.Message)
                         Finally
-                            ' Always delete temp file if present
+                            ' WICHTIG: Temp-Datei IMMER löschen – auch wenn wir fileObject oben auf Nothing gesetzt haben.
                             Try
-                                If Not System.String.IsNullOrWhiteSpace(fileObject) AndAlso System.IO.File.Exists(fileObject) Then
-                                    System.IO.File.Delete(fileObject)
+                                If Not System.String.IsNullOrWhiteSpace(uploadedTempPath) AndAlso System.IO.File.Exists(uploadedTempPath) Then
+                                    System.IO.File.Delete(uploadedTempPath)
                                 End If
                             Catch
                             End Try
 
+                            ' Ursprungs-Konfig wiederherstellen
                             Try
                                 If useSecond AndAlso (usedAlt OrElse origLoaded) AndAlso originalConfigLoaded Then
                                     RestoreDefaults(_context, originalConfig)
@@ -5695,11 +5718,11 @@ Public Class ThisAddIn
                         End Try
 
                         If llmOut Is Nothing Then llmOut = System.String.Empty
+                        llmOut = SanitizeModelOutputForBrowser(llmOut)
                         Dim cleaned As System.String = llmOut.Trim()
 
                         If cleaned.Length = 0 Then
-                            Dim errMsg As System.String =
-                                "Error: The model did not provide a response."
+                            Dim errMsg As System.String = "Error: The model did not provide a response."
                             Dim botErr As New ChatTurn With {
                                 .Role = "assistant",
                                 .Markdown = errMsg,
@@ -5728,6 +5751,8 @@ Public Class ThisAddIn
 
 
 
+
+
                     Case "inky_clear"
                         Dim st As New InkyState()
                         SaveInkyState(st)
@@ -5739,10 +5764,12 @@ Public Class ThisAddIn
                             Return JsonErr("No assistant response available to copy.")
                         End If
 
-                        ' Synchronous wait on UI switch to avoid Await in environments that warn here
-                        SwitchToUi(Sub()
-                                       SLib.PutInClipboard(MarkdownToRtfConverter.Convert(stCopy.LastAssistantText))
-                                   End Sub).Wait()
+                        ' Synchronous wait on UI switch to avoid Await in environments that warn here                   
+                        ' SwitchToUi(Sub() SLib.PutInClipboard(MarkdownToRtfConverter.Convert(stCopy.LastAssistantText)) End Sub).Wait()
+
+                        Await SwitchToUi(Sub()
+                                             SLib.PutInClipboard(MarkdownToRtfConverter.Convert(stCopy.LastAssistantText))
+                                         End Sub).ConfigureAwait(False)
 
                         Return JsonOk(New With {.ok = True})
 
@@ -6198,6 +6225,44 @@ Public Class ThisAddIn
     End Function
 
 
+    ' Entfernt führende Rollenmarker wie [ASSISTANT], [USER] oder "ASSISTANT:" am Zeilenanfang.
+    Private Function SanitizeModelOutputForBrowser(ByVal raw As System.String) As System.String
+        If raw Is Nothing Then Return System.String.Empty
+
+        Dim s As System.String = raw
+
+        ' 1) Vollständige Rollen-Zeilen weg (z. B. nur "[ASSISTANT]" oder "[USER]:")
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s,
+            "(?im)^\s*\[(?:assistant|user)\]\s*:?\s*$",
+            "",
+            System.Text.RegularExpressions.RegexOptions.None)
+
+        ' 2) Rollenmarker am Zeilenanfang entfernen (belässt den eigentlichen Text)
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s,
+            "(?im)^\s*\[(?:assistant|user)\]\s*",
+            "",
+            System.Text.RegularExpressions.RegexOptions.None)
+
+        ' 3) Alternative Schreibweise "ASSISTANT:" / "USER:" am Zeilenanfang entfernen
+        '    (nur am Zeilenanfang, um normalen Fließtext nicht zu beschädigen)
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s,
+            "(?im)^\s*(?:assistant|user)\s*:\s*",
+            "",
+            System.Text.RegularExpressions.RegexOptions.None)
+
+        ' 4) Überzählige Leerzeilen normalisieren (optional)
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s,
+            "(\r?\n){3,}",
+            System.Environment.NewLine & System.Environment.NewLine,
+            System.Text.RegularExpressions.RegexOptions.None)
+
+        Return s
+    End Function
+
 
     ' Maps ChatTurn → browser DTO (camelCase)
     Private Function ToBrowserTurns(list As System.Collections.Generic.List(Of ChatTurn)) _
@@ -6223,6 +6288,492 @@ Public Class ThisAddIn
     End Function
     Private Shared Function GetUserCount() As System.UInt32
         Return GetGuiResources(System.Diagnostics.Process.GetCurrentProcess().Handle, 1UI)
+    End Function
+
+    '──────────────────────────────────────────────────────────────────────────────
+    ' Office → Plaintext
+    '──────────────────────────────────────────────────────────────────────────────
+    Private Function TryExtractOfficeText(
+    ByVal filePath As System.String,
+    ByRef extracted As System.String,
+    ByRef label As System.String
+) As System.Boolean
+
+        extracted = Nothing
+        label = Nothing
+
+        If System.String.IsNullOrWhiteSpace(filePath) Then Return False
+        If Not System.IO.File.Exists(filePath) Then Return False
+
+        Dim ext As System.String = System.IO.Path.GetExtension(filePath).ToLowerInvariant()
+
+        Try
+            Select Case ext
+                Case ".doc", ".docx", ".rtf"
+                    extracted = ExtractWordText(filePath)
+                    label = "Word document: " & System.IO.Path.GetFileName(filePath)
+                Case ".xls", ".xlsx"
+                    extracted = ExtractExcelText(filePath)
+                    label = "Excel workbook: " & System.IO.Path.GetFileName(filePath)
+                Case ".ppt", ".pptx"
+                    extracted = ExtractPowerPointText(filePath)
+                    label = "PowerPoint presentation: " & System.IO.Path.GetFileName(filePath)
+                Case Else
+                    Return False
+            End Select
+        Catch ex As System.Exception
+            ' Optional: Loggen
+            System.Diagnostics.Debug.WriteLine("Office extract failed: " & ex.Message)
+            extracted = Nothing
+            label = Nothing
+            Return False
+        End Try
+
+        If System.String.IsNullOrWhiteSpace(extracted) Then Return False
+        ' Soft-Limit (optional): bremst extrem große Arbeitsmappen
+        If extracted.Length > 1_500_000 Then
+            extracted = extracted.Substring(0, 1_500_000) & System.Environment.NewLine & "[…truncated…]"
+        End If
+
+        Return True
+    End Function
+
+    '──────────────────────────────────────────────────────────────────────────────
+    ' WORD
+    '──────────────────────────────────────────────────────────────────────────────
+    Private Function ExtractWordText(ByVal path As System.String) As System.String
+        Dim app As Microsoft.Office.Interop.Word.Application = Nothing
+        Dim doc As Microsoft.Office.Interop.Word.Document = Nothing
+        Try
+            app = New Microsoft.Office.Interop.Word.Application()
+            app.Visible = False
+            doc = app.Documents.Open(FileName:=path, ReadOnly:=True, Visible:=False, AddToRecentFiles:=False)
+
+            ' Volltext – simpel & robust
+            Dim raw As System.String = doc.Content.Text
+
+            ' Normalize line breaks
+            raw = raw.Replace(vbCrLf, vbLf).Replace(vbCr, vbLf)
+            raw = System.Text.RegularExpressions.Regex.Replace(raw, "[\f\v]+", vbLf)
+
+            Return raw.Trim()
+        Catch ex As System.Exception
+            Throw
+        Finally
+            SafeCloseWord(doc, app)
+        End Try
+    End Function
+
+    Private Sub SafeCloseWord(
+    ByVal doc As Microsoft.Office.Interop.Word.Document,
+    ByVal app As Microsoft.Office.Interop.Word.Application
+)
+        Try
+            If doc IsNot Nothing Then
+                Try : doc.Close(SaveChanges:=False) : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(doc) : Catch : End Try
+            End If
+        Finally
+            If app IsNot Nothing Then
+                Try : app.Quit(SaveChanges:=False) : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(app) : Catch : End Try
+            End If
+        End Try
+    End Sub
+
+    '──────────────────────────────────────────────────────────────────────────────
+    ' EXCEL
+    '──────────────────────────────────────────────────────────────────────────────
+    Private Function ExtractExcelText(ByVal path As System.String) As System.String
+        Dim app As Microsoft.Office.Interop.Excel.Application = Nothing
+        Dim wb As Microsoft.Office.Interop.Excel.Workbook = Nothing
+        Dim sb As New System.Text.StringBuilder(4096)
+
+        Try
+            app = New Microsoft.Office.Interop.Excel.Application()
+            app.Visible = False
+            wb = app.Workbooks.Open(Filename:=path, ReadOnly:=True, AddToMru:=False)
+
+            For Each shObj As System.Object In wb.Worksheets
+                Dim ws As Microsoft.Office.Interop.Excel.Worksheet = Nothing
+                Try
+                    ws = CType(shObj, Microsoft.Office.Interop.Excel.Worksheet)
+                    Dim used As Microsoft.Office.Interop.Excel.Range = ws.UsedRange
+                    If used Is Nothing Then Continue For
+
+                    sb.AppendLine("=== Sheet: " & ws.Name & " ===")
+
+                    Dim rows As System.Int32 = used.Rows.Count
+                    Dim cols As System.Int32 = used.Columns.Count
+                    Dim rowOffset As System.Int32 = used.Row      ' 1-basiert
+                    Dim colOffset As System.Int32 = used.Column   ' 1-basiert
+
+                    ' Schnellpfad: beide Arrays auf einmal holen
+                    Dim dataValues As System.Object(,) = Nothing
+                    Dim dataFormulas As System.Object(,) = Nothing
+                    Try
+                        dataValues = TryCast(used.Value2, System.Object(,))
+                    Catch
+                        dataValues = Nothing
+                    End Try
+                    Try
+                        dataFormulas = TryCast(used.Formula, System.Object(,))
+                    Catch
+                        dataFormulas = Nothing
+                    End Try
+
+                    If dataValues IsNot Nothing AndAlso dataFormulas IsNot Nothing Then
+                        Dim rL As System.Int32 = dataValues.GetLength(0)
+                        Dim cL As System.Int32 = dataValues.GetLength(1)
+                        For r As System.Int32 = 1 To rL
+                            For c As System.Int32 = 1 To cL
+                                Dim absRow As System.Int32 = rowOffset + r - 1
+                                Dim absCol As System.Int32 = colOffset + c - 1
+                                Dim addr As System.String = ColToLetters(absCol) & absRow.ToString(System.Globalization.CultureInfo.InvariantCulture)
+
+                                Dim vObj As System.Object = dataValues(r, c)
+                                Dim fObj As System.Object = dataFormulas(r, c)
+
+                                Dim vStr As System.String = System.Convert.ToString(vObj, System.Globalization.CultureInfo.InvariantCulture)
+                                Dim fStr As System.String = System.Convert.ToString(fObj, System.Globalization.CultureInfo.InvariantCulture)
+
+                                ' Manche Zellen mit Konstante haben Formula="" oder Nothing
+                                If fObj IsNot Nothing Then
+                                    ' Excel liefert bei Konstanten oft den Wert statt einer Formel.
+                                    ' Wenn die Formel identisch zum Wert aussieht (häufig leer), lassen wir sie leer.
+                                End If
+
+                                sb.Append(addr)
+                                sb.Append(vbTab)
+                                sb.Append("FORMULA:")
+                                If Not System.String.IsNullOrEmpty(fStr) Then
+                                    sb.Append("="c)
+                                    sb.Append(fStr.TrimStart("="c))
+                                End If
+                                sb.Append(vbTab)
+                                sb.Append("VALUE: ")
+                                sb.AppendLine(If(vStr, ""))
+                            Next
+                        Next
+                    Else
+                        ' Fallback: Zell-für-Zell (langsamer, aber robust)
+                        For r As System.Int32 = 1 To rows
+                            For c As System.Int32 = 1 To cols
+                                Dim cell As Microsoft.Office.Interop.Excel.Range = Nothing
+                                Try
+                                    cell = CType(used.Cells(r, c), Microsoft.Office.Interop.Excel.Range)
+
+                                    Dim absRow As System.Int32 = rowOffset + r - 1
+                                    Dim absCol As System.Int32 = colOffset + c - 1
+                                    Dim addr As System.String = ColToLetters(absCol) & absRow.ToString(System.Globalization.CultureInfo.InvariantCulture)
+
+                                    Dim vObj As System.Object = Nothing
+                                    Dim fObj As System.Object = Nothing
+                                    Try : vObj = cell.Value2 : Catch : vObj = Nothing : End Try
+                                    Try : fObj = cell.Formula : Catch : fObj = Nothing : End Try
+
+                                    Dim vStr As System.String = System.Convert.ToString(vObj, System.Globalization.CultureInfo.InvariantCulture)
+                                    Dim fStr As System.String = System.Convert.ToString(fObj, System.Globalization.CultureInfo.InvariantCulture)
+
+                                    sb.Append(addr)
+                                    sb.Append(vbTab)
+                                    sb.Append("FORMULA:")
+                                    If Not System.String.IsNullOrEmpty(fStr) Then
+                                        sb.Append("="c)
+                                        sb.Append(fStr.TrimStart("="c))
+                                    End If
+                                    sb.Append(vbTab)
+                                    sb.Append("VALUE: ")
+                                    sb.AppendLine(If(vStr, ""))
+                                Finally
+                                    If cell IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(cell)
+                                End Try
+                            Next
+                        Next
+                    End If
+
+                    If used IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(used)
+                    sb.AppendLine()
+                Finally
+                    If ws IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ws)
+                End Try
+            Next
+
+            Return sb.ToString().Trim()
+        Catch ex As System.Exception
+            Throw
+        Finally
+            SafeCloseExcel(wb, app)
+        End Try
+    End Function
+
+    ' A1-Spaltenbezeichner
+    Private Function ColToLetters(ByVal col As System.Int32) As System.String
+        ' col: 1-basiert (1=A, 27=AA, …)
+        Dim n As System.Int32 = col
+        Dim chars As New System.Text.StringBuilder()
+        While n > 0
+            n -= 1
+            Dim ch As System.Char = System.Convert.ToChar((n Mod 26) + System.Convert.ToInt32("A"c))
+            chars.Insert(0, ch)
+            n \= 26
+        End While
+        Return chars.ToString()
+    End Function
+
+
+    Private Sub SafeCloseExcel(
+    ByVal wb As Microsoft.Office.Interop.Excel.Workbook,
+    ByVal app As Microsoft.Office.Interop.Excel.Application
+)
+        Try
+            If wb IsNot Nothing Then
+                Try : wb.Close(SaveChanges:=False) : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(wb) : Catch : End Try
+            End If
+        Finally
+            If app IsNot Nothing Then
+                Try : app.Quit() : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(app) : Catch : End Try
+            End If
+        End Try
+    End Sub
+
+    '──────────────────────────────────────────────────────────────────────────────
+    ' POWERPOINT
+    '──────────────────────────────────────────────────────────────────────────────
+    Private Function ExtractPowerPointText(ByVal path As System.String) As System.String
+        Dim app As System.Object = Nothing
+        Dim pres As System.Object = Nothing
+        Dim sb As New System.Text.StringBuilder(2048)
+
+        Try
+            ' Late binding: keine PIAs nötig
+            app = Microsoft.VisualBasic.Interaction.CreateObject("PowerPoint.Application")
+
+            ' Presentations.Open(FileName, ReadOnly, Untitled, WithWindow)
+            ' Late bound: True/False als -1/0; hier 1=True, 0=False
+            Dim presentations As System.Object = app.Presentations
+            pres = presentations.Open(path, 1, 0, 0)
+
+            Dim slideCount As System.Int32 = System.Convert.ToInt32(pres.Slides.Count, System.Globalization.CultureInfo.InvariantCulture)
+            For i As System.Int32 = 1 To slideCount
+                Dim sld As System.Object = pres.Slides(i)
+                Try
+                    sb.AppendLine("=== Slide " & i.ToString(System.Globalization.CultureInfo.InvariantCulture) & " ===")
+
+                    Dim shapeCount As System.Int32 = System.Convert.ToInt32(sld.Shapes.Count, System.Globalization.CultureInfo.InvariantCulture)
+                    For j As System.Int32 = 1 To shapeCount
+                        Dim shp As System.Object = sld.Shapes(j)
+                        Try
+                            Dim hasTf As System.Boolean = False
+                            Try
+                                ' In Office-Interop: True = -1, False = 0
+                                hasTf = (System.Convert.ToInt32(shp.HasTextFrame, System.Globalization.CultureInfo.InvariantCulture) <> 0) AndAlso
+                                    (Not shp.TextFrame Is Nothing) AndAlso
+                                    (System.Convert.ToInt32(shp.TextFrame.HasText, System.Globalization.CultureInfo.InvariantCulture) <> 0)
+                            Catch
+                                hasTf = False
+                            End Try
+
+                            If hasTf Then
+                                Dim txt As System.String = System.Convert.ToString(shp.TextFrame.TextRange.Text, System.Globalization.CultureInfo.InvariantCulture)
+                                If Not System.String.IsNullOrWhiteSpace(txt) Then
+                                    sb.AppendLine(txt.Trim())
+                                End If
+                            End If
+                        Finally
+                            Try
+                                If shp IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shp)
+                            Catch
+                            End Try
+                        End Try
+                    Next
+
+                    ' Notes (optional)
+                    Try
+                        Dim notesShapes As System.Object = sld.NotesPage.Shapes
+                        Dim nCount As System.Int32 = System.Convert.ToInt32(notesShapes.Count, System.Globalization.CultureInfo.InvariantCulture)
+                        For k As System.Int32 = 1 To nCount
+                            Dim shp2 As System.Object = notesShapes(k)
+                            Try
+                                Dim hasTf2 As System.Boolean = False
+                                Try
+                                    hasTf2 = (System.Convert.ToInt32(shp2.HasTextFrame, System.Globalization.CultureInfo.InvariantCulture) <> 0) AndAlso
+                                         (Not shp2.TextFrame Is Nothing) AndAlso
+                                         (System.Convert.ToInt32(shp2.TextFrame.HasText, System.Globalization.CultureInfo.InvariantCulture) <> 0)
+                                Catch
+                                    hasTf2 = False
+                                End Try
+                                If hasTf2 Then
+                                    Dim note As System.String = System.Convert.ToString(shp2.TextFrame.TextRange.Text, System.Globalization.CultureInfo.InvariantCulture)
+                                    If Not System.String.IsNullOrWhiteSpace(note) Then
+                                        sb.AppendLine("--- Notes ---")
+                                        sb.AppendLine(note.Trim())
+                                    End If
+                                End If
+                            Finally
+                                Try
+                                    If shp2 IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shp2)
+                                Catch
+                                End Try
+                            End Try
+                        Next
+                    Catch
+                    End Try
+
+                    sb.AppendLine()
+                Finally
+                    Try
+                        If sld IsNot Nothing Then System.Runtime.InteropServices.Marshal.FinalReleaseComObject(sld)
+                    Catch
+                    End Try
+                End Try
+            Next
+
+            Return sb.ToString().Trim()
+        Catch ex As System.Exception
+            Throw
+        Finally
+            Try
+                If pres IsNot Nothing Then
+                    Try : pres.Close() : Catch : End Try
+                    Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(pres) : Catch : End Try
+                End If
+            Catch
+            End Try
+            Try
+                If app IsNot Nothing Then
+                    Try : app.Quit() : Catch : End Try
+                    Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(app) : Catch : End Try
+                End If
+            Catch
+            End Try
+        End Try
+    End Function
+
+
+
+    Private Sub SafeClosePowerPoint(
+    ByVal pres As Microsoft.Office.Interop.PowerPoint.Presentation,
+    ByVal app As Microsoft.Office.Interop.PowerPoint.Application
+)
+        Try
+            If pres IsNot Nothing Then
+                Try : pres.Close() : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(pres) : Catch : End Try
+            End If
+        Finally
+            If app IsNot Nothing Then
+                Try : app.Quit() : Catch : End Try
+                Try : System.Runtime.InteropServices.Marshal.FinalReleaseComObject(app) : Catch : End Try
+            End If
+        End Try
+    End Sub
+
+    '──────────────────────────────────────────────────────────────────────────────
+    ' XML-/Tag-sicher
+    '──────────────────────────────────────────────────────────────────────────────
+    Private Function EscapeForXml(ByVal s As System.String) As System.String
+        If s Is Nothing Then Return ""
+        Return System.Security.SecurityElement.Escape(s)
+    End Function
+
+    Private Function TryExtractTextLike(
+    ByVal filePath As System.String,
+    ByRef extracted As System.String,
+    ByRef label As System.String
+) As System.Boolean
+
+        extracted = Nothing
+        label = Nothing
+
+        If System.String.IsNullOrWhiteSpace(filePath) Then Return False
+        If Not System.IO.File.Exists(filePath) Then Return False
+
+        Dim ext As System.String = System.IO.Path.GetExtension(filePath).ToLowerInvariant()
+
+        ' Liste gängiger Text-/Code-Endungen (erweiterbar)
+        Dim textLike As System.String() = {
+        ".txt", ".log", ".csv", ".tsv", ".md",
+        ".json", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".toml",
+        ".sql",
+        ".cs", ".vb", ".vbs", ".js", ".ts", ".jsx", ".tsx",
+        ".py", ".rb", ".php", ".java", ".kt", ".kts",
+        ".c", ".h", ".hpp", ".hh", ".cpp", ".cc",
+        ".ps1", ".psm1", ".bat", ".cmd", ".sh", ".zsh",
+        ".rtf" ' Hinweis: RTF könnte man auch via Word-Interop extrahieren – hier als Text belassen
+    }
+
+        If Not textLike.Contains(ext) Then
+            Return False
+        End If
+
+        Try
+            ' RTF optional als Office behandeln (falls du lieber echtes Plaintext-RTF willst, nimm Word-Interop)
+            If ext = ".rtf" Then
+                Try
+                    Dim tmp As System.String = ExtractWordText(filePath) ' nutzt Word-Interop, wenn vorhanden
+                    If Not System.String.IsNullOrWhiteSpace(tmp) Then
+                        extracted = tmp
+                        label = "Word-readable (RTF): " & System.IO.Path.GetFileName(filePath)
+                        If extracted.Length > 1_500_000 Then
+                            extracted = extracted.Substring(0, 1_500_000) & System.Environment.NewLine & "[…truncated…]"
+                        End If
+                        Return True
+                    End If
+                Catch
+                    ' Fallback: als Text lesen
+                End Try
+            End If
+
+            Dim content As System.String = ReadAllTextSmart(filePath)
+            If System.String.IsNullOrWhiteSpace(content) Then Return False
+
+            ' Für CSV/TSV eine kleine Kopfzeile hinzufügen
+            If ext = ".csv" OrElse ext = ".tsv" Then
+                Dim sep As System.String = If(ext = ".csv", ",", vbTab)
+                Dim header As System.String = "=== CSV/TSV Detected (" & ext.Trim("."c).ToUpperInvariant() & ", sep=""" & If(ext = ".csv", ",", "\t") & """) ==="
+                extracted = header & System.Environment.NewLine & content
+                label = "Spreadsheet text: " & System.IO.Path.GetFileName(filePath)
+            Else
+                extracted = content
+                label = "Text/code file: " & System.IO.Path.GetFileName(filePath)
+            End If
+
+            If extracted.Length > 1_500_000 Then
+                extracted = extracted.Substring(0, 1_500_000) & System.Environment.NewLine & "[…truncated…]"
+            End If
+
+            Return True
+        Catch ex As System.Exception
+            System.Diagnostics.Debug.WriteLine("Text-like extract failed: " & ex.Message)
+            extracted = Nothing
+            label = Nothing
+            Return False
+        End Try
+    End Function
+
+    Private Function ReadAllTextSmart(ByVal path As System.String) As System.String
+        ' UTF-8 (mit BOM-Erkennung), Fallback: Windows-1252 → UTF-8
+        Try
+            Using sr As New System.IO.StreamReader(path, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks:=True)
+                Dim s As System.String = sr.ReadToEnd()
+                If Not System.String.IsNullOrEmpty(s) Then Return s
+            End Using
+        Catch
+        End Try
+        Try
+            Dim enc As System.Text.Encoding = System.Text.Encoding.GetEncoding(1252) ' Westeuropa Win-1252
+            Return System.IO.File.ReadAllText(path, enc)
+        Catch
+            ' letzter Fallback
+            Try
+                Return System.IO.File.ReadAllText(path)
+            Catch
+                Return Nothing
+            End Try
+        End Try
     End Function
 
 
