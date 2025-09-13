@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 9.9.2025
+' 13.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -227,6 +227,278 @@ Public Module WordSearchHelper
 
 
     Public Function FindLongTextAnchoredFast(
+    ByRef sel As Microsoft.Office.Interop.Word.Selection,
+    ByVal findText As System.String,
+    Optional ByVal skipDeleted As System.Boolean = True,
+    Optional ByVal nWords As System.Int32 = 4,
+    Optional ByVal cancel As System.Threading.CancellationToken = Nothing,
+    Optional ByVal timeoutSeconds As System.Int32 = 10
+) As System.Boolean
+
+        System.Diagnostics.Debug.WriteLine("Skipdeleted=" & skipDeleted)
+
+        ' Word-Application-Referenz aus Selection ableiten
+        Dim wordApp As Microsoft.Office.Interop.Word.Application = sel.Application
+
+        ' Am Anfang: Falls gewünscht, Markups ausblenden
+        If skipDeleted Then
+            With wordApp.ActiveWindow.View
+                .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                .ShowRevisionsAndComments = False
+            End With
+        End If
+
+        Try
+            Dim _dbgLastSlice As System.String = ""
+            Dim _dbgLastIdx As System.Int32 = -1
+            Dim _dbgNeedle As System.String = ""
+
+            Dim t0 As System.DateTime = System.DateTime.UtcNow
+
+            ' ==== WICHTIG: Nur Haupttext (MainTextStory) durchsuchen ====
+            Dim doc As Microsoft.Office.Interop.Word.Document = sel.Document
+            Dim mainStory As Microsoft.Office.Interop.Word.Range =
+            doc.StoryRanges(Microsoft.Office.Interop.Word.WdStoryType.wdMainTextStory).Duplicate
+
+            ' area NUR aus dem Haupttext bestimmen (Selektion ggf. einklemmen)
+            Dim area As Microsoft.Office.Interop.Word.Range
+            If sel.Range.Start = sel.Range.End Then
+                ' Collapsed selection → ganze Hauptstory
+                area = mainStory.Duplicate
+            Else
+                Dim s As System.Int32 = System.Math.Max(sel.Range.Start, mainStory.Start)
+                Dim e As System.Int32 = System.Math.Min(sel.Range.End, mainStory.End)
+                If e < s Then e = s ' gültigen (ggf. kollabierten) Bereich sicherstellen
+                area = doc.Range(Start:=s, End:=e)
+            End If
+            ' ============================================================
+
+            '──────── 0) REINE Ctrl-F-Suche (Literal, kein Format) ────────────
+            If findText.Length <= 255 Then
+                Dim rngPlain As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngPlain.Find
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = findText
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWholeWord = False
+                    .MatchWildcards = False : .Format = False
+                    .IgnoreSpace = False          ' exakt wie Ctrl-F
+                End With
+                Dim hitPlain As System.Boolean
+                Try : hitPlain = rngPlain.Find.Execute()
+                Catch : hitPlain = False         ' COM-Fehler (z. B. >255) → weiter
+                End Try
+                If hitPlain Then
+                    sel.SetRange(rngPlain.Start, rngPlain.End)
+                    Return True
+                End If
+            End If
+
+            '──────── 1) QUICK-Literal  (masked, IgnoreSpace=True, ≤255) ──────
+            Dim litPat As System.String = EscapeForWordWildcard(findText)
+            If litPat.Length <= 255 Then
+                Dim rngLit As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngLit.Find
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = litPat
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWildcards = True
+                    .Format = False : .IgnoreSpace = True
+                End With
+                If rngLit.Find.Execute() Then
+                    sel.SetRange(rngLit.Start, rngLit.End) : Return True
+                End If
+            End If
+
+            '──────── 2) Start/End-Vorbereitung  ──────────────────────────────
+            Dim raw() As System.String = WordSearchHelper.RawWords(findText)
+            Dim canonNeedle As System.String = Canonicalise(findText, True)
+            If canonNeedle = "" Then Return False
+
+            '---- NEU: Kompletter Wildcard-Suchlauf, falls < 255 ----
+            Dim fullWildcardPattern As System.String = BuildWildcardProbe(raw)
+            If fullWildcardPattern.Length <= 255 Then
+                Dim rngFull As Microsoft.Office.Interop.Word.Range = area.Duplicate
+                With rngFull.Find
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = fullWildcardPattern
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWildcards = True
+                    .Format = False : .IgnoreSpace = True
+                End With
+                If rngFull.Find.Execute() Then
+                    sel.SetRange(rngFull.Start, rngFull.End)
+                    Return True
+                End If
+            End If
+
+            ' Fallback auf Anker-Logik, falls kompletter Suchlauf nicht möglich war
+            If raw.Length < 2 Then Return False ' Anker-Logik braucht min. 2 Wörter
+
+            ' nWords so wählen, dass Start- und End-Anker nicht überlappen
+            nWords = System.Math.Min(nWords, raw.Length \ 2)
+            If nWords < 1 Then nWords = 1
+
+            ' Sicherstellen, dass der Start-Anker nicht zu lang ist
+            Do While nWords > 1 AndAlso BuildWildcardProbe(raw.Take(nWords).ToArray()).Length > 255
+                nWords -= 1
+            Loop
+
+            Dim startPat As System.String = BuildWildcardProbe(raw.Take(nWords).ToArray())
+            Dim endWords() As System.String = raw.Skip(raw.Length - nWords).ToArray()
+            Dim endPat As System.String = BuildWildcardProbe(endWords)
+
+            Dim occur As System.Int32 = CountOccurrences(findText, System.String.Join(" "c, endWords))
+            If startPat = endPat Then occur = System.Math.Max(2, occur)
+
+            deletionsCache = Nothing
+
+            '──────── 3) Start-Wildcard-Find (formatneutral) ──────────────────
+            Using sRng As New RangeProxy(area.Duplicate)
+                Dim fS As Microsoft.Office.Interop.Word.Find = sRng.Range.Find
+                With fS
+                    .ClearFormatting() : .Replacement.ClearFormatting()
+                    .Font.Reset() : .ParagraphFormat.Reset()
+                    .Text = startPat
+                    .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                    .MatchCase = False : .MatchWildcards = True
+                    .Format = False : .IgnoreSpace = True
+                End With
+
+                Dim okS As System.Boolean : Try : okS = fS.Execute() : Catch : okS = False : End Try
+                While okS
+                    If (System.DateTime.UtcNow - t0).TotalSeconds > timeoutSeconds Then
+                        Throw New System.Exception("Timeout while searching.")
+                    End If
+                    cancel.ThrowIfCancellationRequested()
+
+                    Dim posStart As System.Int32 = sRng.Range.Start
+                    Dim searchFrom As System.Int32 = sRng.Range.End
+
+                    '──────── End-Wildcard-Find ───────────────────────────────
+                    ' eRng bleibt durch area.End im Haupttext begrenzt
+                    Dim eRng As Microsoft.Office.Interop.Word.Range = doc.Range(searchFrom, area.End)
+                    Dim fE As Microsoft.Office.Interop.Word.Find = eRng.Find
+                    With fE
+                        .ClearFormatting() : .Replacement.ClearFormatting()
+                        .Font.Reset() : .ParagraphFormat.Reset()
+                        .Text = endPat
+                        .Forward = True : .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+                        .MatchCase = False : .MatchWildcards = True
+                        .Format = False : .IgnoreSpace = True
+                    End With
+                    Dim okE As System.Boolean : Try : okE = fE.Execute() : Catch : okE = False : End Try
+                    For i As System.Int32 = 2 To occur
+                        If Not okE Then Exit For
+                        eRng.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        Try : okE = fE.Execute() : Catch : okE = False : End Try
+                    Next
+
+                    If okE Then
+                        Dim sliceTxt As System.String, back As System.Collections.Generic.IReadOnlyList(Of System.Int32)
+                        VisibleSlice(doc, posStart, eRng.End - posStart, skipDeleted, sliceTxt, back)
+
+                        System.Diagnostics.Debug.WriteLine(sliceTxt & System.Environment.NewLine)
+
+                        Dim canSlice As System.String
+                        Dim backCanon As System.Collections.Generic.List(Of System.Int32)
+                        CanonicaliseWithBackMap(sliceTxt, True, back, canSlice, backCanon)
+
+                        Dim idx As System.Int32 = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+
+                        _dbgLastSlice = canSlice
+                        _dbgLastIdx = idx
+                        _dbgNeedle = canonNeedle
+
+                        If idx >= 0 Then
+                            Dim endIdx As System.Int32 = System.Math.Min(idx + canonNeedle.Length - 1, backCanon.Count - 1)
+                            sel.SetRange(backCanon(idx), backCanon(endIdx) + 1)
+                            Return True
+                        End If
+                    End If
+
+                    sRng.CollapseEndPlusOne()
+                    If sRng.Range.Start >= area.End Then Exit While
+                    Try : okS = fS.Execute() : Catch : okS = False : End Try
+                End While
+            End Using
+
+            Dim elapsedSec As System.Double = (System.DateTime.UtcNow - t0).TotalSeconds
+
+            System.Diagnostics.Debug.WriteLine("===== FindLongTextAnchoredFast: FINAL DEBUG =====")
+            System.Diagnostics.Debug.WriteLine("  findText        = '" & findText & "'")
+            System.Diagnostics.Debug.WriteLine("  lastIdx         = " & _dbgLastIdx)
+            System.Diagnostics.Debug.WriteLine("  needle.Length   = " & _dbgNeedle.Length)
+            System.Diagnostics.Debug.WriteLine("  slice.Length    = " & _dbgLastSlice.Length)
+            System.Diagnostics.Debug.WriteLine("  contains?       = " & _dbgLastSlice.Contains(_dbgNeedle).ToString())
+            Dim previewLen As System.Int32 = 200
+            Dim startEx As System.String = If(_dbgLastSlice.Length <= previewLen,
+                                          _dbgLastSlice,
+                                          _dbgLastSlice.Substring(0, previewLen) & "…")
+            Dim endEx As System.String = If(_dbgLastSlice.Length <= previewLen,
+                                        "",
+                                        "…" & _dbgLastSlice.Substring(_dbgLastSlice.Length - previewLen))
+            System.Diagnostics.Debug.WriteLine("  slice excerpt start: '" & startEx & "'")
+            If endEx <> "" Then
+                System.Diagnostics.Debug.WriteLine("  slice excerpt end:   '" & endEx & "'")
+            End If
+            System.Diagnostics.Debug.WriteLine("===============================================")
+
+            '──────── X) Fallback: kanonische Volltextsuche in Fenstern (ß/ss-tolerant) ───────
+            Dim win As System.Int32 = 5000
+            Dim overlap As System.Int32 = 200
+            Dim p As System.Int32 = area.Start
+            While p < area.End
+                If (System.DateTime.UtcNow - t0).TotalSeconds > timeoutSeconds Then
+                    Throw New System.Exception("Timeout while searching.")
+                End If
+                cancel.ThrowIfCancellationRequested()
+
+                Dim len As System.Int32 = System.Math.Min(win, area.End - p)
+                Dim sliceTxt As System.String
+                Dim back As System.Collections.Generic.IReadOnlyList(Of System.Int32)
+                VisibleSlice(doc, p, len, skipDeleted, sliceTxt, back)
+
+                Dim canSlice As System.String
+                Dim backCanon As System.Collections.Generic.List(Of System.Int32)
+                CanonicaliseWithBackMap(sliceTxt, True, back, canSlice, backCanon)
+
+                Dim idx As System.Int32 = canSlice.IndexOf(canonNeedle, System.StringComparison.Ordinal)
+                If idx >= 0 Then
+                    Dim endIdx As System.Int32 = System.Math.Min(idx + canonNeedle.Length - 1, backCanon.Count - 1)
+                    sel.SetRange(backCanon(idx), backCanon(endIdx) + 1)
+                    Return True
+                End If
+
+                ' überlappender Schritt, um Randtreffer nicht zu verpassen
+                p += System.Math.Max(1, win - overlap)
+            End While
+
+            Return False
+
+        Finally
+            ' Am Ende: Falls gewünscht, Markups wieder einblenden
+            If skipDeleted Then
+                With wordApp.ActiveWindow.View
+                    .RevisionsView = Microsoft.Office.Interop.Word.WdRevisionsView.wdRevisionsViewFinal
+                    .ShowRevisionsAndComments = True
+                End With
+            End If
+
+            ' COM-Objekt sauber freigeben
+            If wordApp IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp)
+                wordApp = Nothing
+            End If
+        End Try
+    End Function
+
+
+
+    Public Function OldFindLongTextAnchoredFast(
     ByRef sel As Microsoft.Office.Interop.Word.Selection,
     ByVal findText As String,
     Optional ByVal skipDeleted As Boolean = True,
@@ -1009,7 +1281,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.090925 Gen2 Beta Test"
+    Public Const Version As String = "V.130925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -7609,86 +7881,6 @@ Public Class ThisAddIn
 
     End Function
 
-    Function xxx(ByRef selection As Word.Selection, ByVal findText As String, Optional INI_Clean As Boolean = False) As Boolean
-        ' This function searches for a long text in chunks of a specified sizeed as needed) 
-
-        Dim chunkSize As Integer = 1000 ' Define the chunk size for breaking the text into smaller parts
-        ' Store original selection to restore if needed
-        Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
-        Dim originalStart As Integer = selection.Start
-        Dim originalEnd As Integer = selection.End
-
-        ' Break the long text into chunks of up to chunkSize characters
-        Dim chunks As New List(Of String)
-        Dim startIndex As Integer = 0
-        While startIndex < findText.Length
-            Dim length As Integer = system.math.min(chunkSize, findText.Length - startIndex)
-            chunks.Add(findText.Substring(startIndex, length))
-            startIndex += length
-        End While
-
-        ' We'll need to track the final Start/End of the matched text
-        Dim overallMatchStart As Integer = -1
-        Dim overallMatchEnd As Integer = -1
-
-        ' Move the selection to the beginning of the document (or keep at original if you prefer)
-
-        For i As Integer = 0 To chunks.Count - 1
-            Dim currentChunk As String = chunks(i)
-
-            Dim chunk As String = NormalizeTextForSearch(chunks(i), INI_Clean)
-
-            With selection.Find
-                .Forward = True
-                .Wrap = Word.WdFindWrap.wdFindStop
-                .Format = False
-                .Text = chunk ' Set the text to search for
-                If INI_Clean Then
-                    .MatchWildcards = True
-                    ' replace every literal space with [ ]@ (one-or-more spaces)
-                    ' .Text = chunk.Replace(" ", "[ ]@")
-                Else
-                    .MatchWildcards = False
-                    '.Text = chunk
-                End If
-            End With
-
-            ' If this is the first chunk, search from the current selection
-            ' If it's not found, restore and return False
-            If Not selection.Find.Execute() Then
-                ' Not found
-                selection.SetRange(originalStart, originalEnd) ' restore original selection
-                Return False
-            End If
-
-            ' If we found the chunk:
-            If i = 0 Then
-                ' This is the first chunk found; record the overallMatchStart
-                overallMatchStart = selection.Start
-            Else
-                ' For subsequent chunks, ensure continuity:
-                ' The new chunk's 'Start' should be exactly the previous chunk's 'End'
-                ' If there's a gap, it means it's not contiguous
-                If selection.Start <> overallMatchEnd Then
-                    ' Not contiguous; fail
-                    selection.SetRange(originalStart, originalEnd)
-                    Return False
-                End If
-            End If
-
-            ' Update the overallMatchEnd to this chunk's end
-            overallMatchEnd = selection.End
-
-            ' Move the selection just after this chunk so that next chunk search begins from that point
-            ' (to enforce sequential matching).
-            selection.SetRange(overallMatchEnd, overallMatchEnd)
-        Next
-
-        ' If we reach here, all chunks were found contiguously
-        ' We now have overallMatchStart and overallMatchEnd
-        selection.SetRange(overallMatchStart, overallMatchEnd)
-        Return True
-    End Function
 
     ''' <summary>
     ''' Erzeugt ein Such­muster, das variable Leerzeichen, Absatz-
@@ -20842,12 +21034,17 @@ Public Class ThisAddIn
                                          ByVal PutinBubbles As System.Boolean,
                                          ByVal UseSecondAPI As System.Boolean) As System.Threading.Tasks.Task(Of System.String)
         Try
+
+            If ruleSet.ClausePrompt.Trim().ToUpper = "X" Then
+                ShowCustomMessageBox("The selected rule set does not work with the option 'Check as only one clause' - aborting.")
+                Return System.String.Empty
+            End If
+
             ' System-Prompt: pro-RuleSet effektiver Prompt + optional Bubbles + gesamtes RuleSet (verbatim)
             Dim systemPrompt As System.String =
             ruleSet.ClausePrompt & System.Environment.NewLine &
             (If(PutinBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
             "<RULESET>" & ruleSet.RawJson & "</RULESET>"
-
             Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
             If Not System.String.IsNullOrWhiteSpace(insertDocs) Then
                 userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
@@ -20855,10 +21052,16 @@ Public Class ThisAddIn
 
             Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
 
-            If PutinBubbles Then
-                SetBubbles(answer, Selection, False)
-            Else
-                ShowDocCheckResult(answer)
+            answer = answer.Trim()
+
+            If Len(answer) > 3 Then
+                If PutinBubbles Then
+
+                    SetBubbles(answer, Selection, False)
+
+                Else
+                    ShowDocCheckResult(answer)
+                End If
             End If
 
             Return answer
@@ -20921,11 +21124,15 @@ Public Class ThisAddIn
 
                 Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
 
-                If PutInBubbles Then
-                    SetBubbles(answer, Selection, True)
-                Else
-                    'OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
-                    OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
+                answer = answer.Trim()
+
+                If Len(answer) > 3 Then
+                    If PutInBubbles Then
+                        SetBubbles(answer, Selection, True)
+                    Else
+                        'OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
+                        OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
+                    End If
                 End If
 
                 idx += 1

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 11.9.2025
+' 13.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -78,6 +78,8 @@ Public Class ThisAddIn
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
 
+        StartPowerWatch()
+
         ' Necessary for Update Handler to work correctly
 
         ' 1) Force the creation of the Control's handle on the Office UI thread
@@ -124,6 +126,7 @@ Public Class ThisAddIn
             Dim result = Globals.Ribbons.Ribbon1.UpdateRibbon()
             result = Globals.Ribbons.Ribbon2.UpdateRibbon()
             mainThreadControl.CreateControl()
+            StartListenerWatchdog()
             StartupHttpListener()
         Catch ex As System.Exception
             ' Handling errors gracefully
@@ -131,8 +134,29 @@ Public Class ThisAddIn
     End Sub
 
     Private Sub ThisAddIn_Shutdown() Handles Me.Shutdown
-        ShutdownHttpListener()
+        ' 1) deterministically stop the HTTP listener (await synchronously)
+        Try
+            Dim t As System.Threading.Tasks.Task = ShutdownHttpListener()
+            t.GetAwaiter().GetResult() ' safe: our shutdown continuations don’t capture the UI context
+        Catch ex As System.Exception
+            System.Diagnostics.Debug.WriteLine("ShutdownHttpListener failed: " & ex.Message)
+        End Try
+
+        ' 2) stop watchdog (if you added it)
+        Try
+            StopListenerWatchdog()
+        Catch
+        End Try
+
+        ' 3) tear down power notifications window
+        Try
+            StopPowerWatch()
+        Catch
+        End Try
     End Sub
+
+
+
 
     ' Hardcoded config values
 
@@ -140,7 +164,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.110925 Gen2 Beta Test"
+    Public Const Version As String = "V.130925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -4251,7 +4275,6 @@ Public Class ThisAddIn
     ' WebExtension integration
 
     Private httpListener As HttpListener
-    Private listenerThread As Thread
     Private isShuttingDown As Boolean = False
     Private listenerTask As System.Threading.Tasks.Task
 
@@ -4261,51 +4284,240 @@ Public Class ThisAddIn
     Private llmThread As System.Threading.Thread
     Private cts As System.Threading.CancellationTokenSource
 
-    Private powerWatchStarted As System.Boolean = False
     Private wasListenerRunningBeforeSleep As System.Boolean = False
     Private wasLlmThreadAliveBeforeSleep As System.Boolean = False
     Private restartingAfterResume As System.Int32 = 0  ' 0/1 via Interlocked
 
+    ' Generation protection (pre/post sleep)
+    Private listenerGeneration As System.Int64 = 0
 
-    Private Sub StartupHttpListener()
-        cts = New System.Threading.CancellationTokenSource()
-        listenerTask = StartHttpListener(cts.Token)   ' deine StartHttpListener-Schleife nimmt jetzt ein Token
+    ' Progress watchdog
+    Private lastListenerProgressUtc As System.DateTime = System.DateTime.UtcNow
+    Private watchdog As System.Threading.Timer
+
+    ' --- Power notifications via hidden window ---
+    Private powerWindow As PowerNotificationWindow
+
+
+    '-------------------------------------------------
+    ' Private hidden window to receive WM_POWERBROADCAST
+    '-------------------------------------------------
+    Private NotInheritable Class PowerNotificationWindow
+        Inherits System.Windows.Forms.NativeWindow
+        Implements System.IDisposable
+
+        Private Const WM_POWERBROADCAST As System.Int32 = &H218
+        Private Const PBT_APMSUSPEND As System.Int32 = &H4
+        Private Const PBT_APMRESUMEAUTOMATIC As System.Int32 = &H12
+        Private Const PBT_APMRESUMESUSPEND As System.Int32 = &H7
+
+        Private ReadOnly owner As ThisAddIn
+
+        Public Sub New(ByVal owner As ThisAddIn)
+            Me.owner = owner
+            Dim cp As New System.Windows.Forms.CreateParams()
+            cp.Caption = "InkyPowerWnd"
+            cp.X = 0 : cp.Y = 0 : cp.Height = 0 : cp.Width = 0
+            cp.Style = 0 : cp.ExStyle = 0
+            cp.Parent = System.IntPtr.Zero
+            Me.CreateHandle(cp)
+        End Sub
+
+        Protected Overrides Sub WndProc(ByRef m As System.Windows.Forms.Message)
+            If m.Msg = WM_POWERBROADCAST Then
+                Select Case m.WParam.ToInt32()
+                    Case PBT_APMSUSPEND
+                        owner.OnSystemSuspend()
+                    Case PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND
+                        owner.OnSystemResume()
+                End Select
+            End If
+            MyBase.WndProc(m)
+        End Sub
+
+        Public Sub Dispose() Implements System.IDisposable.Dispose
+            If Me.Handle <> System.IntPtr.Zero Then
+                Me.DestroyHandle()
+            End If
+        End Sub
+    End Class
+
+
+
+    Friend Sub OnSystemSuspend()
+        Try
+
+            System.Diagnostics.Debug.WriteLine("Power SUSPEND at " &
+    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
+
+            ' Remember state safely
+            Try
+                wasListenerRunningBeforeSleep =
+                (httpListener IsNot Nothing AndAlso httpListener.IsListening)
+            Catch
+                wasListenerRunningBeforeSleep = False
+            End Try
+            Try
+                wasLlmThreadAliveBeforeSleep =
+                (llmThread IsNot Nothing AndAlso llmThread.IsAlive)
+            Catch
+                wasLlmThreadAliveBeforeSleep = False
+            End Try
+
+            ' Deterministic, awaitable teardown (safe to block here)
+            Try
+                Dim t As System.Threading.Tasks.Task = ShutdownHttpListener()
+                t.GetAwaiter().GetResult()
+            Catch
+            End Try
+
+            ' Stop the auxiliary STA UI thread if it was running
+            Try
+                If wasLlmThreadAliveBeforeSleep Then
+                    StopLlmUiThread()
+                End If
+            Catch
+            End Try
+        Catch
+        End Try
     End Sub
 
-    Private Async Sub ShutdownHttpListener()
+    Friend Sub OnSystemResume()
+
+        If System.Threading.Interlocked.Exchange(restartingAfterResume, 1) = 1 Then Return
+
+        System.Diagnostics.Debug.WriteLine("Power RESUME at " &
+    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
+
+
+        System.Threading.Tasks.Task.Run(
+        Async Sub()
+            Try
+                Await System.Threading.Tasks.Task.Delay(600).ConfigureAwait(False)
+
+                ' make sure the next loop can run
+                isShuttingDown = False
+
+                Try
+                    If httpListener IsNot Nothing Then
+                        Try
+                            If httpListener.IsListening Then httpListener.Stop()
+                        Catch
+                        End Try
+                        Try : httpListener.Abort() : Catch : End Try
+                        Try : httpListener.Close() : Catch : End Try
+                    End If
+                Catch
+                Finally
+                    httpListener = Nothing
+                End Try
+
+                If wasListenerRunningBeforeSleep Then
+                    Try : StartupHttpListener() : Catch : End Try
+                End If
+
+                If wasLlmThreadAliveBeforeSleep Then
+                    Try : EnsureLlmUiThread() : Catch : End Try
+                End If
+            Finally
+                System.Threading.Interlocked.Exchange(restartingAfterResume, 0)
+            End Try
+        End Sub)
+
+    End Sub
+
+
+
+
+
+    Private Sub StartupHttpListener()
+        ' Make sure the loop can run again
+        isShuttingDown = False
+
+        Dim gen As System.Int64 = System.Threading.Interlocked.Increment(listenerGeneration)
+        cts = New System.Threading.CancellationTokenSource()
+
+        ' ← Add this log (generation + UTC timestamp)
+        System.Diagnostics.Debug.WriteLine(
+        "HttpListener START gen=" &
+        gen.ToString(System.Globalization.CultureInfo.InvariantCulture) &
+        " at " &
+        System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
+
+        lastListenerProgressUtc = System.DateTime.UtcNow
+        listenerTask = StartHttpListener(cts.Token, gen)
+    End Sub
+
+
+
+
+    ' NEW: make it awaitable (no Async Sub)
+    Private Async Function ShutdownHttpListener() As System.Threading.Tasks.Task
         isShuttingDown = True
 
+        ' Cancel current loop
         Try
             If cts IsNot Nothing Then cts.Cancel()
         Catch
         End Try
 
+        ' Force-break any pending GetContextAsync and clean up thoroughly
         Try
             If httpListener IsNot Nothing Then
-                If httpListener.IsListening Then httpListener.Stop()
-                httpListener.Close()
+                Try
+                    If httpListener.IsListening Then httpListener.Stop()
+                Catch
+                End Try
+                Try
+                    httpListener.Abort() ' harsher than Close; reliably breaks GetContextAsync
+                Catch
+                End Try
+                Try
+                    If httpListener.Prefixes IsNot Nothing Then httpListener.Prefixes.Clear()
+                Catch
+                End Try
+                Try
+                    httpListener.Close()
+                Catch
+                End Try
             End If
         Catch
         Finally
             httpListener = Nothing
         End Try
 
+        ' Await the running listener task to completion
         Try
             If listenerTask IsNot Nothing Then
                 Await listenerTask.ConfigureAwait(False)
             End If
         Catch
+        Finally
+            listenerTask = Nothing
         End Try
 
-        ' GANZ wichtig: den zusätzlichen UI-STA-Thread jetzt deterministisch stoppen
+        ' Dispose CTS after we've awaited its dependents
+        Try
+            If cts IsNot Nothing Then cts.Dispose()
+        Catch
+        Finally
+            cts = Nothing
+        End Try
+
+        System.Diagnostics.Debug.WriteLine(
+    "HttpListener STOP at " &
+    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
+
+
+        ' Deterministically stop the UI STA helper
         StopLlmUiThread()
-    End Sub
+    End Function
 
 
-
-
+    ' add: gen
     Private Async Function StartHttpListener(
-    ByVal token As System.Threading.CancellationToken) _
+    ByVal token As System.Threading.CancellationToken,
+    ByVal gen As System.Int64) _
     As System.Threading.Tasks.Task
 
         Const prefix As System.String = "http://127.0.0.1:12333/"
@@ -4313,6 +4525,9 @@ Public Class ThisAddIn
         Dim lastMetrics As System.DateTime = System.DateTime.UtcNow
 
         While (Not isShuttingDown) AndAlso (Not token.IsCancellationRequested)
+            ' Bail out if a newer generation has started
+            If gen <> listenerGeneration Then Return
+
             Dim needShortDelay As System.Boolean = False
 
             Try
@@ -4326,7 +4541,9 @@ Public Class ThisAddIn
                         .DrainEntityBody = System.TimeSpan.FromSeconds(5)
                         .MinSendBytesPerSecond = CType(256UL, System.UInt64)
                     End With
-                    httpListener.Prefixes.Add(prefix)
+                    If Not httpListener.Prefixes.Contains(prefix) Then
+                        httpListener.Prefixes.Add(prefix)
+                    End If
                     httpListener.Start()
                     System.Diagnostics.Debug.WriteLine("HttpListener started.")
                 ElseIf Not httpListener.IsListening Then
@@ -4338,31 +4555,42 @@ Public Class ThisAddIn
                 Dim ctx As System.Net.HttpListenerContext =
                 Await httpListener.GetContextAsync().ConfigureAwait(False)
 
+                ' Progress heartbeat for watchdog
+                lastListenerProgressUtc = System.DateTime.UtcNow
+
+                Dim ctxLocal As System.Net.HttpListenerContext = ctx
                 System.Threading.Tasks.Task.Run(
                 Async Function()
+                    Dim resLocal As System.Net.HttpListenerResponse = Nothing
                     Try
-                        Await HandleHttpRequest(ctx).ConfigureAwait(False)
+                        Await HandleHttpRequest(ctxLocal).ConfigureAwait(False)
                     Catch
-                        System.Diagnostics.Debug.WriteLine("HandleHttpRequest error")
                         Try
-                            Dim res As System.Net.HttpListenerResponse = ctx.Response
-                            res.StatusCode = 500
-                            res.KeepAlive = False
-                            res.Headers("Connection") = "close"
-                            res.SendChunked = False
+                            resLocal = ctxLocal.Response
+                            resLocal.StatusCode = 500
+                            resLocal.KeepAlive = False
+                            resLocal.Headers("Connection") = "close"
+                            resLocal.SendChunked = False
                             Dim bufErr() As System.Byte = System.Text.Encoding.UTF8.GetBytes("Internal server error.")
-                            res.ContentType = "text/plain; charset=utf-8"
-                            res.ContentLength64 = bufErr.LongLength
-                            Using os As System.IO.Stream = res.OutputStream
+                            resLocal.ContentType = "text/plain; charset=utf-8"
+                            resLocal.ContentLength64 = bufErr.LongLength
+                            Using os As System.IO.Stream = resLocal.OutputStream
                                 os.Write(bufErr, 0, bufErr.Length)
                             End Using
-                            res.Close()
                         Catch
+                        Finally
+                            Try
+                                If resLocal IsNot Nothing Then resLocal.Close()
+                            Catch
+                            End Try
                         End Try
+                    Finally
+                        ' Mark progress at the end of a handled request too
+                        lastListenerProgressUtc = System.DateTime.UtcNow
                     End Try
                 End Function)
 
-                ' --- Metriken (optional) ---
+                ' --- metrics (unchanged) ---
                 Dim now As System.DateTime = System.DateTime.UtcNow
                 If (now - lastMetrics).TotalSeconds >= 10.0 Then
                     Dim gdi As System.UInt32 = GetGdiCount()
@@ -4399,10 +4627,14 @@ Public Class ThisAddIn
             If consecutiveFailures >= 10 AndAlso (Not isShuttingDown) AndAlso (Not token.IsCancellationRequested) Then
                 System.Diagnostics.Debug.WriteLine("Restarting HttpListener after 10 failures.")
                 Try
-                    If httpListener IsNot Nothing Then httpListener.Close()
+                    If httpListener IsNot Nothing Then
+                        Try : httpListener.Abort() : Catch : End Try
+                        Try : httpListener.Close() : Catch : End Try
+                    End If
                 Catch
+                Finally
+                    httpListener = Nothing
                 End Try
-                httpListener = Nothing
                 consecutiveFailures = 0
                 Try
                     Await System.Threading.Tasks.Task.Delay(5000, token).ConfigureAwait(False)
@@ -4413,18 +4645,20 @@ Public Class ThisAddIn
     End Function
 
 
-
     Private Sub StartPowerWatch()
-        If powerWatchStarted Then Return
-        AddHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
-        powerWatchStarted = True
+        If powerWindow Is Nothing Then
+            powerWindow = New PowerNotificationWindow(Me)
+        End If
     End Sub
 
     Private Sub StopPowerWatch()
-        If Not powerWatchStarted Then Return
-        RemoveHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
-        powerWatchStarted = False
+        If powerWindow IsNot Nothing Then
+            powerWindow.Dispose()
+            powerWindow = Nothing
+        End If
     End Sub
+
+
 
     Private Sub OnPowerModeChanged(ByVal sender As System.Object,
                                ByVal e As Microsoft.Win32.PowerModeChangedEventArgs)
@@ -4433,7 +4667,7 @@ Public Class ThisAddIn
         Select Case e.Mode
 
             Case Microsoft.Win32.PowerModes.Suspend
-                ' Zustand merken
+                ' Remember state
                 Try
                     wasListenerRunningBeforeSleep =
                     (httpListener IsNot Nothing AndAlso httpListener.IsListening)
@@ -4447,30 +4681,29 @@ Public Class ThisAddIn
                     wasLlmThreadAliveBeforeSleep = False
                 End Try
 
-                ' Sauber herunterfahren
-                Try : ShutdownHttpListener() : Catch : End Try
-                Try
-                    If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then
-                        StopLlmUiThread()
-                    End If
-                Catch
-                End Try
+                ' Clean shutdown (awaitable via background Task)
+                System.Threading.Tasks.Task.Run(
+                Async Function()
+                    Try : Await ShutdownHttpListener().ConfigureAwait(False) : Catch : End Try
+                End Function)
 
             Case Microsoft.Win32.PowerModes.Resume
                 If System.Threading.Interlocked.Exchange(restartingAfterResume, 1) = 1 Then Return
 
                 System.Threading.Tasks.Task.Run(
-                Sub()
+                Async Sub()
                     Try
-                        System.Threading.Thread.Sleep(400) ' kurzer Puffer
+                        ' short cushion; don't use Thread.Sleep on resume paths
+                        Await System.Threading.Tasks.Task.Delay(600).ConfigureAwait(False)
 
-                        ' Listener hart freigeben
+                        ' Aggressively release any stale listener
                         Try
                             If httpListener IsNot Nothing Then
                                 Try
                                     If httpListener.IsListening Then httpListener.Stop()
                                 Catch
                                 End Try
+                                Try : httpListener.Abort() : Catch : End Try
                                 Try : httpListener.Close() : Catch : End Try
                             End If
                         Catch
@@ -4478,12 +4711,10 @@ Public Class ThisAddIn
                             httpListener = Nothing
                         End Try
 
-                        ' Nur neu starten, wenn zuvor aktiv
                         If wasListenerRunningBeforeSleep Then
                             Try : StartupHttpListener() : Catch : End Try
                         End If
 
-                        ' Persistenten UI-STA nur wieder aufbauen, wenn er vorher lebte
                         If wasLlmThreadAliveBeforeSleep Then
                             Try : EnsureLlmUiThread() : Catch : End Try
                         End If
@@ -4495,6 +4726,50 @@ Public Class ThisAddIn
         End Select
     End Sub
 
+    ' Called by PowerBroadcastWindow on UI thread
+
+
+
+
+    Private Sub StartListenerWatchdog()
+        If watchdog IsNot Nothing Then Return
+
+        watchdog = New System.Threading.Timer(
+        Sub(stateObj As System.Object)
+            Try
+                Dim age As System.Double =
+                    (System.DateTime.UtcNow - lastListenerProgressUtc).TotalSeconds
+
+                If age > 15.0 AndAlso httpListener IsNot Nothing Then
+                    If Not isShuttingDown Then
+                        Try : httpListener.Abort() : Catch : End Try
+                        Try : httpListener.Close() : Catch : End Try
+                        httpListener = Nothing
+
+                        ' Only restart if our CTS is alive
+                        If cts IsNot Nothing AndAlso Not cts.IsCancellationRequested Then
+                            StartupHttpListener()
+                        End If
+                    End If
+                End If
+            Catch
+            End Try
+        End Sub,
+        state:=Nothing,
+        dueTime:=System.TimeSpan.FromSeconds(20),
+        period:=System.TimeSpan.FromSeconds(5))
+    End Sub
+
+    Private Sub StopListenerWatchdog()
+        Try
+            If watchdog IsNot Nothing Then
+                watchdog.Dispose()
+            End If
+        Catch
+        Finally
+            watchdog = Nothing
+        End Try
+    End Sub
 
 
     ' ---------------------------------------------------------------------------
@@ -4757,48 +5032,6 @@ Public Class ThisAddIn
         Return tcs.Task
     End Function
 
-
-
-    ''' <summary>
-    ''' Führt Deinen LLM-Call (mit HTTP + UI-Dialogs) komplett
-    ''' auf einem eigenen STA-Thread mit Message-Loop aus.
-    ''' </summary>
-    Public Function OldRunLlmAsync(
-    sysPrompt As String,
-    userPrompt As String,
-    Optional UseSecondAPI As Boolean = False,
-    Optional ShowTimer As Boolean = True,
-    Optional FileObject As String = ""
-) As Task(Of String)
-
-        ' Stelle sicher, dass unser STA-Thread und Scheduler bereit sind
-        EnsureLlmUiThread()
-
-        ' Wir packen alles in einen LongRunning-Task, der
-        ' auf genau diesem STA-Thread ausgeführt wird:
-        Return System.Threading.Tasks.Task.Factory.StartNew(Of String)(
-        Function() As String
-            ' AsyncContext.Run pumpt WinForms- & COM-Messages
-            ' solange bis Dein LLM-Task wirklich fertig ist.
-            Return AsyncContext.Run(
-                Async Function() As Task(Of String)
-                    ' Hier kommt Dein bisheriger LLM-Aufruf hin:
-                    ' er darf HTTP machen und beliebige WinForms-Dialogs öffnen.
-
-                    Dim LLMResult As String = Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject)
-
-                    If UseSecondAPI And originalConfigLoaded Then
-                        RestoreDefaults(_context, originalConfig)
-                        originalConfigLoaded = False
-                    End If
-
-                    Return LLMResult
-                End Function)
-        End Function,
-        CancellationToken.None,
-        TaskCreationOptions.LongRunning,
-        llmScheduler)
-    End Function
 
 
 
