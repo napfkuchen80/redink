@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 13.9.2025
+' 14.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -77,6 +77,12 @@ Public Class ThisAddIn
         System.Threading.SynchronizationContext.Current
 
     Private Sub ThisAddIn_Startup() Handles Me.Startup
+
+        Try
+            RemoveHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
+        Catch
+        End Try
+
 
         StartPowerWatch()
 
@@ -164,7 +170,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.130925 Gen2 Beta Test"
+    Public Const Version As String = "V.140925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -4299,9 +4305,6 @@ Public Class ThisAddIn
     Private powerWindow As PowerNotificationWindow
 
 
-    '-------------------------------------------------
-    ' Private hidden window to receive WM_POWERBROADCAST
-    '-------------------------------------------------
     Private NotInheritable Class PowerNotificationWindow
         Inherits System.Windows.Forms.NativeWindow
         Implements System.IDisposable
@@ -4319,21 +4322,50 @@ Public Class ThisAddIn
             cp.Caption = "InkyPowerWnd"
             cp.X = 0 : cp.Y = 0 : cp.Height = 0 : cp.Width = 0
             cp.Style = 0 : cp.ExStyle = 0
-            cp.Parent = System.IntPtr.Zero
+            ' WICHTIG: Message-only window
+            cp.Parent = New System.IntPtr(-3) ' HWND_MESSAGE
             Me.CreateHandle(cp)
         End Sub
 
+
+
         Protected Overrides Sub WndProc(ByRef m As System.Windows.Forms.Message)
+            Const WM_POWERBROADCAST As System.Int32 = &H218
+            Const PBT_APMQUERYSUSPEND As System.Int32 = &H0
+            Const PBT_APMSUSPEND As System.Int32 = &H4
+            Const PBT_APMRESUMEAUTOMATIC As System.Int32 = &H12
+            Const PBT_APMRESUMESUSPEND As System.Int32 = &H7
+
             If m.Msg = WM_POWERBROADCAST Then
-                Select Case m.WParam.ToInt32()
+                Dim wp As System.Int32 = m.WParam.ToInt32()
+                Select Case wp
+                    Case PBT_APMQUERYSUSPEND
+                        ' Sofort zustimmen und NICHTS tun.
+                        m.Result = New System.IntPtr(1)
+                        Return
+
                     Case PBT_APMSUSPEND
-                        owner.OnSystemSuspend()
+                        System.Threading.ThreadPool.QueueUserWorkItem(
+                    Sub(stateObj As System.Object)
+                        Try : owner.HandlePowerSuspendAsync() : Catch : End Try
+                    End Sub)
+                        m.Result = New System.IntPtr(1)
+                        Return
+
                     Case PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND
-                        owner.OnSystemResume()
+                        System.Threading.ThreadPool.QueueUserWorkItem(
+                    Sub(stateObj As System.Object)
+                        Try : owner.HandlePowerResumeAsync() : Catch : End Try
+                    End Sub)
+                        m.Result = New System.IntPtr(1)
+                        Return
                 End Select
             End If
+
             MyBase.WndProc(m)
         End Sub
+
+
 
         Public Sub Dispose() Implements System.IDisposable.Dispose
             If Me.Handle <> System.IntPtr.Zero Then
@@ -4343,61 +4375,64 @@ Public Class ThisAddIn
     End Class
 
 
+    ' Ensure only one suspend/resume sequence runs at a time
+    Private suspendResumeGate As New System.Threading.SemaphoreSlim(1, 1)
 
-    Friend Sub OnSystemSuspend()
-        Try
-
-            System.Diagnostics.Debug.WriteLine("Power SUSPEND at " &
-    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
-
-            ' Remember state safely
+    Friend Sub HandlePowerSuspendAsync()
+        System.Threading.Tasks.Task.Run(
+        Async Function() As System.Threading.Tasks.Task
+            If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
             Try
-                wasListenerRunningBeforeSleep =
-                (httpListener IsNot Nothing AndAlso httpListener.IsListening)
-            Catch
-                wasListenerRunningBeforeSleep = False
-            End Try
-            Try
-                wasLlmThreadAliveBeforeSleep =
-                (llmThread IsNot Nothing AndAlso llmThread.IsAlive)
-            Catch
-                wasLlmThreadAliveBeforeSleep = False
-            End Try
+                ' Zustand merken (wie bei dir)
+                Try
+                    wasListenerRunningBeforeSleep =
+                        (httpListener IsNot Nothing AndAlso httpListener.IsListening)
+                Catch
+                    wasListenerRunningBeforeSleep = False
+                End Try
+                Try
+                    wasLlmThreadAliveBeforeSleep =
+                        (llmThread IsNot Nothing AndAlso llmThread.IsAlive)
+                Catch
+                    wasLlmThreadAliveBeforeSleep = False
+                End Try
 
-            ' Deterministic, awaitable teardown (safe to block here)
-            Try
-                Dim t As System.Threading.Tasks.Task = ShutdownHttpListener()
-                t.GetAwaiter().GetResult()
-            Catch
-            End Try
+                ' Listener stoppen – OHNE UI-STA zu stoppen
+                Try
+                    Dim t As System.Threading.Tasks.Task = ShutdownHttpListener(stopUiThread:=False)
+                    Await System.Threading.Tasks.Task.WhenAny(
+                        t,
+                        System.Threading.Tasks.Task.Delay(1000)
+                    ).ConfigureAwait(False)
+                Catch
+                End Try
 
-            ' Stop the auxiliary STA UI thread if it was running
-            Try
-                If wasLlmThreadAliveBeforeSleep Then
-                    StopLlmUiThread()
-                End If
-            Catch
+                ' LLM-STA non-blocking schließen (kein Join im Suspend)
+                Try
+                    If wasLlmThreadAliveBeforeSleep Then
+                        StopLlmUiThread()
+                    End If
+                Catch
+                End Try
+            Finally
+                suspendResumeGate.Release()
             End Try
-        Catch
-        End Try
+        End Function)
     End Sub
 
-    Friend Sub OnSystemResume()
 
-        If System.Threading.Interlocked.Exchange(restartingAfterResume, 1) = 1 Then Return
-
-        System.Diagnostics.Debug.WriteLine("Power RESUME at " &
-    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
-
-
+    Friend Sub HandlePowerResumeAsync()
         System.Threading.Tasks.Task.Run(
-        Async Sub()
+        Async Function() As System.Threading.Tasks.Task
+            If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
             Try
-                Await System.Threading.Tasks.Task.Delay(600).ConfigureAwait(False)
+                ' Small cushion; never Thread.Sleep on resume paths
+                Await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(False)
 
-                ' make sure the next loop can run
+                ' Allow listener loop to run again
                 isShuttingDown = False
 
+                ' Hard-release any stale listener quickly
                 Try
                     If httpListener IsNot Nothing Then
                         Try
@@ -4420,11 +4455,31 @@ Public Class ThisAddIn
                     Try : EnsureLlmUiThread() : Catch : End Try
                 End If
             Finally
-                System.Threading.Interlocked.Exchange(restartingAfterResume, 0)
+                suspendResumeGate.Release()
             End Try
-        End Sub)
-
+        End Function)
     End Sub
+
+    Private Sub StopLlmUiThreadNonBlocking()
+        Try
+            If llmSyncContext IsNot Nothing Then
+                llmSyncContext.Post(Sub() System.Windows.Forms.Application.ExitThread(), Nothing)
+            End If
+        Catch
+        End Try
+        ' KEIN Join hier!
+        llmScheduler = Nothing
+        llmSyncContext = Nothing
+        llmThread = Nothing
+    End Sub
+
+    Private Async Function TryEnterGateAsync() As System.Threading.Tasks.Task(Of System.Boolean)
+        Try
+            Return Await suspendResumeGate.WaitAsync(100).ConfigureAwait(False)
+        Catch
+            Return False
+        End Try
+    End Function
 
 
 
@@ -4450,9 +4505,9 @@ Public Class ThisAddIn
 
 
 
-
-    ' NEW: make it awaitable (no Async Sub)
-    Private Async Function ShutdownHttpListener() As System.Threading.Tasks.Task
+    Private Async Function ShutdownHttpListener(
+    Optional ByVal stopUiThread As System.Boolean = True
+) As System.Threading.Tasks.Task
         isShuttingDown = True
 
         ' Cancel current loop
@@ -4505,16 +4560,17 @@ Public Class ThisAddIn
         End Try
 
         System.Diagnostics.Debug.WriteLine(
-    "HttpListener STOP at " &
-    System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
+        "HttpListener STOP at " &
+        System.DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture))
 
-
-        ' Deterministically stop the UI STA helper
-        StopLlmUiThread()
+        ' UI-STA nur stoppen, wenn gewünscht
+        If stopUiThread Then
+            StopLlmUiThread()
+        End If
     End Function
 
 
-    ' add: gen
+
     Private Async Function StartHttpListener(
     ByVal token As System.Threading.CancellationToken,
     ByVal gen As System.Int64) _
@@ -4726,10 +4782,6 @@ Public Class ThisAddIn
         End Select
     End Sub
 
-    ' Called by PowerBroadcastWindow on UI thread
-
-
-
 
     Private Sub StartListenerWatchdog()
         If watchdog IsNot Nothing Then Return
@@ -4792,7 +4844,7 @@ Public Class ThisAddIn
             If req.HttpMethod.Equals("OPTIONS", System.StringComparison.OrdinalIgnoreCase) Then
                 res.AddHeader("Access-Control-Allow-Origin", "*")
                 res.AddHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-                res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                res.AddHeader("Access-control-allow-headers", "Content-Type, Authorization")
                 res.StatusCode = 204
                 res.KeepAlive = False
                 res.Headers("Connection") = "close"
@@ -4931,6 +4983,7 @@ Public Class ThisAddIn
     ' ----------------------------------------
 
     Private Sub EnsureLlmUiThread()
+        If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then Return
         If llmScheduler IsNot Nothing Then Return
 
         Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.Threading.Tasks.TaskScheduler)()
@@ -4964,7 +5017,9 @@ Public Class ThisAddIn
         End Try
         Try
             If llmThread IsNot Nothing AndAlso llmThread.IsAlive Then
-                llmThread.Join(2000)
+                If Not llmThread.Join(2000) Then
+                    ' Optional: Log that the thread did not terminate in time.
+                End If
             End If
         Catch
         End Try
@@ -4984,24 +5039,14 @@ Public Class ThisAddIn
     Optional ByVal FileObject As System.String = ""
 ) As System.Threading.Tasks.Task(Of System.String)
 
-        ' Continuations asynchron fortsetzen, verhindert Inline-Deadlocks
-        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of System.String)(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously)
+        EnsureLlmUiThread()
 
-        Dim th As New System.Threading.Thread(
-        Sub()
-            Try
-                ' Eigener STA-Thread mit WinForms-SyncContext (UI-fähig)
-                System.Threading.SynchronizationContext.SetSynchronizationContext(
-                    New System.Windows.Forms.WindowsFormsSynchronizationContext())
-
-                ' Pumpt Message-Loop NUR für diese eine LLM-Interaktion
-                Dim result As System.String = Nito.AsyncEx.AsyncContext.Run(
+        Return System.Threading.Tasks.Task.Factory.StartNew(
+            Function()
+                Return Nito.AsyncEx.AsyncContext.Run(
                     Async Function() As System.Threading.Tasks.Task(Of System.String)
-
-                        ' Dein bestehender LLM-Aufruf (darf UI öffnen)
                         Dim llmOut As System.String =
-                            Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject) _
-                                  .ConfigureAwait(True)   ' TRUE: Continuations zurück auf diesen UI-STA
+                            Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject).ConfigureAwait(True)
 
                         If UseSecondAPI AndAlso originalConfigLoaded Then
                             RestoreDefaults(_context, originalConfig)
@@ -5010,26 +5055,10 @@ Public Class ThisAddIn
 
                         Return If(llmOut, System.String.Empty)
                     End Function)
-
-                tcs.SetResult(result)
-
-            Catch ex As System.Exception
-                tcs.SetException(ex)
-
-            Finally
-                ' Sicherstellen, dass keine Loop übrig bleibt
-                Try
-                    System.Windows.Forms.Application.ExitThread()
-                Catch
-                End Try
-            End Try
-        End Sub)
-
-        th.SetApartmentState(System.Threading.ApartmentState.STA)
-        th.IsBackground = True
-        th.Start()
-
-        Return tcs.Task
+            End Function,
+            System.Threading.CancellationToken.None,
+            System.Threading.Tasks.TaskCreationOptions.None,
+            llmScheduler)
     End Function
 
 
@@ -7008,7 +7037,6 @@ Public Class ThisAddIn
             End Try
         End Try
     End Function
-
 
 
 End Class
