@@ -83,6 +83,7 @@ Public Class ThisAddIn
         Catch
         End Try
 
+        Try : OleMessageFilter.Register() : Catch : End Try
 
         StartPowerWatch()
 
@@ -159,6 +160,9 @@ Public Class ThisAddIn
             StopPowerWatch()
         Catch
         End Try
+
+        Try : OleMessageFilter.Revoke() : Catch : End Try
+
     End Sub
 
 
@@ -1664,9 +1668,50 @@ Public Class ThisAddIn
 
 
     '───────────────────────────────────────────────────────────────────────────
-    ' Runs a Sub on the UI thread and *waits* for it to complete.
+    ' Runs a Sub on the UI thread and waits asynchronously for it to complete.
     '───────────────────────────────────────────────────────────────────────────
     Private Function SwitchToUi(uiAction As System.Action) _
+        As System.Threading.Tasks.Task
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Object)()
+
+        mainThreadControl.BeginInvoke(New MethodInvoker(
+        Sub()
+            Try
+                uiAction.Invoke()
+                tcs.SetResult(Nothing)
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+            End Try
+        End Sub))
+
+        Return tcs.Task
+    End Function
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' Runs a Function(Of T) on the UI thread and returns its result asynchronously.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function SwitchToUi(Of T)(uiFunc As System.Func(Of T)) _
+        As System.Threading.Tasks.Task(Of T)
+
+        Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of T)()
+
+        mainThreadControl.BeginInvoke(New MethodInvoker(
+        Sub()
+            Try
+                tcs.SetResult(uiFunc.Invoke())
+            Catch ex As System.Exception
+                tcs.SetException(ex)
+            End Try
+        End Sub))
+
+        Return tcs.Task
+    End Function
+
+    '───────────────────────────────────────────────────────────────────────────
+    ' Runs a Sub on the UI thread and *waits* for it to complete.
+    '───────────────────────────────────────────────────────────────────────────
+    Private Function OldSwitchToUi(uiAction As System.Action) _
         As System.Threading.Tasks.Task
 
         Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of Object)()
@@ -1684,11 +1729,76 @@ Public Class ThisAddIn
         Return tcs.Task        ' completes only after uiAction finished
     End Function
 
+    ' OLE message filter to auto-retry transient COM call rejections
+    Friend NotInheritable Class OleMessageFilter
+        <System.Runtime.InteropServices.DllImport("ole32.dll")>
+        Private Shared Function CoRegisterMessageFilter(newFilter As IOleMessageFilter, ByRef oldFilter As IOleMessageFilter) As Integer
+        End Function
+
+        <System.Runtime.InteropServices.ComImport(),
+     System.Runtime.InteropServices.Guid("00000016-0000-0000-C000-000000000046"),
+     System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)>
+        Private Interface IOleMessageFilter
+            <System.Runtime.InteropServices.PreserveSig()>
+            Function HandleInComingCall(dwCallType As Integer,
+                                    hTaskCaller As IntPtr,
+                                    dwTickCount As Integer,
+                                    lpInterfaceInfo As IntPtr) As Integer
+            <System.Runtime.InteropServices.PreserveSig()>
+            Function RetryRejectedCall(hTaskCallee As IntPtr,
+                                   dwTickCount As Integer,
+                                   dwRejectType As Integer) As Integer
+            <System.Runtime.InteropServices.PreserveSig()>
+            Function MessagePending(hTaskCallee As IntPtr,
+                                dwTickCount As Integer,
+                                dwPendingType As Integer) As Integer
+        End Interface
+
+        Private Class Filter
+            Implements IOleMessageFilter
+
+            ' SERVERCALL_ISHANDLED
+            Public Function HandleInComingCall(dwCallType As Integer, hTaskCaller As IntPtr, dwTickCount As Integer, lpInterfaceInfo As IntPtr) As Integer Implements IOleMessageFilter.HandleInComingCall
+                Return 0
+            End Function
+
+            ' Retry RPC_E_CALL_REJECTED / RETRYLATER
+            ' Return >=0 ms to retry, -1 to cancel.
+            Public Function RetryRejectedCall(hTaskCallee As IntPtr, dwTickCount As Integer, dwRejectType As Integer) As Integer Implements IOleMessageFilter.RetryRejectedCall
+                ' 2 = SERVERCALL_RETRYLATER, 1 = SERVERCALL_REJECTED
+                If dwRejectType = 2 OrElse dwRejectType = 1 Then
+                    Return 100 ' retry after 100ms
+                End If
+                Return -1
+            End Function
+
+            ' PENDINGMSG_WAITDEFPROCESS
+            Public Function MessagePending(hTaskCallee As IntPtr, dwTickCount As Integer, dwPendingType As Integer) As Integer Implements IOleMessageFilter.MessagePending
+                Return 2
+            End Function
+        End Class
+
+        Private Shared registered As Boolean
+
+        Public Shared Sub Register()
+            If registered Then Return
+            Dim oldF As IOleMessageFilter = Nothing
+            CoRegisterMessageFilter(New Filter(), oldF)
+            registered = True
+        End Sub
+
+        Public Shared Sub Revoke()
+            If Not registered Then Return
+            Dim oldF As IOleMessageFilter = Nothing
+            CoRegisterMessageFilter(Nothing, oldF)
+            registered = False
+        End Sub
+    End Class
 
     '───────────────────────────────────────────────────────────────────────────
     ' Runs a Function(Of T) on the UI thread and waits for its return value.
     '───────────────────────────────────────────────────────────────────────────
-    Private Function SwitchToUi(Of T)(uiFunc As System.Func(Of T)) _
+    Private Function OldSwitchToUi(Of T)(uiFunc As System.Func(Of T)) _
         As System.Threading.Tasks.Task(Of T)
 
         Dim tcs As New System.Threading.Tasks.TaskCompletionSource(Of T)()
@@ -1752,8 +1862,8 @@ Public Class ThisAddIn
         Return Await SharedMethods.PostCorrection(_context, inputText, UseSecondAPI)
     End Function
 
-    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional ByVal FileObject As String = "") As Task(Of String)
-        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash, AddUserPrompt, FileObject)
+    Public Shared Async Function LLM(ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional HideSplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional ByVal FileObject As String = "", Optional cancellationToken As Threading.CancellationToken = Nothing) As Task(Of String)
+        Return Await SharedMethods.LLM(_context, promptSystem, promptUser, Model, Temperature, Timeout, UseSecondAPI, HideSplash, AddUserPrompt, FileObject, cancellationToken)
     End Function
 
     Private Function ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String))
@@ -4284,6 +4394,8 @@ Public Class ThisAddIn
     Private isShuttingDown As Boolean = False
     Private listenerTask As System.Threading.Tasks.Task
 
+    Private llmOperationCts As System.Threading.CancellationTokenSource
+
 
     ' --- Threading & Listener State (Klassenebene) ---
     Private llmSyncContext As System.Threading.SynchronizationContext
@@ -4293,6 +4405,9 @@ Public Class ThisAddIn
     Private wasListenerRunningBeforeSleep As System.Boolean = False
     Private wasLlmThreadAliveBeforeSleep As System.Boolean = False
     Private restartingAfterResume As System.Int32 = 0  ' 0/1 via Interlocked
+
+    ' guard to mute watchdog and concurrent restarts during power transitions
+    Private powerChanging As System.Int32 = 0
 
     ' Generation protection (pre/post sleep)
     Private listenerGeneration As System.Int64 = 0
@@ -4382,8 +4497,12 @@ Public Class ThisAddIn
         System.Threading.Tasks.Task.Run(
         Async Function() As System.Threading.Tasks.Task
             If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
+            System.Threading.Interlocked.Exchange(powerChanging, 1)
             Try
-                ' Zustand merken (wie bei dir)
+                ' Mute watchdog during suspend
+                Try : StopListenerWatchdog() : Catch : End Try
+
+                ' Remember state
                 Try
                     wasListenerRunningBeforeSleep =
                         (httpListener IsNot Nothing AndAlso httpListener.IsListening)
@@ -4397,6 +4516,20 @@ Public Class ThisAddIn
                     wasLlmThreadAliveBeforeSleep = False
                 End Try
 
+                ' Proactively cancel any in-flight LLM op (prevents wake-up on dead STA)
+                Try
+                    If llmOperationCts IsNot Nothing Then
+                        If Not llmOperationCts.IsCancellationRequested Then llmOperationCts.Cancel()
+                        llmOperationCts.Dispose()
+                    End If
+                Catch
+                Finally
+                    llmOperationCts = Nothing
+                End Try
+
+                ' Force any stale listener loop to exit quickly
+                System.Threading.Interlocked.Increment(listenerGeneration)
+
                 ' Listener stoppen – OHNE UI-STA zu stoppen
                 Try
                     Dim t As System.Threading.Tasks.Task = ShutdownHttpListener(stopUiThread:=False)
@@ -4407,10 +4540,10 @@ Public Class ThisAddIn
                 Catch
                 End Try
 
-                ' LLM-STA non-blocking schließen (kein Join im Suspend)
+                ' LLM-STA: request exit without waiting (no Join while suspending)
                 Try
                     If wasLlmThreadAliveBeforeSleep Then
-                        StopLlmUiThread()
+                        StopLlmUiThreadNonBlocking()
                     End If
                 Catch
                 End Try
@@ -4454,7 +4587,11 @@ Public Class ThisAddIn
                 If wasLlmThreadAliveBeforeSleep Then
                     Try : EnsureLlmUiThread() : Catch : End Try
                 End If
+
+                ' Re-enable watchdog after we’ve (re)started things
+                Try : StartListenerWatchdog() : Catch : End Try
             Finally
+                System.Threading.Interlocked.Exchange(powerChanging, 0)
                 suspendResumeGate.Release()
             End Try
         End Function)
@@ -4789,6 +4926,9 @@ Public Class ThisAddIn
         watchdog = New System.Threading.Timer(
         Sub(stateObj As System.Object)
             Try
+                ' Skip while suspend/resume is in progress
+                If System.Threading.Interlocked.CompareExchange(powerChanging, 0, 0) <> 0 Then Return
+
                 Dim age As System.Double =
                     (System.DateTime.UtcNow - lastListenerProgressUtc).TotalSeconds
 
@@ -4838,6 +4978,27 @@ Public Class ThisAddIn
 
         Dim req As System.Net.HttpListenerRequest = ctx.Request
         Dim res As System.Net.HttpListenerResponse = ctx.Response
+
+        If System.Threading.Interlocked.CompareExchange(powerChanging, 0, 0) <> 0 Then
+            Try
+                res = ctx.Response
+                res.StatusCode = 503
+                res.StatusDescription = "Service Unavailable (suspend/resume)"
+                res.AddHeader("Retry-After", "2")
+                res.KeepAlive = False
+                res.Headers("Connection") = "close"
+                res.SendChunked = False
+                Using os = res.OutputStream
+                    Dim buf = System.Text.Encoding.UTF8.GetBytes("Temporarily unavailable during power transition.")
+                    res.ContentType = "text/plain; charset=utf-8"
+                    res.ContentLength64 = buf.LongLength
+                    os.Write(buf, 0, buf.Length)
+                End Using
+                res.Close()
+            Catch
+            End Try
+            Return
+        End If
 
         Try
             ' ---- CORS Preflight ---------------------------------------------------
@@ -5030,8 +5191,47 @@ Public Class ThisAddIn
     End Sub
 
 
-
     Public Function RunLlmAsync(
+    ByVal sysPrompt As System.String,
+    ByVal userPrompt As System.String,
+    Optional ByVal UseSecondAPI As System.Boolean = False,
+    Optional ByVal ShowTimer As System.Boolean = True,
+    Optional ByVal FileObject As System.String = "",
+    Optional ByVal cancellationToken As System.Threading.CancellationToken = Nothing
+) As System.Threading.Tasks.Task(Of System.String)
+
+        EnsureLlmUiThread()
+
+        Return System.Threading.Tasks.Task.Factory.StartNew(
+        Function() As System.String
+            Using linkedCts As System.Threading.CancellationTokenSource =
+                System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+
+                Try
+                    Return Nito.AsyncEx.AsyncContext.Run(
+                        Async Function() As System.Threading.Tasks.Task(Of System.String)
+                            Dim llmOut As System.String =
+                                Await LLM(sysPrompt, userPrompt, "", "", 0, UseSecondAPI, Not ShowTimer, "", FileObject, linkedCts.Token).ConfigureAwait(True)
+
+                            If UseSecondAPI AndAlso originalConfigLoaded Then
+                                RestoreDefaults(_context, originalConfig)
+                                originalConfigLoaded = False
+                            End If
+
+                            Return If(llmOut, System.String.Empty)
+                        End Function)
+                Catch ex As OperationCanceledException
+                    Return "Operation was canceled by the user."
+                End Try
+            End Using
+        End Function,
+        cancellationToken,
+        System.Threading.Tasks.TaskCreationOptions.None,
+        llmScheduler)
+    End Function
+
+
+    Public Function OldRunLlmAsync(
     ByVal sysPrompt As System.String,
     ByVal userPrompt As System.String,
     Optional ByVal UseSecondAPI As System.Boolean = False,
@@ -5492,6 +5692,288 @@ Public Class ThisAddIn
         ' ---------- Input ----------
         html.AppendLine("  <div class=""inputbar"">")
         html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
+        html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button><button id=""cancelBtn"" style=""display:none;"">Cancel</button></div>")
+        html.AppendLine("  </div>")
+        html.AppendLine("  <div class=""hint"">Drag & drop a file anywhere in the chat to attach • Enter to send • Shift+Enter newline • Ctrl+L clear</div>")
+        html.AppendLine("</div>")
+
+        ' ---------- JS ----------
+        html.AppendLine("<script>")
+        html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
+        html.AppendLine("let __supportsFiles = false;")
+        html.AppendLine("let __pendingFilePath = '';")
+        html.AppendLine("")
+        html.AppendLine("const api = async (cmd, data={}) => {")
+        html.AppendLine("  const res = await fetch('" & InkyApiRoute & "', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd}, data))});")
+        html.AppendLine("  const txt = await res.text();")
+        html.AppendLine("  try { return JSON.parse(txt); } catch { return {ok:false,error:txt}; }")
+        html.AppendLine("};")
+        html.AppendLine("")
+        html.AppendLine("const chatEl = document.getElementById('chat');")
+        html.AppendLine("const msgEl  = document.getElementById('msg');")
+        html.AppendLine("const modelSel = document.getElementById('modelSel');")
+        html.AppendLine("const copyBtn = document.getElementById('copyBtn');")
+        html.AppendLine("const clearBtn = document.getElementById('clearBtn');")
+        html.AppendLine("const themeBtn = document.getElementById('themeBtn');")
+        html.AppendLine("const cancelBtn = document.getElementById('cancelBtn');")
+        html.AppendLine("let dark = false;")
+        html.AppendLine("function setTheme(isDark){")
+        html.AppendLine("  dark = !!isDark;")
+        html.AppendLine("  document.documentElement.classList.toggle('light', !dark);")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("function formatBytes(b){")
+        html.AppendLine("  const u=['B','KB','MB','GB','TB'];")
+        html.AppendLine("  if(!Number.isFinite(b)||b<=0) return '0 B';")
+        html.AppendLine("  const i = Math.min(u.length-1, Math.floor(Math.log(b)/Math.log(1024)));")
+        html.AppendLine("  return (b/Math.pow(1024,i)).toFixed(i?1:0) + ' ' + u[i];")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Renders the full history returned by the server")
+        html.AppendLine("function render(turns){")
+        html.AppendLine("  chatEl.innerHTML='';")
+        html.AppendLine("  for(const t of (turns||[])){")
+        html.AppendLine("    const row = document.createElement('div'); row.className='row ' + (t.role==='user'?'user':'bot');")
+        html.AppendLine("    const b = document.createElement('div'); b.className='bubble';")
+        html.AppendLine("    const r = document.createElement('div'); r.className='role'; r.textContent = (t.role==='user'?'You':(window.__botName||'Bot'));")
+        html.AppendLine("    b.appendChild(r);")
+        html.AppendLine("    const c = document.createElement('div');")
+        html.AppendLine("    if (t && typeof t.html === 'string' && t.html.length){")
+        html.AppendLine("      c.innerHTML = t.html;")
+        html.AppendLine("    } else if (t && typeof t.markdown === 'string' && t.markdown.length){")
+        html.AppendLine("      const safe = t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');")
+        html.AppendLine("      c.innerHTML = safe;")
+        html.AppendLine("    } else { c.textContent = ''; }")
+        html.AppendLine("    b.appendChild(c); row.appendChild(b); chatEl.appendChild(row);")
+        html.AppendLine("  }")
+        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Create a temporary assistant bubble and return its element id")
+        html.AppendLine("function addTempAssistantBubble(html){")
+        html.AppendLine("  const id = 'tmp-' + Math.random().toString(36).slice(2);")
+        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
+        html.AppendLine("    `<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);")
+        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
+        html.AppendLine("  return id;")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Replace the text/body of an existing bubble by id")
+        html.AppendLine("function replaceAssistantBubble(id, html){")
+        html.AppendLine("  const row = document.getElementById(id);")
+        html.AppendLine("  if(!row) return;")
+        html.AppendLine("  const c = row.querySelector('.bubble > div:nth-child(2)');")
+        html.AppendLine("  if(c) c.innerHTML = html;")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("async function boot(){")
+        html.AppendLine("  const st = await api('inky_getstate');")
+        html.AppendLine("  if(!st.ok){alert(st.error||'Failed to initialize');return}")
+        html.AppendLine("  __supportsFiles = (st.supportsFiles===true);")
+        html.AppendLine("  setTheme(st.darkMode===true);")
+        html.AppendLine("  render(st.history||[]);")
+        html.AppendLine("  modelSel.innerHTML='';")
+        html.AppendLine("  for(const m of (st.models||[])){")
+        html.AppendLine("    const opt = document.createElement('option');")
+        html.AppendLine("    opt.value = m.key || '';")
+        html.AppendLine("    opt.textContent = m.label || '';")
+        html.AppendLine("    if (m.disabled) opt.disabled = true;")
+        html.AppendLine("    if (m.isSeparator) opt.style.fontFamily='ui-sans-serif,system-ui,Segoe UI,Roboto,Arial';")
+        html.AppendLine("    if (m.selected && !m.disabled) opt.selected = true;")
+        html.AppendLine("    modelSel.appendChild(opt);")
+        html.AppendLine("  }")
+        html.AppendLine("  if (!modelSel.value) {")
+        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
+        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
+        html.AppendLine("  }")
+        html.AppendLine("  if(st && st.greeting && (!Array.isArray(st.history) || (Array.isArray(st.history) && st.history.length===0))){")
+        html.AppendLine("     msgEl.placeholder = st.greeting;")
+        html.AppendLine("  }")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("async function send(){")
+        html.AppendLine("  const t = msgEl.value.trim(); if(!t) return;")
+        html.AppendLine("  msgEl.value='';")
+        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
+        html.AppendLine("    `<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);")
+        html.AppendLine("  const typingId = addTempAssistantBubble('<span class=""typing""></span>');")
+        html.AppendLine("  const payload = { Text:t };")
+        html.AppendLine("  if (__pendingFilePath) payload.FileObject = __pendingFilePath;")
+        html.AppendLine("  cancelBtn.style.display = 'inline-block';")
+        html.AppendLine("  const res = await api('inky_send', payload);")
+        html.AppendLine("  cancelBtn.style.display = 'none';")
+        html.AppendLine("  const ty = document.getElementById(typingId); if(ty) ty.remove();")
+        html.AppendLine("  if(!res.ok){ alert(res.error||'Error'); return }")
+        html.AppendLine("  __pendingFilePath = '';")
+        html.AppendLine("  render(res.history||[]);")
+        html.AppendLine("}")
+        html.AppendLine("")
+        html.AppendLine("// Drag & Drop (no paper-clip, single bubble that gets replaced)")
+        html.AppendLine(";(function(){")
+        html.AppendLine("  const prevent = e=>{ e.preventDefault(); e.stopPropagation(); };")
+        html.AppendLine("  ['dragenter','dragover','dragleave','drop'].forEach(ev=>{")
+        html.AppendLine("    document.addEventListener(ev, prevent, false);")
+        html.AppendLine("  });")
+        html.AppendLine("")
+        html.AppendLine("  document.addEventListener('drop', async (e)=>{")
+        html.AppendLine("    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);")
+        html.AppendLine("    if(!files.length) return;")
+        html.AppendLine("    const f = files[0];")
+        html.AppendLine("")
+        html.AppendLine("    // If not supported -> single info bubble, no upload attempt")
+        html.AppendLine("    if(!__supportsFiles){")
+        html.AppendLine("      addTempAssistantBubble('File uploads are not supported for the current model.');")
+        html.AppendLine("      return;")
+        html.AppendLine("    }")
+        html.AppendLine("")
+        html.AppendLine("    const tempId = addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${formatBytes(f.size)}) …`);")
+        html.AppendLine("    try {")
+        html.AppendLine("      const fr = new FileReader();")
+        html.AppendLine("      const dataUrl = await new Promise((resolve,reject)=>{")
+        html.AppendLine("        fr.onerror = ()=>reject(new Error('read error'));")
+        html.AppendLine("        fr.onload = ()=>resolve(fr.result);")
+        html.AppendLine("        fr.readAsDataURL(f);")
+        html.AppendLine("      });")
+        html.AppendLine("")
+        html.AppendLine("      const r = await api('inky_upload', { Name:f.name, DataUrl:String(dataUrl||'') });")
+        html.AppendLine("      if(!r.ok){")
+        html.AppendLine("        replaceAssistantBubble(tempId, 'Upload failed: ' + (r.error||'unknown'));")
+        html.AppendLine("        return;")
+        html.AppendLine("      }")
+        html.AppendLine("      if(r.supported === false){")
+        html.AppendLine("        replaceAssistantBubble(tempId, 'File uploads are not supported for the current model.');")
+        html.AppendLine("        return;")
+        html.AppendLine("      }")
+        html.AppendLine("      // Success: keep ONE bubble, just change its text")
+        html.AppendLine("      __pendingFilePath = r.path || '';")
+        html.AppendLine("      replaceAssistantBubble(tempId, `Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b> (${formatBytes(Number(r.size)||f.size)})`);")
+        html.AppendLine("    } catch (err) {")
+        html.AppendLine("      replaceAssistantBubble(tempId, 'Upload failed: ' + (err && err.message ? err.message : 'unknown'));")
+        html.AppendLine("    }")
+        html.AppendLine("  }, false);")
+        html.AppendLine("})();")
+        html.AppendLine("")
+        html.AppendLine("modelSel.addEventListener('change', async ()=>{")
+        html.AppendLine("  const opt = modelSel.options[modelSel.selectedIndex];")
+        html.AppendLine("  if (!opt || opt.disabled || !opt.value) {")
+        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
+        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
+        html.AppendLine("    return;")
+        html.AppendLine("  }")
+        html.AppendLine("  const key = opt.value;")
+        html.AppendLine("  const r = await api('inky_setmodel',{Key:key});")
+        html.AppendLine("  if(!r.ok){alert(r.error||'Failed to set model'); return}")
+        html.AppendLine("  if(typeof r.supportsFiles === 'boolean') __supportsFiles = r.supportsFiles;")
+        html.AppendLine("});")
+        html.AppendLine("")
+        html.AppendLine("copyBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const r = await api('inky_copylast'); if(!r.ok){alert(r.error||'Nothing to copy')}")
+        html.AppendLine("});")
+        html.AppendLine("clearBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const r = await api('inky_clear'); if(r.ok){render([])} else {alert(r.error||'Failed to clear')}")
+        html.AppendLine("});")
+        html.AppendLine("themeBtn.addEventListener('click', async ()=>{")
+        html.AppendLine("  const target = !dark; setTheme(target);")
+        html.AppendLine("  const r = await api('inky_toggletheme');")
+        html.AppendLine("  if(!r.ok){ setTheme(!target); alert(r.error||'Theme switch failed'); return }")
+        html.AppendLine("  if(typeof r.darkMode === 'boolean') setTheme(r.darkMode===true);")
+        html.AppendLine("});")
+        html.AppendLine("msgEl.addEventListener('keydown', (e)=>{")
+        html.AppendLine("  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }")
+        html.AppendLine("  if(e.key.toLowerCase()==='l' && e.ctrlKey){ e.preventDefault(); clearBtn.click(); }")
+        html.AppendLine("});")
+        html.AppendLine("document.getElementById('sendBtn').addEventListener('click', send);")
+        html.AppendLine("cancelBtn.addEventListener('click', async () => {")
+        html.AppendLine("  await api('inky_cancel');")
+        html.AppendLine("  cancelBtn.style.display = 'none';")
+        html.AppendLine("});")
+        html.AppendLine("boot();")
+        html.AppendLine("</script>")
+
+
+        html.AppendLine("</body></html>")
+        Return html.ToString()
+    End Function
+
+
+
+    Private Function OldBuildInkyHtmlPage() As System.String
+        ' Namen/Brand/Logo vorbereiten
+        Dim botName As System.String = GetBotName()
+        Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)
+        Dim logoUrl As System.String = GetLogoDataUrl()
+        Dim greet As System.String = GetFriendlyGreeting()
+
+        Dim html As New System.Text.StringBuilder()
+
+        html.AppendLine("<!doctype html>")
+        html.AppendLine("<html lang=""en""><head><meta charset=""utf-8"">")
+        html.AppendLine("<meta name=""viewport"" content=""width=device-width, initial-scale=1"">")
+        html.AppendLine("<link rel=""shortcut icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
+
+        ' ---------- CSS ----------
+        html.AppendLine("<style>")
+        html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
+        html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9fb0c3;--acc:#2ea043;--border:#1b2430;}")
+        html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5b6a79;--acc:#0969da;--border:#e5e7eb;}")
+        html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
+        html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
+        html.AppendLine(".topline{display:flex;align-items:center;gap:.6rem}")
+        html.AppendLine(".topline img.logo{width:24px;height:24px;border-radius:6px;display:block}")
+        html.AppendLine(".topline .brandbig{font-weight:700}")
+        html.AppendLine(".topline .sub{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".muted{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".spacer{flex:1}")
+        html.AppendLine("select,button,input,textarea{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.6rem;}")
+        html.AppendLine("select,button,input{padding:.5rem .7rem;}")
+        html.AppendLine("button:hover{filter:brightness(1.1)}")
+        html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
+        html.AppendLine(".chat.dragging{outline:2px dashed var(--acc); outline-offset:-8px;}")
+        html.AppendLine(".row{display:flex;margin:0 auto 1rem auto;max-width:1000px;padding:0 .25rem;}")
+        html.AppendLine(".row.bot{justify-content:flex-start;}")
+        html.AppendLine(".row.user{justify-content:flex-end;}")
+        html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}")
+        html.AppendLine(".bot .bubble{border-top-right-radius:.3rem}")
+        html.AppendLine(".user .bubble{border-top-left-radius:.3rem}")
+        html.AppendLine(".role{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}")
+        html.AppendLine(".inputbar{display:flex;gap:.5rem;padding:1rem;border-top:1px solid var(--border);background:var(--card)}")
+        html.AppendLine("textarea{flex:1;resize:vertical;min-height:48px;max-height:200px;border-radius:.8rem;padding:.7rem;}")
+        html.AppendLine(".mono{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
+        html.AppendLine(".actions{display:flex;gap:.5rem}")
+        html.AppendLine(".hint{font-size:.8rem;color:var(--muted);padding:.25rem 1rem 1rem}")
+        html.AppendLine(".system{opacity:.85;border-style:dashed}")
+        html.AppendLine("a{color:var(--acc)} code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.9em}")
+        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem}")
+        html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;color:var(--muted);opacity:.5;animation:ping 1s ease-in-out infinite;}")
+        html.AppendLine("@keyframes ping{0%{transform:scale(0.9);opacity:.25}50%{transform:scale(1.15);opacity:.95}100%{transform:scale(0.9);opacity:.25}}")
+        html.AppendLine("</style>")
+
+        html.AppendLine("</head><body>")
+        html.AppendLine("<div class=""wrap"">")
+
+        ' ---------- Topbar ----------
+        html.AppendLine("  <div class=""topbar"">")
+        html.AppendLine("    <div class=""topline"">")
+        If Not System.String.IsNullOrWhiteSpace(logoUrl) Then
+            html.AppendLine("      <img class=""logo"" src=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """ alt=""logo"">")
+        End If
+        html.AppendLine("      <div class=""brandbig"">" & System.Net.WebUtility.HtmlEncode(brandName) & "</div>")
+        html.AppendLine("      <div class=""sub"">Local Chat</div>")
+        html.AppendLine("    </div>")
+        html.AppendLine("    <div class=""spacer""></div>")
+        html.AppendLine("    <select id=""modelSel"" title=""Model""></select>")
+        html.AppendLine("    <button id=""copyBtn"" title=""Copy last answer to clipboard"">Copy last</button>")
+        html.AppendLine("    <button id=""clearBtn"" title=""Clear conversation"">Clear</button>")
+        html.AppendLine("    <button id=""themeBtn"" title=""Toggle theme"">Theme</button>")
+        html.AppendLine("  </div>")
+
+        html.AppendLine("  <div id=""chat"" class=""chat""></div>")
+
+        ' ---------- Input ----------
+        html.AppendLine("  <div class=""inputbar"">")
+        html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
         html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button></div>")
         html.AppendLine("  </div>")
         html.AppendLine("  <div class=""hint"">Drag & drop a file anywhere in the chat to attach • Enter to send • Shift+Enter newline • Ctrl+L clear</div>")
@@ -5689,9 +6171,6 @@ Public Class ThisAddIn
     End Function
 
 
-
-
-
     ' Builds a simple JSON response
     Private Function JsonOk(o As Object) As System.String
         Return "CT:json" & vbLf & Newtonsoft.Json.JsonConvert.SerializeObject(o)
@@ -5800,6 +6279,14 @@ Public Class ThisAddIn
                             Return JsonErr("Upload failed: " & exUp.Message)
                         End Try
 
+
+                    Case "inky_cancel"
+                        If llmOperationCts IsNot Nothing AndAlso Not llmOperationCts.IsCancellationRequested Then
+                            llmOperationCts.Cancel()
+                            Return JsonOk(New With {.ok = True, .message = "Cancellation requested."})
+                        Else
+                            Return JsonErr("No active operation to cancel.")
+                        End If
 
                     Case "inky_send"
 
@@ -5956,8 +6443,17 @@ Public Class ThisAddIn
 
                         ' LLM ausführen
                         Dim llmOut As System.String = ""
+                        Dim opCts As System.Threading.CancellationTokenSource = Nothing
                         Try
-                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond, False, fileObject).ConfigureAwait(False)
+                            ' Cancel any previous operation
+                            If llmOperationCts IsNot Nothing Then
+                                llmOperationCts.Cancel()
+                                llmOperationCts.Dispose()
+                            End If
+                            llmOperationCts = New System.Threading.CancellationTokenSource()
+                            opCts = llmOperationCts   ' capture for this request
+
+                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond, False, fileObject, llmOperationCts.Token).ConfigureAwait(False)
                         Catch ex As System.Exception
                             Return JsonErr("LLM error: " & ex.Message)
                         Finally
@@ -5983,8 +6479,22 @@ Public Class ThisAddIn
                         llmOut = SanitizeModelOutputForBrowser(llmOut)
                         Dim cleaned As System.String = llmOut.Trim()
 
+
+                        ' Normalize cancellation message coming from RunLlmAsync (if any)
+
+                        If cleaned.Length > 0 AndAlso cleaned.Equals("Operation was canceled by the user.", StringComparison.OrdinalIgnoreCase) Then
+                            cleaned = "Aborted by user."
+                        End If
+
                         If cleaned.Length = 0 Then
-                            Dim errMsg As System.String = "Error: The model did not provide a response."
+                            Dim wasCanceled As System.Boolean = False
+                            Try
+                                wasCanceled = (opCts IsNot Nothing AndAlso opCts.IsCancellationRequested)
+                            Catch
+                                wasCanceled = False
+                            End Try
+
+                            Dim errMsg As System.String = If(wasCanceled, "Aborted by user.", "Error: The model did not provide a response.")
                             Dim botErr As New ChatTurn With {
                                 .Role = "assistant",
                                 .Markdown = errMsg,
@@ -5996,6 +6506,7 @@ Public Class ThisAddIn
                             SaveInkyState(st)
                             Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
                         End If
+
 
                         Dim htmlOut As System.String = MarkdownToHtml(cleaned)
                         Dim botTurn As New ChatTurn With {
@@ -6009,11 +6520,6 @@ Public Class ThisAddIn
                         SaveInkyState(st)
 
                         Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
-
-
-
-
-
 
                     Case "inky_clear"
                         Dim st As New InkyState()

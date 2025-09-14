@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 8.9.2025
+' 14.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1365,7 +1365,9 @@ Namespace SharedLibrary
         Public Const AnonPrefix = "<"
         Public Const AnonSuffix = ">"
 
-        Public Const Default_PaneWidth = 580
+        Public Const Default_PaneWidth As Integer = 580
+
+        Public Const PromptLogCap As Integer = 50
 
         Public Delegate Sub IntelligentMergeCallback(selectedText As String)
 
@@ -2016,7 +2018,7 @@ Namespace SharedLibrary
             Dim htmlresult As String = Markdown.ToHtml(gptResult, pipeline)
 
 
-            htmlresult = htmlResult _
+            htmlresult = htmlresult _
                 .Replace(vbCrLf, "") _
                 .Replace(vbCr, "") _
                 .Replace(vbLf, "")
@@ -2025,7 +2027,7 @@ Namespace SharedLibrary
             ' Load the HTML into HtmlDocument
             Dim htmlDoc As New HtmlAgilityPack.HtmlDocument()
             Dim fullhtml As String
-            htmlDoc.LoadHtml(htmlResult)
+            htmlDoc.LoadHtml(htmlresult)
 
             fullhtml = htmlDoc.DocumentNode.OuterHtml
 
@@ -2968,7 +2970,12 @@ Namespace SharedLibrary
             Return OutputText
         End Function
 
-        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional FileObject As String = "") As Task(Of String)
+        Public Shared Async Function LLM(context As ISharedContext, ByVal promptSystem As String, ByVal promptUser As String, Optional ByVal Model As String = "", Optional ByVal Temperature As String = "", Optional ByVal Timeout As Long = 0, Optional ByVal UseSecondAPI As Boolean = False, Optional ByVal Hidesplash As Boolean = False, Optional ByVal AddUserPrompt As String = "", Optional FileObject As String = "", Optional cancellationToken As Threading.CancellationToken = Nothing) As Task(Of String)
+
+            If cancellationToken.IsCancellationRequested Then
+                Return ""
+            End If
+
 
             ' Anonymization features
 
@@ -3004,6 +3011,10 @@ Namespace SharedLibrary
 
                     AnonActive = True
                 End If
+            End If
+
+            If cancellationToken.IsCancellationRequested Then
+                Return ""
             End If
 
             Dim splash As SplashScreenCountDown = Nothing
@@ -3090,9 +3101,17 @@ Namespace SharedLibrary
 
                 ' Create splash & CTS once:
                 splash = New SplashScreenCountDown("Waiting for the AI to respond...", 0, 0, timeoutSeconds)
-                cts = New System.Threading.CancellationTokenSource()
+
+                'cts = New System.Threading.CancellationTokenSource()
+                'AddHandler splash.CancelRequested, Sub() cts.Cancel()
+                'Dim ct As System.Threading.CancellationToken = cts.Token
+
+                ' lokalen CTS mit dem externen Token verknüpfen,
+                ' damit sowohl der Aufrufer als auch der Splash-Abbrechen-Button greifen.
+                cts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
                 AddHandler splash.CancelRequested, Sub() cts.Cancel()
                 Dim ct As System.Threading.CancellationToken = cts.Token
+
                 If Not Hidesplash Then
                     splash.Show()
                     splash.RestartCountdown(timeoutSeconds)
@@ -3160,7 +3179,7 @@ Namespace SharedLibrary
                         If FileObject.Equals("clipboard", StringComparison.OrdinalIgnoreCase) Then
                             Dim mime As String = Nothing, data As String = Nothing
                             If Not TryGetClipboardObject(mime, data) Then
-                                ShowCustomMessageBox("No supported data found in the clipboard.")
+                                If Not Hidesplash Then ShowCustomMessageBox("No supported data found in the clipboard.") Else Return "No supported data found in the clipboard."
                                 Return ""
                             End If
                             mime = FixMimeType(mime)
@@ -3239,7 +3258,7 @@ Namespace SharedLibrary
                         End If
 
                     Catch ex As System.Exception
-                        ShowCustomMessageBox($"Error encoding '{FileObject}': {ex.Message}")
+                        If Not Hidesplash Then ShowCustomMessageBox($"Error encoding '{FileObject}': {ex.Message}") Else Return $"Error encoding '{FileObject}': {ex.Message}"
                         Return ""
                     End Try
 
@@ -3359,7 +3378,7 @@ Namespace SharedLibrary
                                     ElseIf response.StatusCode = 429 Then
                                         ' If we received a 429 error and haven't exhausted our retries, loop to retry.
                                         If attempt = maxRetries Then
-                                            ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).")
+                                            If Not Hidesplash Then ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).") Else Return $"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient)."
                                             Return ""
                                         End If
                                         ' Otherwise, continue the loop to retry the request.
@@ -3481,7 +3500,7 @@ Namespace SharedLibrary
                                             Next
 
                                         Case Else
-                                            ShowCustomMessageBox($"Unexpected JSON root type: {root2.Type} ({getResponseText})")
+                                            If Not Hidesplash Then ShowCustomMessageBox($"Unexpected JSON root type: {root2.Type} ({getResponseText})")
                                     End Select
 
                                 Else
@@ -3500,36 +3519,36 @@ Namespace SharedLibrary
                                             Next
 
                                         Case Else
-                                            ShowCustomMessageBox($"Unexpected JSON root type: {root.Type} ({responseText})")
+                                            If Not Hidesplash Then ShowCustomMessageBox($"Unexpected JSON root type: {root.Type} ({responseText})")
                                     End Select
                                 End If
 
 
                             Catch ex As System.Net.Http.HttpRequestException When Not ct.IsCancellationRequested
-                                ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
+                                If Not Hidesplash Then ShowCustomMessageBox($"An HTTP request exception occurred: {ex.Message} when accessing the LLM endpoint (2).")
                             Catch ex As TaskCanceledException When ct.IsCancellationRequested
                                 ' Wenn wirklich wir den Token gecancelt haben → durchreichen
                                 Throw New OperationCanceledException(ct)
                             Catch ex As TaskCanceledException When Not ct.IsCancellationRequested
                                 If Not Hidesplash Then splash.Close()
-                                ShowCustomMessageBox($"The request to the endpoint timed out. Please try again or increase the timeout setting.")
+                                If Not Hidesplash Then ShowCustomMessageBox($"The request to the endpoint timed out. Please try again or increase the timeout setting.")
                             Catch ex As System.Exception When Not ct.IsCancellationRequested
                                 If Not Hidesplash Then splash.Close()
-                                ShowCustomMessageBox($"The response from the endpoint resulted in an error: {ex.Message}")
+                                If Not Hidesplash Then ShowCustomMessageBox($"The response from the endpoint resulted in an error: {ex.Message}")
                             End Try
                         End Using ' Dispose HttpClient
                     End Using ' Dispose HttpClientHandler
                 Catch ex As OperationCanceledException
-                    ShowCustomMessageBox("Request canceled.")
+                    If Not Hidesplash Then ShowCustomMessageBox("Request canceled.")
                     Return ""
                 Finally
                     cts.Dispose()
                     If Not Hidesplash Then splash.Close()
                 End Try
                 If DoubleS Then
-                        Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
-                    End If
-                    If context.INI_Clean Then
+                    Returnvalue = Returnvalue.Replace(ChrW(223), "ss") ' Replace German sharp-S if needed
+                End If
+                If context.INI_Clean Then
                     'Returnvalue = Returnvalue.Replace("  ", " ").Replace("  ", " ")
                     Returnvalue = System.Text.RegularExpressions.Regex.Replace(
                                     Returnvalue,
@@ -3539,15 +3558,15 @@ Namespace SharedLibrary
                     Returnvalue = RemoveHiddenMarkers(Returnvalue)
                 End If
 
-                    If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
+                If AnonActive Then Returnvalue = ReidentifyText(Returnvalue)
 
-                    Return Returnvalue
+                Return Returnvalue
 
-                Catch ex As System.Exception
-                    ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}")
-                    Return ""
-                Finally
-                    If Not Hidesplash Then
+            Catch ex As System.Exception
+                If Not Hidesplash Then ShowCustomMessageBox($"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}") Else Return $"An unexpected error occurred when accessing the LLM endpoint: {ex.Message}"
+                Return ""
+            Finally
+                If Not Hidesplash Then
                     splash.Close()
                 End If
             End Try
@@ -3564,13 +3583,96 @@ Namespace SharedLibrary
         End Function
 
 
+        Public Shared Sub ShowAndEditPromptLog()
+            Const MaxItems As Integer = PromptLogCap
+            Const SepLine As String = "----- Prompt Entry Separator -----"
+
+            Try
+                ' 1) Get current log (ensure not Nothing)
+                Dim log = My.Settings.PromptLog
+                If log Is Nothing Then
+                    log = New System.Collections.Specialized.StringCollection()
+                    My.Settings.PromptLog = log
+                End If
+
+                ' 2) Build editable body (preserve multi-line entries; separate by a clear separator)
+                Dim body As New StringBuilder()
+                For i As Integer = 0 To log.Count - 1
+                    If i > 0 Then
+                        body.AppendLine()
+                        body.AppendLine(SepLine)
+                        body.AppendLine()
+                    End If
+                    body.Append(log(i))
+                Next
+
+                ' 3) Show editor; if user cancels, ShowCustomWindow should return Nothing
+                Dim intro As String = $"Prompt Log (most recent first). Edit entries freely. Keep the line '{SepLine}' between items."
+                Dim finalRemark As String = $"OK saves changes (at least one entry must exist). Cancel aborts. Limit is {MaxItems} items (older ones are dropped)."
+                Dim result As String = ShowCustomWindow(intro, body.ToString(), finalRemark, AN, NoRTF:=True, Getfocus:=True)
+
+                If result Is Nothing OrElse result = "" Then
+                    Exit Sub ' canceled
+                End If
+
+                ' 4) Parse back using the separator (preserve internal newlines in each entry)
+                Dim parts = result.Split(New String() {vbCrLf & SepLine & vbCrLf}, StringSplitOptions.None)
+
+                Dim updated = New System.Collections.Specialized.StringCollection()
+                For Each part In parts
+                    Dim trimmed = part.Trim()
+                    If trimmed.Length > 0 Then
+                        updated.Add(trimmed)
+                    End If
+                Next
+
+                ' 5) Enforce LIFO cap (keep first MaxItems; they’re most recent-first)
+                While updated.Count > MaxItems
+                    updated.RemoveAt(updated.Count - 1)
+                End While
+
+                ' 6) Save
+                My.Settings.PromptLog = updated
+                My.Settings.Save()
+
+            Catch
+                ' swallow to avoid UI disruption
+            End Try
+        End Sub
+
 
         ''' <summary>
         ''' Logs token usage and optional cost to a desktop file in a thread‑safe, retry‑enabled manner.
         ''' </summary>
         Private Shared Sub LogTokenSpending(ByRef root As JToken, tokenCountString As String, prompt As String)
+
             ' 0) only run if there's something to log
-            If String.IsNullOrWhiteSpace(tokenCountString) Or String.IsNullOrWhiteSpace(prompt) Then
+
+            If String.IsNullOrWhiteSpace(prompt) Then
+                Return
+            End If
+
+            ' A) Log latest prompt in My.Settings (LIFO, keep last 25)
+            Try
+                Dim log = My.Settings.PromptLog
+                If log Is Nothing Then
+                    log = New System.Collections.Specialized.StringCollection()
+                    My.Settings.PromptLog = log
+                End If
+
+                Dim ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                log.Insert(0, $"{ts} | {prompt}")
+
+                While log.Count > PromptLogCap
+                    log.RemoveAt(log.Count - 1)
+                End While
+
+                My.Settings.Save()
+            Catch
+                ' ignore settings errors
+            End Try
+
+            If String.IsNullOrWhiteSpace(tokenCountString) Then
                 Return
             End If
 
@@ -9070,6 +9172,7 @@ Namespace SharedLibrary
 
                                                                ' Start the download request
                                                                Using response As HttpResponseMessage = Await client.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead)
+
                                                                    response.EnsureSuccessStatusCode()
 
                                                                    ' Create file stream for writing

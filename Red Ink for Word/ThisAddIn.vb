@@ -5018,6 +5018,12 @@ Public Class ThisAddIn
                 Return
             End If
 
+            If OtherPrompt.StartsWith("promptlog", StringComparison.OrdinalIgnoreCase) Then
+                ShowAndEditPromptLog()
+                Return
+            End If
+
+
             If OtherPrompt.StartsWith("redinktest", StringComparison.OrdinalIgnoreCase) Then
 
                 Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
