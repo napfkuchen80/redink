@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.9.2025
+' 15.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -83,8 +83,6 @@ Public Class ThisAddIn
         Catch
         End Try
 
-        Try : OleMessageFilter.Register() : Catch : End Try
-
         StartPowerWatch()
 
         ' Necessary for Update Handler to work correctly
@@ -109,7 +107,14 @@ Public Class ThisAddIn
 
         mainThreadControl.CreateControl()
 
-        outlookExplorer = Application.ActiveExplorer()
+        outlookExplorer = ComRetry(Function() Application.ActiveExplorer())
+        If outlookExplorer IsNot Nothing Then
+            AddHandler outlookExplorer.Activate, AddressOf Explorer_Activate
+        Else
+            mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
+            StartupInitialized = True
+        End If
+
 
         If outlookExplorer IsNot Nothing Then
             AddHandler outlookExplorer.Activate, AddressOf Explorer_Activate
@@ -161,8 +166,6 @@ Public Class ThisAddIn
         Catch
         End Try
 
-        Try : OleMessageFilter.Revoke() : Catch : End Try
-
     End Sub
 
 
@@ -174,7 +177,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.140925 Gen2 Beta Test"
+    Public Const Version As String = "V.150925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1730,70 +1733,119 @@ Public Class ThisAddIn
     End Function
 
     ' OLE message filter to auto-retry transient COM call rejections
+    ' OLE message filter to auto-retry transient COM call rejections (chained)
     Friend NotInheritable Class OleMessageFilter
         <System.Runtime.InteropServices.DllImport("ole32.dll")>
         Private Shared Function CoRegisterMessageFilter(newFilter As IOleMessageFilter, ByRef oldFilter As IOleMessageFilter) As Integer
         End Function
 
         <System.Runtime.InteropServices.ComImport(),
-     System.Runtime.InteropServices.Guid("00000016-0000-0000-C000-000000000046"),
-     System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)>
+         System.Runtime.InteropServices.Guid("00000016-0000-0000-C000-000000000046"),
+         System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)>
         Private Interface IOleMessageFilter
             <System.Runtime.InteropServices.PreserveSig()>
             Function HandleInComingCall(dwCallType As Integer,
-                                    hTaskCaller As IntPtr,
-                                    dwTickCount As Integer,
-                                    lpInterfaceInfo As IntPtr) As Integer
+                                        hTaskCaller As IntPtr,
+                                        dwTickCount As Integer,
+                                        lpInterfaceInfo As IntPtr) As Integer
             <System.Runtime.InteropServices.PreserveSig()>
             Function RetryRejectedCall(hTaskCallee As IntPtr,
-                                   dwTickCount As Integer,
-                                   dwRejectType As Integer) As Integer
+                                       dwTickCount As Integer,
+                                       dwRejectType As Integer) As Integer
             <System.Runtime.InteropServices.PreserveSig()>
             Function MessagePending(hTaskCallee As IntPtr,
-                                dwTickCount As Integer,
-                                dwPendingType As Integer) As Integer
+                                    dwTickCount As Integer,
+                                    dwPendingType As Integer) As Integer
         End Interface
+
+        ' Keep a reference to the filter that Outlook installed before ours,
+        ' so we can forward to it and restore it later.
+        Private Shared prevFilter As IOleMessageFilter = Nothing
+        Private Shared registered As Boolean
 
         Private Class Filter
             Implements IOleMessageFilter
 
-            ' SERVERCALL_ISHANDLED
             Public Function HandleInComingCall(dwCallType As Integer, hTaskCaller As IntPtr, dwTickCount As Integer, lpInterfaceInfo As IntPtr) As Integer Implements IOleMessageFilter.HandleInComingCall
-                Return 0
-            End Function
-
-            ' Retry RPC_E_CALL_REJECTED / RETRYLATER
-            ' Return >=0 ms to retry, -1 to cancel.
-            Public Function RetryRejectedCall(hTaskCallee As IntPtr, dwTickCount As Integer, dwRejectType As Integer) As Integer Implements IOleMessageFilter.RetryRejectedCall
-                ' 2 = SERVERCALL_RETRYLATER, 1 = SERVERCALL_REJECTED
-                If dwRejectType = 2 OrElse dwRejectType = 1 Then
-                    Return 100 ' retry after 100ms
+                If prevFilter IsNot Nothing Then
+                    Try : Return prevFilter.HandleInComingCall(dwCallType, hTaskCaller, dwTickCount, lpInterfaceInfo) : Catch : End Try
                 End If
-                Return -1
+                Return 0 ' SERVERCALL_ISHANDLED
             End Function
 
-            ' PENDINGMSG_WAITDEFPROCESS
+            Public Function RetryRejectedCall(hTaskCallee As IntPtr, dwTickCount As Integer, dwRejectType As Integer) As Integer Implements IOleMessageFilter.RetryRejectedCall
+                ' Ask Outlook’s filter first
+                Dim prevRet As Integer = -1
+                If prevFilter IsNot Nothing Then
+                    Try : prevRet = prevFilter.RetryRejectedCall(hTaskCallee, dwTickCount, dwRejectType) : Catch : prevRet = -1 : End Try
+                End If
+
+                ' Only adjust RETRYLATER if Outlook would cancel (-1)
+                If dwRejectType = 2 Then ' SERVERCALL_RETRYLATER
+                    If prevRet >= 0 Then Return prevRet
+                    Return 150 ' retry after 150ms
+                End If
+
+                ' For all other cases, preserve Outlook’s behavior
+                Return prevRet
+            End Function
+
             Public Function MessagePending(hTaskCallee As IntPtr, dwTickCount As Integer, dwPendingType As Integer) As Integer Implements IOleMessageFilter.MessagePending
-                Return 2
+                If prevFilter IsNot Nothing Then
+                    Try : Return prevFilter.MessagePending(hTaskCallee, dwTickCount, dwPendingType) : Catch : End Try
+                End If
+                Return 2 ' PENDINGMSG_WAITDEFPROCESS
             End Function
         End Class
-
-        Private Shared registered As Boolean
 
         Public Shared Sub Register()
             If registered Then Return
             Dim oldF As IOleMessageFilter = Nothing
+            ' Register our filter and capture the previous (Outlook’s) filter
             CoRegisterMessageFilter(New Filter(), oldF)
+            prevFilter = oldF
             registered = True
         End Sub
 
         Public Shared Sub Revoke()
             If Not registered Then Return
             Dim oldF As IOleMessageFilter = Nothing
-            CoRegisterMessageFilter(Nothing, oldF)
+            ' Restore Outlook’s original filter (do NOT set Nothing here)
+            CoRegisterMessageFilter(prevFilter, oldF)
+            prevFilter = Nothing
             registered = False
         End Sub
     End Class
+
+    Private Sub EnableOleFilterFor(durationMs As Integer)
+        ' must run on the Outlook UI thread
+        Dim t As New System.Windows.Forms.Timer() With {.Interval = Math.Max(500, durationMs)}
+        AddHandler t.Tick,
+            Sub()
+                Try : OleMessageFilter.Revoke() : Catch : End Try
+                Try : t.Stop() : t.Dispose() : Catch : End Try
+            End Sub
+        Try : OleMessageFilter.Register() : Catch : End Try
+        t.Start()
+    End Sub
+
+    Private Shared Function ComRetry(Of T)(work As System.Func(Of T)) As T
+        For i As Integer = 0 To 2
+            Try
+                Return work()
+            Catch ex As System.Runtime.InteropServices.COMException When _
+                ex.HResult = &H80010001 OrElse   ' RPC_E_CALL_REJECTED
+                ex.HResult = &H8001010A OrElse   ' RPC_E_SERVERCALL_RETRYLATER
+                ex.HResult = &H80004005          ' E_FAIL (some busy states)
+                ' If we're on the UI thread, pump messages briefly before retry
+                If System.Windows.Forms.Application.MessageLoop Then
+                    System.Windows.Forms.Application.DoEvents()
+                End If
+                System.Threading.Thread.Sleep(150)
+            End Try
+        Next
+        Return work() ' last try to surface real error
+    End Function
 
     '───────────────────────────────────────────────────────────────────────────
     ' Runs a Function(Of T) on the UI thread and waits for its return value.
@@ -1960,9 +2012,9 @@ Public Class ThisAddIn
             If GPTSetupError OrElse INIValuesMissing() Or Not INIloaded Then Return
 
             ' Use fully qualified names to avoid ambiguity
-            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-            'Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector
-            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = GetActiveInspector()
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
+
             Dim Textlength As Long
 
             If inspector Is Nothing Then
@@ -1973,7 +2025,7 @@ Public Class ThisAddIn
 
                 If Not InspectorOpened Then Exit Sub
 
-                inspector = outlookApp.ActiveInspector
+                inspector = ComRetry(Function() outlookApp.ActiveInspector())
                 If inspector Is Nothing Then
 
                     System.Windows.Forms.MessageBox.Show("Error in MainMenu: No active email item found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -1981,13 +2033,17 @@ Public Class ThisAddIn
                 End If
             End If
 
-            If inspector.CurrentItem.Class = Microsoft.Office.Interop.Outlook.OlObjectClass.olMail Then
-                Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
-                Dim wordEditor As Microsoft.Office.Interop.Word.Document = DirectCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
 
+            Dim curr As Object = ComRetry(Function() inspector.CurrentItem)
+                If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                    SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
+                    Return
+                End If
 
+                Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
-                Select Case RI_Command
+            Select Case RI_Command
 
                     Case "Translate"
                         TranslateLanguage = ""
@@ -2100,11 +2156,8 @@ Public Class ThisAddIn
                         System.Windows.Forms.MessageBox.Show("Error in MainMenu: Invalid internal command.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Select
 
-            Else
-                SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
-            End If
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
         Catch ex As System.Exception
             System.Windows.Forms.MessageBox.Show("Error in MainMenu: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
@@ -2131,6 +2184,210 @@ Public Class ThisAddIn
 
 
     Public Sub OpenInspectorAndReapplySelection(Command As String)
+        Try
+
+            If Command = "InsertClipboard" Then InsertClipboard() : Return
+
+            Dim Sumup As Boolean = (Command = "Sumup")
+            Dim Translate As Boolean = (Command = "Translate" OrElse Command = "PrimLang")
+
+            ' Grab Outlook instances
+            Dim oApp As Outlook.Application = Globals.ThisAddIn.Application
+            Dim oExplorer As Outlook.Explorer = ComRetry(Function() oApp.ActiveExplorer())
+
+            ' Check for inline response
+            Dim inlineResponse As Object = If(oExplorer Is Nothing, Nothing,
+                                              ComRetry(Function() oExplorer.ActiveInlineResponse))
+
+            If inlineResponse Is Nothing OrElse Sumup OrElse Translate Then
+                ' Get the current selection in the explorer
+                Dim selection As Outlook.Selection = If(oExplorer Is Nothing, Nothing,
+                                                       ComRetry(Function() oExplorer.Selection))
+                Dim selectionCount As Integer = If(selection Is Nothing, 0, ComRetry(Function() selection.Count))
+
+                If selectionCount = 0 Then
+                    ShowCustomMessageBox("No email is selected.")
+                    Return
+                End If
+
+
+                If selection.Count > 1 Then
+                    If Not Sumup Then
+                        ShowCustomMessageBox("Multiple emails selected. Please select only one email when not using Sumup mode.")
+                        Return
+                    Else
+                        ' Combine texts from all selected emails.
+                        Dim mailItems As New List(Of Microsoft.Office.Interop.Outlook.MailItem)
+                        For Each item As Object In selection
+                            If TypeOf item Is Microsoft.Office.Interop.Outlook.MailItem Then
+                                mailItems.Add(CType(item, Microsoft.Office.Interop.Outlook.MailItem))
+                            End If
+                        Next
+
+                        If mailItems.Count = 0 Then
+                            ShowCustomMessageBox("None of the selected items are emails.")
+                            Return
+                        End If
+
+                        ' Order the emails: latest email first (descending order by ReceivedTime)
+                        mailItems = mailItems.OrderByDescending(Function(m) m.ReceivedTime).ToList()
+
+                        Const PR_LAST_VERB_EXECUTED As String = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+
+                        Dim selectedText As String = String.Empty
+                        Dim count As Integer = 1
+                        For Each mail As Microsoft.Office.Interop.Outlook.MailItem In mailItems
+
+                            Dim lastVerb As Integer = 0
+
+                            Try
+                                lastVerb = mail.PropertyAccessor.GetProperty(PR_LAST_VERB_EXECUTED)
+                            Catch comEx As COMException
+                                ' Property nicht gesetzt → noch nicht beantwortet
+                                lastVerb = 0
+                            Catch ex As System.Exception
+                                ' Sicherstellen, dass System.Exception voll qualifiziert ist
+                                lastVerb = 0
+                            End Try
+
+
+                            If lastVerb <> 102 AndAlso lastVerb <> 103 Then
+                                Dim tag As String = count.ToString("D4") ' Format count with four digits
+                                Dim latestBody As String = GetLatestMailBody(mail.Body)
+                                selectedText &= "<EMAIL" & tag & ">" & latestBody & "</EMAIL" & tag & ">"
+                                count += 1
+                            End If
+                        Next
+
+                        ShowSumup2(selectedText)
+                        Return
+                    End If
+                Else
+                    ' Only one email is selected.
+                    If Sumup Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
+                            ShowSumup(selectedText)
+                            Return
+                        Else
+                            ShowCustomMessageBox("The selected item is not an email.")
+                            Return
+                        End If
+                    ElseIf Translate Then
+                        Dim selectedItem As Object = selection(1)
+                        If TypeOf selectedItem Is Outlook.MailItem Then
+
+                            If Command = "Translate" Then
+                                TranslateLanguage = ""
+                                TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
+                                If String.IsNullOrEmpty(TranslateLanguage) Then Return
+                            Else
+                                TranslateLanguage = INI_Language1
+                            End If
+
+                            Dim mail As Outlook.MailItem = CType(selectedItem, Outlook.MailItem)
+                            Dim selectedText As String = mail.Body
+
+                            ShowTranslate(selectedText)
+                            Return
+
+                        Else
+                            ShowCustomMessageBox("The selected item is not an email.")
+                            Return
+                        End If
+                    Else
+                        ShowCustomMessageBox("You can only use this function when you are editing one (single) e-mail.")
+                        Return
+                    End If
+                End If
+
+            End If
+
+            ' Ensure it is a MailItem
+            Dim mailItem As MailItem = TryCast(inlineResponse, MailItem)
+            If mailItem Is Nothing Then
+                ShowCustomMessageBox("You can only use this function when you are editing an e-mail (currently, there is no valid e-mail item).")
+                Return
+            End If
+
+            ' Capture the user's current selection range (or caret) from the inline editor
+            Dim oldSelStart As Integer = 0
+            Dim oldSelEnd As Integer = 0
+            If Not GetSelectionOrCaretRangeFromInlineEditor(oExplorer, oldSelStart, oldSelEnd) Then
+                ' If this fails entirely (no Word editor, etc.), we can just open the window without reapplying.
+                ' But no error is shown for "empty selection" anymore – only true failures (e.g., no WordEditor).
+                ' We'll just continue and open the Inspector, albeit we can't set the cursor position.
+            End If
+
+            ' Open the Inspector modelessly
+            Dim inspector As Inspector = mailItem.GetInspector
+            If inspector Is Nothing Then
+                MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to open the ActiveInspector.",
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return
+            End If
+            inspector.Display(False) ' modeless - do not block
+
+            ' A short delay to let the new WordEditor initialize
+            System.Threading.Thread.Sleep(500)
+
+            ' Ensure it's still open and usable (guard COM with retries)
+            If inspector Is Nothing Then
+                inspector = ComRetry(Function() Globals.ThisAddIn.Application.ActiveInspector())
+                If inspector Is Nothing Then
+                    MessageBox.Show("Error in OpenInspectorAndReapplySelection: No active Inspector available.",
+                                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
+            End If
+
+            Dim curr As Object = ComRetry(Function() inspector.CurrentItem)
+            If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                MessageBox.Show("Error in OpenInspectorAndReapplySelection: The Inspector is not ready or no email item is active.",
+                                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return
+            End If
+
+            ' Reapply the original selection (or caret position) to the new Inspector's WordEditor
+            Try
+                Dim wordDoc As Word.Document = ComRetry(Function() TryCast(inspector.WordEditor, Word.Document))
+                If wordDoc IsNot Nothing Then
+                    Dim wordSel As Word.Selection = wordDoc.Application.Selection
+
+                    ' Only reapply if we successfully retrieved the inline offsets
+                    If oldSelStart <> 0 OrElse oldSelEnd <> 0 Then
+                        wordSel.SetRange(Start:=oldSelStart, End:=oldSelEnd)
+                        wordSel.Select()
+                    End If
+                End If
+
+            Catch ex As System.Exception
+                MessageBox.Show("Error in OpenInspectorAndReapplySelection: Failed to restore the original selection: " & ex.Message,
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return
+            End Try
+
+            ' Bring the new Inspector window to the foreground
+
+            InspectorOpened = True
+
+            inspector.Activate()
+
+            ' Clean up COM references
+            Marshal.ReleaseComObject(inspector)
+            Marshal.ReleaseComObject(oExplorer)
+
+            Return
+
+        Catch ex As System.Exception
+            MessageBox.Show("Error in OpenInspectorAndReapplySelection: " & ex.Message,
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+    End Sub
+
+    Public Sub oldOpenInspectorAndReapplySelection(Command As String)
         Try
 
             If Command = "InsertClipboard" Then InsertClipboard() : Return
@@ -2288,16 +2545,26 @@ Public Class ThisAddIn
             ' A short delay to let the new WordEditor initialize
             System.Threading.Thread.Sleep(500)
 
-            ' Ensure it's still open
-            If inspector.CurrentItem Is Nothing Then
-                MessageBox.Show("Error in OpenInspectorAndReapplySelection: The Inspector window was closed before processing could complete.",
-                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            ' Ensure it's still open and usable (guard COM with retries)
+            If inspector Is Nothing Then
+                inspector = ComRetry(Function() Globals.ThisAddIn.Application.ActiveInspector())
+                If inspector Is Nothing Then
+                    MessageBox.Show("Error in OpenInspectorAndReapplySelection: No active Inspector available.",
+                                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
+            End If
+
+            Dim curr As Object = ComRetry(Function() inspector.CurrentItem)
+            If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                MessageBox.Show("Error in OpenInspectorAndReapplySelection: The Inspector is not ready or no email item is active.",
+                                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 Return
             End If
 
             ' Reapply the original selection (or caret position) to the new Inspector's WordEditor
             Try
-                Dim wordDoc As Word.Document = TryCast(inspector.WordEditor, Word.Document)
+                Dim wordDoc As Word.Document = ComRetry(Function() TryCast(inspector.WordEditor, Word.Document))
                 If wordDoc IsNot Nothing Then
                     Dim wordSel As Word.Selection = wordDoc.Application.Selection
 
@@ -2413,6 +2680,31 @@ Public Class ThisAddIn
 
     Private Function GetSelectionOrCaretRangeFromInlineEditor(oExplorer As Outlook.Explorer, ByRef selStart As Integer, ByRef selEnd As Integer) As Boolean
         Try
+            Dim inlineWordEditor As Object =
+                If(oExplorer Is Nothing, Nothing,
+                   ComRetry(Function() oExplorer.ActiveInlineResponseWordEditor))
+            If inlineWordEditor Is Nothing Then
+                Return False
+            End If
+
+            Dim wordSel As Word.Selection =
+                ComRetry(Function() TryCast(inlineWordEditor.Application.Selection, Word.Selection))
+            If wordSel Is Nothing Then
+                Return False
+            End If
+
+            selStart = wordSel.Start
+            selEnd = wordSel.End
+            Return True
+        Catch ex As System.Exception
+            MessageBox.Show("Failed to retrieve the selection: " & ex.Message,
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return False
+        End Try
+    End Function
+
+    Private Function oldGetSelectionOrCaretRangeFromInlineEditor(oExplorer As Outlook.Explorer, ByRef selStart As Integer, ByRef selEnd As Integer) As Boolean
+        Try
             Dim inlineWordEditor As Object = oExplorer.ActiveInlineResponseWordEditor
             If inlineWordEditor Is Nothing Then
                 ' No inline Word editor, so we can't read a selection/caret
@@ -2420,7 +2712,7 @@ Public Class ThisAddIn
             End If
 
             Dim wordSel As Word.Selection =
-            TryCast(inlineWordEditor.Application.Selection, Word.Selection)
+            ComRetry(Function() TryCast(inlineWordEditor.Application.Selection, Word.Selection))
             If wordSel Is Nothing Then
                 Return False
             End If
@@ -2597,32 +2889,43 @@ Public Class ThisAddIn
 
             ' 3) Check for open MailItem (prefer the running instance)
             Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
-            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
+
+            ' Guard Inspector and CurrentItem via ComRetry
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
 
             If inspector Is Nothing _
-           OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+               OrElse curr Is Nothing _
+               OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
 
                 ' No open email: copy to clipboard (cut to 6000 chars + ellipsis)
                 Dim displayText As System.String = If(result.Length > 6000, result.Substring(0, 6000) & "…", result)
 
                 ' Ensure this runs on the Outlook UI STA thread:
                 Await SwitchToUi(
-                Sub()
-                    Dim rtfText As System.String = MarkdownToRtfConverter.Convert(result)
-                    Dim dataObj As System.Windows.Forms.DataObject = New System.Windows.Forms.DataObject()
-                    dataObj.SetData(System.Windows.Forms.DataFormats.Rtf, rtfText)
-                    dataObj.SetData(System.Windows.Forms.DataFormats.Text, result)
-                    System.Windows.Forms.Clipboard.SetDataObject(dataObj, True)
-                    SLib.ShowCustomMessageBox($"The content has been copied to the clipboard:{System.Environment.NewLine}{System.Environment.NewLine}{displayText}")
-                End Sub
-            ).ConfigureAwait(True)
+                    Sub()
+                        Dim rtfText As System.String = MarkdownToRtfConverter.Convert(result)
+                        Dim dataObj As New System.Windows.Forms.DataObject()
+                        dataObj.SetData(System.Windows.Forms.DataFormats.Rtf, rtfText)
+                        dataObj.SetData(System.Windows.Forms.DataFormats.Text, result)
+                        System.Windows.Forms.Clipboard.SetDataObject(dataObj, True)
+                        SLib.ShowCustomMessageBox($"The content has been copied to the clipboard:{System.Environment.NewLine}{System.Environment.NewLine}{displayText}")
+                    End Sub
+                ).ConfigureAwait(True)
 
                 Return
             End If
 
             ' 4) Insert into the current email at the cursor
             Dim wordEditor As Microsoft.Office.Interop.Word.Document =
-            CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            ComRetry(Function() CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
             Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
 
             If selection.Start <> selection.End Then
@@ -2638,67 +2941,6 @@ Public Class ThisAddIn
         End Try
     End Function
 
-
-
-    Private Async Sub OldInsertClipboard()
-
-        ' 1) Configure check
-        If String.IsNullOrWhiteSpace(INI_APICall_Object) Then
-            SLib.ShowCustomMessageBox($"Your model ({INI_Model}) is not configured to process clipboard data (i.e. binary objects).")
-            Return
-        End If
-
-        ' 2) Call LLM
-        Dim result As String
-
-        result = Await LLM(
-            InterpolateAtRuntime(SP_InsertClipboard),
-            "", "", "", 0, False, False, "", "clipboard"
-        )
-
-        If String.IsNullOrEmpty(result) Then Return
-
-        ' 3) Check for open MailItem
-        Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-        Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
-
-        If inspector Is Nothing _
-       OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
-
-            ' No open email: copy to clipboard (cut to 1024 chars + ellipsis)
-            Dim displayText As String = If(result.Length > 6000,
-                                      result.Substring(0, 6000) & "…",
-                                      result)
-            Await SwitchToUi(Sub()
-                                 Dim rtfText As String = MarkdownToRtfConverter.Convert(result)
-                                 Dim dataObj As New DataObject()
-                                 dataObj.SetData(DataFormats.Rtf, rtfText)
-                                 dataObj.SetData(DataFormats.Text, result)
-                                 Clipboard.SetDataObject(dataObj, True)
-                                 SLib.ShowCustomMessageBox($"The content has been copied to the clipboard:{Environment.NewLine}{Environment.NewLine}{displayText}")
-                             End Sub)
-
-            Return
-        End If
-
-        ' 4) Insert into the current email at the cursor
-        Dim wordEditor As Microsoft.Office.Interop.Word.Document =
-        CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
-        Dim selection As Microsoft.Office.Interop.Word.Selection =
-        wordEditor.Application.Selection
-
-        ' Collapse any selection
-        If selection.Start <> selection.End Then
-            selection.Collapse(
-            Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd
-        )
-        End If
-
-        ' Add spacing and insert with your markdown helper
-        selection.TypeParagraph()
-        InsertTextWithMarkdown(selection, result, True)
-
-    End Sub
 
 
     Public Async Sub DefineMyStyle()
@@ -2742,20 +2984,52 @@ Public Class ThisAddIn
 
             ' --- Collect all open emails from Outlook inspectors ---
             Dim app As Outlook.Application = Globals.ThisAddIn.Application
-            Dim inspectors As Outlook.Inspectors = app.Inspectors
+            Dim inspectors As Outlook.Inspectors = ComRetry(Function() app.Inspectors)
+
+            '            Dim mailItems As New System.Collections.Generic.List(Of Outlook.MailItem)()
+
+            'For i As System.Int32 = 1 To inspectors.Count
+            'Dim insp As Outlook.Inspector = inspectors.Item(i)
+            'If insp IsNot Nothing AndAlso insp.CurrentItem IsNot Nothing Then
+            '   If TypeOf insp.CurrentItem Is Outlook.MailItem Then
+            '       Dim mi As Outlook.MailItem = CType(insp.CurrentItem, Outlook.MailItem)
+            '       If mi IsNot Nothing Then
+            '            mailItems.Add(mi)
+            '         End If
+            '      End If
+            '   End If
+            'Next
 
             Dim mailItems As New System.Collections.Generic.List(Of Outlook.MailItem)()
 
-            For i As System.Int32 = 1 To inspectors.Count
-                Dim insp As Outlook.Inspector = inspectors.Item(i)
-                If insp IsNot Nothing AndAlso insp.CurrentItem IsNot Nothing Then
-                    If TypeOf insp.CurrentItem Is Outlook.MailItem Then
-                        Dim mi As Outlook.MailItem = CType(insp.CurrentItem, Outlook.MailItem)
-                        If mi IsNot Nothing Then
-                            mailItems.Add(mi)
-                        End If
+            ' Get count safely
+            Dim inspCount As Integer = 0
+            Try
+                inspCount = ComRetry(Function() inspectors.Count)
+            Catch
+                inspCount = 0
+            End Try
+
+            For i As System.Int32 = 1 To inspCount
+                Dim insp As Outlook.Inspector = Nothing
+                Try
+                    insp = ComRetry(Function() inspectors.Item(i))
+                    If insp Is Nothing Then Continue For
+
+                    Dim curr As Object = ComRetry(Function() insp.CurrentItem)
+                    Dim mi As Outlook.MailItem = TryCast(curr, Outlook.MailItem)
+                    If mi IsNot Nothing Then
+                        ' Intentionally keep the MailItem reference; used later in this method.
+                        mailItems.Add(mi)
                     End If
-                End If
+                Catch
+                    ' Ignore and continue scanning remaining inspectors
+                Finally
+                    If insp IsNot Nothing Then
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(insp)
+                        insp = Nothing
+                    End If
+                End Try
             Next
 
             If mailItems.Count = 0 Then
@@ -2875,16 +3149,38 @@ Public Class ThisAddIn
 
     Private Async Sub FreeStyle_InsertBefore(Command As String, Optional AskForPrompt As Boolean = False)
         Try
-            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-            Dim inspector As Inspector = outlookApp.ActiveInspector()
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Inspector = ComRetry(Function() outlookApp.ActiveInspector())
 
             ' Ensure the inspector is open and the item is a MailItem
-            If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is MailItem Then
+            'If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is MailItem Then
+            'SLib.ShowCustomMessageBox($"Please create or open an email for editing to use {AN}.")
+            'Return
+            'End If
+
+            'Dim mailItem As MailItem = DirectCast(inspector.CurrentItem, MailItem)
+
+
+            ' Guard CurrentItem via ComRetry to avoid transient COM rejections
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
+
+            If inspector Is Nothing _
+               OrElse curr Is Nothing _
+               OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
                 SLib.ShowCustomMessageBox($"Please create or open an email for editing to use {AN}.")
                 Return
             End If
 
-            Dim mailItem As MailItem = DirectCast(inspector.CurrentItem, MailItem)
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
+                CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
+
 
             ' Check if the email is in plain text format
             If mailItem.BodyFormat = OlBodyFormat.olFormatPlain Then
@@ -2893,7 +3189,7 @@ Public Class ThisAddIn
             End If
 
             ' Get the Word editor for the email
-            Dim wordEditor As Microsoft.Office.Interop.Word.Document = TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
             If wordEditor Is Nothing Then
                 SLib.ShowCustomMessageBox("Unable to access the necessary email editor. Ensure the email is in HTML or RTF format.")
@@ -2985,7 +3281,7 @@ Public Class ThisAddIn
             If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
             If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
         Catch ex As System.Exception
             MessageBox.Show("Error in Freestyle_InsertBefore: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -2994,16 +3290,36 @@ Public Class ThisAddIn
 
     Private Async Sub Command_InsertAfter(ByVal SysCommand As String, Optional ByVal DoMarkup As Boolean = False, Optional KeepFormat As Boolean = False, Optional Inplace As Boolean = False, Optional MarkupMethod As Integer = 3)
         Try
-            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
 
             ' Ensure the inspector is open and the item is a MailItem
-            If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            'If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            '   ShowCustomMessageBox("Please open an email to use this function.")
+            '   Return
+            'End If
+
+            'Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+
+            ' Guard CurrentItem via ComRetry to avoid transient COM rejections
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
+
+            If inspector Is Nothing _
+               OrElse curr Is Nothing _
+               OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
                 ShowCustomMessageBox("Please open an email to use this function.")
                 Return
             End If
 
-            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
+                CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
 
             ' Check if the email is in plain text format
             If mailItem.BodyFormat = Microsoft.Office.Interop.Outlook.OlBodyFormat.olFormatPlain Then
@@ -3012,7 +3328,7 @@ Public Class ThisAddIn
             End If
 
             ' Get the Word editor for the email
-            Dim wordEditor As Microsoft.Office.Interop.Word.Document = TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
             If wordEditor Is Nothing Then
                 ShowCustomMessageBox("Unable to access the email editor. Ensure the email is in HTML or RTF format.")
@@ -3174,7 +3490,7 @@ Public Class ThisAddIn
             If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
             If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
         Catch ex As System.Exception
             MessageBox.Show("Error in Command_InsertAfter: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -3219,16 +3535,36 @@ Public Class ThisAddIn
                 AddOnInstruct += MyStyleInstruct.Replace("; add", ", ")
             End If
 
-            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
 
             ' Ensure the inspector is open and the item is a MailItem
-            If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            'If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            '  SLib.ShowCustomMessageBox($"Please create or open an email for editing to use {AN}.")
+            '   Return
+            'End If
+
+            'Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+
+            ' Guard CurrentItem via ComRetry to avoid transient COM rejections
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
+
+            If inspector Is Nothing _
+               OrElse curr Is Nothing _
+               OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
                 SLib.ShowCustomMessageBox($"Please create or open an email for editing to use {AN}.")
                 Return
             End If
 
-            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
+                CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
 
             ' Check if the email is in plain text format
             If mailItem.BodyFormat = Microsoft.Office.Interop.Outlook.OlBodyFormat.olFormatPlain Then
@@ -3237,7 +3573,7 @@ Public Class ThisAddIn
             End If
 
             ' Get the Word editor for the email
-            Dim wordEditor As Microsoft.Office.Interop.Word.Document = TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
             If wordEditor Is Nothing Then
                 SLib.ShowCustomMessageBox("Unable to access the necessary email editor. Ensure the email is in HTML or RTF format.")
@@ -3432,7 +3768,7 @@ Public Class ThisAddIn
             If DoNewDoc Then
                 Try
                     ' Create a new instance of Word
-                    Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+                    Dim wordApp As New Microsoft.Office.Interop.Word.Application
                     wordApp.Visible = True
 
                     ' Add a new document
@@ -3507,7 +3843,7 @@ Public Class ThisAddIn
             If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
             If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
             If UseSecondAPI And originalConfigLoaded Then
                 RestoreDefaults(_context, originalConfig)
@@ -3527,16 +3863,43 @@ Public Class ThisAddIn
         splash.Refresh()
         Try
             ' Get the active inspector (compose mail window)
-            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = New Microsoft.Office.Interop.Outlook.Application()
-            Dim inspector As Inspector = outlookApp.ActiveInspector
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Inspector = ComRetry(Function() outlookApp.ActiveInspector)
 
             ' Ensure the current item is a MailItem and in compose mode
-            If TypeOf inspector.CurrentItem Is MailItem Then
-                Dim mailItem As MailItem = CType(inspector.CurrentItem, MailItem)
-                Dim editor As Object = inspector.WordEditor
 
-                ' Cast the WordEditor to Word.Document
-                Dim wordDoc As Document = CType(editor, Document)
+            ' Ensure the current item is a MailItem and in compose mode (COM-safe)
+            If inspector Is Nothing Then
+                System.Windows.Forms.MessageBox.Show("Error in CompareAndInsertTextCompareDocs: No active inspector.",
+                                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return
+            End If
+
+            Dim curr As Object = Nothing
+            Try
+                curr = ComRetry(Function() inspector.CurrentItem)
+            Catch
+                curr = Nothing
+            End Try
+
+            If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                System.Windows.Forms.MessageBox.Show("Error in CompareAndInsertTextCompareDocs: No active email item.",
+                                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return
+            End If
+
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
+    ComRetry(Function() CType(curr, Microsoft.Office.Interop.Outlook.MailItem))
+
+            Dim editor As Object = ComRetry(Function() inspector.WordEditor)
+
+
+            'If TypeOf inspector.CurrentItem Is MailItem Then
+            'Dim mailItem As MailItem = CType(inspector.CurrentItem, MailItem)
+            'Dim editor As Object = inspector.WordEditor
+
+            ' Cast the WordEditor to Word.Document
+            Dim wordDoc As Document = CType(editor, Document)
 
                 ' Create a new temporary Word application for comparison
                 Dim wordApp As New Microsoft.Office.Interop.Word.Application()
@@ -3583,13 +3946,13 @@ Public Class ThisAddIn
                 compareResult.Close(False)
                 wordApp.Quit(False)
 
-            Else
-                MessageBox.Show("Error in CompareAndInsertTextCompareDocs: The mail compose window is not open (anymore).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-            End If
+            'Else
+            'MessageBox.Show("Error in CompareAndInsertTextCompareDocs: The mail compose window is not open (anymore).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            'End If
 
             ' Release COM objects in reverse order of creation
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
         Catch ex As System.Exception
             MessageBox.Show("Error in CompareAndInsertTextCompareDocs: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -3981,8 +4344,8 @@ Public Class ThisAddIn
         ' 2. Get the current Outlook inspector / Word selection
         '------------------------------------------------------------
         Dim inspector As Microsoft.Office.Interop.Outlook.Inspector =
-        TryCast(Globals.ThisAddIn.Application.ActiveInspector,
-                Microsoft.Office.Interop.Outlook.Inspector)
+        ComRetry(Function() TryCast(Globals.ThisAddIn.Application.ActiveInspector,
+                Microsoft.Office.Interop.Outlook.Inspector))
 
         If inspector Is Nothing Then
             System.Windows.Forms.MessageBox.Show(
@@ -3994,8 +4357,8 @@ Public Class ThisAddIn
         End If
 
         Dim wordDoc As Microsoft.Office.Interop.Word.Document =
-        TryCast(inspector.WordEditor,
-                Microsoft.Office.Interop.Word.Document)
+        ComRetry(Function() TryCast(inspector.WordEditor,
+                Microsoft.Office.Interop.Word.Document))
 
         If wordDoc Is Nothing Then
             System.Windows.Forms.MessageBox.Show(
@@ -4069,14 +4432,14 @@ Public Class ThisAddIn
         Dim originalItalic As Boolean = False
 
         ' Check if there is an active inspector (open email)
-        objInspector = TryCast(Globals.ThisAddIn.Application.ActiveInspector, Microsoft.Office.Interop.Outlook.Inspector)
+        objInspector = ComRetry(Function() TryCast(Globals.ThisAddIn.Application.ActiveInspector, Microsoft.Office.Interop.Outlook.Inspector))
         If objInspector Is Nothing Then
             MessageBox.Show("Error in InsertFormattedText: No open mail item found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Exit Sub
         End If
 
         ' Get the Word editor and the current selection
-        objWordDoc = TryCast(objInspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+        objWordDoc = ComRetry(Function() TryCast(objInspector.WordEditor, Microsoft.Office.Interop.Word.Document))
         If objWordDoc Is Nothing Then
             MessageBox.Show("Error in InsertFormattedText: Unable to access the necessary mail editor for this mail.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Exit Sub
@@ -4239,16 +4602,35 @@ Public Class ThisAddIn
 
     Private Function GetSelectedTextLength() As Integer
         Try
-            Dim outlookApp As New Microsoft.Office.Interop.Outlook.Application()
-            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = outlookApp.ActiveInspector()
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
 
             ' Ensure the inspector is open and the item is a MailItem
-            If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            'If inspector Is Nothing OrElse Not TypeOf inspector.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then
+            '   Return 0
+            'End If
+
+            'Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
+            'DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+
+            ' Guard CurrentItem via ComRetry to avoid transient COM rejections
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
+
+            If inspector Is Nothing _
+               OrElse curr Is Nothing _
+               OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
                 Return 0
             End If
 
             Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem =
-            DirectCast(inspector.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
+                CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
 
             ' Check if the email is in plain text format
             If mailItem.BodyFormat = Microsoft.Office.Interop.Outlook.OlBodyFormat.olFormatPlain Then
@@ -4257,7 +4639,7 @@ Public Class ThisAddIn
 
             ' Get the Word editor for the email
             Dim wordEditor As Microsoft.Office.Interop.Word.Document =
-            TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document)
+            ComRetry(Function() TryCast(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
             If wordEditor Is Nothing Then
                 Return 0
@@ -4282,7 +4664,7 @@ Public Class ThisAddIn
             If wordEditor IsNot Nothing Then Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
             If mailItem IsNot Nothing Then Marshal.ReleaseComObject(mailItem) : mailItem = Nothing
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
-            If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
 
         Catch ex As System.Exception  ' Explicitly referencing System.Exception per your guideline
             Return 0
@@ -4547,6 +4929,7 @@ Public Class ThisAddIn
                     End If
                 Catch
                 End Try
+
             Finally
                 suspendResumeGate.Release()
             End Try
@@ -4590,6 +4973,9 @@ Public Class ThisAddIn
 
                 ' Re-enable watchdog after we’ve (re)started things
                 Try : StartListenerWatchdog() : Catch : End Try
+
+                Await SwitchToUi(Sub() EnableOleFilterFor(10000)).ConfigureAwait(False)
+
             Finally
                 System.Threading.Interlocked.Exchange(powerChanging, 0)
                 suspendResumeGate.Release()
@@ -6611,20 +6997,54 @@ Public Class ThisAddIn
                 If String.IsNullOrWhiteSpace(textBody0) Then Return ""
                 ' All Outlook automation on UI thread
                 Await SwitchToUi(Sub()
-                                     Dim olApp = Globals.ThisAddIn.Application
-                                     Dim insp = olApp.ActiveInspector()
+                                     Dim olApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+                                     Dim insp As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() olApp.ActiveInspector())
                                      If insp Is Nothing Then Exit Sub
-                                     If Not TypeOf insp.CurrentItem Is Microsoft.Office.Interop.Outlook.MailItem Then Exit Sub
-                                     Dim mail = CType(insp.CurrentItem, Microsoft.Office.Interop.Outlook.MailItem)
-                                     If mail.Sent Then Exit Sub
-                                     Dim doc = CType(insp.WordEditor, Microsoft.Office.Interop.Word.Document)
-                                     Dim rng = doc.Application.Selection.Range
-                                     doc.Application.ScreenUpdating = False
-                                     rng.Text = textBody0 & " (" & sourceUrl & ")"
-                                     doc.Application.ScreenUpdating = True
-                                     ' release COM objects
-                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(rng)
-                                     System.Runtime.InteropServices.Marshal.ReleaseComObject(doc)
+
+                                     ' Guard CurrentItem (never access inline)
+                                     Dim curr As Object = Nothing
+                                     Try
+                                         curr = ComRetry(Function() insp.CurrentItem)
+                                     Catch
+                                         curr = Nothing
+                                     End Try
+                                     If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                                         Exit Sub
+                                     End If
+
+                                     Dim mail As Microsoft.Office.Interop.Outlook.MailItem =
+                                         CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
+
+                                     ' Guard Sent property
+                                     Try
+                                         If ComRetry(Function() mail.Sent) Then
+                                             If insp IsNot Nothing Then System.Runtime.InteropServices.Marshal.ReleaseComObject(insp) : insp = Nothing
+                                             Exit Sub
+                                         End If
+                                     Catch
+                                         If insp IsNot Nothing Then System.Runtime.InteropServices.Marshal.ReleaseComObject(insp) : insp = Nothing
+                                         Exit Sub
+                                     End Try
+
+                                     ' Guard WordEditor and selection
+                                     Dim doc As Microsoft.Office.Interop.Word.Document = Nothing
+                                     Try
+                                         doc = ComRetry(Function() CType(insp.WordEditor, Microsoft.Office.Interop.Word.Document))
+                                         If doc Is Nothing Then Exit Sub
+
+                                         Dim rng As Microsoft.Office.Interop.Word.Range = Nothing
+                                         Try
+                                             rng = doc.Application.Selection.Range
+                                             doc.Application.ScreenUpdating = False
+                                             rng.Text = textBody0 & " (" & sourceUrl & ")"
+                                             doc.Application.ScreenUpdating = True
+                                         Finally
+                                             If rng IsNot Nothing Then System.Runtime.InteropServices.Marshal.ReleaseComObject(rng) : rng = Nothing
+                                         End Try
+                                     Finally
+                                         If doc IsNot Nothing Then System.Runtime.InteropServices.Marshal.ReleaseComObject(doc) : doc = Nothing
+                                         If insp IsNot Nothing Then System.Runtime.InteropServices.Marshal.ReleaseComObject(insp) : insp = Nothing
+                                     End Try
                                  End Sub)
                 Return ""
         ' -------------------------------------------------------------------
