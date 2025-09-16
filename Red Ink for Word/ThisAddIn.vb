@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 13.9.2025
+' 16.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1281,7 +1281,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.130925 Gen2 Beta Test"
+    Public Const Version As String = "V.160925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -11114,6 +11114,155 @@ Public Class ThisAddIn
 
         Dim doc As Microsoft.Office.Interop.Word.Document = rng.Document
 
+        Dim originalStart As Integer = rng.Start
+        Dim allowedEnd As Integer = rng.End
+        Dim currentPosition As Integer = originalStart
+
+        Dim NormalizePart As Func(Of String, String) =
+        Function(s As String) As String
+            If String.IsNullOrEmpty(s) Then Return String.Empty
+            Return s.Replace("^13", vbCr)
+        End Function
+
+        Dim isWildcard As Boolean = replacementText.Contains("\1")
+        Dim isInline As Boolean = replacementText.Contains("^&")
+        If Not isWildcard AndAlso Not isInline Then
+            isInline = True
+            replacementText = replacementText & "^&"
+        End If
+
+        Do While currentPosition < allowedEnd
+            Dim searchRange As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=currentPosition, End:=allowedEnd)
+            Dim f As Microsoft.Office.Interop.Word.Find = searchRange.Find
+
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+            configureFind(f)
+            f.Forward = True
+            f.Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
+            f.Format = True
+
+            If Not f.Execute(Replace:=Microsoft.Office.Interop.Word.WdReplace.wdReplaceNone) Then
+                Exit Do
+            End If
+
+            Dim foundStart As Integer = searchRange.Start
+            Dim foundEnd As Integer = searchRange.End
+            Dim foundText As String = searchRange.Text
+
+            If foundEnd <= foundStart Then
+                currentPosition = System.Math.Min(foundStart + 1, allowedEnd)
+                Continue Do
+            End If
+
+            If isWildcard Then
+                ' Handle patterns like "**\1**^13" (paragraph rule)
+                Dim rep As String = replacementText
+                Dim parts = rep.Replace("^13", String.Empty).Split(New String() {"\1"}, 2, StringSplitOptions.None)
+                Dim prefix As String = NormalizePart(If(parts.Length > 0, parts(0), String.Empty))
+                Dim suffix As String = NormalizePart(If(parts.Length > 1, parts(1), String.Empty))
+                Dim prefixLen As Integer = prefix.Length
+                Dim suffixLen As Integer = suffix.Length
+
+                Dim endsWithPara As Boolean = foundText.EndsWith(vbCr, StringComparison.Ordinal)
+                Dim groupEnd As Integer = If(endsWithPara, foundEnd - 1, foundEnd)
+
+                Dim projectedEnd As Integer = foundEnd + prefixLen + suffixLen
+                If projectedEnd > allowedEnd Then Exit Do
+
+                ' 1) Unformat the group content (prevents re-matching)
+                If tweakReplacement IsNot Nothing AndAlso groupEnd > foundStart Then
+                    Dim contentRange As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=groupEnd)
+                    tweakReplacement(contentRange.Font)
+                End If
+
+                ' 2) Also unformat the trailing paragraph mark so inline rules don't match it
+                If tweakReplacement IsNot Nothing AndAlso endsWithPara Then
+                    Dim paraRange As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=groupEnd, End:=groupEnd + 1)
+                    tweakReplacement(paraRange.Font)
+                End If
+
+                ' 3) Insert tokens around the group only
+                If prefixLen > 0 AndAlso groupEnd >= foundStart Then
+                    Dim groupRange As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=groupEnd)
+                    groupRange.InsertBefore(prefix)
+                End If
+                If suffixLen > 0 AndAlso groupEnd >= foundStart Then
+                    Dim groupRange As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=groupEnd)
+                    groupRange.InsertAfter(suffix)
+                End If
+
+                ' 4) Ensure tokens themselves are not formatted
+                If tweakReplacement IsNot Nothing Then
+                    If prefixLen > 0 Then
+                        Dim leadingTok As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=foundStart + prefixLen)
+                        tweakReplacement(leadingTok.Font)
+                    End If
+                    If suffixLen > 0 Then
+                        Dim trailingStart As Integer = groupEnd + prefixLen
+                        Dim trailingTok As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=trailingStart, End:=trailingStart + suffixLen)
+                        tweakReplacement(trailingTok.Font)
+                    End If
+                End If
+
+                currentPosition = foundEnd + prefixLen + suffixLen
+
+            Else
+                ' Inline formatting rule: e.g., "**^&**"
+                ' Skip pure paragraph-mark matches to avoid "**¶**"
+                If foundText = vbCr Then
+                    If tweakReplacement IsNot Nothing Then tweakReplacement(searchRange.Font) ' just unformat ¶
+                    currentPosition = foundEnd
+                    allowedEnd = rng.End
+                    Continue Do
+                End If
+
+                Dim parts = replacementText.Split(New String() {"^&"}, 2, StringSplitOptions.None)
+                Dim prefix As String = NormalizePart(If(parts.Length > 0, parts(0), String.Empty))
+                Dim suffix As String = NormalizePart(If(parts.Length > 1, parts(1), String.Empty))
+                Dim prefixLen As Integer = prefix.Length
+                Dim suffixLen As Integer = suffix.Length
+
+                Dim projectedEnd As Integer = foundEnd + prefixLen + suffixLen
+                If projectedEnd > allowedEnd Then Exit Do
+
+                ' 1) Unformat the matched content
+                If tweakReplacement IsNot Nothing Then tweakReplacement(searchRange.Font)
+
+                ' 2) Insert tokens
+                If prefixLen > 0 Then searchRange.InsertBefore(prefix)
+                If suffixLen > 0 Then searchRange.InsertAfter(suffix)
+
+                ' 3) Unformat tokens too
+                If tweakReplacement IsNot Nothing Then
+                    If prefixLen > 0 Then
+                        Dim leadingTok As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=foundStart, End:=foundStart + prefixLen)
+                        tweakReplacement(leadingTok.Font)
+                    End If
+                    If suffixLen > 0 Then
+                        Dim trailingStart As Integer = foundEnd + prefixLen
+                        Dim trailingTok As Microsoft.Office.Interop.Word.Range = doc.Range(Start:=trailingStart, End:=trailingStart + suffixLen)
+                        tweakReplacement(trailingTok.Font)
+                    End If
+                End If
+
+                currentPosition = foundEnd + prefixLen + suffixLen
+            End If
+
+            allowedEnd = rng.End
+        Loop
+
+        rng.SetRange(Start:=originalStart, End:=allowedEnd)
+    End Sub
+
+    Private Sub oldReplaceWithinRange(
+    ByVal rng As Microsoft.Office.Interop.Word.Range,
+    ByVal configureFind As System.Action(Of Microsoft.Office.Interop.Word.Find),
+    ByVal replacementText As System.String,
+    ByVal tweakReplacement As System.Action(Of Microsoft.Office.Interop.Word.Font))
+
+        Dim doc As Microsoft.Office.Interop.Word.Document = rng.Document
+
         ' Ursprungsgrenzen merken
         Dim originalStart As System.Int32 = rng.Start
         Dim originalEnd As System.Int32 = rng.End
@@ -11203,57 +11352,6 @@ Public Class ThisAddIn
 
 
 
-    Private Sub OldReplaceWithinRange(
-    ByVal rng As Word.Range,
-    ByVal configureFind As Action(Of Word.Find),
-    ByVal replacementText As String,
-    ByVal tweakReplacement As Action(Of Word.Font))
-
-        Dim doc As Word.Document = rng.Document
-        Dim originalStart As Long = rng.Start
-        Dim originalEnd As Long = rng.End
-        Dim currentPosition As Long = originalStart
-
-        Do
-            ' Create a range from current position to the end of the original range
-            Dim searchRange As Word.Range = doc.Range(currentPosition, originalEnd)
-            Dim f As Word.Find = searchRange.Find
-
-            Debug.WriteLine($"Searchrange = '{searchRange.Text}'")
-
-            f.ClearFormatting()
-            f.Replacement.ClearFormatting()
-
-            configureFind(f)
-            f.Replacement.Text = replacementText
-            tweakReplacement(f.Replacement.Font)
-
-            f.Forward = True
-            f.Wrap = Word.WdFindWrap.wdFindStop
-            f.Format = True
-
-            ' If no more matches, exit
-            If Not f.Execute(Replace:=Word.WdReplace.wdReplaceOne) Then Exit Do
-
-            Debug.WriteLine($"Searchrange = '{searchRange.Text}' (after change)")
-
-            ' After replacement, searchRange now points to the match
-            ' Check if this match/replacement went beyond our boundary
-            If searchRange.End > originalEnd Then
-                Debug.WriteLine("Went too far!")
-                doc.Undo()
-                Exit Do
-            End If
-
-            ' Set the current position to continue from the end of this match
-            currentPosition = searchRange.End
-            originalEnd = rng.End
-
-        Loop While currentPosition < originalEnd
-
-        ' Update the original range to reflect the final processed area
-        rng.SetRange(originalStart, originalEnd)
-    End Sub
 
 
 
@@ -20887,6 +20985,7 @@ Public Class ThisAddIn
         Return matches
     End Function
 
+
     Private Function ParseDocCheckFile(ByVal filePath As System.String, ByVal isLocal As System.Boolean) As System.Collections.Generic.List(Of DocCheckRuleSet)
         Dim sets As System.Collections.Generic.List(Of DocCheckRuleSet) = New System.Collections.Generic.List(Of DocCheckRuleSet)()
 
@@ -20894,27 +20993,31 @@ Public Class ThisAddIn
             ' Datei-Default-Prompts (gelten als Fallback in dieser Datei)
             Dim fileDefaultClausePrompt As System.String = Nothing
             Dim fileDefaultMultiPrompt As System.String = Nothing
+            Dim fileDefaultNotice As System.String = Nothing   ' << NEW: file-level Notice
 
             ' Aktueller Segment-Status
             Dim currentTitle As System.String = Nothing
             Dim jsonBuilder As System.Text.StringBuilder = New System.Text.StringBuilder()
             Dim segClausePrompt As System.String = Nothing
             Dim segMultiPrompt As System.String = Nothing
+            Dim segNotice As System.String = Nothing           ' << NEW: segment-level Notice
 
             ' Lokale Routine: aktuelles Segment flushen
             Dim FlushCurrent As System.Action =
-        Sub()
-            Dim raw As System.String = jsonBuilder.ToString().Trim()
-            If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
-                ' Effektive Prompts bestimmen: Segment > Datei-Default > globaler Default (in CreateRuleSet finalisiert)
-                Dim effClause As System.String = If(segClausePrompt, fileDefaultClausePrompt)
-                Dim effMulti As System.String = If(segMultiPrompt, fileDefaultMultiPrompt)
-                sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal, effClause, effMulti))
-            End If
-            jsonBuilder.Clear()
-            segClausePrompt = Nothing
-            segMultiPrompt = Nothing
-        End Sub
+    Sub()
+        Dim raw As System.String = jsonBuilder.ToString().Trim()
+        If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
+            ' Effektive Prompts bestimmen: Segment > Datei-Default > globale Defaults (Notice hat gleiche Priorität)
+            Dim effClause As System.String = If(segClausePrompt, fileDefaultClausePrompt)
+            Dim effMulti As System.String = If(segMultiPrompt, fileDefaultMultiPrompt)
+            Dim effNotice As System.String = If(segNotice, fileDefaultNotice)
+            sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal, effClause, effMulti, effNotice)) ' << PASS NOTICE
+        End If
+        jsonBuilder.Clear()
+        segClausePrompt = Nothing
+        segMultiPrompt = Nothing
+        segNotice = Nothing  ' << RESET SEGMENT NOTICE
+    End Sub
 
             For Each rawLine As System.String In System.IO.File.ReadLines(filePath)
                 If rawLine Is Nothing Then
@@ -20925,6 +21028,18 @@ Public Class ThisAddIn
 
                 ' Kommentarzeilen überspringen
                 If line.StartsWith(";", System.StringComparison.Ordinal) Then
+                    Continue For
+                End If
+
+                ' Notice-Zeile?
+                Dim noticeValue As System.String = Nothing
+                If TryParseNoticeLine(line, noticeValue) Then
+                    If currentTitle IsNot Nothing Then
+                        segNotice = noticeValue
+                    Else
+                        fileDefaultNotice = noticeValue
+                    End If
+                    ' Notice-Zeilen NICHT ins JSON übernehmen
                     Continue For
                 End If
 
@@ -20976,13 +21091,36 @@ Public Class ThisAddIn
     End Function
 
 
+    Private Function TryParseNoticeLine(ByVal line As System.String, ByRef noticeOut As System.String) As System.Boolean
+        noticeOut = Nothing
+        If line Is Nothing Then
+            Return False
+        End If
+
+        Dim m As System.Text.RegularExpressions.Match =
+        System.Text.RegularExpressions.Regex.Match(
+            line,
+            "^\s*Notice\s*=\s*(.*)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        )
+
+        If m IsNot Nothing AndAlso m.Success = True Then
+            noticeOut = m.Groups(1).Value.Trim()
+            Return True
+        End If
+
+        Return False
+    End Function
+
+
 
     Private Function CreateRuleSet(ByVal title As System.String,
                                ByVal rawJson As System.String,
                                ByVal sourcePath As System.String,
                                ByVal isLocal As System.Boolean,
                                ByVal fileOrSegmentClausePrompt As System.String,
-                               ByVal fileOrSegmentMultiPrompt As System.String) As DocCheckRuleSet
+                               ByVal fileOrSegmentMultiPrompt As System.String,
+                               ByVal fileOrSegmentNotice As System.String) As DocCheckRuleSet   ' << CHANGED SIGNATURE
 
         Dim rs As DocCheckRuleSet = New DocCheckRuleSet()
         rs.Title = title
@@ -20994,9 +21132,11 @@ Public Class ThisAddIn
         rs.RecordJsons = ExtractRecordJsonStrings(rawJson)
 
         ' Effektive Prompts finalisieren:
-        '   - Wenn weder Segment- noch Datei-Default vorhanden, auf globale Defaults zurückfallen
         rs.ClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentClausePrompt), fileOrSegmentClausePrompt, SP_DocCheck_Clause)
         rs.MultiClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentMultiPrompt), fileOrSegmentMultiPrompt, SP_DocCheck_MultiClause)
+
+        ' Notice übernehmen (kann Nothing sein)
+        rs.NoticeText = If(fileOrSegmentNotice, Nothing)
 
         Return rs
     End Function
@@ -21032,7 +21172,6 @@ Public Class ThisAddIn
 
 
     ' ========================= Execution =========================
-
     Private Async Function RunIsolatedClause(ByVal ruleSet As DocCheckRuleSet,
                                          ByVal textToAnalyze As System.String,
                                          ByVal insertDocs As System.String,
@@ -21046,7 +21185,6 @@ Public Class ThisAddIn
                 Return System.String.Empty
             End If
 
-            ' System-Prompt: pro-RuleSet effektiver Prompt + optional Bubbles + gesamtes RuleSet (verbatim)
             Dim systemPrompt As System.String =
             ruleSet.ClausePrompt & System.Environment.NewLine &
             (If(PutinBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
@@ -21057,15 +21195,24 @@ Public Class ThisAddIn
             End If
 
             Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
-
             answer = answer.Trim()
 
             If Len(answer) > 3 Then
                 If PutinBubbles Then
-
+                    Dim docRef As Word.Document = Selection.Range.Document
+                    Dim endPos As Integer = Selection.Range.End
                     SetBubbles(answer, Selection, False)
-
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        ShowCustomMessageBox("DocCheck analysis completed." & vbCrLf & vbCrLf & ruleSet.NoticeText)
+                    End If
+                    ' Add the Notice as a final bubble at the selection end (no text applied)
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        AddNoticeBubbleAt(docRef, endPos, ruleSet.NoticeText)
+                    End If
                 Else
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        answer &= vbCrLf & vbCrLf & ruleSet.NoticeText
+                    End If
                     ShowDocCheckResult(answer)
                 End If
             End If
@@ -21073,13 +21220,15 @@ Public Class ThisAddIn
             Return answer
 
         Catch ex As System.Exception
-            ShowCustomMessageBox("DocCheck 'Single Clause' run failed: " & ex.Message)
+            ShowCustomMessageBox("DocCheck 'One Clause' run failed: " & ex.Message)
             Return System.String.Empty
         End Try
     End Function
 
 
 
+
+    ' Multi clause:
     Private Async Function RunSetOfClauses(ByVal ruleSet As DocCheckRuleSet,
                                        ByVal textToAnalyze As System.String,
                                        ByVal insertDocs As System.String,
@@ -21089,7 +21238,6 @@ Public Class ThisAddIn
         Try
             Dim records As System.Collections.Generic.List(Of System.String) = ruleSet.RecordJsons
             If records Is Nothing OrElse records.Count = 0 Then
-                ' Lazy Extract
                 records = ExtractRecordJsonStrings(ruleSet.RawJson)
                 If records Is Nothing OrElse records.Count = 0 Then
                     ShowCustomMessageBox("This rule set contains no valid records. Expected a JSON object with 'Records', or an array/object representing records.")
@@ -21097,7 +21245,6 @@ Public Class ThisAddIn
                 End If
             End If
 
-            ' Progress UI
             ShowProgressBarInSeparateThread(AN & " DocCheck", "Analyzing text...")
             ProgressBarModule.CancelOperation = False
 
@@ -21108,6 +21255,10 @@ Public Class ThisAddIn
             Dim OverallAnswer As System.String = System.String.Empty
             Dim idx As System.Int32 = 0
 
+            ' Capture doc and end-of-selection ONCE for the final notice bubble
+            Dim docRef As Word.Document = Selection.Range.Document
+            Dim endPos As Integer = Selection.Range.End
+
             For Each recordJson As System.String In records
                 If ProgressBarModule.CancelOperation = True Then
                     ShowCustomMessageBox("Analysis aborted by user.")
@@ -21117,7 +21268,6 @@ Public Class ThisAddIn
                 GlobalProgressValue = idx
                 GlobalProgressLabel = "Analyzing rule " & (idx + 1).ToString() & " of " & records.Count.ToString()
 
-                ' System-Prompt: pro-RuleSet effektiver MultiClause-Prompt + optional Bubbles + einzelne Record JSON
                 Dim systemPrompt As System.String =
                 ruleSet.MultiClausePrompt & System.Environment.NewLine &
                 (If(PutInBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
@@ -21129,14 +21279,12 @@ Public Class ThisAddIn
                 End If
 
                 Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
-
                 answer = answer.Trim()
 
                 If Len(answer) > 3 Then
                     If PutInBubbles Then
                         SetBubbles(answer, Selection, True)
                     Else
-                        'OverallAnswer &= "Rule " & (idx + 1).ToString() & ":" & System.Environment.NewLine & System.Environment.NewLine & answer & System.Environment.NewLine & System.Environment.NewLine
                         OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
                     End If
                 End If
@@ -21148,16 +21296,24 @@ Public Class ThisAddIn
                 If PutInBubbles = False Then
                     GlobalProgressLabel = "Creating final report..."
                     GlobalProgressValue = idx
-                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SP_DocCheck_MulticlauseSum), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SP_DocCheck_MultiClauseSum), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
                     ProgressBarModule.CancelOperation = True
-                    If OverallAnswer2.Trim() = "" Then
-                        ShowDocCheckResult(OverallAnswer)
-                    Else
-                        ShowDocCheckResult(OverallAnswer2)
+
+                    Dim finalReport As System.String = If(OverallAnswer2 IsNot Nothing AndAlso OverallAnswer2.Trim() <> "", OverallAnswer2, OverallAnswer)
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        finalReport &= vbCrLf & vbCrLf & ruleSet.NoticeText
                     End If
+                    ShowDocCheckResult(finalReport)
                 Else
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        AddNoticeBubbleAt(docRef, endPos, ruleSet.NoticeText)
+                    End If
                     ProgressBarModule.CancelOperation = True
-                    ShowCustomMessageBox("DocCheck analysis completed - check out the comments added (if any).")
+                    Dim msg As System.String = "DocCheck analysis completed - check out the comments added (if any)."
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        msg &= vbCrLf & vbCrLf & ruleSet.NoticeText
+                    End If
+                    ShowCustomMessageBox(msg)
                 End If
             End If
 
@@ -21170,6 +21326,17 @@ Public Class ThisAddIn
         End Try
     End Function
 
+
+    ' Helper to add a zero-length comment at a specific position
+    Private Sub AddNoticeBubbleAt(doc As Word.Document, endPos As Integer, noticeText As String)
+        Try
+            If doc Is Nothing OrElse String.IsNullOrWhiteSpace(noticeText) Then Return
+            Dim rng As Word.Range = doc.Range(endPos, endPos) ' zero-length anchor
+            doc.Comments.Add(rng, $"{AN5}: " & noticeText)
+        Catch
+            ' Swallow – adding the notice must not break the main flow
+        End Try
+    End Sub
 
 
 
@@ -21296,6 +21463,7 @@ Public Class ThisAddIn
         Public Property RecordJsons As System.Collections.Generic.List(Of System.String)
         Public Property ClausePrompt As System.String
         Public Property MultiClausePrompt As System.String
+        Public Property NoticeText As System.String
     End Class
     ' ========================= Small utility =========================
     Private Function MakeUniqueDisplay(ByVal baseText As System.String, ByVal existing As System.Collections.Generic.ICollection(Of System.String)) As System.String

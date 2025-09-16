@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.9.2025
+' 16.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -10551,10 +10551,8 @@ Namespace SharedLibrary
 
             If Not IsNothing(updatedValues) Then
 
-                ' Check if the Save button was pressed (updatedValues differs from variableValues)
-                If Not updatedValues.Equals(variableValues) Then
-                    ' Update the original variables with the returned values
-                    If updatedValues.ContainsKey("APIKey") Then context.INI_APIKeyBack = updatedValues("APIKey")
+                ' Update the original variables with the returned values
+                If updatedValues.ContainsKey("APIKey") Then context.INI_APIKeyBack = updatedValues("APIKey")
                     If updatedValues.ContainsKey("Temperature") Then context.INI_Temperature = updatedValues("Temperature")
                     If updatedValues.ContainsKey("Timeout") Then context.INI_Timeout = CLng(updatedValues("Timeout"))
                     If updatedValues.ContainsKey("MaxOutputToken") Then context.INI_MaxOutputToken = CInt(updatedValues("MaxOutputToken"))
@@ -10699,9 +10697,8 @@ Namespace SharedLibrary
                     If updatedValues.ContainsKey("DocCheckPathLocal") Then context.INI_DocCheckPathLocal = updatedValues("DocCheckPathLocal")
                     If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
 
-                    ' Call UpdateAppConfig after all updates
-                    UpdateAppConfig(context)
-                End If
+                ' Call UpdateAppConfig after all updates
+                UpdateAppConfig(context)
             End If
         End Sub
 
