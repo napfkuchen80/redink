@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.9.2025
+' 22.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -177,7 +177,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.160925 Gen2 Beta Test"
+    Public Const Version As String = "V.220925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1986,6 +1986,191 @@ Public Class ThisAddIn
 
     Public Sub MainMenu(RI_Command As String)
 
+        ' Acquire single-entry guard; if already in MainMenu, bail out
+        If System.Threading.Interlocked.CompareExchange(inMainMenu, 1, 0) <> 0 Then Return
+
+        Try
+            If IsInResumeCooldown() Then
+                SLib.ShowCustomMessageBox("Outlook is resuming from sleep. Please try again in a few seconds.")
+                Return
+            End If
+
+            If Not INIloaded Then
+                If Not StartupInitialized Then
+                    Try
+                        DelayedStartupTasks()
+                        RemoveHandler outlookExplorer.Activate, AddressOf Explorer_Activate
+                    Catch ex As System.Exception
+                    End Try
+                    If Not INIloaded Then Exit Sub
+                Else
+                    InitializeConfig(False, False)
+                    If Not INIloaded Then
+                        Exit Sub
+                    End If
+                End If
+            End If
+
+            InitializeConfig(False, False)
+
+            If GPTSetupError OrElse INIValuesMissing() Or Not INIloaded Then Return
+
+            ' Use fully qualified names to avoid ambiguity
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
+
+            Dim Textlength As Long
+
+            If inspector Is Nothing Then
+
+                InspectorOpened = False
+
+                OpenInspectorAndReapplySelection(RI_Command)
+
+                If Not InspectorOpened Then Exit Sub
+
+                inspector = ComRetry(Function() outlookApp.ActiveInspector())
+                If inspector Is Nothing Then
+                    System.Windows.Forms.MessageBox.Show("Error in MainMenu: No active email item found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
+            End If
+
+            Dim curr As Object = ComRetry(Function() inspector.CurrentItem)
+            If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
+                Return
+            End If
+
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
+
+            Select Case RI_Command
+
+                Case "Translate"
+                    TranslateLanguage = ""
+                    TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
+                    If String.IsNullOrEmpty(TranslateLanguage) Then Return
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
+                Case "PrimLang"
+                    TranslateLanguage = INI_Language1
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
+                Case "Correct"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Correct), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Summarize"
+
+                    Textlength = GetSelectedTextLength()
+
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Exit Sub
+                    End If
+
+                    Dim UserInput As String
+                    SummaryLength = 0
+
+                    Do
+                        UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)))
+
+                        If String.IsNullOrEmpty(UserInput) Then
+                            Exit Sub
+                        End If
+
+                        If Integer.TryParse(UserInput, SummaryLength) AndAlso SummaryLength >= 1 AndAlso SummaryLength <= Textlength Then
+                            Exit Do
+                        Else
+                            SLib.ShowCustomMessageBox("Please enter a valid word count between 1 and " & Textlength & ".")
+                        End If
+                    Loop
+                    If SummaryLength = 0 Then Exit Sub
+                    'SummaryLength = (Textlength - (Textlength * SummaryPercent / 100))'
+
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Summarize), False)
+                Case "Improve"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Improve), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "NoFillers"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_NoFillers), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "ApplyMyStyle"
+                    Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
+
+                    If String.IsNullOrWhiteSpace(StylePath) Then
+                        ShowCustomMessageBox("You have not defined a MyStyle prompt file. Please do so first in the configuration file or using 'Settings'.")
+                        Return
+                    End If
+                    If Not IO.File.Exists(StylePath) Then
+                        ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                        Return
+                    End If
+
+                    Textlength = GetSelectedTextLength()
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Return
+                    End If
+
+                    MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Outlook", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", False)
+                    If MyStyleInsert = "ERROR" Then Return
+                    If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then
+                        Return
+                    End If
+
+                    Command_InsertAfter(InterpolateAtRuntime(SP_MyStyle_Apply) & " " & MyStyleInsert, INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+
+                Case "Friendly"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Friendly), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Convincing"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Convincing), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Shorten"
+                    Textlength = GetSelectedTextLength()
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Exit Sub
+                    End If
+                    Dim UserInput As String
+                    Dim ShortenPercentValue As Integer = 0
+                    Do
+                        UserInput = Trim(SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%"))
+                        If String.IsNullOrEmpty(UserInput) Then
+                            Exit Sub
+                        End If
+                        UserInput = UserInput.Replace("%", "").Trim()
+                        If Integer.TryParse(UserInput, ShortenPercentValue) AndAlso ShortenPercentValue >= 1 AndAlso ShortenPercentValue <= 99 Then
+                            Exit Do
+                        Else
+                            SLib.ShowCustomMessageBox("Please enter a valid percentage between 1 And 99.")
+                        End If
+                    Loop
+                    ShortenLength = (Textlength - (Textlength * (100 - ShortenPercent) / 100))
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Shorten), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Sumup"
+
+                    Dim selectedText As String = mailItem.Body
+                    ShowSumup(selectedText)
+
+                'FreeStyle_InsertBefore(SP_MailSumup, False)
+                Case "Answers"
+                    FreeStyle_InsertBefore(SP_MailReply, True)
+                Case "Freestyle"
+                    FreeStyle_InsertAfter()
+                Case "InsertClipboard"
+                    InsertClipboard()
+                Case Else
+                    System.Windows.Forms.MessageBox.Show("Error in MainMenu: Invalid internal command.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Select
+
+            If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
+
+        Catch ex As System.Exception
+            System.Windows.Forms.MessageBox.Show("Error in MainMenu: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Finally
+            ' Always release the reentrancy guard so subsequent calls work
+            System.Threading.Interlocked.Exchange(inMainMenu, 0)
+        End Try
+    End Sub
+
+    Public Sub OldMainMenu(RI_Command As String)
+
         If System.Threading.Interlocked.Exchange(inMainMenu, 1) = 1 Then Return
 
         If IsInResumeCooldown() Then
@@ -2039,126 +2224,126 @@ Public Class ThisAddIn
 
 
             Dim curr As Object = ComRetry(Function() inspector.CurrentItem)
-                If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
-                    SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
-                    Return
-                End If
+            If curr Is Nothing OrElse Not TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem Then
+                SLib.ShowCustomMessageBox($"Please open an email for editing for using {AN}.")
+                Return
+            End If
 
-                Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
+            Dim mailItem As Microsoft.Office.Interop.Outlook.MailItem = CType(curr, Microsoft.Office.Interop.Outlook.MailItem)
             Dim wordEditor As Microsoft.Office.Interop.Word.Document = ComRetry(Function() CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
 
             Select Case RI_Command
 
-                    Case "Translate"
-                        TranslateLanguage = ""
-                        TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
-                        If String.IsNullOrEmpty(TranslateLanguage) Then Return
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
-                    Case "PrimLang"
-                        TranslateLanguage = INI_Language1
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
-                    Case "Correct"
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Correct), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "Summarize"
+                Case "Translate"
+                    TranslateLanguage = ""
+                    TranslateLanguage = SLib.ShowCustomInputBox("Enter your target language:", $"{AN} Translate", True, INI_Language2)
+                    If String.IsNullOrEmpty(TranslateLanguage) Then Return
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
+                Case "PrimLang"
+                    TranslateLanguage = INI_Language1
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Translate), False, INI_KeepFormat1, INI_ReplaceText1)
+                Case "Correct"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Correct), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Summarize"
 
-                        Textlength = GetSelectedTextLength()
+                    Textlength = GetSelectedTextLength()
 
-                        If Textlength = 0 Then
-                            SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Exit Sub
+                    End If
+
+                    Dim UserInput As String
+                    SummaryLength = 0
+
+                    Do
+                        UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)))
+
+                        If String.IsNullOrEmpty(UserInput) Then
                             Exit Sub
                         End If
 
-                        Dim UserInput As String
-                        SummaryLength = 0
-
-                        Do
-                            UserInput = Trim(SLib.ShowCustomInputBox("Enter the number of words your summary shall have (the selected text has " & Textlength & " words; the proposal " & SummaryPercent & "%):", $"{AN} Summarizer", True, CStr(Math.Round(SummaryPercent * Textlength / 100 / 5) * 5)))
-
-                            If String.IsNullOrEmpty(UserInput) Then
-                                Exit Sub
-                            End If
-
-                            If Integer.TryParse(UserInput, SummaryLength) AndAlso SummaryLength >= 1 AndAlso SummaryLength <= Textlength Then
-                                Exit Do
-                            Else
-                                SLib.ShowCustomMessageBox("Please enter a valid word count between 1 and " & Textlength & ".")
-                            End If
-                        Loop
-                        If SummaryLength = 0 Then Exit Sub
-                        'SummaryLength = (Textlength - (Textlength * SummaryPercent / 100))'
-
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Summarize), False)
-                    Case "Improve"
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Improve), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "NoFillers"
-                        Command_InsertAfter(InterpolateAtRuntime(SP_NoFillers), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "ApplyMyStyle"
-                        Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
-
-                        If String.IsNullOrWhiteSpace(StylePath) Then
-                            ShowCustomMessageBox("You have not defined a MyStyle prompt file. Please do so first in the configuration file or using 'Settings'.")
-                            Return
+                        If Integer.TryParse(UserInput, SummaryLength) AndAlso SummaryLength >= 1 AndAlso SummaryLength <= Textlength Then
+                            Exit Do
+                        Else
+                            SLib.ShowCustomMessageBox("Please enter a valid word count between 1 and " & Textlength & ".")
                         End If
-                        If Not IO.File.Exists(StylePath) Then
-                            ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
-                            Return
-                        End If
+                    Loop
+                    If SummaryLength = 0 Then Exit Sub
+                    'SummaryLength = (Textlength - (Textlength * SummaryPercent / 100))'
 
-                        Textlength = GetSelectedTextLength()
-                        If Textlength = 0 Then
-                            SLib.ShowCustomMessageBox("Please select the text to be processed.")
-                            Return
-                        End If
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Summarize), False)
+                Case "Improve"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Improve), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "NoFillers"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_NoFillers), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "ApplyMyStyle"
+                    Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
 
-                        MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Outlook", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", False)
-                        If MyStyleInsert = "ERROR" Then Return
-                        If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then
-                            Return
-                        End If
+                    If String.IsNullOrWhiteSpace(StylePath) Then
+                        ShowCustomMessageBox("You have not defined a MyStyle prompt file. Please do so first in the configuration file or using 'Settings'.")
+                        Return
+                    End If
+                    If Not IO.File.Exists(StylePath) Then
+                        ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                        Return
+                    End If
 
-                        Command_InsertAfter(InterpolateAtRuntime(SP_MyStyle_Apply) & " " & MyStyleInsert, INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                    Textlength = GetSelectedTextLength()
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Return
+                    End If
 
-                    Case "Friendly"
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Friendly), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "Convincing"
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Convincing), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "Shorten"
-                        Textlength = GetSelectedTextLength()
-                        If Textlength = 0 Then
-                            SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                    MyStyleInsert = MyStyleHelpers.SelectPromptFromMyStyle(StylePath, "Outlook", 0, "Choose the style prompt to apply …", $"{AN} MyStyle", False)
+                    If MyStyleInsert = "ERROR" Then Return
+                    If MyStyleInsert = "NONE" OrElse String.IsNullOrWhiteSpace(MyStyleInsert) Then
+                        Return
+                    End If
+
+                    Command_InsertAfter(InterpolateAtRuntime(SP_MyStyle_Apply) & " " & MyStyleInsert, INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+
+                Case "Friendly"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Friendly), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Convincing"
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Convincing), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Shorten"
+                    Textlength = GetSelectedTextLength()
+                    If Textlength = 0 Then
+                        SLib.ShowCustomMessageBox("Please select the text to be processed.")
+                        Exit Sub
+                    End If
+                    Dim UserInput As String
+                    Dim ShortenPercentValue As Integer = 0
+                    Do
+                        UserInput = Trim(SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%"))
+                        If String.IsNullOrEmpty(UserInput) Then
                             Exit Sub
                         End If
-                        Dim UserInput As String
-                        Dim ShortenPercentValue As Integer = 0
-                        Do
-                            UserInput = Trim(SLib.ShowCustomInputBox("Enter the percentage by which your text should be shortened (it has " & Textlength & " words; " & ShortenPercent & "% will cut approx. " & (Textlength * ShortenPercent / 100) & " words)", $"{AN} Shortener", True, CStr(ShortenPercent) & "%"))
-                            If String.IsNullOrEmpty(UserInput) Then
-                                Exit Sub
-                            End If
-                            UserInput = UserInput.Replace("%", "").Trim()
-                            If Integer.TryParse(UserInput, ShortenPercentValue) AndAlso ShortenPercentValue >= 1 AndAlso ShortenPercentValue <= 99 Then
-                                Exit Do
-                            Else
-                                SLib.ShowCustomMessageBox("Please enter a valid percentage between 1 And 99.")
-                            End If
-                        Loop
-                        ShortenLength = (Textlength - (Textlength * (100 - ShortenPercent) / 100))
-                        Command_InsertAfter(InterpolateAtRuntime(SP_Shorten), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
-                    Case "Sumup"
+                        UserInput = UserInput.Replace("%", "").Trim()
+                        If Integer.TryParse(UserInput, ShortenPercentValue) AndAlso ShortenPercentValue >= 1 AndAlso ShortenPercentValue <= 99 Then
+                            Exit Do
+                        Else
+                            SLib.ShowCustomMessageBox("Please enter a valid percentage between 1 And 99.")
+                        End If
+                    Loop
+                    ShortenLength = (Textlength - (Textlength * (100 - ShortenPercent) / 100))
+                    Command_InsertAfter(InterpolateAtRuntime(SP_Shorten), INI_DoMarkupOutlook, INI_KeepFormat2, INI_ReplaceText2, INI_MarkupMethodOutlook)
+                Case "Sumup"
 
-                        Dim selectedText As String = mailItem.Body
-                        ShowSumup(selectedText)
+                    Dim selectedText As String = mailItem.Body
+                    ShowSumup(selectedText)
 
                         'FreeStyle_InsertBefore(SP_MailSumup, False)
-                    Case "Answers"
-                        FreeStyle_InsertBefore(SP_MailReply, True)
-                    Case "Freestyle"
-                        FreeStyle_InsertAfter()
-                    Case "InsertClipboard"
-                        InsertClipboard()
-                    Case Else
-                        System.Windows.Forms.MessageBox.Show("Error in MainMenu: Invalid internal command.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                End Select
+                Case "Answers"
+                    FreeStyle_InsertBefore(SP_MailReply, True)
+                Case "Freestyle"
+                    FreeStyle_InsertAfter()
+                Case "InsertClipboard"
+                    InsertClipboard()
+                Case Else
+                    System.Windows.Forms.MessageBox.Show("Error in MainMenu: Invalid internal command.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Select
 
             If inspector IsNot Nothing Then Marshal.ReleaseComObject(inspector) : inspector = Nothing
             'If outlookApp IsNot Nothing Then Marshal.ReleaseComObject(outlookApp) : outlookApp = Nothing
@@ -4474,7 +4659,7 @@ Public Class ThisAddIn
         ' Insert each text chunk with the appropriate formatting
         For i = 0 To TextArray.Length - 1
 
-            System.Windows.Forms.Application.DoEvents()
+            'System.Windows.Forms.Application.DoEvents()
 
             If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And &H8000) <> 0 Then
                 Exit For
@@ -4864,11 +5049,19 @@ Public Class ThisAddIn
                         m.Result = New System.IntPtr(1)
                         Return
 
-                    Case PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND
+                    Case PBT_APMRESUMEAUTOMATIC
                         System.Threading.ThreadPool.QueueUserWorkItem(
-                    Sub(stateObj As System.Object)
-                        Try : owner.HandlePowerResumeAsync() : Catch : End Try
-                    End Sub)
+                        Sub(stateObj As System.Object)
+                            Try : owner.HandlePowerResumeAsync(userPresent:=False) : Catch : End Try
+                        End Sub)
+                        m.Result = New System.IntPtr(1)
+                        Return
+
+                    Case PBT_APMRESUMESUSPEND
+                        System.Threading.ThreadPool.QueueUserWorkItem(
+                        Sub(stateObj As System.Object)
+                            Try : owner.HandlePowerResumeAsync(userPresent:=True) : Catch : End Try
+                        End Sub)
                         m.Result = New System.IntPtr(1)
                         Return
                 End Select
@@ -4952,56 +5145,110 @@ Public Class ThisAddIn
     End Sub
 
 
-    Friend Sub HandlePowerResumeAsync()
+    Friend Sub HandlePowerResumeAsync(userPresent As Boolean)
         System.Threading.Tasks.Task.Run(
-        Async Function() As System.Threading.Tasks.Task
-            If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
+    Async Function() As System.Threading.Tasks.Task
+        If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
+        Try
+            Await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(False)
+
+            isShuttingDown = False
+
+            ' Tear down any stale listener
             Try
-                ' Small cushion; never Thread.Sleep on resume paths
-                Await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(False)
-
-                ' Allow listener loop to run again
-                isShuttingDown = False
-
-                ' Hard-release any stale listener quickly
-                Try
-                    If httpListener IsNot Nothing Then
-                        Try
-                            If httpListener.IsListening Then httpListener.Stop()
-                        Catch
-                        End Try
-                        Try : httpListener.Abort() : Catch : End Try
-                        Try : httpListener.Close() : Catch : End Try
-                    End If
-                Catch
-                Finally
-                    httpListener = Nothing
-                End Try
-
-                If wasListenerRunningBeforeSleep Then
+                If httpListener IsNot Nothing Then
                     Try
-                        Await System.Threading.Tasks.Task.Delay(3000).ConfigureAwait(False)
-                        StartupHttpListener()
+                        If httpListener.IsListening Then httpListener.Stop()
                     Catch
                     End Try
+                    Try : httpListener.Abort() : Catch : End Try
+                    Try : httpListener.Close() : Catch : End Try
                 End If
-
-                If wasLlmThreadAliveBeforeSleep Then
-                    Try : EnsureLlmUiThread() : Catch : End Try
-                End If
-
-                ' Re-enable watchdog after we’ve (re)started things
-                Try : StartListenerWatchdog() : Catch : End Try
-
-                resumeCooldownUntilUtc = System.DateTime.UtcNow.AddSeconds(15)
-
-                Await SwitchToUi(Sub() EnableOleFilterFor(60000)).ConfigureAwait(False)
-
+            Catch
             Finally
-                System.Threading.Interlocked.Exchange(powerChanging, 0)
-                suspendResumeGate.Release()
+                httpListener = Nothing
             End Try
-        End Function)
+
+            ' Only start listener once the user is present
+            If userPresent AndAlso wasListenerRunningBeforeSleep Then
+                Try
+                    Await System.Threading.Tasks.Task.Delay(3000).ConfigureAwait(False)
+                    StartupHttpListener()
+                Catch
+                End Try
+            End If
+
+            ' Do NOT recreate the legacy STA LLM thread anymore
+            ' If you leave this field in place it stays unused by design.
+            'If wasLlmThreadAliveBeforeSleep Then
+            '    Try : EnsureLlmUiThread() : Catch : End Try
+            'End If
+
+            Try : StartListenerWatchdog() : Catch : End Try
+
+            ' Longer post-resume cooldown
+            resumeCooldownUntilUtc = System.DateTime.UtcNow.AddSeconds(60)
+
+            Await SwitchToUi(Sub() EnableOleFilterFor(60000)).ConfigureAwait(False)
+
+        Finally
+            System.Threading.Interlocked.Exchange(powerChanging, 0)
+            suspendResumeGate.Release()
+        End Try
+    End Function)
+    End Sub
+
+    Friend Sub oldHandlePowerResumeAsync()
+        System.Threading.Tasks.Task.Run(
+    Async Function() As System.Threading.Tasks.Task
+        If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
+        Try
+            ' Small cushion; never Thread.Sleep on resume paths
+            Await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(False)
+
+            ' Allow listener loop to run again
+            isShuttingDown = False
+
+            ' Hard-release any stale listener quickly
+            Try
+                If httpListener IsNot Nothing Then
+                    Try
+                        If httpListener.IsListening Then httpListener.Stop()
+                    Catch
+                    End Try
+                    Try : httpListener.Abort() : Catch : End Try
+                    Try : httpListener.Close() : Catch : End Try
+                End If
+            Catch
+            Finally
+                httpListener = Nothing
+            End Try
+
+            If wasListenerRunningBeforeSleep Then
+                Try
+                    Await System.Threading.Tasks.Task.Delay(3000).ConfigureAwait(False)
+                    StartupHttpListener()
+                Catch
+                End Try
+            End If
+
+            If wasLlmThreadAliveBeforeSleep Then
+                Try : EnsureLlmUiThread() : Catch : End Try
+            End If
+
+            ' Re-enable watchdog after we’ve (re)started things
+            Try : StartListenerWatchdog() : Catch : End Try
+
+            ' Increased cool-down window after resume
+            resumeCooldownUntilUtc = System.DateTime.UtcNow.AddSeconds(45)
+
+            Await SwitchToUi(Sub() EnableOleFilterFor(60000)).ConfigureAwait(False)
+
+        Finally
+            System.Threading.Interlocked.Exchange(powerChanging, 0)
+            suspendResumeGate.Release()
+        End Try
+    End Function)
     End Sub
 
     Private Sub StopLlmUiThreadNonBlocking()
@@ -5268,60 +5515,20 @@ Public Class ThisAddIn
         If e Is Nothing Then Return
 
         Select Case e.Mode
-
             Case Microsoft.Win32.PowerModes.Suspend
-                ' Remember state
-                Try
-                    wasListenerRunningBeforeSleep =
-                    (httpListener IsNot Nothing AndAlso httpListener.IsListening)
-                Catch
-                    wasListenerRunningBeforeSleep = False
-                End Try
-                Try
-                    wasLlmThreadAliveBeforeSleep =
-                    (llmThread IsNot Nothing AndAlso llmThread.IsAlive)
-                Catch
-                    wasLlmThreadAliveBeforeSleep = False
-                End Try
-
-                ' Clean shutdown (awaitable via background Task)
-                System.Threading.Tasks.Task.Run(
-                Async Function()
-                    Try : Await ShutdownHttpListener().ConfigureAwait(False) : Catch : End Try
-                End Function)
+                ' Graceful listener stop in the background
+                System.Threading.ThreadPool.QueueUserWorkItem(
+                Sub(state As Object)
+                    Try : ShutdownHttpListener().GetAwaiter().GetResult() : Catch : End Try
+                End Sub)
 
             Case Microsoft.Win32.PowerModes.Resume
+                ' Avoid re-entrancy; delegate to unified resume path (userPresent:=True)
                 If System.Threading.Interlocked.Exchange(restartingAfterResume, 1) = 1 Then Return
-
-                System.Threading.Tasks.Task.Run(
-                Async Sub()
+                System.Threading.ThreadPool.QueueUserWorkItem(
+                Sub(state As Object)
                     Try
-                        ' short cushion; don't use Thread.Sleep on resume paths
-                        Await System.Threading.Tasks.Task.Delay(600).ConfigureAwait(False)
-
-                        ' Aggressively release any stale listener
-                        Try
-                            If httpListener IsNot Nothing Then
-                                Try
-                                    If httpListener.IsListening Then httpListener.Stop()
-                                Catch
-                                End Try
-                                Try : httpListener.Abort() : Catch : End Try
-                                Try : httpListener.Close() : Catch : End Try
-                            End If
-                        Catch
-                        Finally
-                            httpListener = Nothing
-                        End Try
-
-                        If wasListenerRunningBeforeSleep Then
-                            Try : StartupHttpListener() : Catch : End Try
-                        End If
-
-                        If wasLlmThreadAliveBeforeSleep Then
-                            Try : EnsureLlmUiThread() : Catch : End Try
-                        End If
-
+                        HandlePowerResumeAsync(userPresent:=True)
                     Finally
                         System.Threading.Interlocked.Exchange(restartingAfterResume, 0)
                     End Try
@@ -5741,7 +5948,21 @@ Public Class ThisAddIn
     ' Task until the user dismisses it.  Returns True if the user accepted,
     ' False if Esc was pressed (like the original code).
     '───────────────────────────────────────────────────────────────────────────
-    Private Function CompareAndInsertSyncConfirm(
+
+    Private Async Function CompareAndInsertSyncConfirm(
+    originalText As String,
+    llmResult As String) _
+    As System.Threading.Tasks.Task(Of Boolean)
+
+        ' Show compare on UI thread
+        Await SwitchToUi(Sub() CompareAndInsertText(originalText, llmResult, True)).ConfigureAwait(False)
+
+        ' Await user decision (Esc = False, OK/close = True)
+        Dim accepted As Boolean = Await WaitForPreviewDecisionAsync().ConfigureAwait(False)
+        Return accepted
+    End Function
+
+    Private Function oldCompareAndInsertSyncConfirm(
         originalText As String,
         llmResult As String) _
         As System.Threading.Tasks.Task(Of Boolean)
