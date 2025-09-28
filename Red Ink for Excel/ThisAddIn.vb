@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 16.9.2025
+' 28.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -206,7 +206,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.160925 Gen2 Beta Test"
+    Public Const Version As String = "V.280925 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -854,6 +854,23 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_FindClause As String
+        Get
+            Return _context.SP_FindClause
+        End Get
+        Set(value As String)
+            _context.SP_FindClause = value
+        End Set
+    End Property
+
+    Public Shared Property SP_FindClause_Clean As String
+        Get
+            Return _context.SP_FindClause_Clean
+        End Get
+        Set(value As String)
+            _context.SP_FindClause_Clean = value
+        End Set
+    End Property
     Public Shared Property SP_DocCheck_Clause As String
         Get
             Return _context.SP_DocCheck_Clause
@@ -881,6 +898,14 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_MultiClauseSum_Bubbles As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum_Bubbles
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum_Bubbles = value
+        End Set
+    End Property
 
     Public Shared Property SP_SuggestTitles As String
         Get
@@ -1564,6 +1589,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_SpecialServicePath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_FindClausePath As String
+        Get
+            Return _context.INI_FindClausePath
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_FindClausePathLocal As String
+        Get
+            Return _context.INI_FindClausePathLocal
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePathLocal = value
         End Set
     End Property
 
@@ -2517,17 +2560,45 @@ Public Class ThisAddIn
             OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ColorTrigger), "", RegexOptions.IgnoreCase)
         End If
 
-        If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
-            DragDropFormLabel = ""
-            DragDropFormFilter = ""
-            Dim doc As String = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object), True)
-            If String.IsNullOrWhiteSpace(doc) Then
-                ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
-                Return False
+        If Not String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
+            ' Count total occurrences first (case-insensitive) so inserted file text containing {doc} does not trigger extra loops.
+            Dim totalOccurrences As Integer = Regex.Matches(OtherPrompt, Regex.Escape(ExtTrigger), RegexOptions.IgnoreCase).Count
+
+            If totalOccurrences = 1 Then
+                ' Original single-occurrence behavior
+                DragDropFormLabel = ""
+                DragDropFormFilter = ""
+                Dim doc As String = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object), True)
+                If String.IsNullOrWhiteSpace(doc) Then
+                    ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
+                    Return False
+                End If
+                OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
+                ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
+            Else
+                ' Multi-occurrence behavior: prompt separately for each placeholder
+                For occurrence As Integer = 1 To totalOccurrences
+                    Dim idx As Integer = OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase)
+                    If idx < 0 Then Exit For
+
+                    DragDropFormLabel = ""
+                    DragDropFormFilter = ""
+                    Dim docPart As String = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object), True)
+                    If String.IsNullOrWhiteSpace(docPart) Then
+                        ShowCustomMessageBox($"The file you selected for occurrence #{occurrence} is empty or not supported - exiting.")
+                        Return False
+                    End If
+
+                    ' Replace only the first remaining occurrence (manual replacement keeps later placeholders intact)
+                    OtherPrompt = OtherPrompt.Substring(0, idx) & docPart & OtherPrompt.Substring(idx + ExtTrigger.Length)
+
+                    ShowCustomMessageBox($"This file will be included at occurrence #{occurrence} (of {totalOccurrences}) where you used {ExtTrigger}:" &
+                                         vbCrLf & vbCrLf & docPart)
+                Next
             End If
-            OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
-            ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
         End If
+
+
 
         If Not String.IsNullOrEmpty(OtherPrompt) And OtherPrompt.IndexOf(ExtWSTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
             If Not DoRange Then

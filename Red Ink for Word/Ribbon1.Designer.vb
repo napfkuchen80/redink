@@ -81,6 +81,8 @@ Partial Class Ribbon1
         Me.RI_SuggestTitles = Me.Factory.CreateRibbonButton
         Me.RI_SpecialModel = Me.Factory.CreateRibbonButton
         Me.RI_DocCheck = Me.Factory.CreateRibbonButton
+        Me.RI_FindClause = Me.Factory.CreateRibbonButton
+        Me.RI_AddClause = Me.Factory.CreateRibbonButton
         Me.RI_CreatePodcast = Me.Factory.CreateRibbonButton
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
         Me.RI_DefineMyStyle = Me.Factory.CreateRibbonButton
@@ -310,6 +312,8 @@ Partial Class Ribbon1
         Me.Menu3.Items.Add(Me.RI_SuggestTitles)
         Me.Menu3.Items.Add(Me.RI_SpecialModel)
         Me.Menu3.Items.Add(Me.RI_DocCheck)
+        Me.Menu3.Items.Add(Me.RI_FindClause)
+        Me.Menu3.Items.Add(Me.RI_AddClause)
         Me.Menu3.Items.Add(Me.RI_CreatePodcast)
         Me.Menu3.Items.Add(Me.RI_CreateAudio)
         Me.Menu3.Items.Add(Me.RI_DefineMyStyle)
@@ -359,6 +363,22 @@ Partial Class Ribbon1
         Me.RI_DocCheck.OfficeImageId = "FilePrepareMenu"
         Me.RI_DocCheck.ScreenTip = "Check document or selection based on a predefined ruleset"
         Me.RI_DocCheck.ShowImage = True
+        '
+        'RI_FindClause
+        '
+        Me.RI_FindClause.Label = "Find Clause"
+        Me.RI_FindClause.Name = "RI_FindClause"
+        Me.RI_FindClause.OfficeImageId = "MailMergeFindRecipient"
+        Me.RI_FindClause.ScreenTip = "Will find matching clauses from the library you choose"
+        Me.RI_FindClause.ShowImage = True
+        '
+        'RI_AddClause
+        '
+        Me.RI_AddClause.Label = "Add Clause"
+        Me.RI_AddClause.Name = "RI_AddClause"
+        Me.RI_AddClause.OfficeImageId = "NewList"
+        Me.RI_AddClause.ScreenTip = "Will add your current selection to the clause library you choose"
+        Me.RI_AddClause.ShowImage = True
         '
         'RI_CreatePodcast
         '
@@ -698,6 +718,13 @@ Partial Class Ribbon1
             Me.RI_DocCheck.Visible = True
         End If
 
+        If Trim(ThisAddIn.INI_FindClausePath) = "" And Trim(ThisAddIn.INI_FindClausePathLocal) = "" Then
+            Me.RI_FindClause.Visible = False
+            Me.RI_AddClause.Visible = False
+        Else
+            Me.RI_FindClause.Visible = True
+            Me.RI_AddClause.Visible = True
+        End If
 
         Dim LastFreestylePrompt As String = My.Settings.LastFreestylePrompt
         If Trim(LastFreestylePrompt) = "" Then
@@ -766,6 +793,8 @@ Partial Class Ribbon1
     Friend WithEvents RI_ApplyMyStyle As RibbonButton
     Friend WithEvents RI_DefineMyStyle As RibbonButton
     Friend WithEvents RI_DocCheck As RibbonButton
+    Friend WithEvents RI_FindClause As RibbonButton
+    Friend WithEvents RI_AddClause As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

@@ -171,4 +171,12 @@ Public Class Ribbon1
     Private Sub RI_DocCheck_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_DocCheck.Click
         Globals.ThisAddIn.RunDocCheck()
     End Sub
+
+    Private Sub RI_FindClause_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_FindClause.Click
+        Globals.ThisAddIn.FindClause()
+    End Sub
+
+    Private Sub RI_AddClause_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_AddClause.Click
+        Globals.ThisAddIn.AddClause()
+    End Sub
 End Class

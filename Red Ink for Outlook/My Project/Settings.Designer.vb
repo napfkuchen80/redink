@@ -113,6 +113,30 @@ Namespace My
                 Me("Inky_DarkMode") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property ChatHistory_Inky2() As String
+            Get
+                Return CType(Me("ChatHistory_Inky2"),String)
+            End Get
+            Set
+                Me("ChatHistory_Inky2") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("1")>  _
+        Public Property Inky_LastChat() As Integer
+            Get
+                Return CType(Me("Inky_LastChat"),Integer)
+            End Get
+            Set
+                Me("Inky_LastChat") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

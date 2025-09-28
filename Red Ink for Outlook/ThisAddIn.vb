@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 22.9.2025
+' 28.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -123,6 +123,12 @@ Public Class ThisAddIn
             StartupInitialized = True
         End If
 
+        Try
+            activeChatId = If(My.Settings.Inky_LastChat = 2, 2, 1)
+        Catch
+            activeChatId = 1
+        End Try
+
     End Sub
 
     Private Sub Explorer_Activate()
@@ -177,7 +183,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.220925 Gen2 Beta Test"
+    Public Const Version As String = "V.280925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -834,6 +840,24 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_FindClause As String
+        Get
+            Return _context.SP_FindClause
+        End Get
+        Set(value As String)
+            _context.SP_FindClause = value
+        End Set
+    End Property
+
+    Public Shared Property SP_FindClause_Clean As String
+        Get
+            Return _context.SP_FindClause_Clean
+        End Get
+        Set(value As String)
+            _context.SP_FindClause_Clean = value
+        End Set
+    End Property
+
     Public Shared Property SP_DocCheck_Clause As String
         Get
             Return _context.SP_DocCheck_Clause
@@ -861,6 +885,14 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_DocCheck_MultiClauseSum_Bubbles As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum_Bubbles
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum_Bubbles = value
+        End Set
+    End Property
 
     Public Shared Property SP_SuggestTitles As String
         Get
@@ -1552,6 +1584,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_SpecialServicePath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_FindClausePath As String
+        Get
+            Return _context.INI_FindClausePath
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_FindClausePathLocal As String
+        Get
+            Return _context.INI_FindClausePathLocal
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePathLocal = value
         End Set
     End Property
 
@@ -5593,6 +5643,8 @@ Public Class ThisAddIn
     Private Const InkyApiRoute As String = "/inky/api"      ' POST (JSON) → commands
     Private Const InkyName As String = "Inky"               ' Fallback; AN6 preferred
 
+    Private activeChatId As Integer = 1   ' 1 or 2 – in‑memory only (not persisted)
+
 
     Private Async Function HandleHttpRequest(
     ByVal ctx As System.Net.HttpListenerContext
@@ -6232,22 +6284,39 @@ Public Class ThisAddIn
 
 
 
-    Private Function LoadInkyState() As InkyState
+    Private Function LoadInkyState(Optional chatId As Integer = -1) As InkyState
+        If chatId = -1 Then chatId = activeChatId
+        Dim settingKey As String = If(chatId = 2, "ChatHistory_Inky2", "ChatHistory_Inky")
         Try
-            Dim raw As System.String = My.Settings.ChatHistory_Inky
-            If System.String.IsNullOrWhiteSpace(raw) Then Return New InkyState()
-            Return Newtonsoft.Json.JsonConvert.DeserializeObject(Of InkyState)(raw)
+            Dim raw As String = ""
+            Try : raw = DirectCast(My.Settings.[GetType]().GetProperty(settingKey).GetValue(My.Settings, Nothing), String) : Catch : raw = "" : End Try
+            If String.IsNullOrWhiteSpace(raw) Then
+                Dim st As New InkyState()
+                ' Default dark mode on first empty chat
+                st.DarkMode = True
+                Return st
+            End If
+            Dim stLoaded = Newtonsoft.Json.JsonConvert.DeserializeObject(Of InkyState)(raw)
+            If stLoaded Is Nothing Then stLoaded = New InkyState()
+            Return stLoaded
         Catch
-            Return New InkyState()
+            Dim st As New InkyState() : st.DarkMode = True
+            Return st
         End Try
     End Function
 
-    Private Sub SaveInkyState(ByVal st As InkyState)
+    Private Sub SaveInkyState(st As InkyState, Optional chatId As Integer = -1)
+        If chatId = -1 Then chatId = activeChatId
+        Dim settingKey As String = If(chatId = 2, "ChatHistory_Inky2", "ChatHistory_Inky")
         Try
-            My.Settings.ChatHistory_Inky = Newtonsoft.Json.JsonConvert.SerializeObject(st)
-            My.Settings.Save()
+            Dim json = Newtonsoft.Json.JsonConvert.SerializeObject(st)
+            Try
+                My.Settings.[GetType]().GetProperty(settingKey).SetValue(My.Settings, json, Nothing)
+                My.Settings.Save()
+            Catch
+                ' ignore
+            End Try
         Catch
-            ' ignore persistence failures silently to never break Outlook
         End Try
     End Sub
 
@@ -6305,8 +6374,181 @@ Public Class ThisAddIn
     End Function
 
     ' Builds the entire HTML UI (single file; no external assets)
+
+
+    ' Builds the entire HTML UI (single file; neutral – no green/blue/red accents)
     Private Function BuildInkyHtmlPage() As System.String
-        ' Namen/Brand/Logo vorbereiten
+        Dim botName As String = GetBotName()
+        Dim brandName As String = If(Not String.IsNullOrWhiteSpace(AN), AN, botName)
+        Dim logoUrl As String = GetLogoDataUrl()
+        Dim greet As String = GetFriendlyGreeting()
+
+        Dim html As New System.Text.StringBuilder()
+
+        html.AppendLine("<!doctype html>")
+        html.AppendLine("<html lang=""en""><head><meta charset=""utf-8"">")
+        html.AppendLine("<meta name=""viewport"" content=""width=device-width, initial-scale=1"">")
+        html.AppendLine("<link rel=""shortcut icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
+        html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
+
+        ' ================= CSS (neutral grayscale + pressed feedback) =================
+        html.AppendLine("<style>")
+        html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9aa8b7;--border:#1b2430;--border-strong:#2d3744;--elev:#1a222c;--press-shadow:inset 0 2px 6px rgba(0,0,0,.45);}")
+        html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5d6a77;--border:#e2e5e9;--border-strong:#c9cfd6;--elev:#eef1f4;--press-shadow:inset 0 2px 5px rgba(0,0,0,.08);}")
+
+        html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
+        html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
+        html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
+        html.AppendLine(".topline{display:flex;align-items:center;gap:.6rem}")
+        html.AppendLine(".topline img.logo{width:24px;height:24px;border-radius:6px;display:block}")
+        html.AppendLine(".topline .brandbig{font-weight:700}")
+        html.AppendLine(".topline .sub{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".muted{color:var(--muted);font-size:.85rem}")
+        html.AppendLine(".spacer{flex:1}")
+        html.AppendLine("select,button,input,textarea{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.6rem;font:inherit;}")
+        html.AppendLine("select,button,input{padding:.5rem .7rem;}")
+        html.AppendLine("button{cursor:pointer;transition:background .16s,filter .12s,transform .08s,box-shadow .18s;}")
+        html.AppendLine("button:hover{filter:brightness(1.07)}")
+        html.AppendLine("button:disabled{opacity:.5;cursor:not-allowed}")
+        ' Press feedback states
+        html.AppendLine("button.is-pressed, .chatTab.is-pressed{transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.92);}")
+        html.AppendLine("button:active:not(:disabled){transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.9);}")
+        html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
+        html.AppendLine(".row{display:flex;margin:0 auto 1rem auto;max-width:1000px;padding:0 .25rem;}")
+        html.AppendLine(".row.bot{justify-content:flex-start}")
+        html.AppendLine(".row.user{justify-content:flex-end}")
+        html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,.25)}")
+        html.AppendLine(".bot .bubble{border-top-right-radius:.35rem}")
+        html.AppendLine(".user .bubble{border-top-left-radius:.35rem}")
+        html.AppendLine(".role{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}")
+        html.AppendLine(".inputbar{display:flex;gap:.5rem;padding:1rem;border-top:1px solid var(--border);background:var(--card)}")
+        html.AppendLine("textarea{flex:1;resize:vertical;min-height:52px;max-height:220px;border-radius:.8rem;padding:.75rem;line-height:1.25;}")
+        html.AppendLine(".hint{font-size:.7rem;letter-spacing:.3px;color:var(--muted);padding:.25rem 1rem 1rem}")
+        html.AppendLine("a{color:inherit;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35)}")
+        html.AppendLine(":root.light a{text-decoration-color:rgba(0,0,0,.4)}")
+        html.AppendLine("a:hover{filter:brightness(1.15)}")
+        html.AppendLine("code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
+        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem;position:relative;background:var(--elev);}")
+        html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;opacity:.5;animation:ping 1s ease-in-out infinite;}")
+        html.AppendLine("@keyframes ping{0%{transform:scale(.9);opacity:.25}50%{transform:scale(1.15);opacity:.9}100%{transform:scale(.9);opacity:.25}}")
+        html.AppendLine(".code-copy-btn{position:absolute;top:6px;right:6px;padding:4px 8px;font-size:.65rem;line-height:1;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--fg);opacity:0;transition:opacity .18s,background .18s;}")
+        html.AppendLine("pre:hover .code-copy-btn{opacity:1}")
+        html.AppendLine(".code-copy-btn svg{width:16px;height:16px;display:block}")
+        html.AppendLine(".code-copy-btn.copied{background:#2c3440;color:#fff}")
+        html.AppendLine(":root.light .code-copy-btn.copied{background:#d5d9dd;color:#111}")
+        html.AppendLine(".code-copy-btn:focus{outline:2px solid var(--border-strong);}")
+        html.AppendLine(".chatTab{padding:.45rem .55rem;min-width:32px;font-size:.7rem;font-weight:600;line-height:1;border:1px solid var(--border);background:var(--card);color:var(--muted);transition:background .18s,border-color .18s,color .18s,transform .08s,box-shadow .18s;}")
+        html.AppendLine(".chatTab:hover{background:var(--elev);color:var(--fg);}")
+        html.AppendLine(".chatTab.active{background:#222b35;border-color:var(--border-strong);color:#fff;box-shadow:inset 0 0 0 1px #303c46;}")
+        html.AppendLine(":root.light .chatTab.active{background:#e2e5e9;border-color:var(--border-strong);color:#0e1116;box-shadow:inset 0 0 0 1px #c9cfd6;}")
+        html.AppendLine(".chatTab:focus{outline:2px solid var(--border-strong);outline-offset:1px;}")
+        html.AppendLine("</style>")
+
+        html.AppendLine("</head><body>")
+        html.AppendLine("<div class=""wrap"">")
+
+        ' Topbar
+        html.AppendLine("  <div class=""topbar"">")
+        html.AppendLine("    <div class=""topline"">")
+        If Not String.IsNullOrWhiteSpace(logoUrl) Then
+            html.AppendLine("      <img class=""logo"" src=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """ alt=""logo"">")
+        End If
+        html.AppendLine("      <div class=""brandbig"">" & System.Net.WebUtility.HtmlEncode(brandName) & "</div>")
+        html.AppendLine("      <div class=""sub"">Local Chat</div>")
+        html.AppendLine("    </div>")
+        html.AppendLine("    <div class=""spacer""></div>")
+        html.AppendLine("    <select id=""modelSel"" title=""Model""></select>")
+        html.AppendLine("    <button id=""copyBtn"" title=""Copy last answer to clipboard"">Copy last</button>")
+        html.AppendLine("    <button id=""clearBtn"" title=""Clear current conversation"">Clear</button>")
+        html.AppendLine("    <button id=""chat1Btn"" class=""chatTab"" data-chat=""1"" title=""Chat 1"">1</button>")
+        html.AppendLine("    <button id=""chat2Btn"" class=""chatTab"" data-chat=""2"" title=""Chat 2"">2</button>")
+        html.AppendLine("    <button id=""themeBtn"" title=""Toggle theme"">Theme</button>")
+        html.AppendLine("  </div>")
+
+        html.AppendLine("  <div id=""chat"" class=""chat""></div>")
+
+        ' Input
+        html.AppendLine("  <div class=""inputbar"">")
+        html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
+        html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button><button id=""cancelBtn"" style=""display:none;"">Cancel</button></div>")
+        html.AppendLine("  </div>")
+        html.AppendLine("  <div class=""hint"">Drag & drop a file • Enter=send • Shift+Enter=newline • Ctrl+L=clear</div>")
+        html.AppendLine("</div>")
+
+        ' ================= JS =================
+        html.AppendLine("<script>")
+        html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
+        html.AppendLine("let __supportsFiles = false;")
+        html.AppendLine("let __pendingFilePath = '';")
+        html.AppendLine("let dark=false;")
+
+        ' Press interaction (delegated) - visual feedback
+        html.AppendLine("(function(){")
+        html.AppendLine("const add=(b)=>{if(!b) return;};")
+        html.AppendLine("const pressOn=(e)=>{const btn=e.target.closest('button');if(!btn||btn.disabled)return;btn.classList.add('is-pressed');};")
+        html.AppendLine("const pressOff=()=>{document.querySelectorAll('button.is-pressed').forEach(b=>b.classList.remove('is-pressed'));};")
+        html.AppendLine("document.addEventListener('mousedown',pressOn);")
+        html.AppendLine("document.addEventListener('touchstart',pressOn,{passive:true});")
+        html.AppendLine("document.addEventListener('mouseup',pressOff);")
+        html.AppendLine("document.addEventListener('mouseleave',pressOff);")
+        html.AppendLine("window.addEventListener('blur',pressOff);")
+        html.AppendLine("document.addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter')pressOff();});")
+        html.AppendLine("document.addEventListener('keydown',e=>{if((e.key===' '||e.key==='Enter')){const btn=e.target.closest('button');if(btn&&!btn.disabled)btn.classList.add('is-pressed');}});")
+        html.AppendLine("})();")
+
+        html.AppendLine("function copyText(t){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();res();}catch(e){rej(e);}});}")
+        html.AppendLine("function enhanceCodeBlocks(scope){(scope||document).querySelectorAll('pre').forEach(pre=>{if(pre.dataset.enhanced==='1')return;const btn=document.createElement('button');btn.type='button';btn.className='code-copy-btn';btn.innerHTML='<svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""/><path d=""M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1""/></svg>';btn.addEventListener('click',()=>{const code=pre.querySelector('code');const txt=code?code.innerText:pre.innerText;copyText(txt).then(()=>{btn.classList.add('copied');setTimeout(()=>btn.classList.remove('copied'),1500);});});pre.appendChild(btn);pre.dataset.enhanced='1';});}")
+        html.AppendLine("const api=async(cmd,data={})=>{try{const r=await fetch('/inky/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd},data))});const txt=await r.text();try{return JSON.parse(txt);}catch{return{ok:false,error:txt}}}catch(e){return{ok:false,error:e.message||'Network error'}}};")
+
+        html.AppendLine("const chatEl=document.getElementById('chat');")
+        html.AppendLine("const msgEl=document.getElementById('msg');")
+        html.AppendLine("const modelSel=document.getElementById('modelSel');")
+        html.AppendLine("const copyBtn=document.getElementById('copyBtn');")
+        html.AppendLine("const clearBtn=document.getElementById('clearBtn');")
+        html.AppendLine("const themeBtn=document.getElementById('themeBtn');")
+        html.AppendLine("const cancelBtn=document.getElementById('cancelBtn');")
+        html.AppendLine("const chat1Btn=document.getElementById('chat1Btn');")
+        html.AppendLine("const chat2Btn=document.getElementById('chat2Btn');")
+
+        html.AppendLine("function setTheme(isDark){dark=!!isDark;document.documentElement.classList.toggle('light',!dark);} ")
+        html.AppendLine("function forceExternalLinks(scope){try{(scope||document).querySelectorAll('a[href]').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer';});}catch{}}")
+        html.AppendLine("function setActiveChatBtn(id){document.querySelectorAll('.chatTab').forEach(b=>b.classList.toggle('active',b.dataset.chat==String(id)));}")
+
+        html.AppendLine("function render(turns){chatEl.innerHTML='';for(const t of (turns||[])){const row=document.createElement('div');row.className='row '+(t.role==='user'?'user':'bot');const bub=document.createElement('div');bub.className='bubble';const rl=document.createElement('div');rl.className='role';rl.textContent=(t.role==='user'?'You':(window.__botName||'Bot'));bub.appendChild(rl);const cont=document.createElement('div');if(t && t.html){cont.innerHTML=t.html;forceExternalLinks(cont);}else if(t && t.markdown){const safe=t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');cont.innerHTML=safe;}bub.appendChild(cont);row.appendChild(bub);chatEl.appendChild(row);}chatEl.scrollTop=chatEl.scrollHeight;enhanceCodeBlocks(chatEl);} ")
+        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
+        html.AppendLine("function replaceAssistantBubble(id,html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.bubble > div:nth-child(2)');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);}}")
+
+        html.AppendLine("async function boot(){const st=await api('inky_getstate');if(!st.ok){alert(st.error||'Init failed');return;}__supportsFiles=(st.supportsFiles===true);setTheme(st.darkMode!==false);render(st.history||[]);modelSel.innerHTML='';for(const m of (st.models||[])){const o=document.createElement('option');o.value=m.key||'';o.textContent=m.label||'';o.disabled=!!m.disabled;if(m.selected&&!o.disabled)o.selected=true;modelSel.appendChild(o);}if(!modelSel.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;}if(st.greeting && (!Array.isArray(st.history)||st.history.length===0)){msgEl.placeholder=st.greeting;}setActiveChatBtn(st.activeChat||1);} ")
+
+        html.AppendLine("async function send(){const t=msgEl.value.trim();if(!t)return;msgEl.value='';chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);const typingId=addTempAssistantBubble('<span class=""typing""></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;cancelBtn.style.display='inline-block';let res;try{res=await api('inky_send',payload);}catch(e){res={ok:false,error:e.message||'Network error'};}finally{cancelBtn.style.display='none';const tmp=document.getElementById(typingId);if(tmp)tmp.remove();}if(!res.ok){alert(res.error||'Error');return;}__pendingFilePath='';render(res.history||[]);} ")
+
+        html.AppendLine("(function(){const stop=e=>{e.preventDefault();e.stopPropagation();};['dragenter','dragover','dragleave','drop'].forEach(ev=>document.addEventListener(ev,stop,false));document.addEventListener('drop',async e=>{const files=[...(e.dataTransfer&&e.dataTransfer.files)||[]];if(!files.length)return;const f=files[0];if(!__supportsFiles){addTempAssistantBubble('File uploads are not supported for the current model.');return;}const tempId=addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${(f.size/1024).toFixed(1)} KB)…`);try{const fr=new FileReader();const dataUrl=await new Promise((res,rej)=>{fr.onerror=()=>rej(new Error('read error'));fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});const r=await api('inky_upload',{Name:f.name,DataUrl:String(dataUrl||'')});if(!r.ok){replaceAssistantBubble(tempId,'Upload failed: '+(r.error||'unknown'));return;}if(r.supported===false){replaceAssistantBubble(tempId,'File uploads are not supported for this model.');return;}__pendingFilePath=r.path||'';replaceAssistantBubble(tempId,`Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b>`);}catch(err){replaceAssistantBubble(tempId,'Upload failed: '+(err&&err.message?err.message:'unknown'));}} ,false);})();")
+
+        html.AppendLine("modelSel.addEventListener('change',async()=>{const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;return;}const r=await api('inky_setmodel',{Key:opt.value});if(!r.ok){alert(r.error||'Failed to set model');return;}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
+        html.AppendLine("clearBtn.addEventListener('click',async()=>{const r=await api('inky_clear');if(r.ok){render([]);if(r.greeting)msgEl.placeholder=r.greeting;}else{alert(r.error||'Failed to clear');}});")
+        html.AppendLine("copyBtn.addEventListener('click',async()=>{const r=await api('inky_copylast');if(!r.ok){alert(r.error||'Nothing to copy')}});")
+        html.AppendLine("themeBtn.addEventListener('click',async()=>{const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return;}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
+        html.AppendLine("msgEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}if(e.ctrlKey&&e.key.toLowerCase()==='l'){e.preventDefault();clearBtn.click();}});")
+        html.AppendLine("document.getElementById('sendBtn').addEventListener('click',send);")
+        html.AppendLine("cancelBtn.addEventListener('click',async()=>{await api('inky_cancel');cancelBtn.style.display='none';});")
+        html.AppendLine("chatEl.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;if(a.target!=='_blank'){a.target='_blank';a.rel='noopener noreferrer';}});")
+
+        html.AppendLine("async function switchChat(n){const r=await api('inky_switch',{Chat:String(n)});if(!r.ok){alert(r.error||'Switch failed');return;}setActiveChatBtn(r.activeChat||n);render(r.history||[]);if(r.greeting){msgEl.placeholder=r.greeting;}}")
+        html.AppendLine("chat1Btn.addEventListener('click',()=>switchChat(1));")
+        html.AppendLine("chat2Btn.addEventListener('click',()=>switchChat(2));")
+
+        html.AppendLine("boot();")
+        html.AppendLine("</script>")
+        html.AppendLine("</body></html>")
+        Return html.ToString()
+    End Function
+
+
+
+
+    ' Builds the entire HTML UI (single file; no external assets)
+    Private Function OldBuildInkyHtmlPage() As System.String
         Dim botName As System.String = GetBotName()
         Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)
         Dim logoUrl As System.String = GetLogoDataUrl()
@@ -6353,9 +6595,16 @@ Public Class ThisAddIn
         html.AppendLine(".hint{font-size:.8rem;color:var(--muted);padding:.25rem 1rem 1rem}")
         html.AppendLine(".system{opacity:.85;border-style:dashed}")
         html.AppendLine("a{color:var(--acc)} code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.9em}")
-        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem}")
+        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem;position:relative;}")
         html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;color:var(--muted);opacity:.5;animation:ping 1s ease-in-out infinite;}")
         html.AppendLine("@keyframes ping{0%{transform:scale(0.9);opacity:.25}50%{transform:scale(1.15);opacity:.95}100%{transform:scale(0.9);opacity:.25}}")
+        ' Copy button styles
+
+        html.AppendLine(".code-copy-btn{position:absolute;top:6px;right:6px;padding:3px 7px;font-size:.65rem;line-height:1;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);cursor:pointer;display:flex;align-items:center;gap:4px;color:var(--fg);opacity:0;transition:opacity .2s,background .2s;}")
+        html.AppendLine("pre:hover .code-copy-btn{opacity:1}")
+        html.AppendLine(".code-copy-btn svg{width:14px;height:14px;display:block}")
+        html.AppendLine(".code-copy-btn.copied{background:var(--acc);color:#fff}")
+        html.AppendLine(".code-copy-btn:focus{outline:2px solid var(--acc);}")
         html.AppendLine("</style>")
 
         html.AppendLine("</head><body>")
@@ -6392,7 +6641,11 @@ Public Class ThisAddIn
         html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
         html.AppendLine("let __supportsFiles = false;")
         html.AppendLine("let __pendingFilePath = '';")
-        html.AppendLine("")
+
+        ' Clipboard helper & code block enhancer
+        html.AppendLine("function copyText(t){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);res();}catch(e){rej(e);}});}")
+        html.AppendLine("function enhanceCodeBlocks(scope){const root=scope||document;const pres=root.querySelectorAll('pre');pres.forEach(pre=>{if(pre.dataset.enhanced==='1')return;const btn=document.createElement('button');btn.type='button';btn.className='code-copy-btn';btn.innerHTML='<svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""/><path d=""M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1""/></svg><span style=""position:absolute;left:-9999px;"">Copy</span>';btn.title='Copy code';btn.addEventListener('click',()=>{const code=pre.querySelector('code');const txt=code?code.innerText:pre.innerText;copyText(txt).then(()=>{btn.classList.add('copied');btn.title='Copied!';setTimeout(()=>{btn.classList.remove('copied');btn.title='Copy code';},1500);}).catch(()=>{btn.title='Copy failed';});});pre.appendChild(btn);pre.dataset.enhanced='1';});}")
+
         html.AppendLine("const api = async (cmd, data={}) => {")
         html.AppendLine("  try {")
         html.AppendLine("    const res = await fetch('" & InkyApiRoute & "', {")
@@ -6403,10 +6656,9 @@ Public Class ThisAddIn
         html.AppendLine("    const txt = await res.text();")
         html.AppendLine("    try { return JSON.parse(txt); } catch { return { ok:false, error: txt }; }")
         html.AppendLine("  } catch (err) {")
-        html.AppendLine("    return { ok:false, error: (err && err.message) ? err.message : 'Network error' };")
-        html.AppendLine("  }")
+        html.AppendLine("    return { ok:false, error: (err && err.message) ? err.message : 'Network error' }; }")
         html.AppendLine("};")
-        html.AppendLine("")
+
         html.AppendLine("const chatEl = document.getElementById('chat');")
         html.AppendLine("const msgEl  = document.getElementById('msg');")
         html.AppendLine("const modelSel = document.getElementById('modelSel');")
@@ -6415,209 +6667,33 @@ Public Class ThisAddIn
         html.AppendLine("const themeBtn = document.getElementById('themeBtn');")
         html.AppendLine("const cancelBtn = document.getElementById('cancelBtn');")
         html.AppendLine("let dark = false;")
-        html.AppendLine("function setTheme(isDark){")
-        html.AppendLine("  dark = !!isDark;")
-        html.AppendLine("  document.documentElement.classList.toggle('light', !dark);")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("function formatBytes(b){")
-        html.AppendLine("  const u=['B','KB','MB','GB','TB'];")
-        html.AppendLine("  if(!Number.isFinite(b)||b<=0) return '0 B';")
-        html.AppendLine("  const i = Math.min(u.length-1, Math.floor(Math.log(b)/Math.log(1024)));")
-        html.AppendLine("  return (b/Math.pow(1024,i)).toFixed(i?1:0) + ' ' + u[i];")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("function forceExternalLinks(scope){")
-        html.AppendLine("  try {")
-        html.AppendLine("    const root = scope || document;")
-        html.AppendLine("    const anchors = root.querySelectorAll('a[href]');")
-        html.AppendLine("    for (const a of anchors){")
-        html.AppendLine("      a.setAttribute('target','_blank');")
-        html.AppendLine("      a.setAttribute('rel','noopener noreferrer');")
-        html.AppendLine("    }")
-        html.AppendLine("  } catch {}")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("// Renders the full history returned by the server")
-        html.AppendLine("function render(turns){")
-        html.AppendLine("  chatEl.innerHTML='';")
-        html.AppendLine("  for(const t of (turns||[])){")
-        html.AppendLine("    const row = document.createElement('div'); row.className='row ' + (t.role==='user'?'user':'bot');")
-        html.AppendLine("    const b = document.createElement('div'); b.className='bubble';")
-        html.AppendLine("    const r = document.createElement('div'); r.className='role'; r.textContent = (t.role==='user'?'You':(window.__botName||'Bot'));")
-        html.AppendLine("    b.appendChild(r);")
-        html.AppendLine("    const c = document.createElement('div');")
-        html.AppendLine("    if (t && typeof t.html === 'string' && t.html.length){")
-        html.AppendLine("      c.innerHTML = t.html;")
-        html.AppendLine("      forceExternalLinks(c);")
-        html.AppendLine("    } else if (t && typeof t.markdown === 'string' && t.markdown.length){")
-        html.AppendLine("      const safe = t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');")
-        html.AppendLine("      c.innerHTML = safe;")
-        html.AppendLine("      forceExternalLinks(c);")
-        html.AppendLine("    } else { c.textContent = ''; }")
-        html.AppendLine("    b.appendChild(c); row.appendChild(b); chatEl.appendChild(row);")
-        html.AppendLine("  }")
-        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("// Create a temporary assistant bubble and return its element id")
-        html.AppendLine("function addTempAssistantBubble(html){")
-        html.AppendLine("  const id = 'tmp-' + Math.random().toString(36).slice(2);")
-        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
-        html.AppendLine("    `<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);")
-        html.AppendLine("  chatEl.scrollTop = chatEl.scrollHeight;")
-        html.AppendLine("  return id;")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("// Replace the text/body of an existing bubble by id")
-        html.AppendLine("function replaceAssistantBubble(id, html){")
-        html.AppendLine("  const row = document.getElementById(id);")
-        html.AppendLine("  if(!row) return;")
-        html.AppendLine("  const c = row.querySelector('.bubble > div:nth-child(2)');")
-        html.AppendLine("  if(c) { c.innerHTML = html; forceExternalLinks(row); }")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("async function boot(){")
-        html.AppendLine("  const st = await api('inky_getstate');")
-        html.AppendLine("  if(!st.ok){alert(st.error||'Failed to initialize');return}")
-        html.AppendLine("  __supportsFiles = (st.supportsFiles===true);")
-        html.AppendLine("  setTheme(st.darkMode===true);")
-        html.AppendLine("  render(st.history||[]);")
-        html.AppendLine("  modelSel.innerHTML='';")
-        html.AppendLine("  for(const m of (st.models||[])){")
-        html.AppendLine("    const opt = document.createElement('option');")
-        html.AppendLine("    opt.value = m.key || '';")
-        html.AppendLine("    opt.textContent = m.label || '';")
-        html.AppendLine("    if (m.disabled) opt.disabled = true;")
-        html.AppendLine("    if (m.isSeparator) opt.style.fontFamily='ui-sans-serif,system-ui,Segoe UI,Roboto,Arial';")
-        html.AppendLine("    if (m.selected && !m.disabled) opt.selected = true;")
-        html.AppendLine("    modelSel.appendChild(opt);")
-        html.AppendLine("  }")
-        html.AppendLine("  if (!modelSel.value) {")
-        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
-        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
-        html.AppendLine("  }")
-        html.AppendLine("  if(st && st.greeting && (!Array.isArray(st.history) || (Array.isArray(st.history) && st.history.length===0))){")
-        html.AppendLine("     msgEl.placeholder = st.greeting;")
-        html.AppendLine("  }")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("async function send(){")
-        html.AppendLine("  const t = msgEl.value.trim(); if(!t) return;")
-        html.AppendLine("  msgEl.value='';")
-        html.AppendLine("  chatEl.insertAdjacentHTML('beforeend',")
-        html.AppendLine("    `<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);")
-        html.AppendLine("  const typingId = addTempAssistantBubble('<span class=""typing""></span>');")
-        html.AppendLine("  const payload = { Text:t };")
-        html.AppendLine("  if (__pendingFilePath) payload.FileObject = __pendingFilePath;")
-        html.AppendLine("  cancelBtn.style.display = 'inline-block';")
-        html.AppendLine("  let res;")
-        html.AppendLine("  try {")
-        html.AppendLine("    res = await api('inky_send', payload);")
-        html.AppendLine("  } catch (err) {")
-        html.AppendLine("    res = { ok:false, error: (err && err.message) ? err.message : 'Network error' };")
-        html.AppendLine("  } finally {")
-        html.AppendLine("    cancelBtn.style.display = 'none';")
-        html.AppendLine("    const ty = document.getElementById(typingId); if(ty) ty.remove();")
-        html.AppendLine("  }")
-        html.AppendLine("  if(!res || !res.ok){ alert(res && res.error ? res.error : 'Error'); return }")
-        html.AppendLine("  __pendingFilePath = '';")
-        html.AppendLine("  render(res.history||[]);")
-        html.AppendLine("}")
-        html.AppendLine("")
-        html.AppendLine("// Drag & Drop (no paper-clip, single bubble that gets replaced)")
-        html.AppendLine(";(function(){")
-        html.AppendLine("  const prevent = e=>{ e.preventDefault(); e.stopPropagation(); };")
-        html.AppendLine("  ['dragenter','dragover','dragleave','drop'].forEach(ev=>{")
-        html.AppendLine("    document.addEventListener(ev, prevent, false);")
-        html.AppendLine("  });")
-        html.AppendLine("")
-        html.AppendLine("  document.addEventListener('drop', async (e)=>{")
-        html.AppendLine("    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);")
-        html.AppendLine("    if(!files.length) return;")
-        html.AppendLine("    const f = files[0];")
-        html.AppendLine("")
-        html.AppendLine("    // If not supported -> single info bubble, no upload attempt")
-        html.AppendLine("    if(!__supportsFiles){")
-        html.AppendLine("      addTempAssistantBubble('File uploads are not supported for the current model.');")
-        html.AppendLine("      return;")
-        html.AppendLine("    }")
-        html.AppendLine("")
-        html.AppendLine("    const tempId = addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${formatBytes(f.size)}) …`);")
-        html.AppendLine("    try {")
-        html.AppendLine("      const fr = new FileReader();")
-        html.AppendLine("      const dataUrl = await new Promise((resolve,reject)=>{")
-        html.AppendLine("        fr.onerror = ()=>reject(new Error('read error'));")
-        html.AppendLine("        fr.onload = ()=>resolve(fr.result);")
-        html.AppendLine("        fr.readAsDataURL(f);")
-        html.AppendLine("      });")
-        html.AppendLine("")
-        html.AppendLine("      const r = await api('inky_upload', { Name:f.name, DataUrl:String(dataUrl||'') });")
-        html.AppendLine("      if(!r.ok){")
-        html.AppendLine("        replaceAssistantBubble(tempId, 'Upload failed: ' + (r.error||'unknown'));")
-        html.AppendLine("        return;")
-        html.AppendLine("      }")
-        html.AppendLine("      if(r.supported === false){")
-        html.AppendLine("        replaceAssistantBubble(tempId, 'File uploads are not supported for the current model.');")
-        html.AppendLine("        return;")
-        html.AppendLine("      }")
-        html.AppendLine("      // Success: keep ONE bubble, just change its text")
-        html.AppendLine("      __pendingFilePath = r.path || '';")
-        html.AppendLine("      replaceAssistantBubble(tempId, `Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b> (${formatBytes(Number(r.size)||f.size)})`);")
-        html.AppendLine("    } catch (err) {")
-        html.AppendLine("      replaceAssistantBubble(tempId, 'Upload failed: ' + (err && err.message ? err.message : 'unknown'));")
-        html.AppendLine("    }")
-        html.AppendLine("  }, false);")
-        html.AppendLine("})();")
-        html.AppendLine("")
-        html.AppendLine("modelSel.addEventListener('change', async ()=>{")
-        html.AppendLine("  const opt = modelSel.options[modelSel.selectedIndex];")
-        html.AppendLine("  if (!opt || opt.disabled || !opt.value) {")
-        html.AppendLine("    const firstEnabled = Array.from(modelSel.options).find(o => !o.disabled && o.value);")
-        html.AppendLine("    if (firstEnabled) firstEnabled.selected = true;")
-        html.AppendLine("    return;")
-        html.AppendLine("  }")
-        html.AppendLine("  const key = opt.value;")
-        html.AppendLine("  const r = await api('inky_setmodel',{Key:key});")
-        html.AppendLine("  if(!r.ok){alert(r.error||'Failed to set model'); return}")
-        html.AppendLine("  if(typeof r.supportsFiles === 'boolean') __supportsFiles = r.supportsFiles;")
-        html.AppendLine("});")
-        html.AppendLine("")
-        html.AppendLine("copyBtn.addEventListener('click', async ()=>{")
-        html.AppendLine("  const r = await api('inky_copylast'); if(!r.ok){alert(r.error||'Nothing to copy')}")
-        html.AppendLine("});")
-        html.AppendLine("clearBtn.addEventListener('click', async ()=>{")
-        html.AppendLine("  const r = await api('inky_clear'); if(r.ok){render([])} else {alert(r.error||'Failed to clear')}")
-        html.AppendLine("});")
-        html.AppendLine("themeBtn.addEventListener('click', async ()=>{")
-        html.AppendLine("  const target = !dark; setTheme(target);")
-        html.AppendLine("  const r = await api('inky_toggletheme');")
-        html.AppendLine("  if(!r.ok){ setTheme(!target); alert(r.error||'Theme switch failed'); return }")
-        html.AppendLine("  if(typeof r.darkMode === 'boolean') setTheme(r.darkMode===true);")
-        html.AppendLine("});")
-        html.AppendLine("msgEl.addEventListener('keydown', (e)=>{")
-        html.AppendLine("  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }")
-        html.AppendLine("  if(e.key.toLowerCase()==='l' && e.ctrlKey){ e.preventDefault(); clearBtn.click(); }")
-        html.AppendLine("});")
+        html.AppendLine("function setTheme(isDark){dark=!!isDark;document.documentElement.classList.toggle('light', !dark);} ")
+        html.AppendLine("function formatBytes(b){const u=['B','KB','MB','GB','TB'];if(!Number.isFinite(b)||b<=0)return '0 B';const i=Math.min(u.length-1,Math.floor(Math.log(b)/Math.log(1024)));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];}")
+        html.AppendLine("function forceExternalLinks(scope){try{const root=scope||document;root.querySelectorAll('a[href]').forEach(a=>{a.setAttribute('target','_blank');a.setAttribute('rel','noopener noreferrer');});}catch{}}")
+
+        ' render now adds copy buttons
+        html.AppendLine("function render(turns){chatEl.innerHTML='';for(const t of (turns||[])){const row=document.createElement('div');row.className='row '+(t.role==='user'?'user':'bot');const b=document.createElement('div');b.className='bubble';const r=document.createElement('div');r.className='role';r.textContent=(t.role==='user'?'You':(window.__botName||'Bot'));b.appendChild(r);const c=document.createElement('div');if(t && typeof t.html==='string' && t.html.length){c.innerHTML=t.html;forceExternalLinks(c);}else if(t && typeof t.markdown==='string'&&t.markdown.length){const safe=t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');c.innerHTML=safe;forceExternalLinks(c);}b.appendChild(c);row.appendChild(b);chatEl.appendChild(row);}chatEl.scrollTop=chatEl.scrollHeight;enhanceCodeBlocks(chatEl);} ")
+
+        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
+
+        html.AppendLine("function replaceAssistantBubble(id, html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.bubble > div:nth-child(2)');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);} }")
+
+        html.AppendLine("async function boot(){const st=await api('inky_getstate');if(!st.ok){alert(st.error||'Failed to initialize');return}__supportsFiles=(st.supportsFiles===true);setTheme(st.darkMode===true);render(st.history||[]);modelSel.innerHTML='';for(const m of (st.models||[])){const opt=document.createElement('option');opt.value=m.key||'';opt.textContent=m.label||'';if(m.disabled)opt.disabled=true;if(m.isSeparator)opt.style.fontFamily='ui-sans-serif,system-ui,Segoe UI,Roboto,Arial';if(m.selected && !m.disabled)opt.selected=true;modelSel.appendChild(opt);}if(!modelSel.value){const firstEnabled=Array.from(modelSel.options).find(o=>!o.disabled && o.value);if(firstEnabled)firstEnabled.selected=true;}if(st && st.greeting && (!Array.isArray(st.history)||st.history.length===0)){msgEl.placeholder=st.greeting;}}")
+
+        html.AppendLine("async function send(){const t=msgEl.value.trim();if(!t)return;msgEl.value='';chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);const typingId=addTempAssistantBubble('<span class=""typing""></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;cancelBtn.style.display='inline-block';let res;try{res=await api('inky_send',payload);}catch(err){res={ok:false,error:(err&&err.message)?err.message:'Network error'};}finally{cancelBtn.style.display='none';const ty=document.getElementById(typingId);if(ty)ty.remove();}if(!res||!res.ok){alert(res && res.error ? res.error : 'Error');return}__pendingFilePath='';render(res.history||[]);} ")
+
+        html.AppendLine(";(function(){const prevent=e=>{e.preventDefault();e.stopPropagation();};['dragenter','dragover','dragleave','drop'].forEach(ev=>{document.addEventListener(ev,prevent,false);});document.addEventListener('drop',async e=>{const files=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]);if(!files.length)return;const f=files[0];if(!__supportsFiles){addTempAssistantBubble('File uploads are not supported for the current model.');return;}const tempId=addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${formatBytes(f.size)}) …`);try{const fr=new FileReader();const dataUrl=await new Promise((resolve,reject)=>{fr.onerror=()=>reject(new Error('read error'));fr.onload=()=>resolve(fr.result);fr.readAsDataURL(f);});const r=await api('inky_upload',{Name:f.name,DataUrl:String(dataUrl||'')});if(!r.ok){replaceAssistantBubble(tempId,'Upload failed: '+(r.error||'unknown'));return;}if(r.supported===false){replaceAssistantBubble(tempId,'File uploads are not supported for the current model.');return;}__pendingFilePath=r.path||'';replaceAssistantBubble(tempId,`Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b> (${formatBytes(Number(r.size)||f.size)})`);}catch(err){replaceAssistantBubble(tempId,'Upload failed: '+(err&&err.message?err.message:'unknown'));}} ,false);})();")
+
+        html.AppendLine("modelSel.addEventListener('change', async ()=>{const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const firstEnabled=Array.from(modelSel.options).find(o=>!o.disabled && o.value);if(firstEnabled)firstEnabled.selected=true;return;}const key=opt.value;const r=await api('inky_setmodel',{Key:key});if(!r.ok){alert(r.error||'Failed to set model');return}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
+        html.AppendLine("copyBtn.addEventListener('click', async ()=>{const r=await api('inky_copylast');if(!r.ok){alert(r.error||'Nothing to copy')}});")
+        html.AppendLine("clearBtn.addEventListener('click', async ()=>{const r=await api('inky_clear');if(r.ok){render([])}else{alert(r.error||'Failed to clear')}});")
+        html.AppendLine("themeBtn.addEventListener('click', async ()=>{const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
+        html.AppendLine("msgEl.addEventListener('keydown', e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}if(e.key.toLowerCase()==='l'&&e.ctrlKey){e.preventDefault();clearBtn.click();}});")
         html.AppendLine("document.getElementById('sendBtn').addEventListener('click', send);")
-        html.AppendLine("cancelBtn.addEventListener('click', async () => {")
-        html.AppendLine("  await api('inky_cancel');")
-        html.AppendLine("  cancelBtn.style.display = 'none';")
-        html.AppendLine("});")
-        html.AppendLine("")
-        html.AppendLine("chatEl.addEventListener('click', function(e){")
-        html.AppendLine("  const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;")
-        html.AppendLine("  if(!a) return;")
-        html.AppendLine("  if(a.getAttribute('target') !== '_blank'){")
-        html.AppendLine("    a.setAttribute('target','_blank');")
-        html.AppendLine("    a.setAttribute('rel','noopener noreferrer');")
-        html.AppendLine("  }")
-        html.AppendLine("});")
-        html.AppendLine("")
+        html.AppendLine("cancelBtn.addEventListener('click', async ()=>{await api('inky_cancel');cancelBtn.style.display='none';});")
+        html.AppendLine("chatEl.addEventListener('click', e=>{const a=e.target&&e.target.closest?e.target.closest('a[href]'):null;if(!a)return;if(a.getAttribute('target')!=='_blank'){a.setAttribute('target','_blank');a.setAttribute('rel','noopener noreferrer');}});")
         html.AppendLine("boot();")
         html.AppendLine("</script>")
-
-
         html.AppendLine("</body></html>")
         Return html.ToString()
     End Function
@@ -6668,18 +6744,40 @@ Public Class ThisAddIn
                         If st.History.Count = 0 Then greeting = GetFriendlyGreeting()
 
                         Dim models As System.Collections.Generic.List(Of System.Object) =
-        Await GetModelListForBrowserAsync(st)
+                                    Await GetModelListForBrowserAsync(st)
 
                         Return JsonOk(New With {
-        .ok = True,
-        .history = ToBrowserTurns(LoadInkyState().History),
-        .greeting = greeting,
-        .models = models,
-        .modelLabel = GetSelectedModelLabel(st.UseSecondApi, st.SelectedModelKey),
-        .darkMode = st.DarkMode,
-        .supportsFiles = st.SupportsFileUploads
-    })
+                            .ok = True,
+                            .history = ToBrowserTurns(LoadInkyState().History),
+                            .greeting = greeting,
+                            .models = models,
+                            .modelLabel = GetSelectedModelLabel(st.UseSecondApi, st.SelectedModelKey),
+                            .darkMode = st.DarkMode,
+                            .supportsFiles = st.SupportsFileUploads,
+                            .activeChat = activeChatId
+                        })
 
+                    Case "inky_switch"
+                        Dim which As String = j("Chat")?.ToString()
+                        activeChatId = If(which = "2", 2, 1)
+                        Dim stSw = LoadInkyState()
+                        If stSw.History.Count = 0 AndAlso Not stSw.DarkMode Then stSw.DarkMode = True
+                        Dim greetingSwitch As String = If(stSw.History.Count = 0, GetFriendlyGreeting(), Nothing)
+
+                        Try
+                            My.Settings.Inky_LastChat = activeChatId
+                            My.Settings.Save()
+                        Catch
+                        End Try
+
+                        Return JsonOk(New With {
+                            .ok = True,
+                            .history = ToBrowserTurns(stSw.History),
+                            .activeChat = activeChatId,
+                            .darkMode = stSw.DarkMode,
+                            .supportsFiles = ComputeSupportsFiles(stSw.UseSecondApi, stSw.SelectedModelKey),
+                            .greeting = greetingSwitch
+                        })
 
                     Case "inky_upload"
                         Try
@@ -6975,9 +7073,13 @@ Public Class ThisAddIn
                         Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
 
                     Case "inky_clear"
-                        Dim st As New InkyState()
-                        SaveInkyState(st)
-                        Return JsonOk(New With {.ok = True})
+                        Dim stClear As New InkyState()
+                        SaveInkyState(stClear)
+                        Return JsonOk(New With {
+                            .ok = True,
+                            .activeChat = activeChatId,
+                            .greeting = GetFriendlyGreeting()
+                        })
 
                     Case "inky_copylast"
                         Dim stCopy As InkyState = LoadInkyState()
@@ -7025,7 +7127,7 @@ Public Class ThisAddIn
                         End Try
                         SaveInkyState(st)
 
-                        Return JsonOk(New With {.ok = True, .supportsFiles = st.SupportsFileUploads})
+                        Return JsonOk(New With {.ok = True, .supportsFiles = st.SupportsFileUploads, .activeChat = activeChatId})
 
 
 
@@ -7038,7 +7140,7 @@ Public Class ThisAddIn
                             My.Settings.Save()
                         Catch
                         End Try
-                        Return JsonOk(New With {.ok = True, .darkMode = st.DarkMode})
+                        Return JsonOk(New With {.ok = True, .darkMode = st.DarkMode, .activeChat = activeChatId})
 
                     Case Else
                         Return JsonErr("Unknown command.")
@@ -7311,71 +7413,108 @@ Public Class ThisAddIn
                     Return llmResult                        ' send text back
                 End If
 
+                ' Replace the original block inside Case "redink_freestyle" with this updated version:
+
                 If DoNewDoc And wordInstalled Then
-
-                    ' Create a new instance of Word
-                    Try
-                        Dim wordApp As New Microsoft.Office.Interop.Word.Application()
-                        wordApp.Visible = True
-
-                        ' Add a new document
-                        Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
-
-                        ' Insert your text (LLMResult) at the beginning
-                        Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
-                        InsertTextWithMarkdown(docSelection, llmResult, True)
-                        Await SwitchToUi(Sub()
-                                             ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
-                                         End Sub)
-
+                    If Await TryCreateWordDocFromMarkdown(llmResult) Then
                         Return ""
-
-                    Catch ex As System.Exception
-                        '
-                    End Try
+                    End If
                     Await SwitchToUi(Sub()
                                          ShowCustomMessageBox("Could not create new Word document and insert the LLM output; providing your output to a separate window.")
                                      End Sub)
-
                 End If
 
                 ' C) clipboard-only path  --------------------------------------
                 Dim finalTxt As String = Await SwitchToUi(Function()
                                                               Return SLib.ShowCustomWindow(
-                                                                      "The LLM has provided the following result (you can edit it):",
-                                                                      llmResult,
-                                                                      "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting). If you select Cancel, nothing will be put into the clipboard (you can yourself copy it to the clipboard).",
-                                                                      AN, False, True)
+                                                                  "The LLM has provided the following result (you can edit it):",
+                                                                  llmResult,
+                                                                  "You can choose whether you want to have the original text put into the clipboard or your text with any changes you have made (without formatting)." & If(wordInstalled, " If you choose to insert the original text with formatting, a new Word document will be created with it. ", " ") & "If you select Cancel, nothing will be put into the clipboard (you can yourself copy it to the clipboard).",
+                                                                  AN, False, True, If(wordInstalled, True, False))
                                                           End Function)
+
+                ' user chose to create a Word doc now (sentinel "Markdown")
+                If String.Equals(finalTxt, "Markdown", StringComparison.OrdinalIgnoreCase) Then
+                    If wordInstalled AndAlso Await TryCreateWordDocFromMarkdown(llmResult) Then
+                        Return ""
+                    Else
+                        Await SwitchToUi(Sub()
+                                             ShowCustomMessageBox("Could not create new Word document and insert the LLM output (however, it will be in the clipboard).")
+                                             finalTxt = MarkdownToRtfConverter.Convert(llmResult)  ' fall back to clipboard
+                                         End Sub)
+                    End If
+                End If
 
                 If Not String.IsNullOrWhiteSpace(finalTxt) Then
                     Await SwitchToUi(Sub() SLib.PutInClipboard(finalTxt))
                 End If
 
-                Return ""                                   ' old behaviour: no body sent
+                Return ""
 
         End Select
 
         Return ""
     End Function
 
+    ' Add this helper anywhere inside the ThisAddIn class (e.g. near other small helpers)
+    Private Async Function TryCreateWordDocFromMarkdown(markdown As String) As Task(Of Boolean)
+        Try
+            Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+            wordApp.Visible = True
+            Dim newDoc As Microsoft.Office.Interop.Word.Document = wordApp.Documents.Add()
+            Dim docSelection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
+            InsertTextWithMarkdown(docSelection, markdown, True)
+            Await SwitchToUi(Sub()
+                                 ShowCustomMessageBox("Your Word document has been created. It may be hidden behind the other windows.")
+                             End Sub)
+            Return True
+        Catch
+            Return False
+        End Try
+    End Function
+
     ' Provide model list for the browser dropdown (default, second, alternates)
-    ' --------- DROP-IN: kompletter Ersatz von GetModelListForBrowserAsync ---------
+
+    ' Provide model list for the browser dropdown (default, second, alternates)
+    ' --------- FIXED: selection reconciliation moved to the top ---------
     Private Async Function GetModelListForBrowserAsync(ByVal st As InkyState) _
-    As System.Threading.Tasks.Task(Of System.Collections.Generic.List(Of Object))
+        As System.Threading.Tasks.Task(Of System.Collections.Generic.List(Of Object))
 
         Dim list As New System.Collections.Generic.List(Of Object)()
 
-        ' Verfügbarkeiten ermitteln
-        Dim hasPrimary As System.Boolean = Not System.String.IsNullOrWhiteSpace(INI_Model)
-        Dim hasSecondApi As System.Boolean = INI_SecondAPI
-        Dim hasSecondModelName As System.Boolean = Not System.String.IsNullOrWhiteSpace(INI_Model_2)
-        Dim hasSecondary As System.Boolean = hasSecondApi AndAlso hasSecondModelName
+        ' --- 1) Load persisted preference FIRST and reconcile with current state ---
+        Try
+            Dim savedSecond As Boolean = My.Settings.Inky_UseSecondApiSelected
+            Dim savedKey As String = My.Settings.Inky_SelectedModelKey
+
+            ' Only adopt saved values if they are consistent / meaningful
+            Dim shouldApply As Boolean = False
+
+            If savedSecond <> st.UseSecondApi Then
+                shouldApply = True
+            ElseIf savedSecond AndAlso Not String.Equals(savedKey, st.SelectedModelKey, StringComparison.OrdinalIgnoreCase) Then
+                shouldApply = True
+            End If
+
+            If shouldApply Then
+                st.UseSecondApi = savedSecond
+                st.SelectedModelKey = If(savedSecond, savedKey, "")
+                SaveInkyState(st)
+            End If
+        Catch
+            ' Ignore; keep in-memory state
+        End Try
+
+        ' --- 2) Gather availability info based on (potentially updated) state ---
+        Dim hasPrimary As Boolean = Not String.IsNullOrWhiteSpace(INI_Model)
+        Dim hasSecondApi As Boolean = INI_SecondAPI
+        Dim hasSecondModelName As Boolean = Not String.IsNullOrWhiteSpace(INI_Model_2)
+        Dim hasSecondary As Boolean = hasSecondApi AndAlso hasSecondModelName
 
         Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) = Nothing
-        Dim altCount As System.Int32 = 0
+        Dim altCount As Integer = 0
         Try
-            If hasSecondApi AndAlso Not System.String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+            If hasSecondApi AndAlso Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
                 alts = LoadAlternativeModels(INI_AlternateModelPath, _context)
                 If alts IsNot Nothing Then altCount = alts.Count
             End If
@@ -7384,100 +7523,98 @@ Public Class ThisAddIn
             alts = Nothing
         End Try
 
-        ' Fall 1: Nur Primary vorhanden → nur dieses anzeigen
-        If hasPrimary AndAlso (Not hasSecondary) AndAlso altCount = 0 Then
-            Dim defLabel As System.String = INI_Model
-            list.Add(New With {
-            .key = "default",
-            .label = defLabel,
-            .selected = (Not st.UseSecondApi),
-            .disabled = False,
-            .isSeparator = False
-        })
-            Return list
+        ' --- 3) If saved SelectedModelKey no longer exists, normalize state ---
+        If st.UseSecondApi AndAlso Not String.IsNullOrWhiteSpace(st.SelectedModelKey) Then
+            Dim exists As Boolean = False
+            If alts IsNot Nothing Then
+                exists = alts.Any(Function(m)
+                                      If m Is Nothing Then Return False
+                                      Dim label = If(Not String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
+                                      Return String.Equals(label, st.SelectedModelKey, StringComparison.OrdinalIgnoreCase)
+                                  End Function)
+            End If
+            If Not exists Then
+                ' Fallback to second default (still second API)
+                st.SelectedModelKey = ""
+                SaveInkyState(st)
+            End If
         End If
 
-        ' Fall 2: Labels + Modelle rendern
-        If hasPrimary Then
-            ' Label: Primary
+        ' --- 4) Simple case: only primary model available ---
+        If hasPrimary AndAlso Not hasSecondary AndAlso altCount = 0 Then
             list.Add(New With {
-            .key = "__hdr_primary__",
-            .label = "Primary model:",
-            .selected = False,
-            .disabled = True,
-            .isSeparator = False
-        })
-            ' Option: Primary
-            Dim defLabel As System.String = INI_Model
-            list.Add(New With {
-            .key = "default",
-            .label = defLabel,
-            .selected = (Not st.UseSecondApi),
-            .disabled = False,
-            .isSeparator = False
-        })
-        End If
-
-        If hasSecondary Then
-            ' Label: Secondary
-            list.Add(New With {
-            .key = "__hdr_secondary__",
-            .label = "Secondary model:",
-            .selected = False,
-            .disabled = True,
-            .isSeparator = False
-        })
-            ' Option: Secondary
-            Dim secondLabel As System.String = INI_Model_2
-            list.Add(New With {
-            .key = "__second__",
-            .label = secondLabel,
-            .selected = (st.UseSecondApi AndAlso System.String.IsNullOrWhiteSpace(st.SelectedModelKey)),
-            .disabled = False,
-            .isSeparator = False
-        })
-        End If
-
-        ' Alternative Modelle
-        If altCount > 0 AndAlso alts IsNot Nothing Then
-            ' Trennstrich
-            list.Add(New With {
-            .key = "__sep__",
-            .label = "Alternative models:",
-            .selected = False,
-            .disabled = True,
-            .isSeparator = True
-        })
-
-            For Each m As SharedLibrary.SharedLibrary.ModelConfig In alts
-                If m Is Nothing Then Continue For
-                Dim label As System.String = If(Not System.String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
-                If System.String.IsNullOrWhiteSpace(label) Then label = "Model"
-                ' key = Anzeige-Label (wir matchen später wieder darauf)
-                list.Add(New With {
-                .key = label,
-                .label = label,
-                .selected = (st.UseSecondApi AndAlso System.String.Equals(st.SelectedModelKey, label, System.StringComparison.OrdinalIgnoreCase)),
+                .key = "default",
+                .label = INI_Model,
+                .selected = (Not st.UseSecondApi),
                 .disabled = False,
                 .isSeparator = False
             })
+            Return list
+        End If
+
+        ' --- 5) Build list with correct selection flags ---
+        If hasPrimary Then
+            list.Add(New With {
+                .key = "__hdr_primary__",
+                .label = "Primary model:",
+                .selected = False,
+                .disabled = True,
+                .isSeparator = False
+            })
+            list.Add(New With {
+                .key = "default",
+                .label = INI_Model,
+                .selected = (Not st.UseSecondApi),
+                .disabled = False,
+                .isSeparator = False
+            })
+        End If
+
+        If hasSecondary Then
+            list.Add(New With {
+                .key = "__hdr_secondary__",
+                .label = "Secondary model:",
+                .selected = False,
+                .disabled = True,
+                .isSeparator = False
+            })
+            list.Add(New With {
+                .key = "__second__",
+                .label = INI_Model_2,
+                .selected = (st.UseSecondApi AndAlso String.IsNullOrWhiteSpace(st.SelectedModelKey)),
+                .disabled = False,
+                .isSeparator = False
+            })
+        End If
+
+        If altCount > 0 AndAlso alts IsNot Nothing Then
+            list.Add(New With {
+                .key = "__sep__",
+                .label = "Alternative models:",
+                .selected = False,
+                .disabled = True,
+                .isSeparator = True
+            })
+
+            For Each m In alts
+                If m Is Nothing Then Continue For
+                Dim label = If(Not String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
+                If String.IsNullOrWhiteSpace(label) Then label = "Model"
+                list.Add(New With {
+                    .key = label,
+                    .label = label,
+                    .selected = (st.UseSecondApi AndAlso
+                                 String.Equals(st.SelectedModelKey, label, StringComparison.OrdinalIgnoreCase)),
+                    .disabled = False,
+                    .isSeparator = False
+                })
             Next
         End If
 
-        ' Gespeicherte Präferenzen sanft übernehmen (falls abweichend)
-        Try
-            Dim savedSecond As System.Boolean = My.Settings.Inky_UseSecondApiSelected
-            Dim savedKey As System.String = My.Settings.Inky_SelectedModelKey
-            If savedSecond <> st.UseSecondApi OrElse (savedSecond AndAlso Not System.String.Equals(savedKey, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase)) Then
-                st.UseSecondApi = savedSecond
-                st.SelectedModelKey = savedKey
-                SaveInkyState(st)
-            End If
-        Catch
-        End Try
-
         Return list
     End Function
+
+
 
 
     ' Entfernt führende Rollenmarker wie [ASSISTANT], [USER] oder "ASSISTANT:" am Zeilenanfang.

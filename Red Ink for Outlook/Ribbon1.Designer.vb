@@ -309,10 +309,10 @@ Partial Class Ribbon1
         Me.Tabs.Add(Me.Tab1)
         Me.Tab1.ResumeLayout(False)
         Me.Tab1.PerformLayout()
-        Me.Group2.ResumeLayout(False)
-        Me.Group2.PerformLayout()
         Me.Group1.ResumeLayout(False)
         Me.Group1.PerformLayout()
+        Me.Group2.ResumeLayout(False)
+        Me.Group2.PerformLayout()
         Me.ResumeLayout(False)
 
     End Sub

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 23.9.2025
+' 28.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -26,6 +26,7 @@
 
 Option Explicit On
 
+Imports System.Collections
 Imports System.Collections.Concurrent
 Imports System.Data
 Imports System.Data.SqlTypes
@@ -54,6 +55,7 @@ Imports System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel
 Imports DiffPlex
 Imports DiffPlex.DiffBuilder
 Imports DiffPlex.DiffBuilder.Model
+Imports DiffPlex.Model
 Imports DocumentFormat.OpenXml
 Imports DocumentFormat.OpenXml.Drawing
 Imports DocumentFormat.OpenXml.Drawing.Diagrams
@@ -66,9 +68,11 @@ Imports DocumentFormat.OpenXml.Validation
 Imports DocumentFormat.OpenXml.Wordprocessing
 Imports Google.Api.Gax.Grpc
 Imports Google.Apis.Auth.OAuth2.Responses
+Imports Google.Apis.Util.Store
 Imports Google.Cloud.Speech.V1
 Imports Google.Cloud.Speech.V1.LanguageCodes
 Imports Google.Protobuf
+Imports Google.Protobuf.Reflection
 Imports Google.Rpc.Context.AttributeContext.Types
 Imports Grpc.Core
 Imports HtmlAgilityPack
@@ -80,6 +84,7 @@ Imports NAudio
 Imports NAudio.CoreAudioApi
 Imports NAudio.Lame
 Imports NAudio.Wave
+Imports NetOffice.PowerPointApi
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 Imports SharedLibrary.MarkdownToRtf
@@ -1281,7 +1286,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.230925 Gen2 Beta Test"
+    Public Const Version As String = "V.280925 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -2100,6 +2105,24 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_FindClause As String
+        Get
+            Return _context.SP_FindClause
+        End Get
+        Set(value As String)
+            _context.SP_FindClause = value
+        End Set
+    End Property
+
+    Public Shared Property SP_FindClause_Clean As String
+        Get
+            Return _context.SP_FindClause_Clean
+        End Get
+        Set(value As String)
+            _context.SP_FindClause_Clean = value
+        End Set
+    End Property
+
     Public Shared Property SP_DocCheck_Clause As String
         Get
             Return _context.SP_DocCheck_Clause
@@ -2124,6 +2147,15 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.SP_DocCheck_MultiClauseSum = value
+        End Set
+    End Property
+
+    Public Shared Property SP_DocCheck_MultiClauseSum_Bubbles As String
+        Get
+            Return _context.SP_DocCheck_MultiClauseSum_Bubbles
+        End Get
+        Set(value As String)
+            _context.SP_DocCheck_MultiClauseSum_Bubbles = value
         End Set
     End Property
 
@@ -2847,6 +2879,24 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property INI_FindClausePath As String
+        Get
+            Return _context.INI_FindClausePath
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_FindClausePathLocal As String
+        Get
+            Return _context.INI_FindClausePathLocal
+        End Get
+        Set(value As String)
+            _context.INI_FindClausePathLocal = value
+        End Set
+    End Property
+
     Public Shared Property INI_DocCheckPath As String
         Get
             Return _context.INI_DocCheckPath
@@ -3230,7 +3280,7 @@ Public Class ThisAddIn
 
             If INI_SecondAPI Then
                 subControl = CType(myControl.Controls.Add(Type:=MsoControlType.msoControlButton, Temporary:=True), CommandBarButton)
-                subControl.Caption = "Freestyle (" & INI_Model_2 & ")"
+                subControl.Caption = "Freestyle (2nd)"
                 subControl.OnAction = "CallFreestyleAM"
                 subControl.FaceId = 346
                 If shortcutDict.ContainsKey(subControl.Caption) Then
@@ -3320,7 +3370,7 @@ Public Class ThisAddIn
 
                 ' Assign shortcuts for second API if applicable
                 If INI_SecondAPI Then
-                    AssignShortcut("Freestyle (" & INI_Model_2 & ")", "CallFreestyleAM", shortcutDict)
+                    AssignShortcut("Freestyle (2nd)", "CallFreestyleAM", shortcutDict)
                 End If
 
                 ' Assign shortcuts for submenu "Word helpers"
@@ -3766,7 +3816,7 @@ Public Class ThisAddIn
             Return
         End If
         If Not IO.File.Exists(StylePath) Then
-            ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+            ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - will abort.")
             Return
         End If
         If Selection.Type = WdSelectionType.wdSelectionIP Then
@@ -4247,10 +4297,10 @@ Public Class ThisAddIn
         InsertDocs = GatherSelectedDocuments(False, True)
         Debug.WriteLine($"GatherSelectedDocs returned: {Left(InsertDocs, 3000)}")
         If InsertDocs.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
-            ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - exiting.")
+            ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - will abort.")
             Return
         ElseIf InsertDocs.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
-            ShowCustomMessageBox($"There are no other documents to add - exiting.")
+            ShowCustomMessageBox($"There are no other documents to add - will abort.")
             Return
         End If
 
@@ -5176,6 +5226,17 @@ Public Class ThisAddIn
                 Return
             End If
 
+            If OtherPrompt.StartsWith("findclause", StringComparison.OrdinalIgnoreCase) Then
+                FindClause()
+                Return
+            End If
+
+            If OtherPrompt.StartsWith("addclause", StringComparison.OrdinalIgnoreCase) Then
+                AddClause()
+                Return
+            End If
+
+
             If OtherPrompt.StartsWith("createpodcast", StringComparison.OrdinalIgnoreCase) Then
                 CreatePodcast()
                 Return
@@ -5375,7 +5436,7 @@ Public Class ThisAddIn
             If Not String.IsNullOrWhiteSpace(INI_MyStylePath) And OtherPrompt.IndexOf(MyStyleTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
                 Dim StylePath As String = ExpandEnvironmentVariables(INI_MyStylePath)
                 If Not IO.File.Exists(StylePath) Then
-                    ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - exiting.")
+                    ShowCustomMessageBox("No MyStyle prompt file has been found. You may have to first create a MyStyle prompt. Go to 'Analyze' and use 'Define MyStyle' to do so - will abort.")
                     Return
                 End If
                 OtherPrompt = OtherPrompt.Replace(MyStyleTrigger, "").Trim()
@@ -5390,28 +5451,57 @@ Public Class ThisAddIn
                 InsertDocs = GatherSelectedDocuments()
                 Debug.WriteLine($"GatherSelectedDocs returned: {Left(InsertDocs, 3000)}")
                 If String.IsNullOrWhiteSpace(InsertDocs) Then
-                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - exiting.")
+                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - will abort.")
                     Return
                 ElseIf InsertDocs.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) Then
-                    ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - exiting.")
+                    ShowCustomMessageBox($"An error occured gathering the additional document(s) ({InsertDocs.Substring(6).Trim()}) - will abort.")
                     Return
                 ElseIf InsertDocs.StartsWith("NONE", StringComparison.OrdinalIgnoreCase) Then
-                    ShowCustomMessageBox($"There are no other documents to add - exiting.")
+                    ShowCustomMessageBox($"There are no other documents to add - will abort.")
                     Return
                 End If
                 OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(AddDocTrigger), "", RegexOptions.IgnoreCase)
             End If
 
             If Not String.IsNullOrEmpty(OtherPrompt) AndAlso OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
-                DragDropFormLabel = ""
-                DragDropFormFilter = ""
-                doc = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object))
-                If String.IsNullOrWhiteSpace(doc) Then
-                    ShowCustomMessageBox("The file you have selected is empty or not supported - exiting.")
-                    Return
+                ' Count total (case-insensitive) occurrences first
+                Dim totalOccurrences As Integer =
+                    Regex.Matches(OtherPrompt, Regex.Escape(ExtTrigger), RegexOptions.IgnoreCase).Count
+
+                If totalOccurrences = 1 Then
+                    ' Original single-occurrence behavior
+                    DragDropFormLabel = ""
+                    DragDropFormFilter = ""
+                    doc = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object))
+                    If String.IsNullOrWhiteSpace(doc) Then
+                        ShowCustomMessageBox("The file you have selected is empty or not supported - will abort.")
+                        Return
+                    End If
+                    OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
+                    ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
+                Else
+                    ' Multi-occurrence behavior: prompt separately per placeholder
+                    For occurrence As Integer = 1 To totalOccurrences
+                        Dim idx As Integer = OtherPrompt.IndexOf(ExtTrigger, StringComparison.OrdinalIgnoreCase)
+                        If idx < 0 Then Exit For
+
+                        DragDropFormLabel = ""
+                        DragDropFormFilter = ""
+                        doc = Await GetFileContent(Nothing, False, Not String.IsNullOrWhiteSpace(INI_APICall_Object))
+                        If String.IsNullOrWhiteSpace(doc) Then
+                            ShowCustomMessageBox($"The file you selected for occurrence #{occurrence} is empty or not supported - will abort.")
+                            Return
+                        End If
+
+                        ' Replace only the first remaining occurrence manually
+                        OtherPrompt = OtherPrompt.Substring(0, idx) &
+                                      doc &
+                                      OtherPrompt.Substring(idx + ExtTrigger.Length)
+
+                        ShowCustomMessageBox($"This file will be included at occurrence #{occurrence} (of {totalOccurrences}) where you used {ExtTrigger}:" &
+                                             vbCrLf & vbCrLf & doc)
+                    Next
                 End If
-                OtherPrompt = Regex.Replace(OtherPrompt, Regex.Escape(ExtTrigger), doc, RegexOptions.IgnoreCase)
-                ShowCustomMessageBox($"This file will be included in your prompt where you have referred to {ExtTrigger}: " & vbCrLf & vbCrLf & doc)
             End If
 
             If DoFileObject Then
@@ -7289,7 +7379,7 @@ Public Class ThisAddIn
             Dim ErrorList As String = ""
 
             If notfoundresponse.Count > 0 Then
-                ErrorList += "The following comments could not be assigned to your text (they were not found, typically because of formatting or markup issues):" & vbCrLf & vbCrLf
+                ErrorList += "The following comments could not be assigned to your text (they were not found, typically because of the LLM not acting as instructed, formatting or markup issues):" & vbCrLf & vbCrLf
                 For Each item In notfoundresponse
                     If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                 Next
@@ -7297,7 +7387,7 @@ Public Class ThisAddIn
             End If
 
             If wrongformatresponse.Count > 0 Then
-                ErrorList += "The following responses could not be identified as bubble comments:" & vbCrLf & vbCrLf
+                ErrorList += "The following responses could not be identified as bubble comments (typically because the LLM did not act as instructed):" & vbCrLf & vbCrLf
                 For Each item In wrongformatresponse
                     If item.Trim() <> "" Then ErrorList += Trim("- " & item & vbCrLf)
                 Next
@@ -10479,12 +10569,16 @@ Public Class ThisAddIn
         ByVal workingrange As Word.Range,
         PreserveParagraphFormatInline As Boolean, DoMarkdown As Boolean) As String
 
-        Dim splash As New Slib.Splashscreen("Extracting text and format ...")
+        Dim splash As New SLib.SplashScreen("Extracting text and format (tables may take time) ...")
         splash.Show()
         splash.Refresh()
 
         Dim app As Word.Application = CType(workingrange.Application, Word.Application)
         Dim oldSU As Boolean = app.ScreenUpdating
+        Dim oldSpell As Boolean = app.Options.CheckSpellingAsYouType
+        Dim oldGrammar As Boolean = app.Options.CheckGrammarAsYouType
+        app.Options.CheckSpellingAsYouType = False
+        app.Options.CheckGrammarAsYouType = False
         app.ScreenUpdating = False
 
         Try
@@ -10983,12 +11077,13 @@ Public Class ThisAddIn
             Debug.WriteLine("Error in GetTextWithSpecialElementsInline: " & ex.Message)
             Return workingrange.Text
         Finally
+            app.Options.CheckSpellingAsYouType = oldSpell
+            app.Options.CheckGrammarAsYouType = oldGrammar
             app.ScreenUpdating = oldSU
             splash.Close()
 
         End Try
     End Function
-
 
 
 
@@ -11845,7 +11940,7 @@ Public Class ThisAddIn
                 earliestDate = parsed
                 earliestDateFiltered = True
             Else
-                ShowCustomMessageBox("Improper date/time format - exiting.")
+                ShowCustomMessageBox("Improper date/time format - will abort.")
                 Exit Sub
             End If
 
@@ -14322,7 +14417,7 @@ Public Class ThisAddIn
                     Else
                         SelectedText = RichTextBox1.SelectedText
                     End If
-                    Dim LLMResult As String = Await LLM(OtherPrompt, SelectedText, "", "", False)
+                    Dim LLMResult As String = Await LLM(OtherPrompt & " Current Date is: " & DateTime.Now.ToString("dd MMM yyyy", CultureInfo.CurrentCulture), SelectedText, "", "", False)
 
                     Dim wordApp As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
                     Dim selection As Microsoft.Office.Interop.Word.Selection = wordApp.Selection
@@ -17175,8 +17270,8 @@ Public Class ThisAddIn
                 Catch ex As System.Exception
                     ' Fehler still schlucken, Ablauf geht ungestört weiter
                     Debug.WriteLine("Error writing cleaned text file: " & ex.Message)
-            End Try
-        End If
+                End Try
+            End If
 
             ' Cleanup temporary files.
             For Each file In tempFiles
@@ -17237,11 +17332,11 @@ Public Class ThisAddIn
             End Using
 
             Return tempFile
-            Catch ex As Exception
-                Debug.WriteLine($"Error generating silence audio: {ex.Message}")
-                Return Nothing
-            End Try
-        End Function
+        Catch ex As Exception
+            Debug.WriteLine($"Error generating silence audio: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
 
 
     Public Class TTSSelectionForm
@@ -20529,6 +20624,1022 @@ Public Class ThisAddIn
     End Function
 
 
+    ' FindClause Integration for Word
+
+    ' ================================== Clause Finder ==================================
+    ' Data container for a clause library segment
+    Private Class ClauseLibrary
+        Public Property Title As String
+        Public Property SourcePath As String
+        Public Property IsLocal As Boolean
+        Public Property RawJson As String                  ' JSON for that library segment
+        Public Property EffectivePrompt As String          ' FindClause prompt override (file or segment)
+        Public Property EffectiveMergePrompt As String     ' MergePrompt override (file or segment)  << NEW
+    End Class
+
+
+    Public Async Sub FindClause()
+        Try
+            If INILoadFail() Then Return
+
+            ' 1) Expand / normalize paths
+            Dim pathGlobal As String = ExpandEnvironmentVariables(INI_FindClausePath)
+            If Not String.IsNullOrEmpty(pathGlobal) AndAlso Not pathGlobal.EndsWith("\", StringComparison.Ordinal) Then pathGlobal &= "\"
+            Dim pathLocal As String = ExpandEnvironmentVariables(INI_FindClausePathLocal)
+            If Not String.IsNullOrEmpty(pathLocal) AndAlso Not pathLocal.EndsWith("\", StringComparison.Ordinal) Then pathLocal &= "\"
+
+            Dim hasGlobal As Boolean = Not String.IsNullOrWhiteSpace(pathGlobal) AndAlso IO.Directory.Exists(pathGlobal)
+            Dim hasLocal As Boolean = Not String.IsNullOrWhiteSpace(pathLocal) AndAlso IO.Directory.Exists(pathLocal)
+
+            If Not hasGlobal AndAlso Not hasLocal Then
+                ShowCustomMessageBox("No Clause Library paths are configured or accessible. Configure 'ClauseFindPath' or 'ClauseFindPathLocal'.")
+                Return
+            End If
+
+            ' 2) Acquire current selection context
+            Dim app As Word.Application = Globals.ThisAddIn.Application
+            If app Is Nothing OrElse app.Documents Is Nothing OrElse app.Documents.Count = 0 Then
+                ShowCustomMessageBox("No active document.")
+                Return
+            End If
+
+            Dim doc As Word.Document = app.ActiveDocument
+            Dim sel As Word.Selection = app.Selection
+
+            Dim selectedText As String = ""
+            If sel.Range IsNot Nothing AndAlso sel.Range.Text IsNot Nothing Then
+                selectedText = sel.Range.Text
+                If selectedText IsNot Nothing Then selectedText = selectedText.Trim()
+            End If
+
+            ' 3) Load all libraries (may be multiple segments per file)
+            Dim allLibs As List(Of ClauseLibrary) = LoadClauseLibraries(pathGlobal, pathLocal)
+            If allLibs Is Nothing OrElse allLibs.Count = 0 Then
+                ShowCustomMessageBox("No clause libraries found. Place files named 'redink-lib-*.txt' in the configured path(s).")
+                Return
+            End If
+
+            ' 4) Build dropdown entries
+            allLibs.Sort(Function(a, b) String.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase))
+            Dim displayMap As New Dictionary(Of String, ClauseLibrary)(StringComparer.OrdinalIgnoreCase)
+            Dim options As New List(Of String)
+            For Each cl In allLibs
+                Dim disp As String = cl.Title
+                If cl.IsLocal Then disp &= " (local)"
+                disp = MakeUniqueDisplay(disp, displayMap.Keys) ' uniqueness helper
+                displayMap(disp) = cl
+                options.Add(disp)
+            Next
+
+            ' 5) Parameters dialog
+            Dim defaultDisplay As String = If(options.Count > 0, options(0), "")
+            Dim defaultUseSelected As Boolean = Not String.IsNullOrWhiteSpace(selectedText)
+            ' OtherPrompt (global) will hold the search query
+            Dim p0 As New SLib.InputParameter("Clause Library", defaultDisplay) With {.Options = New List(Of String)(options)}
+            Dim p1 As New SLib.InputParameter("Search for", "") ' text to search (query)
+            Dim paramArr() As SLib.InputParameter
+            If selectedText <> "" Then
+                Dim p2 As New SLib.InputParameter("Use selected text", defaultUseSelected)
+                paramArr = {p0, p1, p2}
+            Else
+                paramArr = {p0, p1}
+            End If
+
+            If ShowCustomVariableInputForm("Please set the Clause Finder parameters:", AN & " FindClause", paramArr) = False Then
+                Return
+            End If
+
+            OtherPrompt = ""
+            Dim chosenDisplay As String = CStr(paramArr(0).Value)
+            OtherPrompt = CStr(paramArr(1).Value)          ' store query globally as required
+            Dim useSelected As Boolean = False
+            If paramArr.Length > 2 Then useSelected = CBool(paramArr(2).Value)
+
+            If String.IsNullOrWhiteSpace(OtherPrompt) AndAlso Not useSelected Then
+                ShowCustomMessageBox("You have not provided a search term - will abort.")
+                Return
+            End If
+
+            Dim chosenLib As ClauseLibrary = Nothing
+            If Not displayMap.TryGetValue(chosenDisplay, chosenLib) OrElse chosenLib Is Nothing Then
+                ShowCustomMessageBox("Selected library could not be resolved - will abort.")
+                Return
+            End If
+
+            ' 6) Build prompts
+            Dim systemPrompt As String = InterpolateAtRuntime(If(String.IsNullOrWhiteSpace(chosenLib.EffectivePrompt), SP_FindClause, chosenLib.EffectivePrompt))
+
+            Dim userPromptBuilder As New System.Text.StringBuilder()
+            If useSelected AndAlso Not String.IsNullOrWhiteSpace(selectedText) Then
+                userPromptBuilder.AppendLine("<TEXTFORSEARCH>")
+                userPromptBuilder.AppendLine(selectedText)
+                userPromptBuilder.AppendLine("</TEXTFORSEARCH>")
+            End If
+            ' Provide search query explicitly
+            userPromptBuilder.AppendLine("<SEARCHQUERY>")
+            userPromptBuilder.AppendLine(OtherPrompt)
+            userPromptBuilder.AppendLine("</SEARCHQUERY>")
+            ' Provide library JSON (raw) between tags
+            userPromptBuilder.AppendLine("<LIBRARY>")
+            userPromptBuilder.AppendLine(chosenLib.RawJson.Trim())
+            userPromptBuilder.AppendLine("</LIBRARY>")
+
+            Dim userPrompt As String = userPromptBuilder.ToString()
+
+            ' 7) Call LLM
+
+            Dim UseSecondAPI As Boolean = False
+
+            If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                If Not GetSpecialTaskModel(_context, INI_AlternateModelPath, "FindClause") Then
+                    originalConfigLoaded = False
+                Else
+                    UseSecondAPI = True
+                End If
+            End If
+
+            Dim llmResponse As String = Await LLM(systemPrompt, userPrompt, "", "", 0, UseSecondAPI)
+
+            If UseSecondAPI AndAlso originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
+
+            If String.IsNullOrWhiteSpace(llmResponse) Then
+                ShowCustomMessageBox("No response received from the model.")
+                Return
+            End If
+            llmResponse = llmResponse.Trim()
+
+            ' 8) Parse response JSON → build Markdown
+            Dim markdownResult As String = BuildMarkdownFromClauseResponse(llmResponse)
+
+            ' 9) Show in pane (Markdown conversion handled by ShowPaneAsync with insertMarkdown:=True)
+            Dim paneHeader As String = $"The following clauses were found:"
+            Dim paneFooter As String = "Select the clause you want to use and click on merge, copy or insert to do so."
+            Dim finalToShow As String = markdownResult
+
+            ' Decide which merge prompt to cache (segment > file-level > default)
+            Dim mergePromptToUse As String = If(String.IsNullOrWhiteSpace(chosenLib.EffectiveMergePrompt), SP_MergePrompt, chosenLib.EffectiveMergePrompt)
+
+            If _uiContext IsNot Nothing Then
+                Dim localMergePrompt = mergePromptToUse ' capture for closure safety
+                _uiContext.Post(Sub(s)
+                                    SP_MergePrompt_Cached = localMergePrompt
+                                    ShowPaneAsync(paneHeader, finalToShow, paneFooter, AN, noRTF:=False, insertMarkdown:=True)
+                                End Sub, Nothing)
+            Else
+                SP_MergePrompt_Cached = mergePromptToUse
+                ShowPaneAsync(paneHeader, finalToShow, paneFooter, AN, noRTF:=False, insertMarkdown:=True)
+            End If
+
+        Catch ex As Exception
+#If DEBUG Then
+            Debug.WriteLine("Error: " & ex.Message)
+            Debug.WriteLine("Stacktrace: " & ex.StackTrace)
+
+            System.Diagnostics.Debugger.Break()
+#End If
+            ShowCustomMessageBox("Error in FindClause: " & ex.Message)
+        End Try
+    End Sub
+
+    ' Load all clause libraries from both paths
+    Private Function LoadClauseLibraries(pathGlobal As String, pathLocal As String) As List(Of ClauseLibrary)
+        Dim list As New List(Of ClauseLibrary)()
+        Dim candidates As New List(Of Tuple(Of String, Boolean))()
+
+        If Not String.IsNullOrWhiteSpace(pathGlobal) AndAlso IO.Directory.Exists(pathGlobal) Then
+            For Each f In EnumerateClauseLibraryFiles(pathGlobal)
+                candidates.Add(Tuple.Create(f, False))
+            Next
+        End If
+        If Not String.IsNullOrWhiteSpace(pathLocal) AndAlso IO.Directory.Exists(pathLocal) Then
+            For Each f In EnumerateClauseLibraryFiles(pathLocal)
+                candidates.Add(Tuple.Create(f, True))
+            Next
+        End If
+
+        For Each t In candidates
+            list.AddRange(ParseClauseLibraryFile(t.Item1, t.Item2))
+        Next
+
+        Return list
+    End Function
+
+    Private Function EnumerateClauseLibraryFiles(folder As String) As IEnumerable(Of String)
+        Dim matches As New List(Of String)
+        Try
+            For Each f In IO.Directory.EnumerateFiles(folder, "redink-lib-*.txt", IO.SearchOption.TopDirectoryOnly)
+                matches.Add(f)
+            Next
+        Catch ex As Exception
+            ShowCustomMessageBox("Failed to enumerate library files in '" & folder & "': " & ex.Message)
+        End Try
+        Return matches
+    End Function
+
+    ' Parses a clause library file. Supports:
+    '   - Lines starting with ';' are comments
+    '   - "SP_FindClause = <prompt>" lines (file-level before any [Title] or segment-level after a [Title])
+    '   - "SP_MergePrompt = <prompt>" lines (file-level before any [Title] or segment-level after a [Title])
+    '   - Segments delimited by [Title] ... (JSON content lines gathered)
+    Private Function ParseClauseLibraryFile(filePath As String, isLocal As Boolean) As List(Of ClauseLibrary)
+        Dim libs As New List(Of ClauseLibrary)()
+        Try
+            Dim fileDefaultFindPrompt As String = Nothing
+            Dim fileDefaultMergePrompt As String = Nothing
+            Dim currentTitle As String = Nothing
+            Dim segFindPrompt As String = Nothing
+            Dim segMergePrompt As String = Nothing
+            Dim jsonBuilder As New System.Text.StringBuilder()
+
+            Dim FlushCurrent As System.Action =
+        Sub()
+            Dim raw = jsonBuilder.ToString().Trim()
+            If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
+                Dim effFind As String = If(segFindPrompt, fileDefaultFindPrompt)
+                Dim effMerge As String = If(segMergePrompt, fileDefaultMergePrompt)
+                libs.Add(New ClauseLibrary With {
+                    .Title = currentTitle,
+                    .SourcePath = filePath,
+                    .IsLocal = isLocal,
+                    .RawJson = raw,
+                    .EffectivePrompt = effFind,
+                    .EffectiveMergePrompt = effMerge
+                })
+            End If
+            jsonBuilder.Clear()
+            segFindPrompt = Nothing
+            segMergePrompt = Nothing
+        End Sub
+
+            For Each rawLine In IO.File.ReadLines(filePath)
+                If rawLine Is Nothing Then Continue For
+                Dim line As String = rawLine.Trim()
+
+                If line.StartsWith(";", StringComparison.Ordinal) Then Continue For
+
+                ' FindClause override?
+                Dim findVal As String = Nothing
+                If TryParseFindClauseLine(line, findVal) Then
+                    If currentTitle Is Nothing Then
+                        fileDefaultFindPrompt = findVal
+                    Else
+                        segFindPrompt = findVal
+                    End If
+                    Continue For
+                End If
+
+                ' MergePrompt override?
+                Dim mergeVal As String = Nothing
+                If TryParseMergePromptLine(line, mergeVal) Then
+                    If currentTitle Is Nothing Then
+                        fileDefaultMergePrompt = mergeVal
+                    Else
+                        segMergePrompt = mergeVal
+                    End If
+                    Continue For
+                End If
+
+                ' New segment start
+                If line.StartsWith("[", StringComparison.Ordinal) AndAlso line.EndsWith("]", StringComparison.Ordinal) Then
+                    FlushCurrent()
+                    currentTitle = line.Substring(1, line.Length - 2).Trim()
+                    Continue For
+                End If
+
+                If currentTitle IsNot Nothing Then
+                    jsonBuilder.AppendLine(rawLine)
+                End If
+            Next
+            FlushCurrent()
+
+        Catch ex As Exception
+            ShowCustomMessageBox("Failed to parse library file '" & filePath & "': " & ex.Message)
+        End Try
+        Return libs
+    End Function
+
+    Private Function TryParseFindClauseLine(line As String, ByRef valueOut As String) As Boolean
+        valueOut = Nothing
+        If line Is Nothing Then Return False
+        Dim m = System.Text.RegularExpressions.Regex.Match(line, "^\s*SP_FindClause\s*=\s*(.*)$", RegexOptions.IgnoreCase)
+        If m IsNot Nothing AndAlso m.Success Then
+            valueOut = m.Groups(1).Value.Trim()
+            Return True
+        End If
+        Return False
+    End Function
+
+    Private Function TryParseMergePromptLine(line As String, ByRef valueOut As String) As Boolean
+        valueOut = Nothing
+        If line Is Nothing Then Return False
+        Dim m = System.Text.RegularExpressions.Regex.Match(line, "^\s*SP_MergePrompt\s*=\s*(.*)$", RegexOptions.IgnoreCase)
+        If m IsNot Nothing AndAlso m.Success Then
+            valueOut = m.Groups(1).Value.Trim()
+            Return True
+        End If
+        Return False
+    End Function
+
+    ' ================== Revised BuildMarkdownFromClauseResponse ==================
+    ' Expects the LLM to return:
+    ' {
+    '   "records":[
+    '     {
+    '       "clause":"<verbatim>",
+    '       "title":"<optional>",
+    '       "id":"<optional>",
+    '       "score":0.87,
+    '       "reason":"<optional short rationale>"
+    '     }, ...
+    '   ]
+    ' }
+    ' Falls back gracefully if the structure deviates.
+    ' Replace the previous BuildMarkdownFromClauseResponse with the improved, more robust version below.
+    ' Add the two new helper functions (CleanAndExtractJson, FallbackExtractRecords) anywhere in the class.
+
+    ' Cleans LLM output (removes surrounding code fences, stray text) and extracts the most likely JSON payload.
+    Private Function CleanAndExtractJson(raw As String) As String
+        If String.IsNullOrWhiteSpace(raw) Then Return ""
+        Dim s = raw.Trim()
+
+        ' Strip leading / trailing markdown fences ```...```
+        ' Accept variants: ```json, ```JSON, ```
+        If s.StartsWith("```", StringComparison.Ordinal) Then
+            Dim idx = s.IndexOf(vbLf)
+            If idx > -1 Then
+                s = s.Substring(idx + 1).TrimStart()
+            End If
+        End If
+        If s.EndsWith("```", StringComparison.Ordinal) Then
+            Dim lastFence = s.LastIndexOf("```", StringComparison.Ordinal)
+            If lastFence >= 0 Then
+                s = s.Substring(0, lastFence).TrimEnd()
+            End If
+        End If
+
+        ' If model wrapped JSON in prose, try to isolate from first { to last }
+        Dim firstBrace = s.IndexOf("{"c)
+        Dim lastBrace = s.LastIndexOf("}"c)
+        If firstBrace >= 0 AndAlso lastBrace > firstBrace Then
+            s = s.Substring(firstBrace, lastBrace - firstBrace + 1).Trim()
+        End If
+
+        Return s
+    End Function
+
+    ' Very lenient fallback extraction if JSON parsing fails (returns list of minimal JObject-like dictionaries).
+    Private Function FallbackExtractRecords(raw As String) As List(Of Dictionary(Of String, String))
+        Dim list As New List(Of Dictionary(Of String, String))()
+        If String.IsNullOrWhiteSpace(raw) Then Return list
+
+        ' Try to isolate the records array content
+        Dim m = System.Text.RegularExpressions.Regex.Match(raw, """records""\s*:\s*\[(.*)\]\s*\}", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
+        If Not m.Success Then Return list
+
+        Dim arrayContent = m.Groups(1).Value
+
+        ' Split naively on "},{" boundaries (add back braces)
+        Dim parts = System.Text.RegularExpressions.Regex.Split(arrayContent, "\},\s*\{", RegexOptions.Singleline)
+        For Each partRaw In parts
+            Dim part = partRaw.Trim()
+            If part = "" Then Continue For
+            If Not part.StartsWith("{") Then part = "{" & part
+            If Not part.EndsWith("}") Then part &= "}"
+
+            Dim d As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+
+            ' pull clause (multiline)
+            Dim mClause = System.Text.RegularExpressions.Regex.Match(part, """clause""\s*:\s*""(.*?)""\s*(,|\})", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
+            If mClause.Success Then
+                Dim c = mClause.Groups(1).Value
+                c = c.Replace("\r", "").Replace("\n", vbCrLf)
+                d("clause") = c
+            End If
+
+            Dim mTitle = System.Text.RegularExpressions.Regex.Match(part, """title""\s*:\s*""(.*?)""\s*(,|\})", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
+            If mTitle.Success Then d("title") = mTitle.Groups(1).Value
+
+            Dim mId = System.Text.RegularExpressions.Regex.Match(part, """id""\s*:\s*""(.*?)""\s*(,|\})", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
+            If mId.Success Then d("id") = mId.Groups(1).Value
+
+            Dim mReason = System.Text.RegularExpressions.Regex.Match(part, """reason""\s*:\s*""(.*?)""\s*(,|\})", RegexOptions.Singleline Or RegexOptions.IgnoreCase)
+            If mReason.Success Then d("reason") = mReason.Groups(1).Value
+
+            Dim mScore = System.Text.RegularExpressions.Regex.Match(part, """score""\s*:\s*([0-9]+(\.[0-9]+)?)", RegexOptions.IgnoreCase)
+            If mScore.Success Then d("score") = mScore.Groups(1).Value
+
+            If d.ContainsKey("clause") Then list.Add(d)
+        Next
+
+        Return list
+    End Function
+
+    Private Function BuildMarkdownFromClauseResponse(responseJson As String) As String
+        Dim sb As New System.Text.StringBuilder()
+
+        If String.IsNullOrWhiteSpace(responseJson) Then
+            sb.AppendLine("_No response (empty)._")
+            Return sb.ToString().Trim()
+        End If
+
+        ' 1. Clean / extract JSON payload
+        Dim cleaned = CleanAndExtractJson(responseJson)
+
+        ' 2. First parse attempt (strict)
+        Dim topToken As JToken = Nothing
+        Dim parsedOk As Boolean = False
+        If Not String.IsNullOrWhiteSpace(cleaned) Then
+            Try
+                ' Repair common LLM issue: unescaped inner quotes starting a value with ""
+                ' We ONLY patch inside "clause" value boundaries where a leading "" occurs.
+                cleaned = System.Text.RegularExpressions.Regex.Replace(
+                cleaned,
+                "(?<=\bclause\b\s*:\s*)""""",
+                """\\""",
+                RegexOptions.IgnoreCase)
+
+                topToken = JToken.Parse(cleaned)
+                parsedOk = True
+            Catch ex As Exception
+                parsedOk = False
+            End Try
+        End If
+
+        Dim recs As New List(Of JObject)
+
+        If parsedOk Then
+            ' 3. Normal extraction
+            Dim recordsToken As JToken = Nothing
+
+            If topToken.Type = JTokenType.Object Then
+                Dim obj = CType(topToken, JObject)
+                Dim prop = obj.Properties().FirstOrDefault(Function(p) p.Name.Equals("records", StringComparison.OrdinalIgnoreCase))
+                If prop IsNot Nothing AndAlso prop.Value.Type = JTokenType.Array Then
+                    recordsToken = prop.Value
+                ElseIf obj.Properties().Any(Function(p) p.Name.Equals("clause", StringComparison.OrdinalIgnoreCase)) Then
+                    ' Single record object
+                    recordsToken = New JArray(obj)
+                End If
+            ElseIf topToken.Type = JTokenType.Array Then
+                recordsToken = topToken
+            End If
+
+            If recordsToken IsNot Nothing Then
+                For Each r In recordsToken
+                    If r.Type = JTokenType.Object Then recs.Add(CType(r, JObject))
+                Next
+            End If
+        End If
+
+        ' 4. Fallback if strict parse failed or no records found
+        ' === FIX: Replace ONLY the fallback block inside BuildMarkdownFromClauseResponse that used GetValueOrDefault ===
+        ' Locate the section:  If recs.Count = 0 Then ... If Not parsedOk Then
+        ' Replace that entire inner fallback rendering with the code below.
+
+        If recs.Count = 0 Then
+            If Not parsedOk Then
+                Dim fallback = FallbackExtractRecords(cleaned)
+                If fallback.Count > 0 Then
+                    Dim idx = 1
+                    For Each d In fallback
+                        Dim clauseText As String = Nothing
+                        If Not d.TryGetValue("clause", clauseText) OrElse String.IsNullOrWhiteSpace(clauseText) Then Continue For
+
+                        Dim titleTxt As String = Nothing
+                        If Not d.TryGetValue("title", titleTxt) OrElse String.IsNullOrWhiteSpace(titleTxt) Then
+                            If Not d.TryGetValue("id", titleTxt) OrElse String.IsNullOrWhiteSpace(titleTxt) Then
+                                titleTxt = "Clause " & idx.ToString()
+                            End If
+                        End If
+
+                        sb.AppendLine("### " & titleTxt.Trim())
+                        sb.AppendLine()
+                        sb.AppendLine(clauseText.Trim())
+                        sb.AppendLine()
+
+                        Dim meta As New List(Of String)
+                        Dim idVal As String = Nothing
+                        If d.TryGetValue("id", idVal) AndAlso Not String.IsNullOrWhiteSpace(idVal) AndAlso Not idVal.Equals(titleTxt, StringComparison.OrdinalIgnoreCase) Then
+                            meta.Add("ID: " & idVal)
+                        End If
+                        Dim scoreVal As String = Nothing
+                        If d.TryGetValue("score", scoreVal) AndAlso Not String.IsNullOrWhiteSpace(scoreVal) Then
+                            meta.Add("Score: " & scoreVal)
+                        End If
+                        Dim reasonVal As String = Nothing
+                        If d.TryGetValue("reason", reasonVal) AndAlso Not String.IsNullOrWhiteSpace(reasonVal) Then
+                            meta.Add("Reason: " & reasonVal)
+                        End If
+
+                        If meta.Count > 0 Then
+                            sb.AppendLine("_" & String.Join(" • ", meta) & "_")
+                            sb.AppendLine()
+                        End If
+                        idx += 1
+                    Next
+                    Return sb.ToString().Trim()
+                Else
+                    sb.AppendLine("_Could not parse JSON (even after fallback). Raw cleaned content:_")
+                    sb.AppendLine()
+                    sb.AppendLine("```json")
+                    sb.AppendLine(If(cleaned, ""))
+                    sb.AppendLine("```")
+                    Return sb.ToString().Trim()
+                End If
+            Else
+                sb.AppendLine("_No matching clauses returned._")
+                Return sb.ToString().Trim()
+            End If
+        End If
+
+        ' 5. Normal markdown rendering for parsed records
+        Dim counter As Integer = 1
+        For Each ro In recs
+            Dim clauseProp = ro.Properties().FirstOrDefault(Function(p) p.Name.Equals("clause", StringComparison.OrdinalIgnoreCase))
+            If clauseProp Is Nothing Then Continue For
+            Dim clauseText = clauseProp.Value.ToString()
+            If String.IsNullOrWhiteSpace(clauseText) Then Continue For
+
+            Dim titleTxt As String = GetFirstString(ro, {"title"})
+            If String.IsNullOrWhiteSpace(titleTxt) Then titleTxt = GetFirstString(ro, {"id"})
+            If String.IsNullOrWhiteSpace(titleTxt) Then titleTxt = "Clause " & counter
+
+            Dim idTxt = GetFirstString(ro, {"id"})
+            Dim reasonTxt = GetFirstString(ro, {"reason", "rationale"})
+            Dim scoreTxt As String = Nothing
+            Dim scoreProp = ro.Properties().FirstOrDefault(Function(p) p.Name.Equals("score", StringComparison.OrdinalIgnoreCase))
+            If scoreProp IsNot Nothing AndAlso scoreProp.Value.Type <> JTokenType.Object AndAlso scoreProp.Value.Type <> JTokenType.Array Then
+                scoreTxt = scoreProp.Value.ToString()
+            End If
+
+            sb.AppendLine("## " & titleTxt.Trim())
+            sb.AppendLine()
+            sb.AppendLine(clauseText.Trim())
+            sb.AppendLine()
+
+            Dim meta As New List(Of String)
+            If Not String.IsNullOrWhiteSpace(idTxt) AndAlso Not idTxt.Equals(titleTxt, StringComparison.OrdinalIgnoreCase) Then meta.Add("ID: " & idTxt)
+            If Not String.IsNullOrWhiteSpace(scoreTxt) Then meta.Add("Score: " & scoreTxt)
+            If Not String.IsNullOrWhiteSpace(reasonTxt) Then meta.Add("Reason: " & reasonTxt)
+            If meta.Count > 0 Then
+                sb.AppendLine("_" & String.Join(" • ", meta) & "_")
+                sb.AppendLine()
+            End If
+
+            counter += 1
+        Next
+
+        If counter = 1 Then
+            sb.AppendLine("_No usable clause records were found (all malformed or missing 'clause')._")
+        End If
+
+        Return sb.ToString().Trim()
+    End Function
+
+
+    Private Function GetFirstString(obj As JObject, keys As IEnumerable(Of String)) As String
+        For Each k In keys
+            Dim p = obj.Properties().FirstOrDefault(Function(pr) pr.Name.Equals(k, StringComparison.OrdinalIgnoreCase))
+            If p IsNot Nothing AndAlso p.Value IsNot Nothing Then
+                If p.Value.Type = JTokenType.String Then
+                    Dim v = p.Value.ToString().Trim()
+                    If v.Length > 0 Then Return v
+                Else
+                    ' If it's not a string but scalar, use ToString
+                    If p.Value.Type <> JTokenType.Object AndAlso p.Value.Type <> JTokenType.Array Then
+                        Dim v = p.Value.ToString().Trim()
+                        If v.Length > 0 Then Return v
+                    End If
+                End If
+            End If
+        Next
+        Return Nothing
+    End Function
+
+    ' ====================== Add Clause to Library (Segment + Lenient JSON) ======================
+    ' Lets user pick a specific library SEGMENT (like FindClause) and appends the selected text
+    ' ONLY to that segment. Other segments / prompt overrides remain untouched.
+    ' Supports three storage styles inside a segment:
+    '   (A) { "Records":[ { ... }, ... ] }
+    '   (B) [ { ... }, { ... } ]
+    '   (C) Sequence of standalone objects:  { ... }\r\n{ ... }\r\n{ ... }
+    ' The field name used for clause text is determined from the LAST existing object’s first string property;
+    ' if none exists, it falls back to "Text".  Duplicate detection uses that dynamic field.
+    Public Async Sub AddClause()
+        Try
+            If INILoadFail() Then Return
+
+            ' 1) Get selection
+            Dim app As Word.Application = Globals.ThisAddIn.Application
+            If app Is Nothing OrElse app.Documents Is Nothing OrElse app.Documents.Count = 0 Then
+                ShowCustomMessageBox("No active document.")
+                Return
+            End If
+            Dim sel As Word.Selection = app.Selection
+            Dim selectedText As String = ""
+            If sel IsNot Nothing AndAlso sel.Range IsNot Nothing AndAlso sel.Range.Text IsNot Nothing Then
+                selectedText = sel.Range.Text
+            End If
+            selectedText = If(selectedText, "").Trim()
+            If String.IsNullOrWhiteSpace(selectedText) Then
+                ShowCustomMessageBox("Please select some text first.")
+                Return
+            End If
+
+            ' 2) Load all segment libraries (same as FindClause logic)
+            Dim pathGlobal As String = ExpandEnvironmentVariables(INI_FindClausePath)
+            If Not String.IsNullOrEmpty(pathGlobal) AndAlso Not pathGlobal.EndsWith("\", StringComparison.Ordinal) Then pathGlobal &= "\"
+            Dim pathLocal As String = ExpandEnvironmentVariables(INI_FindClausePathLocal)
+            If Not String.IsNullOrEmpty(pathLocal) AndAlso Not pathLocal.EndsWith("\", StringComparison.Ordinal) Then pathLocal &= "\"
+
+            Dim allLibs As List(Of ClauseLibrary) = LoadClauseLibraries(pathGlobal, pathLocal)
+            If allLibs Is Nothing OrElse allLibs.Count = 0 Then
+                ShowCustomMessageBox("No clause library segments found. (redink-lib-*.txt)")
+                Return
+            End If
+
+            ' 3) Build segment display list (Title + filename + (local) if local)
+            allLibs.Sort(Function(a, b) String.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase))
+            Dim segmentDisplayMap As New Dictionary(Of String, ClauseLibrary)(StringComparer.OrdinalIgnoreCase)
+            For Each cl In allLibs
+                Dim disp As String = $"{cl.Title} [{IO.Path.GetFileName(cl.SourcePath)}]"
+                If cl.IsLocal Then disp &= " (local)"
+                disp = MakeUniqueDisplay(disp, segmentDisplayMap.Keys)
+                segmentDisplayMap(disp) = cl
+            Next
+            Dim segmentOptions = segmentDisplayMap.Keys.OrderBy(Function(x) x, StringComparer.OrdinalIgnoreCase).ToList()
+            If segmentOptions.Count = 0 Then
+                ShowCustomMessageBox("No clause library segments available.")
+                Return
+            End If
+
+            ' 4) User picks segment + Clean option
+            Dim pSeg As New SLib.InputParameter("Clause Segment", segmentOptions(0)) With {.Options = New List(Of String)(segmentOptions)}
+            Dim pClean As New SLib.InputParameter("Clean/anonymize", False)
+            Dim paramArr() As SLib.InputParameter = {pSeg, pClean}
+            If ShowCustomVariableInputForm("Select the library segment to which you want to append the clause:", AN & " AddClause", paramArr) = False Then
+                Return
+            End If
+            Dim chosenDisp As String = CStr(paramArr(0).Value)
+            Dim doClean As Boolean = CBool(paramArr(1).Value)
+
+            If String.IsNullOrWhiteSpace(chosenDisp) OrElse Not segmentDisplayMap.ContainsKey(chosenDisp) Then
+                ShowCustomMessageBox("Invalid segment selection.")
+                Return
+            End If
+            Dim chosenSegment = segmentDisplayMap(chosenDisp)
+
+            ' 5) Optional clean / anonymize
+            Dim finalText As String = selectedText
+            If doClean Then
+                Try
+                    Dim cleaned As String = Await LLM(SP_FindClause_Clean, "<TEXTTOPROCESS>" & selectedText & "</TEXTTOPROCESS>", "", "", 0, False)
+                    If String.IsNullOrWhiteSpace(cleaned) Then
+                        ShowCustomMessageBox("No cleaned text returned - aborting.")
+                        Return
+                    End If
+                    Dim edited = ShowCustomWindow("The cleaning and anonymization resulted in the following text for your review:", cleaned.Trim(), "Edit text to insert, then press OK or Cancel.", $"{AN} AddClause")
+                    If String.IsNullOrWhiteSpace(edited) Then
+                        ShowCustomMessageBox("Operation cancelled (no text).")
+                        Return
+                    End If
+                    finalText = edited.Trim()
+                Catch ex As Exception
+                    ShowCustomMessageBox("Clean/anonymize step failed: " & ex.Message)
+                    Return
+                End Try
+            End If
+            If String.IsNullOrWhiteSpace(finalText) Then
+                ShowCustomMessageBox("No clause text to add (empty).")
+                Return
+            End If
+
+            ' 6) Update ONLY that segment inside its source file.
+            Dim targetFile As String = chosenSegment.SourcePath
+            If Not IO.File.Exists(targetFile) Then
+                ShowCustomMessageBox("Underlying library file no longer exists.")
+                Return
+            End If
+
+            Dim success As Boolean = False
+            Dim attempt As Integer = 0
+
+            While Not success
+                attempt += 1
+                Try
+                    ' Try to obtain exclusive lock
+                    Using fs As New IO.FileStream(targetFile,
+                                                  IO.FileMode.Open,
+                                                  IO.FileAccess.ReadWrite,
+                                                  IO.FileShare.None)
+
+                        ' Read file content THROUGH THE SAME LOCKED STREAM (avoid File.ReadAllLines re-open)
+                        Dim rawText As String
+                        Using sr As New IO.StreamReader(fs, New System.Text.UTF8Encoding(False), True, 4096, True)
+                            rawText = sr.ReadToEnd()
+                        End Using
+
+                        ' Normalize + split into lines (preserve empty file gracefully)
+                        Dim allLines As List(Of String)
+                        If String.IsNullOrEmpty(rawText) Then
+                            allLines = New List(Of String)
+                        Else
+                            ' Normalize line endings to LF then split; we will write back with CRLF
+                            Dim norm = rawText.Replace(vbCrLf, vbLf).Replace(vbCr, vbLf)
+                            allLines = norm.Split(New String() {vbLf}, StringSplitOptions.None).ToList()
+                        End If
+
+                        ' Parse segments WITH line positions so we can replace only chosen segment content
+                        Dim segments = ParseSegmentsWithPositions(allLines)
+                        Dim segInfo = segments.FirstOrDefault(Function(s) s.Title.Equals(chosenSegment.Title, StringComparison.OrdinalIgnoreCase))
+                        If segInfo Is Nothing Then
+                            ShowCustomMessageBox("Selected segment not found in file (it may have been renamed).")
+                            Exit While
+                        End If
+
+                        ' Extract original JSON text for this segment (content lines only)
+                        Dim originalSegmentJson As String = ""
+                        If segInfo.ContentLineCount > 0 Then
+                            originalSegmentJson = String.Join(vbCrLf, allLines.Skip(segInfo.ContentStartLine).Take(segInfo.ContentLineCount))
+                        End If
+
+                        ' Build new JSON (append record) preserving style
+                        Dim updatedSegmentJson As String = AppendClauseToSegment(originalSegmentJson, finalText)
+                        If String.IsNullOrWhiteSpace(updatedSegmentJson) Then
+                            ShowCustomMessageBox("Failed to build updated JSON for the selected segment.")
+                            Exit While
+                        End If
+
+                        ' Remove old content lines
+                        For i = 1 To segInfo.ContentLineCount
+                            allLines.RemoveAt(segInfo.ContentStartLine)
+                        Next
+                        ' Insert new content lines
+                        Dim newLines = Split(updatedSegmentJson, vbCrLf).ToList()
+                        allLines.InsertRange(segInfo.ContentStartLine, newLines)
+
+                        ' Rewind & overwrite file
+                        fs.Position = 0
+                        fs.SetLength(0)
+                        Using sw As New IO.StreamWriter(fs, New System.Text.UTF8Encoding(False), 4096, True)
+                            For i = 0 To allLines.Count - 1
+                                If i > 0 Then sw.Write(vbCrLf)
+                                sw.Write(allLines(i))
+                            Next
+                            sw.Flush()
+                        End Using
+                    End Using
+
+                    success = True
+                    ShowCustomMessageBox($"Clause added to segment '{chosenSegment.Title}' of your library file.",
+                                                                    extraButtonText:="Edit file",
+                                                                    extraButtonAction:=Sub()
+                                                                                           ' Your code here
+                                                                                           SLib.ShowTextFileEditor(targetFile, $"Edit your library file ('{targetFile}'):")
+                                                                                       End Sub)
+
+                Catch ioEx As IO.IOException
+                    ' True sharing violation only happens on opening, not during internal re-read now.
+                    Dim choice = ShowCustomYesNoBox($"Could not acquire exclusive access (attempt {attempt}). Retry?", "Retry", "Abort")
+                    If choice <> 1 Then
+                        ShowCustomMessageBox("Operation aborted - could not acquire lock.")
+                        Return
+                    End If
+                    System.Threading.Thread.Sleep(250)
+
+                Catch ex As Exception
+                    ShowCustomMessageBox("Error updating segment: " & ex.Message)
+                    Return
+                End Try
+            End While
+
+        Catch ex As Exception
+#If DEBUG Then
+            Debug.WriteLine("AddClause error: " & ex.Message)
+            Debug.WriteLine(ex.StackTrace)
+#End If
+            ShowCustomMessageBox("Error in AddClause: " & ex.Message)
+        End Try
+    End Sub
+
+    ' ----- Helper: parse the entire library file into segments with line positions -----
+    Private Function ParseSegmentsWithPositions(lines As List(Of String)) As List(Of SegmentInfo)
+        Dim result As New List(Of SegmentInfo)()
+        Dim currentTitle As String = Nothing
+        Dim contentStart As Integer = -1
+
+        ' We must ignore SP_FindClause / SP_MergePrompt lines from content (same logic as original parser)
+        Dim i As Integer = 0
+        While i < lines.Count
+            Dim rawLine = lines(i)
+            Dim line = (If(rawLine, "")).Trim()
+
+            Dim isHeader As Boolean = line.StartsWith("[") AndAlso line.EndsWith("]")
+            If isHeader Then
+                ' Flush previous segment
+                If currentTitle IsNot Nothing Then
+                    Dim segEndLineExclusive = i ' current header line starts next segment
+                    Dim contentCount = System.Math.Max(0, segEndLineExclusive - contentStart)
+                    result.Add(New SegmentInfo With {
+                        .Title = currentTitle,
+                        .ContentStartLine = contentStart,
+                        .ContentLineCount = contentCount
+                    })
+                End If
+
+                currentTitle = line.Substring(1, line.Length - 2).Trim()
+                contentStart = i + 1 ' content starts after header
+                i += 1
+                Continue While
+            End If
+
+            ' Skip prompt override lines from segment content (they are not part of JSON)
+            If currentTitle IsNot Nothing AndAlso
+               (Regex.IsMatch(line, "^\s*SP_FindClause\s*=", RegexOptions.IgnoreCase) OrElse
+                Regex.IsMatch(line, "^\s*SP_MergePrompt\s*=", RegexOptions.IgnoreCase)) Then
+                ' ensure contentStart moves forward if prompt lines appear at the beginning
+                If contentStart = i Then contentStart = i + 1
+            End If
+
+            i += 1
+        End While
+
+        ' Flush last segment
+        If currentTitle IsNot Nothing Then
+            Dim segEnd = lines.Count
+            Dim contentCount = System.Math.Max(0, segEnd - contentStart)
+            result.Add(New SegmentInfo With {
+                .Title = currentTitle,
+                .ContentStartLine = contentStart,
+                .ContentLineCount = contentCount
+            })
+        End If
+
+        Return result
+    End Function
+
+    Private Class SegmentInfo
+        Public Property Title As String
+        Public Property ContentStartLine As Integer   ' index of first JSON content line
+        Public Property ContentLineCount As Integer   ' number of lines belonging to JSON content
+    End Class
+
+    ' ----- Helper: Append clause text to segment JSON (lenient formats) -----
+    Private Function AppendClauseToSegment(originalJson As String, finalText As String) As String
+        Dim trimmed = (If(originalJson, "")).Trim()
+
+        ' Case A: Wrapper object containing "Records" array
+        If LooksLikeWrapperWithRecords(trimmed) Then
+            Try
+                Dim obj = JObject.Parse(trimmed)
+                Dim arr = TryCast(obj("Records"), JArray)
+                If arr Is Nothing Then
+                    arr = New JArray()
+                    obj("Records") = arr
+                End If
+
+                Dim fieldName = DetectFieldNameFromLast(arr)
+                If String.IsNullOrWhiteSpace(fieldName) Then fieldName = "Text"
+
+                ' Duplicate check
+                Dim dup = arr.OfType(Of JObject)().Any(Function(o) HasStringValue(o, fieldName, finalText))
+                If dup Then
+                    Dim c = ShowCustomYesNoBox("A record with identical text already exists in this segment. Add anyway?", "Add duplicate", "Abort")
+                    If c <> 1 Then Return Nothing
+                End If
+
+                Dim newRec As New JObject From {{fieldName, finalText}}
+                arr.Add(newRec)
+                Return obj.ToString(Formatting.Indented)
+            Catch
+                ' fall through to next styles
+            End Try
+        End If
+
+        ' Case B: Pure JSON array
+        If trimmed.StartsWith("[") Then
+            Try
+                Dim arr = JArray.Parse(trimmed)
+                Dim fieldName = DetectFieldNameFromLast(arr)
+                If String.IsNullOrWhiteSpace(fieldName) Then fieldName = "Text"
+
+                Dim dup = arr.OfType(Of JObject)().Any(Function(o) HasStringValue(o, fieldName, finalText))
+                If dup Then
+                    Dim c = ShowCustomYesNoBox("A record with identical text already exists in this segment. Add anyway?", "Add duplicate", "Abort")
+                    If c <> 1 Then Return Nothing
+                End If
+
+                arr.Add(New JObject From {{fieldName, finalText}})
+                Return arr.ToString(Formatting.Indented)
+            Catch
+                ' fall through
+            End Try
+        End If
+
+        ' Case C: Sequence of standalone objects
+        Dim objects = ParseStandaloneObjectSequence(trimmed)
+        If objects IsNot Nothing Then
+            Dim fieldName = DetectFieldNameFromLast(objects)
+            If String.IsNullOrWhiteSpace(fieldName) Then fieldName = "Text"
+
+            Dim dup = objects.OfType(Of JObject)().Any(Function(o) HasStringValue(o, fieldName, finalText))
+            If dup Then
+                Dim c = ShowCustomYesNoBox("A record with identical text already exists in this segment. Add anyway?", "Add duplicate", "Abort")
+                If c <> 1 Then Return Nothing
+            End If
+
+            objects.Add(New JObject From {{fieldName, finalText}})
+
+            ' Reconstruct sequence (keep style: each object pretty printed separated by blank line)
+            Dim sb As New System.Text.StringBuilder()
+            For i = 0 To objects.Count - 1
+                If i > 0 Then sb.AppendLine().AppendLine()
+                sb.Append(objects(i).ToString(Formatting.Indented))
+            Next
+            Return sb.ToString()
+        End If
+
+        ' Empty segment: create new wrapper
+        If String.IsNullOrWhiteSpace(trimmed) Then
+            Dim arr As New JArray()
+            arr.Add(New JObject From {{"Text", finalText}})
+            Return "{""Records"":" & arr.ToString(Formatting.None) & "}"
+        End If
+
+        ' Fallback: treat entire content as single object? Try parse then convert to Records.
+        Try
+            Dim singleObj = JObject.Parse(trimmed)
+            Dim fieldName As String = singleObj.Properties().FirstOrDefault(Function(p) p.Value.Type = JTokenType.String)?.Name
+            If String.IsNullOrWhiteSpace(fieldName) Then fieldName = "Text"
+            Dim arr As New JArray(singleObj, New JObject From {{fieldName, finalText}})
+            Return "{""Records"":" & arr.ToString(Formatting.None) & "}"
+        Catch
+            ' give up
+        End Try
+
+        Return Nothing
+    End Function
+
+    Private Function LooksLikeWrapperWithRecords(s As String) As Boolean
+        Return s.StartsWith("{") AndAlso s.IndexOf("""Records""", StringComparison.OrdinalIgnoreCase) >= 0
+    End Function
+
+    ' For JArray or List(Of JObject)
+    Private Function DetectFieldNameFromLast(container As IEnumerable) As String
+        Dim lastObj As JObject = Nothing
+        For Each o In container
+            If TypeOf o Is JObject Then lastObj = CType(o, JObject)
+        Next
+        If lastObj Is Nothing Then Return Nothing
+        For Each p In lastObj.Properties()
+            If p.Value.Type = JTokenType.String Then Return p.Name
+        Next
+        Return Nothing
+    End Function
+
+    Private Function HasStringValue(o As JObject, fieldName As String, value As String) As Boolean
+        Dim tok = o(fieldName)
+        Return tok IsNot Nothing AndAlso tok.Type = JTokenType.String AndAlso String.Equals(CStr(tok), value, StringComparison.Ordinal)
+    End Function
+
+    ' Parse a sequence of standalone objects (no array / wrapper). Returns List(Of JObject) or Nothing.
+    Private Function ParseStandaloneObjectSequence(raw As String) As List(Of JObject)
+        If String.IsNullOrWhiteSpace(raw) Then Return New List(Of JObject)()
+        Dim parts As New List(Of String)()
+
+        ' Split on blank-line boundaries that separate top-level objects OR naive closing brace followed by line(s) then opening brace
+        Dim regexSplit = New Regex("(?<=\})(?:\s*\r?\n){1,}(?=\{)", RegexOptions.Singleline)
+        Dim rawParts = regexSplit.Split(raw)
+
+        ' If only one part, ensure it is NOT just a single object (then it's not a sequence style)
+        If rawParts.Length = 1 Then
+            ' If it parses as object, we treat that in fallback, so return Nothing here (not sequence)
+            Try
+                JObject.Parse(rawParts(0))
+                Return Nothing
+            Catch
+                ' not valid JSON => maybe malformed -> ignore
+                Return Nothing
+            End Try
+        End If
+
+        Dim list As New List(Of JObject)
+        For Each p In rawParts
+            Dim t = p.Trim()
+            If t = "" Then Continue For
+            Try
+                list.Add(JObject.Parse(t))
+            Catch
+                ' If anyone fails -> not reliable -> abort
+                Return Nothing
+            End Try
+        Next
+        Return list
+    End Function
+
 
     ' DocCheck integration for Word
 
@@ -20578,14 +21689,47 @@ Public Class ThisAddIn
             End If
 
             Dim currentSelection As Microsoft.Office.Interop.Word.Selection = app.Selection
-            If currentSelection Is Nothing Then
-                ShowCustomMessageBox("No selection available.")
-                Return
+            Dim FromFile As String = ""
+
+            If currentSelection.Type = WdSelectionType.wdSelectionIP Then
+                Dim answer As Integer = ShowCustomYesNoBox("You have not selected any text. Do you instead want to analyze text from a document file or Powerpoint presentation?", "Yes", "No")
+                If answer = 1 Then
+
+                    DragDropFormLabel = "Document files (.txt, .docx, .pdf) or Powerpoint (.pptx)."
+                    DragDropFormFilter = "Supported Files|*.txt;*.rtf;*.doc;*.docx;*.pdf;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm;*.pptx||" &
+                                 "Text Files (*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm|" &
+                                 "Rich Text Files (*.rtf)|*.rtf|" &
+                                 "Word Documents (*.doc;*.docx)|*.doc;*.docx|" &
+                                 "PDF Files (*.pdf)|*.pdf" &
+                                 "Powerpoint Files (*.pptx)|*.pptx"
+
+                    Dim FilePath As String = GetFileName()
+                    DragDropFormLabel = ""
+                    DragDropFormFilter = ""
+                    If String.IsNullOrWhiteSpace(FilePath) Then
+                        ShowCustomMessageBox("No file has been selected - will abort.")
+                        Return
+                    End If
+
+                    Dim ext As String = IO.Path.GetExtension(FilePath).ToLowerInvariant()
+                    FromFile = Await GetFileContent(FilePath, False, True, True)
+
+                    If FromFile.StartsWith("Error:") Then
+                        ShowCustomMessageBox(FromFile)
+                        Return
+                    End If
+                    If String.IsNullOrWhiteSpace(FromFile) Then
+                        ShowCustomMessageBox("The file you provided did not contain any text - will abort.")
+                        Return
+                    End If
+                End If
             End If
 
-            ' If selection has no usable text, select the whole story so we STILL have a Selection
             Dim textToAnalyze As System.String = Nothing
-            If currentSelection.Range IsNot Nothing AndAlso currentSelection.Range.Text IsNot Nothing Then
+
+            If FromFile <> "" Then
+                textToAnalyze = FromFile
+            ElseIf currentSelection.Range IsNot Nothing AndAlso currentSelection.Range.Text IsNot Nothing Then
                 Dim selectedText As System.String = currentSelection.Range.Text
                 If selectedText IsNot Nothing AndAlso selectedText.Trim().Length > 0 Then
                     textToAnalyze = selectedText
@@ -20598,9 +21742,13 @@ Public Class ThisAddIn
                     ShowCustomMessageBox("There is no text to analyze.")
                     Return
                 End If
-                app.Selection.WholeStory() ' this updates app.Selection in-place
-                currentSelection = app.Selection                         ' keep the Selection object
-                textToAnalyze = currentSelection.Range.Text              ' and use its text
+                If ShowCustomYesNoBox("Select entire document for analysis?", "Yes", "No, abort") = 1 Then
+                    app.Selection.WholeStory() ' this updates app.Selection in-place
+                    currentSelection = app.Selection                         ' keep the Selection object
+                    textToAnalyze = currentSelection.Range.Text              ' and use its text
+                Else
+                    Return
+                End If
             End If
 
             ' 2) Load all RuleSets from provided paths
@@ -20630,7 +21778,14 @@ Public Class ThisAddIn
             Dim defaultRuleSetDisplay As System.String = If(displayOptions.Count > 0, displayOptions(0), System.String.Empty)
             Dim checkOnlyOneClause As System.Boolean = False
             Dim addAdditionalContext As System.Boolean = False
-            Dim doBubbles As System.Boolean = True
+            Dim doBubbles As Boolean? = True
+            Dim doSummary As Boolean? = True
+
+            If FromFile <> "" Then
+                doBubbles = CType(Nothing, Boolean?)
+                doSummary = CType(Nothing, Boolean?)
+            End If
+
             OtherPrompt = ""
 
             Dim p0 As SLib.InputParameter = New SLib.InputParameter("Rule Set to use", defaultRuleSetDisplay)
@@ -20638,17 +21793,18 @@ Public Class ThisAddIn
             Dim p1 As SLib.InputParameter = New SLib.InputParameter("Check as only one clause", checkOnlyOneClause)
             Dim p2 As SLib.InputParameter = New SLib.InputParameter("Add additional context", addAdditionalContext)
             Dim p3 As SLib.InputParameter = New SLib.InputParameter("Output as Word Bubbles", doBubbles)
+            Dim p4 As SLib.InputParameter = New SLib.InputParameter("Bubbles multiclause summary", doSummary)
 
-            Dim p4 As SLib.InputParameter
+            Dim p5 As SLib.InputParameter
             If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
-                p4 = New SLib.InputParameter("Use a secondary model", do2ndModel)
+                p5 = New SLib.InputParameter("Use a secondary model", do2ndModel)
             Else
-                p4 = New SLib.InputParameter("Use the secondary model", do2ndModel)
+                p5 = New SLib.InputParameter("Use the secondary model", do2ndModel)
             End If
 
-            Dim p5 As SLib.InputParameter = New SLib.InputParameter("Other instructions", OtherPrompt)
+            Dim p6 As SLib.InputParameter = New SLib.InputParameter("Other instructions", OtherPrompt)
 
-            Dim params() As SLib.InputParameter = {p0, p1, p2, p3, p4, p5}
+            Dim params() As SLib.InputParameter = {p0, p1, p2, p3, p4, p5, p6}
 
             If ShowCustomVariableInputForm("Please set the DocCheck parameters:", AN & " DocCheck", params) = False Then
                 Return
@@ -20658,18 +21814,31 @@ Public Class ThisAddIn
             Dim chosenDisplay As System.String = System.Convert.ToString(params(0).Value)
             checkOnlyOneClause = System.Convert.ToBoolean(params(1).Value)
             addAdditionalContext = System.Convert.ToBoolean(params(2).Value)
-            doBubbles = System.Convert.ToBoolean(params(3).Value)
-            do2ndModel = System.Convert.ToBoolean(params(4).Value)
-            OtherPrompt = System.Convert.ToString(params(5).Value)
+
+            Dim newBubbles = params(3).Value
+            If TypeOf newBubbles Is Boolean Then
+                doBubbles = CBool(newBubbles)
+            Else
+                doBubbles = CBool(False)
+            End If
+            Dim newSummary = params(4).Value
+            If TypeOf (newSummary) Is Boolean Then
+                doSummary = CBool(newSummary)
+            Else
+                doSummary = CBool(False)
+            End If
+
+            do2ndModel = System.Convert.ToBoolean(params(5).Value)
+            OtherPrompt = System.Convert.ToString(params(6).Value)
 
             ' Resolve selected rule set
             Dim chosenRuleSet As DocCheckRuleSet = Nothing
             If chosenDisplay IsNot Nothing AndAlso displayToSet.TryGetValue(chosenDisplay, chosenRuleSet) = False Then
-                ShowCustomMessageBox("Selected rule set could not be resolved (check file with rules) - aborting.")
+                ShowCustomMessageBox("Selected rule set could not be resolved (check file with rules) - will abort.")
                 Return
             End If
             If chosenRuleSet Is Nothing Then
-                ShowCustomMessageBox("No rule set was selected - aborting.")
+                ShowCustomMessageBox("No rule set was selected - will abort.")
                 Return
             End If
 
@@ -20678,31 +21847,25 @@ Public Class ThisAddIn
             If addAdditionalContext = True Then
                 insertDocs = GatherSelectedDocuments(True, False)
                 If insertDocs Is Nothing OrElse insertDocs.Trim().Length = 0 Then
-                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - exiting.")
+                    ShowCustomMessageBox("No content was found or an error occurred in gathering the additional document(s) - will abort.")
                     Return
                 ElseIf insertDocs.StartsWith("ERROR", System.StringComparison.OrdinalIgnoreCase) Then
-                    ShowCustomMessageBox("An error occured gathering the additional document(s) (" & insertDocs.Substring(6).Trim() & ") - exiting.")
+                    ShowCustomMessageBox("An error occured gathering the additional document(s) (" & insertDocs.Substring(6).Trim() & ") - will abort.")
                     Return
                 ElseIf insertDocs.StartsWith("NONE", System.StringComparison.OrdinalIgnoreCase) Then
-                    ShowCustomMessageBox("There are no other documents to add - exiting.")
+                    ShowCustomMessageBox("There are no other documents to add - will abort.")
                     Return
                 End If
             End If
 
             ' 5) Re-sync to the *current* selection right before running (user might have changed it)
             currentSelection = app.Selection
-            If currentSelection Is Nothing Then
+            If FromFile = "" AndAlso (currentSelection.Range Is Nothing OrElse currentSelection.Range.Text Is Nothing OrElse currentSelection.Range.Text.Trim().Length = 0) Then
                 ShowCustomMessageBox("Word selection is not available.")
                 Return
             End If
-            If currentSelection.Range Is Nothing OrElse currentSelection.Range.Text Is Nothing OrElse currentSelection.Range.Text.Trim().Length = 0 Then
-                ' If selection is empty now, keep earlier text; optionally, select whole story again:
-                ' app.Selection.WholeStory()
-                ' currentSelection = app.Selection
-                ' textToAnalyze = currentSelection.Range.Text
-            Else
-                textToAnalyze = currentSelection.Range.Text
-            End If
+
+            If FromFile = "" Then textToAnalyze = currentSelection.Range.Text
 
             If do2ndModel Then
 
@@ -20712,7 +21875,6 @@ Public Class ThisAddIn
                         ShowCustomMessageBox("The secondary model could not be loaded - aborting.")
                         Return
                     End If
-                    LastFreestyleModelConfig = GetCurrentConfig(_context)
                 End If
 
             End If
@@ -20721,7 +21883,7 @@ Public Class ThisAddIn
             If checkOnlyOneClause Then
                 Dim Response As String = Await RunIsolatedClause(chosenRuleSet, textToAnalyze, insertDocs, currentSelection, doBubbles, do2ndModel)
             Else
-                Dim Response As String = Await RunSetOfClauses(chosenRuleSet, textToAnalyze, insertDocs, currentSelection, doBubbles, do2ndModel)
+                Dim Response As String = Await RunSetOfClauses(chosenRuleSet, textToAnalyze, insertDocs, currentSelection, doBubbles, do2ndModel, doSummary)
             End If
 
 
@@ -20775,7 +21937,118 @@ Public Class ThisAddIn
     End Function
 
 
+    ' ==== 2) ParseDocCheckFile: add file/segment-level variables & logic ====
     Private Function ParseDocCheckFile(ByVal filePath As System.String, ByVal isLocal As System.Boolean) As System.Collections.Generic.List(Of DocCheckRuleSet)
+        Dim sets As New System.Collections.Generic.List(Of DocCheckRuleSet)()
+
+        Try
+            ' File-level defaults
+            Dim fileDefaultClausePrompt As System.String = Nothing
+            Dim fileDefaultMultiPrompt As System.String = Nothing
+            Dim fileDefaultNotice As System.String = Nothing
+            Dim fileDefaultSummaryPrompt As System.String = Nothing                 ' << NEW
+            Dim fileDefaultSummaryPromptBubbles As System.String = Nothing          ' << NEW
+
+            ' Segment state
+            Dim currentTitle As System.String = Nothing
+            Dim jsonBuilder As New System.Text.StringBuilder()
+            Dim segClausePrompt As System.String = Nothing
+            Dim segMultiPrompt As System.String = Nothing
+            Dim segNotice As System.String = Nothing
+            Dim segSummaryPrompt As System.String = Nothing                         ' << NEW
+            Dim segSummaryPromptBubbles As System.String = Nothing                  ' << NEW
+
+            Dim FlushCurrent As System.Action =
+            Sub()
+                Dim raw As System.String = jsonBuilder.ToString().Trim()
+                If currentTitle IsNot Nothing AndAlso raw.Length > 0 Then
+                    Dim effClause As System.String = If(segClausePrompt, fileDefaultClausePrompt)
+                    Dim effMulti As System.String = If(segMultiPrompt, fileDefaultMultiPrompt)
+                    Dim effNotice As System.String = If(segNotice, fileDefaultNotice)
+                    Dim effSummary As System.String = If(segSummaryPrompt, fileDefaultSummaryPrompt)
+                    Dim effSummaryB As System.String = If(segSummaryPromptBubbles, fileDefaultSummaryPromptBubbles)
+                    sets.Add(CreateRuleSet(currentTitle,
+                                            raw,
+                                            filePath,
+                                            isLocal,
+                                            effClause,
+                                            effMulti,
+                                            effNotice,
+                                            effSummary,
+                                            effSummaryB))
+                End If
+                jsonBuilder.Clear()
+                segClausePrompt = Nothing
+                segMultiPrompt = Nothing
+                segNotice = Nothing
+                segSummaryPrompt = Nothing
+                segSummaryPromptBubbles = Nothing
+            End Sub
+
+            For Each rawLine As System.String In System.IO.File.ReadLines(filePath)
+                If rawLine Is Nothing Then Continue For
+                Dim line As System.String = rawLine.Trim()
+                If line.StartsWith(";", System.StringComparison.Ordinal) Then Continue For
+
+                Dim noticeValue As System.String = Nothing
+                If TryParseNoticeLine(line, noticeValue) Then
+                    If currentTitle IsNot Nothing Then
+                        segNotice = noticeValue
+                    Else
+                        fileDefaultNotice = noticeValue
+                    End If
+                    Continue For
+                End If
+
+                Dim k As System.String = Nothing
+                Dim v As System.String = Nothing
+                If TryParsePromptLine(line, k, v) Then
+                    If currentTitle IsNot Nothing Then
+                        If k.Equals("SP_DocCheck_Clause", StringComparison.OrdinalIgnoreCase) Then
+                            segClausePrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClause", StringComparison.OrdinalIgnoreCase) Then
+                            segMultiPrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClauseSum", StringComparison.OrdinalIgnoreCase) Then
+                            segSummaryPrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClauseSum_Bubbles", StringComparison.OrdinalIgnoreCase) Then
+                            segSummaryPromptBubbles = v
+                        End If
+                    Else
+                        If k.Equals("SP_DocCheck_Clause", StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultClausePrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClause", StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultMultiPrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClauseSum", StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultSummaryPrompt = v
+                        ElseIf k.Equals("SP_DocCheck_MultiClauseSum_Bubbles", StringComparison.OrdinalIgnoreCase) Then
+                            fileDefaultSummaryPromptBubbles = v
+                        End If
+                    End If
+                    Continue For
+                End If
+
+                If line.StartsWith("[", StringComparison.Ordinal) AndAlso line.EndsWith("]", StringComparison.Ordinal) Then
+                    FlushCurrent()
+                    currentTitle = line.Substring(1, line.Length - 2).Trim()
+                    Continue For
+                End If
+
+                If currentTitle IsNot Nothing Then
+                    jsonBuilder.AppendLine(rawLine)
+                End If
+            Next
+
+            FlushCurrent()
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("Failed to parse '" & filePath & "': " & ex.Message)
+        End Try
+
+        Return sets
+    End Function
+
+
+    Private Function oldParseDocCheckFile(ByVal filePath As System.String, ByVal isLocal As System.Boolean) As System.Collections.Generic.List(Of DocCheckRuleSet)
         Dim sets As System.Collections.Generic.List(Of DocCheckRuleSet) = New System.Collections.Generic.List(Of DocCheckRuleSet)()
 
         Try
@@ -20800,7 +22073,7 @@ Public Class ThisAddIn
             Dim effClause As System.String = If(segClausePrompt, fileDefaultClausePrompt)
             Dim effMulti As System.String = If(segMultiPrompt, fileDefaultMultiPrompt)
             Dim effNotice As System.String = If(segNotice, fileDefaultNotice)
-            sets.Add(CreateRuleSet(currentTitle, raw, filePath, isLocal, effClause, effMulti, effNotice)) ' << PASS NOTICE
+            sets.Add(OldCreateRuleSet(currentTitle, raw, filePath, isLocal, effClause, effMulti, effNotice))
         End If
         jsonBuilder.Clear()
         segClausePrompt = Nothing
@@ -20902,8 +22175,35 @@ Public Class ThisAddIn
     End Function
 
 
-
     Private Function CreateRuleSet(ByVal title As System.String,
+                               ByVal rawJson As System.String,
+                               ByVal sourcePath As System.String,
+                               ByVal isLocal As System.Boolean,
+                               ByVal fileOrSegmentClausePrompt As System.String,
+                               ByVal fileOrSegmentMultiPrompt As System.String,
+                               ByVal fileOrSegmentNotice As System.String,
+                               ByVal fileOrSegmentSummaryPrompt As System.String,
+                               ByVal fileOrSegmentSummaryPromptBubbles As System.String) As DocCheckRuleSet
+
+        Dim rs As New DocCheckRuleSet()
+        rs.Title = title
+        rs.SourcePath = sourcePath
+        rs.IsLocal = isLocal
+        rs.RawJson = rawJson
+        rs.RecordJsons = ExtractRecordJsonStrings(rawJson)
+
+        rs.ClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentClausePrompt), fileOrSegmentClausePrompt, SP_DocCheck_Clause)
+        rs.MultiClausePrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentMultiPrompt), fileOrSegmentMultiPrompt, SP_DocCheck_MultiClause)
+        rs.NoticeText = If(fileOrSegmentNotice, Nothing)
+
+        ' New summary prompts with defaults:
+        rs.SummaryPrompt = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentSummaryPrompt), fileOrSegmentSummaryPrompt, SP_DocCheck_MultiClauseSum)
+        rs.SummaryPrompt_Bubbles = If(Not System.String.IsNullOrWhiteSpace(fileOrSegmentSummaryPromptBubbles), fileOrSegmentSummaryPromptBubbles, SP_DocCheck_MultiClauseSum_Bubbles)
+
+        Return rs
+    End Function
+
+    Private Function OldCreateRuleSet(ByVal title As System.String,
                                ByVal rawJson As System.String,
                                ByVal sourcePath As System.String,
                                ByVal isLocal As System.Boolean,
@@ -20930,9 +22230,29 @@ Public Class ThisAddIn
         Return rs
     End Function
 
-
-
     Private Function TryParsePromptLine(ByVal line As System.String,
+                                    ByRef keyOut As System.String,
+                                    ByRef valueOut As System.String) As System.Boolean
+        keyOut = Nothing
+        valueOut = Nothing
+        If line Is Nothing Then Return False
+
+        Dim m As System.Text.RegularExpressions.Match =
+        System.Text.RegularExpressions.Regex.Match(
+            line,
+            "^\s*(SP_DocCheck_(Clause|MultiClause|MultiClauseSum|MultiClauseSum_Bubbles))\s*=\s*(.*)$",   ' << MODIFIED
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        )
+
+        If m IsNot Nothing AndAlso m.Success = True Then
+            keyOut = m.Groups(1).Value
+            valueOut = m.Groups(3).Value.Trim()
+            Return True
+        End If
+        Return False
+    End Function
+
+    Private Function OldTryParsePromptLine(ByVal line As System.String,
                                     ByRef keyOut As System.String,
                                     ByRef valueOut As System.String) As System.Boolean
         keyOut = Nothing
@@ -21018,12 +22338,127 @@ Public Class ThisAddIn
 
 
     ' Multi clause:
+
     Private Async Function RunSetOfClauses(ByVal ruleSet As DocCheckRuleSet,
                                        ByVal textToAnalyze As System.String,
                                        ByVal insertDocs As System.String,
                                        ByVal Selection As Microsoft.Office.Interop.Word.Selection,
                                        ByVal PutInBubbles As System.Boolean,
-                                       ByVal UseSecondAPI As System.Boolean) As System.Threading.Tasks.Task(Of System.String)
+                                       ByVal UseSecondAPI As System.Boolean,
+                                       ByVal DoSummary As System.Boolean) As System.Threading.Tasks.Task(Of System.String)
+        Try
+            Dim records As System.Collections.Generic.List(Of System.String) = ruleSet.RecordJsons
+            If records Is Nothing OrElse records.Count = 0 Then
+                records = ExtractRecordJsonStrings(ruleSet.RawJson)
+                If records Is Nothing OrElse records.Count = 0 Then
+                    ShowCustomMessageBox("This rule set contains no valid records. Expected a JSON object with 'Records', or an array/object representing records.")
+                    Return System.String.Empty
+                End If
+            End If
+
+            ShowProgressBarInSeparateThread(AN & " DocCheck", "Analyzing text...")
+            ProgressBarModule.CancelOperation = False
+
+            GlobalProgressMax = records.Count
+            GlobalProgressValue = 0
+            GlobalProgressLabel = "Analyzing rule 0 of " & records.Count
+
+            Dim OverallAnswer As System.String = System.String.Empty
+            Dim idx As System.Int32 = 0
+
+            Dim docRef As Word.Document = Selection.Range.Document
+            Dim startPos As Integer = Selection.Range.Start
+            Dim endPos As Integer = Selection.Range.End
+
+            For Each recordJson As System.String In records
+                If ProgressBarModule.CancelOperation = True Then
+                    ShowCustomMessageBox("Analysis aborted by user.")
+                    Exit For
+                End If
+
+                GlobalProgressValue = idx
+                GlobalProgressLabel = "Analyzing rule " & (idx + 1).ToString() & " of " & records.Count.ToString()
+
+                Dim systemPrompt As System.String =
+                ruleSet.MultiClausePrompt & System.Environment.NewLine &
+                (If(PutInBubbles, " " & SP_Add_Bubbles & System.Environment.NewLine, "")) &
+                "<RULESET>" & recordJson & "</RULESET>"
+
+                Dim userPrompt As System.String = "<TEXTTOANALYZE>" & textToAnalyze & "</TEXTTOANALYZE> "
+                If Not System.String.IsNullOrWhiteSpace(insertDocs) Then
+                    userPrompt &= System.Environment.NewLine & "FURTHER CONTEXT: " & System.Environment.NewLine & insertDocs
+                End If
+
+                Dim answer As System.String = Await LLM(InterpolateAtRuntime(systemPrompt), userPrompt, "", "", 0, UseSecondAPI)
+                answer = answer.Trim()
+
+                If answer.Length > 3 Then
+                    If PutInBubbles Then
+                        SetBubbles(answer, Selection, True)
+                        OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
+                    Else
+                        OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
+                    End If
+                End If
+
+                idx += 1
+            Next
+
+            If ProgressBarModule.CancelOperation = False Then
+                If PutInBubbles = False Then
+                    GlobalProgressLabel = "Creating final report..."
+                    GlobalProgressValue = idx
+                    Dim summaryPromptToUse As String = ruleSet.SummaryPrompt
+                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(summaryPromptToUse), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                    ProgressBarModule.CancelOperation = True
+
+                    Dim finalReport As System.String = If(Not String.IsNullOrWhiteSpace(OverallAnswer2), OverallAnswer2, OverallAnswer)
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        finalReport &= vbCrLf & vbCrLf & ruleSet.NoticeText
+                    End If
+                    ShowDocCheckResult(finalReport)
+                Else
+                    If DoSummary Then
+                        GlobalProgressLabel = "Creating summary..."
+                        GlobalProgressValue = idx
+                        Dim summaryPromptBubbles As String = ruleSet.SummaryPrompt_Bubbles
+                        Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(summaryPromptBubbles), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                        OverallAnswer = OverallAnswer2.Trim()
+                        If OverallAnswer2 <> "" Then
+                            AddNoticeBubbleAt(docRef, startPos, OverallAnswer2)
+                        End If
+                    End If
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        AddNoticeBubbleAt(docRef, endPos, ruleSet.NoticeText)
+                    End If
+                    ProgressBarModule.CancelOperation = True
+                    Dim msg As System.String = "DocCheck analysis completed - check out the comments added (if any)."
+                    If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
+                        msg &= vbCrLf & vbCrLf & ruleSet.NoticeText
+                    End If
+                    ShowCustomMessageBox(msg)
+                End If
+            End If
+
+            ProgressBarModule.CancelOperation = True
+            Return OverallAnswer
+
+        Catch ex As System.Exception
+            ShowCustomMessageBox("DocCheck 'Multi Clause' run failed: " & ex.Message)
+            Return System.String.Empty
+        End Try
+    End Function
+
+
+    Private Async Function OldRunSetOfClauses(ByVal ruleSet As DocCheckRuleSet,
+                                       ByVal textToAnalyze As System.String,
+                                       ByVal insertDocs As System.String,
+                                       ByVal Selection As Microsoft.Office.Interop.Word.Selection,
+                                       ByVal PutInBubbles As System.Boolean,
+                                       ByVal UseSecondAPI As System.Boolean,
+                                       ByVal DoSummary As Boolean,
+                                           ByVal SumPrompt As String,
+                                           ByVal SumPromptB As String) As System.Threading.Tasks.Task(Of System.String)
         Try
             Dim records As System.Collections.Generic.List(Of System.String) = ruleSet.RecordJsons
             If records Is Nothing OrElse records.Count = 0 Then
@@ -21046,6 +22481,7 @@ Public Class ThisAddIn
 
             ' Capture doc and end-of-selection ONCE for the final notice bubble
             Dim docRef As Word.Document = Selection.Range.Document
+            Dim startPos As Integer = Selection.Range.Start
             Dim endPos As Integer = Selection.Range.End
 
             For Each recordJson As System.String In records
@@ -21073,6 +22509,7 @@ Public Class ThisAddIn
                 If Len(answer) > 3 Then
                     If PutInBubbles Then
                         SetBubbles(answer, Selection, True)
+                        OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
                     Else
                         OverallAnswer &= answer & System.Environment.NewLine & System.Environment.NewLine
                     End If
@@ -21085,7 +22522,7 @@ Public Class ThisAddIn
                 If PutInBubbles = False Then
                     GlobalProgressLabel = "Creating final report..."
                     GlobalProgressValue = idx
-                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SP_DocCheck_MultiClauseSum), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                    Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SumPrompt), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
                     ProgressBarModule.CancelOperation = True
 
                     Dim finalReport As System.String = If(OverallAnswer2 IsNot Nothing AndAlso OverallAnswer2.Trim() <> "", OverallAnswer2, OverallAnswer)
@@ -21094,6 +22531,15 @@ Public Class ThisAddIn
                     End If
                     ShowDocCheckResult(finalReport)
                 Else
+                    If DoSummary Then
+                        GlobalProgressLabel = "Creating summary..."
+                        GlobalProgressValue = idx
+                        Dim OverallAnswer2 As System.String = Await LLM(InterpolateAtRuntime(SumPromptB), "<TEXTTOPROCESS>" & OverallAnswer & "</TEXTTOPROCESS>", "", "", 0, False)
+                        OverallAnswer = OverallAnswer2.Trim()
+                        If OverallAnswer2 <> "" Then
+                            AddNoticeBubbleAt(docRef, startPos, OverallAnswer2)
+                        End If
+                    End If
                     If Not System.String.IsNullOrWhiteSpace(ruleSet.NoticeText) Then
                         AddNoticeBubbleAt(docRef, endPos, ruleSet.NoticeText)
                     End If
@@ -21165,13 +22611,13 @@ Public Class ThisAddIn
             Else
 
                 ShowPaneAsync(
-                                                                            "DocCheck Findings",
-                                                                            answer,
-                                                                            "",
-                                                                            AN,
-                                                                            noRTF:=False,
-                                                                            insertMarkdown:=True
-                                                                            )
+                                                            "DocCheck Findings",
+                                                            answer,
+                                                            "",
+                                                            AN,
+                                                            noRTF:=False,
+                                                            insertMarkdown:=True
+                                                            )
             End If
 
         End If
@@ -21253,7 +22699,10 @@ Public Class ThisAddIn
         Public Property ClausePrompt As System.String
         Public Property MultiClausePrompt As System.String
         Public Property NoticeText As System.String
+        Public Property SummaryPrompt As System.String
+        Public Property SummaryPrompt_Bubbles As System.String
     End Class
+
     ' ========================= Small utility =========================
     Private Function MakeUniqueDisplay(ByVal baseText As System.String, ByVal existing As System.Collections.Generic.ICollection(Of System.String)) As System.String
         If existing Is Nothing OrElse existing.Contains(baseText) = False Then
