@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 28.9.2025
+' 29.9.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -183,7 +183,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.280925 Gen2 Beta Test"
+    Public Const Version As String = "V.290925 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -3578,8 +3578,8 @@ Public Class ThisAddIn
 
             ' Get the selected text and range
             Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
-                    Dim range As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate ' Duplicate to preserve original
-                    Dim SelectedText As String
+            Dim range As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate ' Duplicate to preserve original
+            Dim SelectedText As String
 
             'Try
             'Using New WordUndoScope(wordEditor, $"{AN} Changes")
@@ -3587,132 +3587,132 @@ Public Class ThisAddIn
 
             If INI_KeepFormatCap > 0 Then If Len(selection.Text) > INI_KeepFormatCap Then KeepFormat = False
 
-                    If KeepFormat Then
-                        SelectedText = SLib.GetRangeHtml(selection.Range)
-                    Else
-                        If INI_MarkdownConvert Then ConvertRangeToMarkdown(selection.Range)
-                        SelectedText = selection.Text
+            If KeepFormat Then
+                SelectedText = SLib.GetRangeHtml(selection.Range)
+            Else
+                If INI_MarkdownConvert Then ConvertRangeToMarkdown(selection.Range)
+                SelectedText = selection.Text
+            End If
+
+            If String.IsNullOrWhiteSpace(SelectedText) Then
+                ShowCustomMessageBox($"Please select the text to be processed.")
+                Return
+            End If
+
+            If DoMarkup And MarkupMethod = 2 And Len(SelectedText) > INI_MarkupDiffCap Then
+                Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
+                Select Case MarkupChange
+                    Case 1
+                        MarkupMethod = 3
+                    Case 2
+                        MarkupMethod = 2
+                    Case Else
+                        Exit Sub
+                End Select
+            End If
+
+            Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbCr) Or SelectedText.EndsWith(vbLf)
+
+            ' Call your LLM function with the selected text
+            Dim LLMResult As String = Await LLM(SysCommand & If(KeepFormat, " " & SP_Add_KeepHTMLIntact, SP_Add_KeepInlineIntact), "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0)
+
+            LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
+
+            If INI_PostCorrection <> "" Then
+                LLMResult = Await PostCorrection(LLMResult)
+            End If
+
+            Debug.WriteLine("TrailingCR=" & trailingCR)
+            Debug.WriteLine($"Selection='{selection.Text}'")
+
+            ' Replace the selected text with the processed result
+            If Not String.IsNullOrWhiteSpace(LLMResult) Then
+                If KeepFormat Then
+
+                    Dim Plaintext As String = ""
+
+                    SelectedText = selection.Text
+                    SLib.InsertTextWithFormat(LLMResult, range, Inplace, Not trailingCR)
+                    If DoMarkup Then
+                        LLMResult = SLib.RemoveHTML(LLMResult)
+                        If MarkupMethod <> 3 Then
+                            range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf
+                        End If
+                        range.Collapse(WdCollapseDirection.wdCollapseEnd)
+                        selection.SetRange(range.Start, selection.End)
+
+                        CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
                     End If
 
-                    If String.IsNullOrWhiteSpace(SelectedText) Then
-                        ShowCustomMessageBox($"Please select the text to be processed.")
-                        Return
-                    End If
+                Else
 
-                    If DoMarkup And MarkupMethod = 2 And Len(SelectedText) > INI_MarkupDiffCap Then
-                        Dim MarkupChange As Integer = SLib.ShowCustomYesNoBox($"The selected text exceeds the defined cap for the Diff markup method at {INI_MarkupDiffCap} chars (your selection has {Len(SelectedText)} chars). {If(KeepFormat, "This may be because HTML codes have been inserted to keep the formatting (you can turn this off in the settings). ", "")}. How do you want to continue?", "Use Diff in Window compare instead", "Use Diff")
-                        Select Case MarkupChange
-                            Case 1
-                                MarkupMethod = 3
-                            Case 2
-                                MarkupMethod = 2
-                            Case Else
-                                Exit Sub
-                        End Select
-                    End If
-
-                    Dim trailingCR As Boolean = SelectedText.EndsWith(vbCrLf) Or SelectedText.EndsWith(vbCr) Or SelectedText.EndsWith(vbLf)
-
-                    ' Call your LLM function with the selected text
-                    Dim LLMResult As String = Await LLM(SysCommand & If(KeepFormat, " " & SP_Add_KeepHTMLIntact, SP_Add_KeepInlineIntact), "<TEXTTOPROCESS>" & SelectedText & "</TEXTTOPROCESS>", "", "", 0)
-
-                    LLMResult = LLMResult.Replace("<TEXTTOPROCESS>", "").Replace("</TEXTTOPROCESS>", "")
-
-                    If INI_PostCorrection <> "" Then
-                        LLMResult = Await PostCorrection(LLMResult)
-                    End If
-
-                    Debug.WriteLine("TrailingCR=" & trailingCR)
-                    Debug.WriteLine($"Selection='{selection.Text}'")
-
-                    ' Replace the selected text with the processed result
-                    If Not String.IsNullOrWhiteSpace(LLMResult) Then
-                        If KeepFormat Then
-
-                            Dim Plaintext As String = ""
-
-                            SelectedText = selection.Text
-                            SLib.InsertTextWithFormat(LLMResult, range, Inplace, Not trailingCR)
-                            If DoMarkup Then
-                                LLMResult = SLib.RemoveHTML(LLMResult)
-                                If MarkupMethod <> 3 Then
-                                    range.Text = vbCrLf & vbCrLf & "MARKUP:" & vbCrLf
-                                End If
-                                range.Collapse(WdCollapseDirection.wdCollapseEnd)
-                                selection.SetRange(range.Start, selection.End)
-
-                                CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
-                            End If
-
+                    If Inplace Then
+                        If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
+                        If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
+                        If DoMarkup And MarkupMethod <> 3 Then
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
+                            'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
                         Else
+                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
+                            'selection.TypeText(LLMResult)
+                        End If
+                    Else
+                        ' Replace this line:
+                        ' selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
 
-                            If Inplace Then
-                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Lf) Then LLMResult = LLMResult.TrimEnd(ControlChars.Lf)
-                                If Not trailingCR And LLMResult.EndsWith(ControlChars.Cr) Then LLMResult = LLMResult.TrimEnd(ControlChars.Cr)
-                                If DoMarkup And MarkupMethod <> 3 Then
-                                    SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>", trailingCR)
-                                    'selection.TypeText(LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                                Else
-                                    SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-                                    'selection.TypeText(LLMResult)
-                                End If
-                            Else
-                                ' Replace this line:
-                                ' selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        ' With the following code to insert two new lines and select the last one, preserving formatting:
+                        Dim selRange As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate
+                        Dim originalFont As Microsoft.Office.Interop.Word.Font = selRange.Font.Duplicate
 
-                                ' With the following code to insert two new lines and select the last one, preserving formatting:
-                                Dim selRange As Microsoft.Office.Interop.Word.Range = selection.Range.Duplicate
-                                Dim originalFont As Microsoft.Office.Interop.Word.Font = selRange.Font.Duplicate
+                        ' Insert two new lines at the end of the selection
+                        selRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                        selRange.Text = vbCrLf & vbCrLf
 
-                                ' Insert two new lines at the end of the selection
-                                selRange.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
-                                selRange.Text = vbCrLf & vbCrLf
+                        ' Select the last new line
+                        Dim newStart As Integer = selRange.End - 2 ' Position at the start of the last vbCrLf
+                        Dim newEnd As Integer = selRange.End
+                        selection.SetRange(newStart, newEnd)
 
-                                ' Select the last new line
-                                Dim newStart As Integer = selRange.End - 2 ' Position at the start of the last vbCrLf
-                                Dim newEnd As Integer = selRange.End
-                                selection.SetRange(newStart, newEnd)
+                        ' Reapply the original formatting to the new selection
+                        selection.Font = originalFont
 
-                                ' Reapply the original formatting to the new selection
-                                selection.Font = originalFont
-
-                                If DoMarkup And MarkupMethod <> 3 Then
-                                    'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
-                                    SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>" & vbCrLf, trailingCR)
-                                Else
-                                    'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
-                                    SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
-
-                                End If
-                            End If
-
-                            ' Use Find to locate the nearest line break backward and adjust selection
-                            range = selection.Range
-                            With range.Find
-                                .Text = vbCrLf
-                                .Forward = False
-                                .MatchWildcards = False
-                                If .Execute() Then
-                                    selection.SetRange(range.Start, selection.End)
-                                End If
-                            End With
-
-                            ' Perform markup comparison and insertion if necessary
-                            If DoMarkup Then
-                                If MarkupMethod = 2 Or MarkupMethod = 3 Then
-                                    CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
-                                Else
-                                    CompareAndInsertTextCompareDocs(SelectedText, LLMResult)
-                                End If
-
-                            End If
+                        If DoMarkup And MarkupMethod <> 3 Then
+                            'selection.TypeText(vbCrLf & LLMResult & vbCrLf & vbCrLf & "MARKUP:" & vbCrLf & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult & vbCrLf & "<p>MARKUP:<br></p>" & vbCrLf, trailingCR)
+                        Else
+                            'selection.TypeText(vbCrLf & LLMResult & vbCrLf)
+                            SLib.InsertTextWithMarkdown(selection, LLMResult, trailingCR)
 
                         End If
+                    End If
 
-                    Else
-                        ShowCustomMessageBox("The LLM did not return any content to insert.")
+                    ' Use Find to locate the nearest line break backward and adjust selection
+                    range = selection.Range
+                    With range.Find
+                        .Text = vbCrLf
+                        .Forward = False
+                        .MatchWildcards = False
+                        If .Execute() Then
+                            selection.SetRange(range.Start, selection.End)
+                        End If
+                    End With
+
+                    ' Perform markup comparison and insertion if necessary
+                    If DoMarkup Then
+                        If MarkupMethod = 2 Or MarkupMethod = 3 Then
+                            CompareAndInsertText(SelectedText, LLMResult, MarkupMethod = 3, "This is the markup of the text inserted:", True)
+                        Else
+                            CompareAndInsertTextCompareDocs(SelectedText, LLMResult)
+                        End If
 
                     End If
+
+                End If
+
+            Else
+                ShowCustomMessageBox("The LLM did not return any content to insert.")
+
+            End If
 
             ' End Using
 
@@ -3886,26 +3886,26 @@ Public Class ThisAddIn
                 DoClipboard = True
             ElseIf OtherPrompt.StartsWith(NewDocPrefix, StringComparison.OrdinalIgnoreCase) Then
                 OtherPrompt = OtherPrompt.Substring(NewDocPrefix.Length).Trim()
-                    DoClipboard = True
-                    DoNewDoc = True
+                DoClipboard = True
+                DoNewDoc = True
 
-                ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                    OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
-                    DoMarkup = True
-                ElseIf OtherPrompt.StartsWith(MarkupPrefixWord, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixWord.Length).Trim()
-                    DoMarkup = True
-                    MarkupMethod = 1
-                ElseIf OtherPrompt.StartsWith(MarkupPrefixDiffW, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiffW.Length).Trim()
-                    DoMarkup = True
-                    MarkupMethod = 3
-                ElseIf OtherPrompt.StartsWith(MarkupPrefixDiff, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                    OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiff.Length).Trim()
-                    DoMarkup = True
-                    MarkupMethod = 2
-                ElseIf OtherPrompt.StartsWith(InPlacePrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
-                    OtherPrompt = OtherPrompt.Substring(InPlacePrefix.Length).Trim()
+            ElseIf OtherPrompt.StartsWith(MarkupPrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(MarkupPrefix.Length).Trim()
+                DoMarkup = True
+            ElseIf OtherPrompt.StartsWith(MarkupPrefixWord, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(MarkupPrefixWord.Length).Trim()
+                DoMarkup = True
+                MarkupMethod = 1
+            ElseIf OtherPrompt.StartsWith(MarkupPrefixDiffW, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiffW.Length).Trim()
+                DoMarkup = True
+                MarkupMethod = 3
+            ElseIf OtherPrompt.StartsWith(MarkupPrefixDiff, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(MarkupPrefixDiff.Length).Trim()
+                DoMarkup = True
+                MarkupMethod = 2
+            ElseIf OtherPrompt.StartsWith(InPlacePrefix, StringComparison.OrdinalIgnoreCase) And Not NoText Then
+                OtherPrompt = OtherPrompt.Substring(InPlacePrefix.Length).Trim()
                 DoMarkup = False
                 MarkupMethod = 3
                 DoInplace = True
@@ -4140,50 +4140,50 @@ Public Class ThisAddIn
             ' Cast the WordEditor to Word.Document
             Dim wordDoc As Document = CType(editor, Document)
 
-                ' Create a new temporary Word application for comparison
-                Dim wordApp As New Microsoft.Office.Interop.Word.Application()
-                wordApp.Visible = False
+            ' Create a new temporary Word application for comparison
+            Dim wordApp As New Microsoft.Office.Interop.Word.Application()
+            wordApp.Visible = False
 
-                ' Create temporary documents for input1 and input2
-                Dim tempDoc1 As Document = wordApp.Documents.Add()
-                Dim tempDoc2 As Document = wordApp.Documents.Add()
+            ' Create temporary documents for input1 and input2
+            Dim tempDoc1 As Document = wordApp.Documents.Add()
+            Dim tempDoc2 As Document = wordApp.Documents.Add()
 
-                ' Insert the input texts into the temporary documents
-                tempDoc1.Content.Text = input1
-                tempDoc2.Content.Text = input2
+            ' Insert the input texts into the temporary documents
+            tempDoc1.Content.Text = input1
+            tempDoc2.Content.Text = input2
 
-                ' Perform the comparison
-                Dim compareResult As Document = wordApp.CompareDocuments(tempDoc1, tempDoc2,
-                                                            WdCompareDestination.wdCompareDestinationNew,
-                                                            WdGranularity.wdGranularityWordLevel,
-                                                            False, False, False, False, False, False)
+            ' Perform the comparison
+            Dim compareResult As Document = wordApp.CompareDocuments(tempDoc1, tempDoc2,
+                                                        WdCompareDestination.wdCompareDestinationNew,
+                                                        WdGranularity.wdGranularityWordLevel,
+                                                        False, False, False, False, False, False)
 
-                ' Convert tracked changes to static formatting
-                For Each revision As Revision In compareResult.Revisions
-                    Select Case revision.Type
-                        Case WdRevisionType.wdRevisionInsert
-                            ' Insertions: Apply blue color and underline
-                            revision.Range.Font.Color = WdColor.wdColorBlue
-                            revision.Range.Font.Underline = WdUnderline.wdUnderlineSingle
-                        Case WdRevisionType.wdRevisionDelete
-                            ' Deletions: Apply red color and strikethrough
-                            revision.Range.Font.Color = WdColor.wdColorRed
-                            revision.Range.Font.StrikeThrough = True
-                    End Select
-                    revision.Accept() ' Accept the revision to make the formatting static
-                Next
+            ' Convert tracked changes to static formatting
+            For Each revision As Revision In compareResult.Revisions
+                Select Case revision.Type
+                    Case WdRevisionType.wdRevisionInsert
+                        ' Insertions: Apply blue color and underline
+                        revision.Range.Font.Color = WdColor.wdColorBlue
+                        revision.Range.Font.Underline = WdUnderline.wdUnderlineSingle
+                    Case WdRevisionType.wdRevisionDelete
+                        ' Deletions: Apply red color and strikethrough
+                        revision.Range.Font.Color = WdColor.wdColorRed
+                        revision.Range.Font.StrikeThrough = True
+                End Select
+                revision.Accept() ' Accept the revision to make the formatting static
+            Next
 
-                ' Copy the comparison result to clipboard
-                compareResult.Content.Copy()
+            ' Copy the comparison result to clipboard
+            compareResult.Content.Copy()
 
-                ' Paste the comparison result into the Outlook compose window at the current selection
-                wordDoc.Application.Selection.PasteAndFormat(WdRecoveryType.wdFormatOriginalFormatting)
+            ' Paste the comparison result into the Outlook compose window at the current selection
+            wordDoc.Application.Selection.PasteAndFormat(WdRecoveryType.wdFormatOriginalFormatting)
 
-                ' Clean up
-                tempDoc1.Close(False)
-                tempDoc2.Close(False)
-                compareResult.Close(False)
-                wordApp.Quit(False)
+            ' Clean up
+            tempDoc1.Close(False)
+            tempDoc2.Close(False)
+            compareResult.Close(False)
+            wordApp.Quit(False)
 
             'Else
             'MessageBox.Show("Error in CompareAndInsertTextCompareDocs: The mail compose window is not open (anymore).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -5139,6 +5139,15 @@ Public Class ThisAddIn
             If Not Await TryEnterGateAsync().ConfigureAwait(False) Then Return
             System.Threading.Interlocked.Exchange(powerChanging, 1)
             Try
+
+                ' cancel all jobs
+                For Each kv In jobMap
+                    Try
+                        kv.Value.Cts.Cancel()
+                    Catch
+                    End Try
+                Next
+
                 ' Mute watchdog during suspend
                 Try : StopListenerWatchdog() : Catch : End Try
 
@@ -5321,9 +5330,6 @@ Public Class ThisAddIn
             Return False
         End Try
     End Function
-
-
-
 
 
     Private Sub StartupHttpListener()
@@ -5596,9 +5602,10 @@ Public Class ThisAddIn
             ' Skip while suspend/resume is in progress
             If System.Threading.Interlocked.CompareExchange(powerChanging, 0, 0) <> 0 Then Return
 
-            ' NEW: do not kill the listener if a request is currently being processed
-            Dim inFlight As Integer = System.Threading.Interlocked.CompareExchange(activeRequests, 0, 0)
-            If inFlight > 0 Then Return
+            ' do not kill the listener if a request is currently being processed
+            Dim inFlight As Integer = Threading.Interlocked.CompareExchange(activeRequests, 0, 0)
+            Dim jobsInFlight As Integer = Threading.Interlocked.CompareExchange(activeJobs, 0, 0)
+            If inFlight > 0 OrElse jobsInFlight > 0 Then Return
 
             Dim age As System.Double =
                 (System.DateTime.UtcNow - lastListenerProgressUtc).TotalSeconds
@@ -5644,6 +5651,20 @@ Public Class ThisAddIn
     Private Const InkyName As String = "Inky"               ' Fallback; AN6 preferred
 
     Private activeChatId As Integer = 1   ' 1 or 2 – in‑memory only (not persisted)
+
+    Private Class LlmJob
+        Public Property Id As String
+        Public Property CreatedUtc As DateTime
+        Public Property Tcs As TaskCompletionSource(Of String)
+        Public Property Cts As CancellationTokenSource
+        Public Property UseSecond As Boolean
+        Public Property FileObject As String
+    End Class
+
+    Private ReadOnly jobMap As New System.Collections.Concurrent.ConcurrentDictionary(Of String, LlmJob)()
+    Private activeJobs As Integer = 0
+    Private Const JobTtlMinutes As Integer = 45
+
 
 
     Private Async Function HandleHttpRequest(
@@ -6375,8 +6396,6 @@ Public Class ThisAddIn
 
     ' Builds the entire HTML UI (single file; no external assets)
 
-
-    ' Builds the entire HTML UI (single file; neutral – no green/blue/red accents)
     Private Function BuildInkyHtmlPage() As System.String
         Dim botName As String = GetBotName()
         Dim brandName As String = If(Not String.IsNullOrWhiteSpace(AN), AN, botName)
@@ -6392,11 +6411,10 @@ Public Class ThisAddIn
         html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
         html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
 
-        ' ================= CSS (neutral grayscale + pressed feedback) =================
+        ' CSS
         html.AppendLine("<style>")
         html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9aa8b7;--border:#1b2430;--border-strong:#2d3744;--elev:#1a222c;--press-shadow:inset 0 2px 6px rgba(0,0,0,.45);}")
         html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5d6a77;--border:#e2e5e9;--border-strong:#c9cfd6;--elev:#eef1f4;--press-shadow:inset 0 2px 5px rgba(0,0,0,.08);}")
-
         html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
         html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
         html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
@@ -6411,7 +6429,6 @@ Public Class ThisAddIn
         html.AppendLine("button{cursor:pointer;transition:background .16s,filter .12s,transform .08s,box-shadow .18s;}")
         html.AppendLine("button:hover{filter:brightness(1.07)}")
         html.AppendLine("button:disabled{opacity:.5;cursor:not-allowed}")
-        ' Press feedback states
         html.AppendLine("button.is-pressed, .chatTab.is-pressed{transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.92);}")
         html.AppendLine("button:active:not(:disabled){transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.9);}")
         html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
@@ -6430,8 +6447,6 @@ Public Class ThisAddIn
         html.AppendLine("a:hover{filter:brightness(1.15)}")
         html.AppendLine("code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
         html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem;position:relative;background:var(--elev);}")
-        html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;opacity:.5;animation:ping 1s ease-in-out infinite;}")
-        html.AppendLine("@keyframes ping{0%{transform:scale(.9);opacity:.25}50%{transform:scale(1.15);opacity:.9}100%{transform:scale(.9);opacity:.25}}")
         html.AppendLine(".code-copy-btn{position:absolute;top:6px;right:6px;padding:4px 8px;font-size:.65rem;line-height:1;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--fg);opacity:0;transition:opacity .18s,background .18s;}")
         html.AppendLine("pre:hover .code-copy-btn{opacity:1}")
         html.AppendLine(".code-copy-btn svg{width:16px;height:16px;display:block}")
@@ -6439,16 +6454,27 @@ Public Class ThisAddIn
         html.AppendLine(":root.light .code-copy-btn.copied{background:#d5d9dd;color:#111}")
         html.AppendLine(".code-copy-btn:focus{outline:2px solid var(--border-strong);}")
         html.AppendLine(".chatTab{padding:.45rem .55rem;min-width:32px;font-size:.7rem;font-weight:600;line-height:1;border:1px solid var(--border);background:var(--card);color:var(--muted);transition:background .18s,border-color .18s,color .18s,transform .08s,box-shadow .18s;}")
-        html.AppendLine(".chatTab:hover{background:var(--elev);color:var(--fg);}")
+        html.AppendLine(".chatTab:hover:not(:disabled){background:var(--elev);color:var(--fg);}")
         html.AppendLine(".chatTab.active{background:#222b35;border-color:var(--border-strong);color:#fff;box-shadow:inset 0 0 0 1px #303c46;}")
         html.AppendLine(":root.light .chatTab.active{background:#e2e5e9;border-color:var(--border-strong);color:#0e1116;box-shadow:inset 0 0 0 1px #c9cfd6;}")
         html.AppendLine(".chatTab:focus{outline:2px solid var(--border-strong);outline-offset:1px;}")
+        ' Typing + elapsed
+        html.AppendLine(".typing-dots{display:inline-flex;gap:6px;align-items:center;}")
+        html.AppendLine(".typing-dots span{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.35;animation:tdots 1.2s infinite ease-in-out;}")
+        html.AppendLine(".typing-dots span:nth-child(2){animation-delay:.2s}")
+        html.AppendLine(".typing-dots span:nth-child(3){animation-delay:.4s}")
+        html.AppendLine("@keyframes tdots{0%,80%,100%{transform:translateY(0);opacity:.3}40%{transform:translateY(-5px);opacity:.85}}")
+        html.AppendLine(".typing-elapsed{margin-left:8px;font-size:.65rem;color:var(--muted);font-family:ui-monospace,monospace;opacity:.8;}")
+        html.AppendLine(".actions{display:flex;flex-direction:row;gap:.5rem;align-items:stretch;}")
+        html.AppendLine(".actions .stack{display:flex;flex-direction:column;gap:.5rem;}")
+        html.AppendLine("#cancelBtn{display:none;align-self:stretch;height:auto;}")
+        html.AppendLine("@media (max-width:640px){.actions{flex-direction:column;}.actions .stack{flex-direction:row;}.actions .stack button{flex:1;}#cancelBtn{align-self:auto;height:auto;}}")
         html.AppendLine("</style>")
 
         html.AppendLine("</head><body>")
         html.AppendLine("<div class=""wrap"">")
 
-        ' Topbar
+        ' Top bar
         html.AppendLine("  <div class=""topbar"">")
         html.AppendLine("    <div class=""topline"">")
         If Not String.IsNullOrWhiteSpace(logoUrl) Then
@@ -6468,36 +6494,36 @@ Public Class ThisAddIn
 
         html.AppendLine("  <div id=""chat"" class=""chat""></div>")
 
-        ' Input
         html.AppendLine("  <div class=""inputbar"">")
         html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
-        html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button><button id=""cancelBtn"" style=""display:none;"">Cancel</button></div>")
+        html.AppendLine("    <div class=""actions"">" &
+                            "<div class=""stack"">" &
+                                "<button id=""sendBtn"">Send</button>" &
+                                "<button id=""pureBtn"" title=""Send only this raw text (no system prompt, no history)"">Pure</button>" &
+                            "</div>" &
+                            "<button id=""cancelBtn"" style=""display:none;"">Cancel</button>" &
+                        "</div>")
         html.AppendLine("  </div>")
         html.AppendLine("  <div class=""hint"">Drag & drop a file • Enter=send • Shift+Enter=newline • Ctrl+L=clear</div>")
         html.AppendLine("</div>")
 
-        ' ================= JS =================
+        ' JS
         html.AppendLine("<script>")
-        html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
-        html.AppendLine("let __supportsFiles = false;")
-        html.AppendLine("let __pendingFilePath = '';")
+        html.AppendLine("window.__botName=" & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
+        html.AppendLine("let __supportsFiles=false;")
+        html.AppendLine("let __pendingFilePath='';")
         html.AppendLine("let dark=false;")
+        html.AppendLine("let __currentJobId=null;")
+        html.AppendLine("let __jobCanceled=false;")
+        html.AppendLine("let __typingBubbleId=null;")
+        html.AppendLine("let __jobStartTs=0;")
+        html.AppendLine("let __elapsedTimer=null;")
 
-        ' Press interaction (delegated) - visual feedback
-        html.AppendLine("(function(){")
-        html.AppendLine("const add=(b)=>{if(!b) return;};")
-        html.AppendLine("const pressOn=(e)=>{const btn=e.target.closest('button');if(!btn||btn.disabled)return;btn.classList.add('is-pressed');};")
-        html.AppendLine("const pressOff=()=>{document.querySelectorAll('button.is-pressed').forEach(b=>b.classList.remove('is-pressed'));};")
-        html.AppendLine("document.addEventListener('mousedown',pressOn);")
-        html.AppendLine("document.addEventListener('touchstart',pressOn,{passive:true});")
-        html.AppendLine("document.addEventListener('mouseup',pressOff);")
-        html.AppendLine("document.addEventListener('mouseleave',pressOff);")
-        html.AppendLine("window.addEventListener('blur',pressOff);")
-        html.AppendLine("document.addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter')pressOff();});")
-        html.AppendLine("document.addEventListener('keydown',e=>{if((e.key===' '||e.key==='Enter')){const btn=e.target.closest('button');if(btn&&!btn.disabled)btn.classList.add('is-pressed');}});")
-        html.AppendLine("})();")
+        ' Press feedback
+        html.AppendLine("(function(){const pressOn=e=>{const b=e.target.closest('button');if(!b||b.disabled)return;b.classList.add('is-pressed');};const pressOff=()=>{document.querySelectorAll('button.is-pressed').forEach(b=>b.classList.remove('is-pressed'));};['mousedown','touchstart'].forEach(ev=>document.addEventListener(ev,pressOn,{passive:true}));['mouseup','mouseleave','blur'].forEach(ev=>document.addEventListener(ev,pressOff));document.addEventListener('keydown',e=>{if((e.key===' '||e.key==='Enter')){const b=e.target.closest('button');if(b&&!b.disabled)b.classList.add('is-pressed');}});document.addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter')pressOff();});})();")
 
-        html.AppendLine("function copyText(t){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();res();}catch(e){rej(e);}});}")
+        ' Helpers
+        html.AppendLine("function copyText(t){if(navigator.clipboard){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();res();}catch(e){rej(e);}});}")
         html.AppendLine("function enhanceCodeBlocks(scope){(scope||document).querySelectorAll('pre').forEach(pre=>{if(pre.dataset.enhanced==='1')return;const btn=document.createElement('button');btn.type='button';btn.className='code-copy-btn';btn.innerHTML='<svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""/><path d=""M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1""/></svg>';btn.addEventListener('click',()=>{const code=pre.querySelector('code');const txt=code?code.innerText:pre.innerText;copyText(txt).then(()=>{btn.classList.add('copied');setTimeout(()=>btn.classList.remove('copied'),1500);});});pre.appendChild(btn);pre.dataset.enhanced='1';});}")
         html.AppendLine("const api=async(cmd,data={})=>{try{const r=await fetch('/inky/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd},data))});const txt=await r.text();try{return JSON.parse(txt);}catch{return{ok:false,error:txt}}}catch(e){return{ok:false,error:e.message||'Network error'}}};")
 
@@ -6510,31 +6536,52 @@ Public Class ThisAddIn
         html.AppendLine("const cancelBtn=document.getElementById('cancelBtn');")
         html.AppendLine("const chat1Btn=document.getElementById('chat1Btn');")
         html.AppendLine("const chat2Btn=document.getElementById('chat2Btn');")
+        html.AppendLine("const sendBtn=document.getElementById('sendBtn');")
+        html.AppendLine("const pureBtn=document.getElementById('pureBtn');") ' NEW
 
         html.AppendLine("function setTheme(isDark){dark=!!isDark;document.documentElement.classList.toggle('light',!dark);} ")
         html.AppendLine("function forceExternalLinks(scope){try{(scope||document).querySelectorAll('a[href]').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer';});}catch{}}")
         html.AppendLine("function setActiveChatBtn(id){document.querySelectorAll('.chatTab').forEach(b=>b.classList.toggle('active',b.dataset.chat==String(id)));}")
+        html.AppendLine("function disableChatSwitch(dis){chat1Btn.disabled=dis;chat2Btn.disabled=dis;}")
 
         html.AppendLine("function render(turns){chatEl.innerHTML='';for(const t of (turns||[])){const row=document.createElement('div');row.className='row '+(t.role==='user'?'user':'bot');const bub=document.createElement('div');bub.className='bubble';const rl=document.createElement('div');rl.className='role';rl.textContent=(t.role==='user'?'You':(window.__botName||'Bot'));bub.appendChild(rl);const cont=document.createElement('div');if(t && t.html){cont.innerHTML=t.html;forceExternalLinks(cont);}else if(t && t.markdown){const safe=t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');cont.innerHTML=safe;}bub.appendChild(cont);row.appendChild(bub);chatEl.appendChild(row);}chatEl.scrollTop=chatEl.scrollHeight;enhanceCodeBlocks(chatEl);} ")
-        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
-        html.AppendLine("function replaceAssistantBubble(id,html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.bubble > div:nth-child(2)');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);}}")
+        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div class=""tmpContent"">${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
+        html.AppendLine("function removeTempBubble(id){const el=document.getElementById(id);if(el)el.remove();}")
+        html.AppendLine("function replaceAssistantBubble(id,html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.tmpContent');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);}}")
 
+        ' Typing + elapsed
+        html.AppendLine("function ensureTypingBubble(){if(__typingBubbleId)return;const content='<div class=""typing-container""><span class=""typing-dots""><span></span><span></span><span></span></span><span id=""typingElapsed"" class=""typing-elapsed"" style=""display:none;"">(0s)</span></div>';__typingBubbleId=addTempAssistantBubble(content);}")
+        html.AppendLine("function updateElapsed(){if(!__typingBubbleId)return;const el=document.getElementById('typingElapsed');if(!el)return;const sec=Math.floor((Date.now()-__jobStartTs)/1000);if(sec>=10){el.style.display='inline-block';el.textContent='(' + sec + 's)';}}")
+        html.AppendLine("function startElapsedTimer(){stopElapsedTimer();__jobStartTs=Date.now();__elapsedTimer=setInterval(updateElapsed,1000);}")
+        html.AppendLine("function stopElapsedTimer(){if(__elapsedTimer){clearInterval(__elapsedTimer);__elapsedTimer=null;}const el=document.getElementById('typingElapsed');if(el)el.style.display='none';}")
+        html.AppendLine("function removeTypingBubble(){if(__typingBubbleId){removeTempBubble(__typingBubbleId);__typingBubbleId=null;}stopElapsedTimer();}")
+
+        ' boot
         html.AppendLine("async function boot(){const st=await api('inky_getstate');if(!st.ok){alert(st.error||'Init failed');return;}__supportsFiles=(st.supportsFiles===true);setTheme(st.darkMode!==false);render(st.history||[]);modelSel.innerHTML='';for(const m of (st.models||[])){const o=document.createElement('option');o.value=m.key||'';o.textContent=m.label||'';o.disabled=!!m.disabled;if(m.selected&&!o.disabled)o.selected=true;modelSel.appendChild(o);}if(!modelSel.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;}if(st.greeting && (!Array.isArray(st.history)||st.history.length===0)){msgEl.placeholder=st.greeting;}setActiveChatBtn(st.activeChat||1);} ")
 
-        html.AppendLine("async function send(){const t=msgEl.value.trim();if(!t)return;msgEl.value='';chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);const typingId=addTempAssistantBubble('<span class=""typing""></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;cancelBtn.style.display='inline-block';let res;try{res=await api('inky_send',payload);}catch(e){res={ok:false,error:e.message||'Network error'};}finally{cancelBtn.style.display='none';const tmp=document.getElementById(typingId);if(tmp)tmp.remove();}if(!res.ok){alert(res.error||'Error');return;}__pendingFilePath='';render(res.history||[]);} ")
+        ' pollJob
+        html.AppendLine("async function pollJob(jobId){if(!jobId)return;__currentJobId=jobId;__jobCanceled=false;ensureTypingBubble();startElapsedTimer();cancelBtn.style.display='inline-block';disableChatSwitch(true);try{for(;;){await new Promise(r=>setTimeout(r,2000));if(__jobCanceled)break;const s=await api('inky_jobstatus',{Job:jobId});if(!s.ok){console.warn('job status error',s.error);break;}if(s.status==='running'){continue;}const st=await api('inky_getstate');if(st.ok){render(st.history||[]);}break;} }finally{cancelBtn.style.display='none';removeTypingBubble();sendBtn.disabled=false;pureBtn.disabled=false;disableChatSwitch(false);__currentJobId=null;}}")
 
+        ' send (normal)
+        html.AppendLine("async function send(){if(__currentJobId){return;}const t=msgEl.value.trim();if(!t)return;msgEl.value='';sendBtn.disabled=true;pureBtn.disabled=true;chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);let typingId=addTempAssistantBubble('<span class=""typing-dots""><span></span><span></span><span></span></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;let r;try{r=await api('inky_send',payload);}catch(e){r={ok:false,error:e.message||'Network error'};}if(!r||!r.ok){removeTempBubble(typingId);sendBtn.disabled=false;pureBtn.disabled=false;alert(r&&r.error||'Error');__pendingFilePath='';return;}__pendingFilePath='';if(r.job){if(r.history){render(r.history||[]);}removeTempBubble(typingId);__typingBubbleId=null;ensureTypingBubble();startElapsedTimer();cancelBtn.style.display='inline-block';disableChatSwitch(true);pollJob(r.job);}else{removeTempBubble(typingId);sendBtn.disabled=false;pureBtn.disabled=false;if(r.history){render(r.history||[]);}}}")
+
+        ' pureSend (NEW)
+        html.AppendLine("async function pureSend(){if(__currentJobId){return;}const t=msgEl.value.trim();if(!t)return;msgEl.value='';sendBtn.disabled=true;pureBtn.disabled=true;chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${('Pure: '+t).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);let typingId=addTempAssistantBubble('<span class=""typing-dots""><span></span><span></span><span></span></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;let r;try{r=await api('inky_pure',payload);}catch(e){r={ok:false,error:e.message||'Network error'};}if(!r||!r.ok){removeTempBubble(typingId);sendBtn.disabled=false;pureBtn.disabled=false;alert(r&&r.error||'Error');__pendingFilePath='';return;}__pendingFilePath='';if(r.job){if(r.history){render(r.history||[]);}removeTempBubble(typingId);__typingBubbleId=null;ensureTypingBubble();startElapsedTimer();cancelBtn.style.display='inline-block';disableChatSwitch(true);pollJob(r.job);}else{removeTempBubble(typingId);sendBtn.disabled=false;pureBtn.disabled=false;if(r.history){render(r.history||[]);}}}")
+
+        ' drag/drop
         html.AppendLine("(function(){const stop=e=>{e.preventDefault();e.stopPropagation();};['dragenter','dragover','dragleave','drop'].forEach(ev=>document.addEventListener(ev,stop,false));document.addEventListener('drop',async e=>{const files=[...(e.dataTransfer&&e.dataTransfer.files)||[]];if(!files.length)return;const f=files[0];if(!__supportsFiles){addTempAssistantBubble('File uploads are not supported for the current model.');return;}const tempId=addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${(f.size/1024).toFixed(1)} KB)…`);try{const fr=new FileReader();const dataUrl=await new Promise((res,rej)=>{fr.onerror=()=>rej(new Error('read error'));fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});const r=await api('inky_upload',{Name:f.name,DataUrl:String(dataUrl||'')});if(!r.ok){replaceAssistantBubble(tempId,'Upload failed: '+(r.error||'unknown'));return;}if(r.supported===false){replaceAssistantBubble(tempId,'File uploads are not supported for this model.');return;}__pendingFilePath=r.path||'';replaceAssistantBubble(tempId,`Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b>`);}catch(err){replaceAssistantBubble(tempId,'Upload failed: '+(err&&err.message?err.message:'unknown'));}} ,false);})();")
 
-        html.AppendLine("modelSel.addEventListener('change',async()=>{const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;return;}const r=await api('inky_setmodel',{Key:opt.value});if(!r.ok){alert(r.error||'Failed to set model');return;}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
-        html.AppendLine("clearBtn.addEventListener('click',async()=>{const r=await api('inky_clear');if(r.ok){render([]);if(r.greeting)msgEl.placeholder=r.greeting;}else{alert(r.error||'Failed to clear');}});")
+        ' events
+        html.AppendLine("modelSel.addEventListener('change',async()=>{if(__currentJobId)return;const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;return;}const r=await api('inky_setmodel',{Key:opt.value});if(!r.ok){alert(r.error||'Failed to set model');return;}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
+        html.AppendLine("clearBtn.addEventListener('click',async()=>{if(__currentJobId)return;const r=await api('inky_clear');if(r.ok){render([]);if(r.greeting)msgEl.placeholder=r.greeting;}else{alert(r.error||'Failed to clear');}});")
         html.AppendLine("copyBtn.addEventListener('click',async()=>{const r=await api('inky_copylast');if(!r.ok){alert(r.error||'Nothing to copy')}});")
-        html.AppendLine("themeBtn.addEventListener('click',async()=>{const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return;}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
+        html.AppendLine("themeBtn.addEventListener('click',async()=>{if(__currentJobId)return;const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return;}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
         html.AppendLine("msgEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}if(e.ctrlKey&&e.key.toLowerCase()==='l'){e.preventDefault();clearBtn.click();}});")
-        html.AppendLine("document.getElementById('sendBtn').addEventListener('click',send);")
-        html.AppendLine("cancelBtn.addEventListener('click',async()=>{await api('inky_cancel');cancelBtn.style.display='none';});")
+        html.AppendLine("sendBtn.addEventListener('click',send);")
+        html.AppendLine("pureBtn.addEventListener('click',pureSend);") ' NEW
+        html.AppendLine("cancelBtn.addEventListener('click',async()=>{if(!__currentJobId)return;__jobCanceled=true;await api('inky_cancel',{Job:__currentJobId});});")
         html.AppendLine("chatEl.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;if(a.target!=='_blank'){a.target='_blank';a.rel='noopener noreferrer';}});")
-
-        html.AppendLine("async function switchChat(n){const r=await api('inky_switch',{Chat:String(n)});if(!r.ok){alert(r.error||'Switch failed');return;}setActiveChatBtn(r.activeChat||n);render(r.history||[]);if(r.greeting){msgEl.placeholder=r.greeting;}}")
+        html.AppendLine("async function switchChat(n){if(__currentJobId)return;const r=await api('inky_switch',{Chat:String(n)});if(!r.ok){alert(r.error||'Switch failed');return;}setActiveChatBtn(r.activeChat||n);render(r.history||[]);if(r.greeting){msgEl.placeholder=r.greeting;}}")
         html.AppendLine("chat1Btn.addEventListener('click',()=>switchChat(1));")
         html.AppendLine("chat2Btn.addEventListener('click',()=>switchChat(2));")
 
@@ -6544,15 +6591,11 @@ Public Class ThisAddIn
         Return html.ToString()
     End Function
 
-
-
-
-    ' Builds the entire HTML UI (single file; no external assets)
     Private Function OldBuildInkyHtmlPage() As System.String
-        Dim botName As System.String = GetBotName()
-        Dim brandName As System.String = If(Not System.String.IsNullOrWhiteSpace(AN), AN, botName)
-        Dim logoUrl As System.String = GetLogoDataUrl()
-        Dim greet As System.String = GetFriendlyGreeting()
+        Dim botName As String = GetBotName()
+        Dim brandName As String = If(Not String.IsNullOrWhiteSpace(AN), AN, botName)
+        Dim logoUrl As String = GetLogoDataUrl()
+        Dim greet As String = GetFriendlyGreeting()
 
         Dim html As New System.Text.StringBuilder()
 
@@ -6563,57 +6606,70 @@ Public Class ThisAddIn
         html.AppendLine("<link rel=""icon"" type=""image/png"" href=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """>")
         html.AppendLine("<title>" & System.Net.WebUtility.HtmlEncode(brandName) & " — Local Chat</title>")
 
-        ' ---------- CSS ----------
+        ' CSS
         html.AppendLine("<style>")
+        html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9aa8b7;--border:#1b2430;--border-strong:#2d3744;--elev:#1a222c;--press-shadow:inset 0 2px 6px rgba(0,0,0,.45);}")
+        html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5d6a77;--border:#e2e5e9;--border-strong:#c9cfd6;--elev:#eef1f4;--press-shadow:inset 0 2px 5px rgba(0,0,0,.08);}")
         html.AppendLine("html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);}")
-        html.AppendLine(":root{--bg:#0b0f14;--card:#11161d;--fg:#e8eef6;--muted:#9fb0c3;--acc:#2ea043;--border:#1b2430;}")
-        html.AppendLine(":root.light{--bg:#f6f7f9;--card:#ffffff;--fg:#0e1116;--muted:#5b6a79;--acc:#0969da;--border:#e5e7eb;}")
         html.AppendLine(".wrap{display:flex;flex-direction:column;height:100%;}")
         html.AppendLine(".topbar{display:flex;gap:.5rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}")
         html.AppendLine(".topline{display:flex;align-items:center;gap:.6rem}")
         html.AppendLine(".topline img.logo{width:24px;height:24px;border-radius:6px;display:block}")
         html.AppendLine(".topline .brandbig{font-weight:700}")
         html.AppendLine(".topline .sub{color:var(--muted);font-size:.9rem}")
-        html.AppendLine(".muted{color:var(--muted);font-size:.9rem}")
+        html.AppendLine(".muted{color:var(--muted);font-size:.85rem}")
         html.AppendLine(".spacer{flex:1}")
-        html.AppendLine("select,button,input,textarea{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.6rem;}")
+        html.AppendLine("select,button,input,textarea{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.6rem;font:inherit;}")
         html.AppendLine("select,button,input{padding:.5rem .7rem;}")
-        html.AppendLine("button:hover{filter:brightness(1.1)}")
+        html.AppendLine("button{cursor:pointer;transition:background .16s,filter .12s,transform .08s,box-shadow .18s;}")
+        html.AppendLine("button:hover{filter:brightness(1.07)}")
+        html.AppendLine("button:disabled{opacity:.5;cursor:not-allowed}")
+        html.AppendLine("button.is-pressed, .chatTab.is-pressed{transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.92);}")
+        html.AppendLine("button:active:not(:disabled){transform:translateY(1px);box-shadow:var(--press-shadow);filter:brightness(.9);}")
         html.AppendLine(".chat{flex:1;overflow:auto;padding:1rem;}")
-        html.AppendLine(".chat.dragging{outline:2px dashed var(--acc); outline-offset:-8px;}")
         html.AppendLine(".row{display:flex;margin:0 auto 1rem auto;max-width:1000px;padding:0 .25rem;}")
-        html.AppendLine(".row.bot{justify-content:flex-start;}")
-        html.AppendLine(".row.user{justify-content:flex-end;}")
-        html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}")
-        html.AppendLine(".bot .bubble{border-top-right-radius:.3rem}")
-        html.AppendLine(".user .bubble{border-top-left-radius:.3rem}")
+        html.AppendLine(".row.bot{justify-content:flex-start}")
+        html.AppendLine(".row.user{justify-content:flex-end}")
+        html.AppendLine(".bubble{max-width:75%;padding:1rem;border:1px solid var(--border);background:var(--card);border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,.25)}")
+        html.AppendLine(".bot .bubble{border-top-right-radius:.35rem}")
+        html.AppendLine(".user .bubble{border-top-left-radius:.35rem}")
         html.AppendLine(".role{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}")
         html.AppendLine(".inputbar{display:flex;gap:.5rem;padding:1rem;border-top:1px solid var(--border);background:var(--card)}")
-        html.AppendLine("textarea{flex:1;resize:vertical;min-height:48px;max-height:200px;border-radius:.8rem;padding:.7rem;}")
-        html.AppendLine(".mono{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
-        html.AppendLine(".actions{display:flex;gap:.5rem}")
-        html.AppendLine(".hint{font-size:.8rem;color:var(--muted);padding:.25rem 1rem 1rem}")
-        html.AppendLine(".system{opacity:.85;border-style:dashed}")
-        html.AppendLine("a{color:var(--acc)} code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.9em}")
-        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem;position:relative;}")
-        html.AppendLine(".typing{display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;color:var(--muted);opacity:.5;animation:ping 1s ease-in-out infinite;}")
-        html.AppendLine("@keyframes ping{0%{transform:scale(0.9);opacity:.25}50%{transform:scale(1.15);opacity:.95}100%{transform:scale(0.9);opacity:.25}}")
-        ' Copy button styles
-
-        html.AppendLine(".code-copy-btn{position:absolute;top:6px;right:6px;padding:3px 7px;font-size:.65rem;line-height:1;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);cursor:pointer;display:flex;align-items:center;gap:4px;color:var(--fg);opacity:0;transition:opacity .2s,background .2s;}")
+        html.AppendLine("textarea{flex:1;resize:vertical;min-height:52px;max-height:220px;border-radius:.8rem;padding:.75rem;line-height:1.25;}")
+        html.AppendLine(".hint{font-size:.7rem;letter-spacing:.3px;color:var(--muted);padding:.25rem 1rem 1rem}")
+        html.AppendLine("a{color:inherit;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35)}")
+        html.AppendLine(":root.light a{text-decoration-color:rgba(0,0,0,.4)}")
+        html.AppendLine("a:hover{filter:brightness(1.15)}")
+        html.AppendLine("code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}")
+        html.AppendLine("pre{overflow:auto;padding:.75rem;border:1px solid var(--border);border-radius:.6rem;position:relative;background:var(--elev);}")
+        html.AppendLine(".code-copy-btn{position:absolute;top:6px;right:6px;padding:4px 8px;font-size:.65rem;line-height:1;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--fg);opacity:0;transition:opacity .18s,background .18s;}")
         html.AppendLine("pre:hover .code-copy-btn{opacity:1}")
-        html.AppendLine(".code-copy-btn svg{width:14px;height:14px;display:block}")
-        html.AppendLine(".code-copy-btn.copied{background:var(--acc);color:#fff}")
-        html.AppendLine(".code-copy-btn:focus{outline:2px solid var(--acc);}")
+        html.AppendLine(".code-copy-btn svg{width:16px;height:16px;display:block}")
+        html.AppendLine(".code-copy-btn.copied{background:#2c3440;color:#fff}")
+        html.AppendLine(":root.light .code-copy-btn.copied{background:#d5d9dd;color:#111}")
+        html.AppendLine(".code-copy-btn:focus{outline:2px solid var(--border-strong);}")
+        html.AppendLine(".chatTab{padding:.45rem .55rem;min-width:32px;font-size:.7rem;font-weight:600;line-height:1;border:1px solid var(--border);background:var(--card);color:var(--muted);transition:background .18s,border-color .18s,color .18s,transform .08s,box-shadow .18s;}")
+        html.AppendLine(".chatTab:hover:not(:disabled){background:var(--elev);color:var(--fg);}")
+        html.AppendLine(".chatTab.active{background:#222b35;border-color:var(--border-strong);color:#fff;box-shadow:inset 0 0 0 1px #303c46;}")
+        html.AppendLine(":root.light .chatTab.active{background:#e2e5e9;border-color:var(--border-strong);color:#0e1116;box-shadow:inset 0 0 0 1px #c9cfd6;}")
+        html.AppendLine(".chatTab:focus{outline:2px solid var(--border-strong);outline-offset:1px;}")
+
+        ' Typing + elapsed
+        html.AppendLine(".typing-dots{display:inline-flex;gap:6px;align-items:center;}")
+        html.AppendLine(".typing-dots span{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.35;animation:tdots 1.2s infinite ease-in-out;}")
+        html.AppendLine(".typing-dots span:nth-child(2){animation-delay:.2s}")
+        html.AppendLine(".typing-dots span:nth-child(3){animation-delay:.4s}")
+        html.AppendLine("@keyframes tdots{0%,80%,100%{transform:translateY(0);opacity:.3}40%{transform:translateY(-5px);opacity:.85}}")
+        html.AppendLine(".typing-elapsed{margin-left:8px;font-size:.65rem;color:var(--muted);font-family:ui-monospace,monospace;opacity:.8;}")
         html.AppendLine("</style>")
 
         html.AppendLine("</head><body>")
         html.AppendLine("<div class=""wrap"">")
 
-        ' ---------- Topbar ----------
+        ' Top bar
         html.AppendLine("  <div class=""topbar"">")
         html.AppendLine("    <div class=""topline"">")
-        If Not System.String.IsNullOrWhiteSpace(logoUrl) Then
+        If Not String.IsNullOrWhiteSpace(logoUrl) Then
             html.AppendLine("      <img class=""logo"" src=""" & System.Net.WebUtility.HtmlEncode(logoUrl) & """ alt=""logo"">")
         End If
         html.AppendLine("      <div class=""brandbig"">" & System.Net.WebUtility.HtmlEncode(brandName) & "</div>")
@@ -6622,82 +6678,99 @@ Public Class ThisAddIn
         html.AppendLine("    <div class=""spacer""></div>")
         html.AppendLine("    <select id=""modelSel"" title=""Model""></select>")
         html.AppendLine("    <button id=""copyBtn"" title=""Copy last answer to clipboard"">Copy last</button>")
-        html.AppendLine("    <button id=""clearBtn"" title=""Clear conversation"">Clear</button>")
+        html.AppendLine("    <button id=""clearBtn"" title=""Clear current conversation"">Clear</button>")
+        html.AppendLine("    <button id=""chat1Btn"" class=""chatTab"" data-chat=""1"" title=""Chat 1"">1</button>")
+        html.AppendLine("    <button id=""chat2Btn"" class=""chatTab"" data-chat=""2"" title=""Chat 2"">2</button>")
         html.AppendLine("    <button id=""themeBtn"" title=""Toggle theme"">Theme</button>")
         html.AppendLine("  </div>")
 
         html.AppendLine("  <div id=""chat"" class=""chat""></div>")
 
-        ' ---------- Input ----------
         html.AppendLine("  <div class=""inputbar"">")
         html.AppendLine("    <textarea id=""msg"" placeholder=""" & System.Net.WebUtility.HtmlEncode(greet) & """ autofocus></textarea>")
         html.AppendLine("    <div class=""actions""><button id=""sendBtn"">Send</button><button id=""cancelBtn"" style=""display:none;"">Cancel</button></div>")
         html.AppendLine("  </div>")
-        html.AppendLine("  <div class=""hint"">Drag & drop a file anywhere in the chat to attach • Enter to send • Shift+Enter newline • Ctrl+L clear</div>")
+        html.AppendLine("  <div class=""hint"">Drag & drop a file • Enter=send • Shift+Enter=newline • Ctrl+L=clear</div>")
         html.AppendLine("</div>")
 
-        ' ---------- JS ----------
+        ' JS
         html.AppendLine("<script>")
-        html.AppendLine("window.__botName = " & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
-        html.AppendLine("let __supportsFiles = false;")
-        html.AppendLine("let __pendingFilePath = '';")
+        html.AppendLine("window.__botName=" & Newtonsoft.Json.JsonConvert.SerializeObject(botName) & ";")
+        html.AppendLine("let __supportsFiles=false;")
+        html.AppendLine("let __pendingFilePath='';")
+        html.AppendLine("let dark=false;")
+        html.AppendLine("let __currentJobId=null;")
+        html.AppendLine("let __jobCanceled=false;")
+        html.AppendLine("let __typingBubbleId=null;")
+        html.AppendLine("let __jobStartTs=0;")
+        html.AppendLine("let __elapsedTimer=null;")
 
-        ' Clipboard helper & code block enhancer
-        html.AppendLine("function copyText(t){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);res();}catch(e){rej(e);}});}")
-        html.AppendLine("function enhanceCodeBlocks(scope){const root=scope||document;const pres=root.querySelectorAll('pre');pres.forEach(pre=>{if(pre.dataset.enhanced==='1')return;const btn=document.createElement('button');btn.type='button';btn.className='code-copy-btn';btn.innerHTML='<svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""/><path d=""M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1""/></svg><span style=""position:absolute;left:-9999px;"">Copy</span>';btn.title='Copy code';btn.addEventListener('click',()=>{const code=pre.querySelector('code');const txt=code?code.innerText:pre.innerText;copyText(txt).then(()=>{btn.classList.add('copied');btn.title='Copied!';setTimeout(()=>{btn.classList.remove('copied');btn.title='Copy code';},1500);}).catch(()=>{btn.title='Copy failed';});});pre.appendChild(btn);pre.dataset.enhanced='1';});}")
+        ' Press feedback
+        html.AppendLine("(function(){const pressOn=e=>{const b=e.target.closest('button');if(!b||b.disabled)return;b.classList.add('is-pressed');};const pressOff=()=>{document.querySelectorAll('button.is-pressed').forEach(b=>b.classList.remove('is-pressed'));};['mousedown','touchstart'].forEach(ev=>document.addEventListener(ev,pressOn,{passive:true}));['mouseup','mouseleave','blur'].forEach(ev=>document.addEventListener(ev,pressOff));document.addEventListener('keydown',e=>{if((e.key===' '||e.key==='Enter')){const b=e.target.closest('button');if(b&&!b.disabled)b.classList.add('is-pressed');}});document.addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter')pressOff();});})();")
 
-        html.AppendLine("const api = async (cmd, data={}) => {")
-        html.AppendLine("  try {")
-        html.AppendLine("    const res = await fetch('" & InkyApiRoute & "', {")
-        html.AppendLine("      method:'POST',")
-        html.AppendLine("      headers:{'Content-Type':'application/json'},")
-        html.AppendLine("      body:JSON.stringify(Object.assign({Command:cmd}, data))")
-        html.AppendLine("    });")
-        html.AppendLine("    const txt = await res.text();")
-        html.AppendLine("    try { return JSON.parse(txt); } catch { return { ok:false, error: txt }; }")
-        html.AppendLine("  } catch (err) {")
-        html.AppendLine("    return { ok:false, error: (err && err.message) ? err.message : 'Network error' }; }")
-        html.AppendLine("};")
+        ' Helpers
+        html.AppendLine("function copyText(t){if(navigator.clipboard){return navigator.clipboard.writeText(t);}return new Promise((res,rej)=>{try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();res();}catch(e){rej(e);}});}")
+        html.AppendLine("function enhanceCodeBlocks(scope){(scope||document).querySelectorAll('pre').forEach(pre=>{if(pre.dataset.enhanced==='1')return;const btn=document.createElement('button');btn.type='button';btn.className='code-copy-btn';btn.innerHTML='<svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""/><path d=""M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1""/></svg>';btn.addEventListener('click',()=>{const code=pre.querySelector('code');const txt=code?code.innerText:pre.innerText;copyText(txt).then(()=>{btn.classList.add('copied');setTimeout(()=>btn.classList.remove('copied'),1500);});});pre.appendChild(btn);pre.dataset.enhanced='1';});}")
+        html.AppendLine("const api=async(cmd,data={})=>{try{const r=await fetch('/inky/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({Command:cmd},data))});const txt=await r.text();try{return JSON.parse(txt);}catch{return{ok:false,error:txt}}}catch(e){return{ok:false,error:e.message||'Network error'}}};")
 
-        html.AppendLine("const chatEl = document.getElementById('chat');")
-        html.AppendLine("const msgEl  = document.getElementById('msg');")
-        html.AppendLine("const modelSel = document.getElementById('modelSel');")
-        html.AppendLine("const copyBtn = document.getElementById('copyBtn');")
-        html.AppendLine("const clearBtn = document.getElementById('clearBtn');")
-        html.AppendLine("const themeBtn = document.getElementById('themeBtn');")
-        html.AppendLine("const cancelBtn = document.getElementById('cancelBtn');")
-        html.AppendLine("let dark = false;")
-        html.AppendLine("function setTheme(isDark){dark=!!isDark;document.documentElement.classList.toggle('light', !dark);} ")
-        html.AppendLine("function formatBytes(b){const u=['B','KB','MB','GB','TB'];if(!Number.isFinite(b)||b<=0)return '0 B';const i=Math.min(u.length-1,Math.floor(Math.log(b)/Math.log(1024)));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];}")
-        html.AppendLine("function forceExternalLinks(scope){try{const root=scope||document;root.querySelectorAll('a[href]').forEach(a=>{a.setAttribute('target','_blank');a.setAttribute('rel','noopener noreferrer');});}catch{}}")
+        html.AppendLine("const chatEl=document.getElementById('chat');")
+        html.AppendLine("const msgEl=document.getElementById('msg');")
+        html.AppendLine("const modelSel=document.getElementById('modelSel');")
+        html.AppendLine("const copyBtn=document.getElementById('copyBtn');")
+        html.AppendLine("const clearBtn=document.getElementById('clearBtn');")
+        html.AppendLine("const themeBtn=document.getElementById('themeBtn');")
+        html.AppendLine("const cancelBtn=document.getElementById('cancelBtn');")
+        html.AppendLine("const chat1Btn=document.getElementById('chat1Btn');")
+        html.AppendLine("const chat2Btn=document.getElementById('chat2Btn');")
+        html.AppendLine("const sendBtn=document.getElementById('sendBtn');")
 
-        ' render now adds copy buttons
-        html.AppendLine("function render(turns){chatEl.innerHTML='';for(const t of (turns||[])){const row=document.createElement('div');row.className='row '+(t.role==='user'?'user':'bot');const b=document.createElement('div');b.className='bubble';const r=document.createElement('div');r.className='role';r.textContent=(t.role==='user'?'You':(window.__botName||'Bot'));b.appendChild(r);const c=document.createElement('div');if(t && typeof t.html==='string' && t.html.length){c.innerHTML=t.html;forceExternalLinks(c);}else if(t && typeof t.markdown==='string'&&t.markdown.length){const safe=t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');c.innerHTML=safe;forceExternalLinks(c);}b.appendChild(c);row.appendChild(b);chatEl.appendChild(row);}chatEl.scrollTop=chatEl.scrollHeight;enhanceCodeBlocks(chatEl);} ")
+        html.AppendLine("function setTheme(isDark){dark=!!isDark;document.documentElement.classList.toggle('light',!dark);} ")
+        html.AppendLine("function forceExternalLinks(scope){try{(scope||document).querySelectorAll('a[href]').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer';});}catch{}}")
+        html.AppendLine("function setActiveChatBtn(id){document.querySelectorAll('.chatTab').forEach(b=>b.classList.toggle('active',b.dataset.chat==String(id)));}")
+        html.AppendLine("function disableChatSwitch(dis){chat1Btn.disabled=dis;chat2Btn.disabled=dis;}")
 
-        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div>${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
+        html.AppendLine("function render(turns){chatEl.innerHTML='';for(const t of (turns||[])){const row=document.createElement('div');row.className='row '+(t.role==='user'?'user':'bot');const bub=document.createElement('div');bub.className='bubble';const rl=document.createElement('div');rl.className='role';rl.textContent=(t.role==='user'?'You':(window.__botName||'Bot'));bub.appendChild(rl);const cont=document.createElement('div');if(t && t.html){cont.innerHTML=t.html;forceExternalLinks(cont);}else if(t && t.markdown){const safe=t.markdown.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>');cont.innerHTML=safe;}bub.appendChild(cont);row.appendChild(bub);chatEl.appendChild(row);}chatEl.scrollTop=chatEl.scrollHeight;enhanceCodeBlocks(chatEl);} ")
+        html.AppendLine("function addTempAssistantBubble(html){const id='tmp-'+Math.random().toString(36).slice(2);chatEl.insertAdjacentHTML('beforeend',`<div class=""row bot"" id=""${id}""><div class=""bubble""><div class=""role"">${window.__botName||'Bot'}</div><div class=""tmpContent"">${html}</div></div></div>`);chatEl.scrollTop=chatEl.scrollHeight;return id;}")
+        html.AppendLine("function removeTempBubble(id){const el=document.getElementById(id);if(el)el.remove();}")
+        html.AppendLine("function replaceAssistantBubble(id,html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.tmpContent');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);}}")
 
-        html.AppendLine("function replaceAssistantBubble(id, html){const row=document.getElementById(id);if(!row)return;const c=row.querySelector('.bubble > div:nth-child(2)');if(c){c.innerHTML=html;forceExternalLinks(row);enhanceCodeBlocks(row);} }")
+        ' Typing + elapsed
+        html.AppendLine("function ensureTypingBubble(){if(__typingBubbleId)return;const content='<div class=""typing-container""><span class=""typing-dots""><span></span><span></span><span></span></span><span id=""typingElapsed"" class=""typing-elapsed"" style=""display:none;"">(0s)</span></div>';__typingBubbleId=addTempAssistantBubble(content);}")
+        html.AppendLine("function updateElapsed(){if(!__typingBubbleId)return;const el=document.getElementById('typingElapsed');if(!el)return;const sec=Math.floor((Date.now()-__jobStartTs)/1000);if(sec>=10){el.style.display='inline-block';el.textContent='(' + sec + 's)';}}")
+        html.AppendLine("function startElapsedTimer(){stopElapsedTimer();__jobStartTs=Date.now();__elapsedTimer=setInterval(updateElapsed,1000);}")
+        html.AppendLine("function stopElapsedTimer(){if(__elapsedTimer){clearInterval(__elapsedTimer);__elapsedTimer=null;}const el=document.getElementById('typingElapsed');if(el)el.style.display='none';}")
+        html.AppendLine("function removeTypingBubble(){if(__typingBubbleId){removeTempBubble(__typingBubbleId);__typingBubbleId=null;}stopElapsedTimer();}")
 
-        html.AppendLine("async function boot(){const st=await api('inky_getstate');if(!st.ok){alert(st.error||'Failed to initialize');return}__supportsFiles=(st.supportsFiles===true);setTheme(st.darkMode===true);render(st.history||[]);modelSel.innerHTML='';for(const m of (st.models||[])){const opt=document.createElement('option');opt.value=m.key||'';opt.textContent=m.label||'';if(m.disabled)opt.disabled=true;if(m.isSeparator)opt.style.fontFamily='ui-sans-serif,system-ui,Segoe UI,Roboto,Arial';if(m.selected && !m.disabled)opt.selected=true;modelSel.appendChild(opt);}if(!modelSel.value){const firstEnabled=Array.from(modelSel.options).find(o=>!o.disabled && o.value);if(firstEnabled)firstEnabled.selected=true;}if(st && st.greeting && (!Array.isArray(st.history)||st.history.length===0)){msgEl.placeholder=st.greeting;}}")
+        ' boot
+        html.AppendLine("async function boot(){const st=await api('inky_getstate');if(!st.ok){alert(st.error||'Init failed');return;}__supportsFiles=(st.supportsFiles===true);setTheme(st.darkMode!==false);render(st.history||[]);modelSel.innerHTML='';for(const m of (st.models||[])){const o=document.createElement('option');o.value=m.key||'';o.textContent=m.label||'';o.disabled=!!m.disabled;if(m.selected&&!o.disabled)o.selected=true;modelSel.appendChild(o);}if(!modelSel.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;}if(st.greeting && (!Array.isArray(st.history)||st.history.length===0)){msgEl.placeholder=st.greeting;}setActiveChatBtn(st.activeChat||1);} ")
 
-        html.AppendLine("async function send(){const t=msgEl.value.trim();if(!t)return;msgEl.value='';chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);const typingId=addTempAssistantBubble('<span class=""typing""></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;cancelBtn.style.display='inline-block';let res;try{res=await api('inky_send',payload);}catch(err){res={ok:false,error:(err&&err.message)?err.message:'Network error'};}finally{cancelBtn.style.display='none';const ty=document.getElementById(typingId);if(ty)ty.remove();}if(!res||!res.ok){alert(res && res.error ? res.error : 'Error');return}__pendingFilePath='';render(res.history||[]);} ")
+        ' pollJob
+        html.AppendLine("async function pollJob(jobId){if(!jobId)return;__currentJobId=jobId;__jobCanceled=false;ensureTypingBubble();startElapsedTimer();cancelBtn.style.display='inline-block';disableChatSwitch(true);try{for(;;){await new Promise(r=>setTimeout(r,2000));if(__jobCanceled)break;const s=await api('inky_jobstatus',{Job:jobId});if(!s.ok){console.warn('job status error',s.error);break;}if(s.status==='running'){continue;}const st=await api('inky_getstate');if(st.ok){render(st.history||[]);}break;} }finally{cancelBtn.style.display='none';removeTypingBubble();sendBtn.disabled=false;disableChatSwitch(false);__currentJobId=null;}}")
 
-        html.AppendLine(";(function(){const prevent=e=>{e.preventDefault();e.stopPropagation();};['dragenter','dragover','dragleave','drop'].forEach(ev=>{document.addEventListener(ev,prevent,false);});document.addEventListener('drop',async e=>{const files=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]);if(!files.length)return;const f=files[0];if(!__supportsFiles){addTempAssistantBubble('File uploads are not supported for the current model.');return;}const tempId=addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${formatBytes(f.size)}) …`);try{const fr=new FileReader();const dataUrl=await new Promise((resolve,reject)=>{fr.onerror=()=>reject(new Error('read error'));fr.onload=()=>resolve(fr.result);fr.readAsDataURL(f);});const r=await api('inky_upload',{Name:f.name,DataUrl:String(dataUrl||'')});if(!r.ok){replaceAssistantBubble(tempId,'Upload failed: '+(r.error||'unknown'));return;}if(r.supported===false){replaceAssistantBubble(tempId,'File uploads are not supported for the current model.');return;}__pendingFilePath=r.path||'';replaceAssistantBubble(tempId,`Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b> (${formatBytes(Number(r.size)||f.size)})`);}catch(err){replaceAssistantBubble(tempId,'Upload failed: '+(err&&err.message?err.message:'unknown'));}} ,false);})();")
+        ' send
+        html.AppendLine("async function send(){if(__currentJobId){return;}const t=msgEl.value.trim();if(!t)return;msgEl.value='';sendBtn.disabled=true;chatEl.insertAdjacentHTML('beforeend',`<div class=""row user""><div class=""bubble""><div class=""role"">You</div><div>${t.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n','<br>')}</div></div></div>`);let typingId=addTempAssistantBubble('<span class=""typing-dots""><span></span><span></span><span></span></span>');const payload={Text:t};if(__pendingFilePath)payload.FileObject=__pendingFilePath;let r;try{r=await api('inky_send',payload);}catch(e){r={ok:false,error:e.message||'Network error'};}if(!r||!r.ok){removeTempBubble(typingId);sendBtn.disabled=false;alert(r&&r.error||'Error');__pendingFilePath='';return;}__pendingFilePath='';if(r.job){if(r.history){render(r.history||[]);}removeTempBubble(typingId);__typingBubbleId=null;ensureTypingBubble();startElapsedTimer();cancelBtn.style.display='inline-block';disableChatSwitch(true);pollJob(r.job);}else{removeTempBubble(typingId);sendBtn.disabled=false;if(r.history){render(r.history||[]);}}}")
 
-        html.AppendLine("modelSel.addEventListener('change', async ()=>{const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const firstEnabled=Array.from(modelSel.options).find(o=>!o.disabled && o.value);if(firstEnabled)firstEnabled.selected=true;return;}const key=opt.value;const r=await api('inky_setmodel',{Key:key});if(!r.ok){alert(r.error||'Failed to set model');return}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
-        html.AppendLine("copyBtn.addEventListener('click', async ()=>{const r=await api('inky_copylast');if(!r.ok){alert(r.error||'Nothing to copy')}});")
-        html.AppendLine("clearBtn.addEventListener('click', async ()=>{const r=await api('inky_clear');if(r.ok){render([])}else{alert(r.error||'Failed to clear')}});")
-        html.AppendLine("themeBtn.addEventListener('click', async ()=>{const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
-        html.AppendLine("msgEl.addEventListener('keydown', e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}if(e.key.toLowerCase()==='l'&&e.ctrlKey){e.preventDefault();clearBtn.click();}});")
-        html.AppendLine("document.getElementById('sendBtn').addEventListener('click', send);")
-        html.AppendLine("cancelBtn.addEventListener('click', async ()=>{await api('inky_cancel');cancelBtn.style.display='none';});")
-        html.AppendLine("chatEl.addEventListener('click', e=>{const a=e.target&&e.target.closest?e.target.closest('a[href]'):null;if(!a)return;if(a.getAttribute('target')!=='_blank'){a.setAttribute('target','_blank');a.setAttribute('rel','noopener noreferrer');}});")
+        ' drag/drop
+        html.AppendLine("(function(){const stop=e=>{e.preventDefault();e.stopPropagation();};['dragenter','dragover','dragleave','drop'].forEach(ev=>document.addEventListener(ev,stop,false));document.addEventListener('drop',async e=>{const files=[...(e.dataTransfer&&e.dataTransfer.files)||[]];if(!files.length)return;const f=files[0];if(!__supportsFiles){addTempAssistantBubble('File uploads are not supported for the current model.');return;}const tempId=addTempAssistantBubble(`Uploading <b>${f.name.replaceAll('&','&amp;')}</b> (${(f.size/1024).toFixed(1)} KB)…`);try{const fr=new FileReader();const dataUrl=await new Promise((res,rej)=>{fr.onerror=()=>rej(new Error('read error'));fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});const r=await api('inky_upload',{Name:f.name,DataUrl:String(dataUrl||'')});if(!r.ok){replaceAssistantBubble(tempId,'Upload failed: '+(r.error||'unknown'));return;}if(r.supported===false){replaceAssistantBubble(tempId,'File uploads are not supported for this model.');return;}__pendingFilePath=r.path||'';replaceAssistantBubble(tempId,`Added file: <b>${(r.name||f.name).replaceAll('&','&amp;')}</b>`);}catch(err){replaceAssistantBubble(tempId,'Upload failed: '+(err&&err.message?err.message:'unknown'));}} ,false);})();")
+
+        ' events
+        html.AppendLine("modelSel.addEventListener('change',async()=>{if(__currentJobId)return;const opt=modelSel.options[modelSel.selectedIndex];if(!opt||opt.disabled||!opt.value){const fe=[...modelSel.options].find(o=>!o.disabled&&o.value);if(fe)fe.selected=true;return;}const r=await api('inky_setmodel',{Key:opt.value});if(!r.ok){alert(r.error||'Failed to set model');return;}if(typeof r.supportsFiles==='boolean')__supportsFiles=r.supportsFiles;});")
+        html.AppendLine("clearBtn.addEventListener('click',async()=>{if(__currentJobId)return;const r=await api('inky_clear');if(r.ok){render([]);if(r.greeting)msgEl.placeholder=r.greeting;}else{alert(r.error||'Failed to clear');}});")
+        html.AppendLine("copyBtn.addEventListener('click',async()=>{const r=await api('inky_copylast');if(!r.ok){alert(r.error||'Nothing to copy')}});")
+        html.AppendLine("themeBtn.addEventListener('click',async()=>{if(__currentJobId)return;const target=!dark;setTheme(target);const r=await api('inky_toggletheme');if(!r.ok){setTheme(!target);alert(r.error||'Theme switch failed');return;}if(typeof r.darkMode==='boolean')setTheme(r.darkMode===true);});")
+        html.AppendLine("msgEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}if(e.ctrlKey&&e.key.toLowerCase()==='l'){e.preventDefault();clearBtn.click();}});")
+        html.AppendLine("sendBtn.addEventListener('click',send);")
+        html.AppendLine("cancelBtn.addEventListener('click',async()=>{if(!__currentJobId)return;__jobCanceled=true;await api('inky_cancel',{Job:__currentJobId});});")
+        html.AppendLine("chatEl.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;if(a.target!=='_blank'){a.target='_blank';a.rel='noopener noreferrer';}});")
+        html.AppendLine("async function switchChat(n){if(__currentJobId)return;const r=await api('inky_switch',{Chat:String(n)});if(!r.ok){alert(r.error||'Switch failed');return;}setActiveChatBtn(r.activeChat||n);render(r.history||[]);if(r.greeting){msgEl.placeholder=r.greeting;}}")
+        html.AppendLine("chat1Btn.addEventListener('click',()=>switchChat(1));")
+        html.AppendLine("chat2Btn.addEventListener('click',()=>switchChat(2));")
+
         html.AppendLine("boot();")
         html.AppendLine("</script>")
         html.AppendLine("</body></html>")
         Return html.ToString()
     End Function
-
 
 
     ' Builds a simple JSON response
@@ -6830,17 +6903,88 @@ Public Class ThisAddIn
                             Return JsonErr("Upload failed: " & exUp.Message)
                         End Try
 
-
                     Case "inky_cancel"
-                        If llmOperationCts IsNot Nothing AndAlso Not llmOperationCts.IsCancellationRequested Then
-                            llmOperationCts.Cancel()
-                            Return JsonOk(New With {.ok = True, .message = "Cancellation requested."})
-                        Else
-                            Return JsonErr("No active operation to cancel.")
+
+                        ' Optional job id (preferred modern path)
+                        Dim jobId As String = j("Job")?.ToString()
+
+                        If Not String.IsNullOrWhiteSpace(jobId) Then
+                            Dim job As LlmJob = Nothing
+                            If Not jobMap.TryGetValue(jobId, job) Then
+                                Return JsonErr("Unknown job.")
+                            End If
+                            Try
+                                If job Is Nothing OrElse job.Cts Is Nothing Then
+                                    Return JsonErr("Job has no cancellation handle.")
+                                End If
+                                If Not job.Cts.IsCancellationRequested Then
+                                    job.Cts.Cancel()
+                                    Return JsonOk(New With {
+                                        .ok = True,
+                                        .job = jobId,
+                                        .status = "cancelRequested"
+                                    })
+                                Else
+                                    Return JsonOk(New With {
+                                        .ok = True,
+                                        .job = jobId,
+                                        .status = "alreadyCanceled"
+                                    })
+                                End If
+                            Catch ex As System.Exception
+                                Return JsonErr("Cancel failed: " & ex.Message)
+                            End Try
                         End If
+
+                        ' Legacy path: global CTS (kept for backward compatibility)
+                        If llmOperationCts IsNot Nothing AndAlso Not llmOperationCts.IsCancellationRequested Then
+                            Try
+                                llmOperationCts.Cancel()
+                                Return JsonOk(New With {
+                                    .ok = True,
+                                    .status = "cancelRequestedLegacy"
+                                })
+                            Catch ex As System.Exception
+                                Return JsonErr("Legacy cancel failed: " & ex.Message)
+                            End Try
+                        End If
+
+                        ' Fallback: try to find the most recent running job (if user pressed cancel without specifying id)
+                        Dim fallbackJob As LlmJob =
+                            jobMap.Values _
+                                  .Where(Function(x) x IsNot Nothing AndAlso
+                                                     x.Tcs IsNot Nothing AndAlso
+                                                     Not x.Tcs.Task.IsCompleted) _
+                                  .OrderByDescending(Function(x) x.CreatedUtc) _
+                                  .FirstOrDefault()
+
+                        If fallbackJob IsNot Nothing Then
+                            Try
+                                If Not fallbackJob.Cts.IsCancellationRequested Then
+                                    fallbackJob.Cts.Cancel()
+                                    Return JsonOk(New With {
+                                        .ok = True,
+                                        .job = fallbackJob.Id,
+                                        .status = "cancelRequestedFallback"
+                                    })
+                                Else
+                                    Return JsonOk(New With {
+                                        .ok = True,
+                                        .job = fallbackJob.Id,
+                                        .status = "alreadyCanceledFallback"
+                                    })
+                                End If
+                            Catch ex As System.Exception
+                                Return JsonErr("Fallback cancel failed: " & ex.Message)
+                            End Try
+                        End If
+
+                        Return JsonErr("No active operation to cancel.")
+
 
                     Case "inky_send"
 
+                        ' ------------------ (A) Read request & validate ------------------
                         Dim fileObject As System.String = j("FileObject")?.ToString()
                         Dim uploadedTempPath As System.String = fileObject
 
@@ -6851,7 +6995,7 @@ Public Class ThisAddIn
 
                         Dim st As InkyState = LoadInkyState()
 
-                        ' Recompute upload capability (falls Client-State alt ist)
+                        ' Recompute upload capability (client may be stale)
                         Dim supportsFilesNow As System.Boolean = False
                         Try
                             supportsFilesNow = ComputeSupportsFiles(st.UseSecondApi, st.SelectedModelKey)
@@ -6859,6 +7003,7 @@ Public Class ThisAddIn
                             supportsFilesNow = False
                         End Try
 
+                        ' ------------------ (B) File / clipboard object extraction (unchanged logic) ------------
                         Dim extractedDoc As System.String = Nothing
                         Dim extractedLabel As System.String = Nothing
                         Dim attachedType As System.String = Nothing
@@ -6868,31 +7013,28 @@ Public Class ThisAddIn
                             Dim okOffice As System.Boolean = False
                             Try
                                 okOffice = TryExtractOfficeText(fileObject, extractedDoc, extractedLabel)
-                            Catch exOff As System.Exception
+                            Catch
                                 okOffice = False
                             End Try
 
                             If okOffice Then
                                 hadInlineExtraction = True
                                 attachedType = "office"
-                                fileObject = Nothing        ' Wichtig: KEIN Pfad ans Modell geben
+                                fileObject = Nothing    ' Do NOT pass a path to the model
                             Else
-                                ' Kein (oder fehlgeschlagenes) Office → Text-/Code-/CSV-Erkennung
                                 Dim okText As System.Boolean = False
                                 Try
                                     okText = TryExtractTextLike(fileObject, extractedDoc, extractedLabel)
-                                Catch exTxt As System.Exception
+                                Catch
                                     okText = False
                                 End Try
-
                                 If okText Then
                                     hadInlineExtraction = True
                                     attachedType = "text"
-                                    fileObject = Nothing    ' ebenfalls KEIN Pfad ans Modell
+                                    fileObject = Nothing
                                 Else
-                                    ' Weder Office noch Text/Code extrahierbar:
-                                    ' Wenn das Modell KEINE FileObjects unterstützt, geben wir eine freundliche Meldung aus.
                                     If (Not supportsFilesNow) AndAlso (Not System.String.IsNullOrWhiteSpace(fileObject)) Then
+                                        ' Model does not support file objects
                                         st.History.Add(New ChatTurn With {
                                             .Role = "assistant",
                                             .Markdown = "This model does not support file attachments.",
@@ -6900,177 +7042,383 @@ Public Class ThisAddIn
                                             .Utc = System.DateTime.UtcNow
                                         })
                                         SaveInkyState(st)
-
-                                        ' Tempdatei trotzdem wegräumen
+                                        ' Cleanup temp
                                         Try
-                                            If Not System.String.IsNullOrWhiteSpace(uploadedTempPath) AndAlso System.IO.File.Exists(uploadedTempPath) Then
-                                                System.IO.File.Delete(uploadedTempPath)
+                                            If Not System.String.IsNullOrWhiteSpace(uploadedTempPath) AndAlso IO.File.Exists(uploadedTempPath) Then
+                                                IO.File.Delete(uploadedTempPath)
                                             End If
                                         Catch
                                         End Try
-
                                         Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
                                     End If
-                                    ' andernfalls: PDFs/sonstige bleiben via FileObject (wie bisher)
+                                    ' Else: keep fileObject (e.g. PDF) for API that supports raw path/object
                                 End If
                             End If
                         End If
 
-                        ' Benutzerturn in History
+                        ' ------------------ (C) Append user turn immediately ------------------
                         Dim userTurn As New ChatTurn With {
                             .Role = "user",
                             .Markdown = textBody,
                             .Html = MarkdownToHtml(textBody),
-                            .Utc = System.DateTime.UtcNow
+                            .Utc = Date.UtcNow
                         }
                         st.History.Add(userTurn)
 
-                        ' History kürzen
-                        Dim cap As System.Int32 = 0
+                        ' Cap history (unchanged)
+                        Dim cap As Integer = 0
                         Try : cap = INI_ChatCap : Catch : cap = 4000 : End Try
-                        Dim clipped As System.Collections.Generic.List(Of ChatTurn) = CapHistoryToChars(st, cap)
+                        Dim clipped As List(Of ChatTurn) = CapHistoryToChars(st, cap)
 
-                        ' Prompt zusammenstellen
-                        Dim sb As New System.Text.StringBuilder()
-                        sb.AppendLine("<DIALOG>")
+                        ' Build dialog prompt now (passed into job)
+                        Dim sbDialog As New System.Text.StringBuilder()
+                        sbDialog.AppendLine("<DIALOG>")
                         For Each t In clipped
                             If t.Role = "user" Then
-                                sb.AppendLine("[USER] " & t.Markdown)
+                                sbDialog.AppendLine("[USER] " & t.Markdown)
                             Else
-                                sb.AppendLine("[ASSISTANT] " & t.Markdown)
+                                sbDialog.AppendLine("[ASSISTANT] " & t.Markdown)
                             End If
                         Next
-                        sb.AppendLine("</DIALOG>")
+                        sbDialog.AppendLine("</DIALOG>")
 
-                        ' ── NEU: Einmaliger, nicht-persistenter Anhangsblock ──
-                        If hadInlineExtraction AndAlso Not System.String.IsNullOrWhiteSpace(extractedDoc) Then
-                            sb.AppendLine()
-                            Dim lbl As System.String = EscapeForXml(If(extractedLabel, "Attached document"))
-                            Dim typ As System.String = If(System.String.IsNullOrWhiteSpace(attachedType), "text", attachedType)
-                            sb.AppendLine("<ATTACHED_DOCUMENT type=""" & typ & """ label=""" & lbl & """>")
-                            sb.AppendLine(extractedDoc)
-                            sb.AppendLine("</ATTACHED_DOCUMENT>")
+                        ' Add inline extracted document block if any (unchanged)
+                        If hadInlineExtraction AndAlso Not String.IsNullOrWhiteSpace(extractedDoc) Then
+                            sbDialog.AppendLine()
+                            Dim lbl As String = EscapeForXml(If(extractedLabel, "Attached document"))
+                            Dim typ As String = If(String.IsNullOrWhiteSpace(attachedType), "text", attachedType)
+                            sbDialog.AppendLine("<ATTACHED_DOCUMENT type=""" & typ & """ label=""" & lbl & """>")
+                            sbDialog.AppendLine(extractedDoc)
+                            sbDialog.AppendLine("</ATTACHED_DOCUMENT>")
                         End If
 
-                        ' Systemprompt
-                        Dim sysPrompt As System.String = GetSystemPromptChat()
-                        Dim nowLocal As System.String = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture)
-                        sysPrompt &= System.Environment.NewLine & "Current local date/time: " & nowLocal
-                        sysPrompt &= System.Environment.NewLine & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
+                        ' Persist state with user turn BEFORE returning (important)
+                        SaveInkyState(st)
 
-                        ' Model-Konfiguration (Second API / Alternates)
-                        Dim useSecond As System.Boolean = st.UseSecondApi
-                        Dim usedAlt As System.Boolean = False
-                        Dim origLoaded As System.Boolean = False
+                        ' ------------------ (D) Prepare system prompt (same logic) ------------------
+                        Dim sysPromptBase As String = GetSystemPromptChat()
+                        Dim nowLocal As String = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", Globalization.CultureInfo.InvariantCulture)
+                        sysPromptBase &= Environment.NewLine & "Current local date/time: " & nowLocal
+                        sysPromptBase &= Environment.NewLine & $"Your name is '{AN6}'. Only if you are expressly asked you can say that you have been developped by David Rosenthal of the law firm VISCHER in Switzerland."
 
-                        If useSecond AndAlso Not System.String.IsNullOrWhiteSpace(st.SelectedModelKey) Then
-                            Try
-                                originalConfig = GetCurrentConfig(_context) : originalConfigLoaded = True
+                        Dim useSecondApiLocal As Boolean = st.UseSecondApi
+                        Dim selectedModelKeyLocal As String = st.SelectedModelKey
 
-                                Dim alts As System.Collections.Generic.List(Of SharedLibrary.SharedLibrary.ModelConfig) =
-                                    LoadAlternativeModels(INI_AlternateModelPath, _context)
+                        ' Capture file object (may be Nothing after extraction)
+                        Dim finalFileObject As String = fileObject
+                        Dim tempUploadPathCopy As String = uploadedTempPath
 
-                                Dim sel As SharedLibrary.SharedLibrary.ModelConfig =
-                                    alts.FirstOrDefault(Function(m As SharedLibrary.SharedLibrary.ModelConfig)
-                                                            If m Is Nothing Then Return False
-                                                            If Not System.String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
-                                                               System.String.Equals(m.ModelDescription, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
-                                                                Return True
-                                                            End If
-                                                            If Not System.String.IsNullOrWhiteSpace(m.Model) AndAlso
-                                                               System.String.Equals(m.Model, st.SelectedModelKey, System.StringComparison.OrdinalIgnoreCase) Then
-                                                                Return True
-                                                            End If
-                                                            Return False
-                                                        End Function)
+                        ' ------------------ (E) Create background job ------------------
+                        Dim jobId As String = Guid.NewGuid().ToString("N")
+                        Dim jobCts As New CancellationTokenSource()
+                        Dim tcs As New TaskCompletionSource(Of String)(TaskCreationOptions.RunContinuationsAsynchronously)
 
-                                If sel IsNot Nothing Then
-                                    ApplyModelConfig(_context, sel)
-                                    usedAlt = True
-                                End If
-                            Catch
-                            End Try
+                        Dim job As New LlmJob With {
+                            .Id = jobId,
+                            .CreatedUtc = Date.UtcNow,
+                            .Tcs = tcs,
+                            .Cts = jobCts,
+                            .UseSecond = useSecondApiLocal,
+                            .FileObject = finalFileObject
+                        }
+
+                        If Not jobMap.TryAdd(jobId, job) Then
+                            jobCts.Dispose()
+                            Return JsonErr("Failed to register job.")
                         End If
+                        Threading.Interlocked.Increment(activeJobs)
 
-                        ' LLM ausführen
-                        Dim llmOut As System.String = ""
-                        Dim opCts As System.Threading.CancellationTokenSource = Nothing
+                        ' Keep old global CTS reference for legacy inky_cancel support
                         Try
-                            ' Cancel any previous operation
                             If llmOperationCts IsNot Nothing Then
                                 llmOperationCts.Cancel()
                                 llmOperationCts.Dispose()
                             End If
-                            llmOperationCts = New System.Threading.CancellationTokenSource()
-                            opCts = llmOperationCts   ' capture for this request
+                        Catch
+                        End Try
+                        llmOperationCts = jobCts
 
-                            llmOut = Await RunLlmAsync(sysPrompt, sb.ToString(), useSecond, False, fileObject, llmOperationCts.Token).ConfigureAwait(False)
+                        System.Threading.Tasks.Task.Run(
+                            Sub()
+                                Dim originalCfgLoaded As Boolean = False
+                                Dim usedAlternate As Boolean = False
+                                Dim localOutput As String = ""
+                                Try
+                                    ' (1) Alternate model application (moved from synchronous path)
+                                    If useSecondApiLocal AndAlso Not String.IsNullOrWhiteSpace(selectedModelKeyLocal) Then
+                                        Try
+                                            originalConfig = GetCurrentConfig(_context) : originalConfigLoaded = True
+                                            Dim alts = LoadAlternativeModels(INI_AlternateModelPath, _context)
+                                            Dim sel = alts?.FirstOrDefault(
+                                                Function(m)
+                                                    If m Is Nothing Then Return False
+                                                    If Not String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
+                                                       String.Equals(m.ModelDescription, selectedModelKeyLocal, StringComparison.OrdinalIgnoreCase) Then Return True
+                                                    If Not String.IsNullOrWhiteSpace(m.Model) AndAlso
+                                                       String.Equals(m.Model, selectedModelKeyLocal, StringComparison.OrdinalIgnoreCase) Then Return True
+                                                    Return False
+                                                End Function)
+                                            If sel IsNot Nothing Then
+                                                ApplyModelConfig(_context, sel)
+                                                usedAlternate = True
+                                            End If
+                                        Catch
+                                        End Try
+                                    End If
+
+                                    ' (2) Run LLM
+                                    localOutput = RunLlmAsync(sysPromptBase, sbDialog.ToString(),
+                                                              useSecondApiLocal,
+                                                              False,
+                                                              finalFileObject,
+                                                              jobCts.Token).GetAwaiter().GetResult()
+
+                                    If localOutput Is Nothing Then localOutput = String.Empty
+                                    localOutput = SanitizeModelOutputForBrowser(localOutput).Trim()
+
+                                    ' Normalize cancellation marker
+                                    If localOutput.Length > 0 AndAlso
+                                       localOutput.Equals("Operation was canceled by the user.", StringComparison.OrdinalIgnoreCase) Then
+                                        localOutput = "Aborted by user."
+                                    End If
+
+                                    ' (3) Build assistant turn or error turn
+                                    Dim assistantText As String = localOutput
+                                    Dim wasCanceled As Boolean = jobCts.IsCancellationRequested
+
+                                    If assistantText.Length = 0 Then
+                                        assistantText = If(wasCanceled,
+                                                           "Aborted by user.",
+                                                           "Error: The model did not provide a response.")
+                                    End If
+
+                                    Dim htmlOut = MarkdownToHtml(assistantText)
+
+                                    ' Reload latest state (in case user switched chats meanwhile)
+                                    Dim stJob = LoadInkyState()
+
+                                    stJob.History.Add(New ChatTurn With {
+                                        .Role = "assistant",
+                                        .Markdown = assistantText,
+                                        .Html = htmlOut,
+                                        .Utc = Date.UtcNow
+                                    })
+                                    stJob.LastAssistantText = assistantText
+                                    SaveInkyState(stJob)
+
+                                    If wasCanceled AndAlso localOutput.Length = 0 Then
+                                        tcs.TrySetCanceled()
+                                    Else
+                                        tcs.TrySetResult(assistantText)
+                                    End If
+
+                                Catch exOp As OperationCanceledException
+                                    tcs.TrySetCanceled()
+                                Catch ex As System.Exception
+                                    tcs.TrySetException(ex)
+                                Finally
+                                    ' (4) Cleanup temp upload
+                                    Try
+                                        If Not String.IsNullOrWhiteSpace(tempUploadPathCopy) AndAlso IO.File.Exists(tempUploadPathCopy) Then
+                                            IO.File.Delete(tempUploadPathCopy)
+                                        End If
+                                    Catch
+                                    End Try
+                                    ' (5) Restore original config if needed
+                                    Try
+                                        If useSecondApiLocal AndAlso (usedAlternate OrElse originalCfgLoaded) AndAlso originalConfigLoaded Then
+                                            RestoreDefaults(_context, originalConfig)
+                                            originalConfigLoaded = False
+                                        End If
+                                    Catch
+                                    End Try
+                                    Threading.Interlocked.Decrement(activeJobs)
+                                End Try
+                            End Sub)
+
+                        ' ------------------ (F) Immediate response with job id ------------------
+                        Return JsonOk(New With {
+                            .ok = True,
+                            .job = jobId,
+                            .status = "running",
+                            .history = ToBrowserTurns(st.History)
+                        })
+
+                    Case "inky_pure"
+                        ' PURE MODE: send only raw user text (no history, no system prompt),
+                        ' optionally with a binary file object (no text extraction).
+                        Dim fileObject As String = j("FileObject")?.ToString()
+                        Dim textBody As String = j("Text")?.ToString()
+
+                        If String.IsNullOrWhiteSpace(textBody) Then
+                            Return JsonErr("Please enter a message.")
+                        End If
+
+                        Dim stPure As InkyState = LoadInkyState()
+
+                        ' Decide model context (still respect selected model choice)
+                        Dim useSecondApiLocal As Boolean = stPure.UseSecondApi
+                        Dim selectedModelKeyLocal As String = stPure.SelectedModelKey
+
+                        ' Validate file object support (only pass through if supported; no extraction)
+                        Dim supportsFilesNow As Boolean = False
+                        Try
+                            supportsFilesNow = ComputeSupportsFiles(useSecondApiLocal, selectedModelKeyLocal)
+                        Catch
+                            supportsFilesNow = False
+                        End Try
+                        If Not supportsFilesNow Then
+                            fileObject = Nothing
+                        End If
+
+                        ' Record user turn (prefixed)
+                        stPure.History.Add(New ChatTurn With {
+                            .Role = "user",
+                            .Markdown = "Pure: " & textBody,
+                            .Html = MarkdownToHtml("Pure: " & textBody),
+                            .Utc = Date.UtcNow
+                        })
+                        SaveInkyState(stPure)
+
+                        ' Prepare background job (mirrors inky_send logic but no dialog/system prompt)
+                        Dim jobIdP As String = Guid.NewGuid().ToString("N")
+                        Dim jobCtsP As New CancellationTokenSource()
+                        Dim tcsP As New TaskCompletionSource(Of String)(TaskCreationOptions.RunContinuationsAsynchronously)
+
+                        Dim jobP As New LlmJob With {
+                            .Id = jobIdP,
+                            .CreatedUtc = Date.UtcNow,
+                            .Tcs = tcsP,
+                            .Cts = jobCtsP,
+                            .UseSecond = useSecondApiLocal,
+                            .FileObject = fileObject
+                        }
+
+                        If Not jobMap.TryAdd(jobIdP, jobP) Then
+                            jobCtsP.Dispose()
+                            Return JsonErr("Failed to register job.")
+                        End If
+                        Threading.Interlocked.Increment(activeJobs)
+
+                        ' Maintain legacy cancellation
+                        Try
+                            If llmOperationCts IsNot Nothing Then
+                                llmOperationCts.Cancel()
+                                llmOperationCts.Dispose()
+                            End If
+                        Catch
+                        End Try
+                        llmOperationCts = jobCtsP
+
+                        System.Threading.Tasks.Task.Run(
+                            Sub()
+                                Dim originalCfgLoadedP As Boolean = False
+                                Dim usedAlternate As Boolean = False
+                                Try
+                                    ' Apply alternate model if a specific alternate is selected
+                                    If useSecondApiLocal AndAlso Not String.IsNullOrWhiteSpace(selectedModelKeyLocal) Then
+                                        Try
+                                            originalConfig = GetCurrentConfig(_context) : originalCfgLoadedP = True
+                                            Dim alts = LoadAlternativeModels(INI_AlternateModelPath, _context)
+                                            Dim sel = alts?.FirstOrDefault(
+                                                Function(m)
+                                                    If m Is Nothing Then Return False
+                                                    If Not String.IsNullOrWhiteSpace(m.ModelDescription) AndAlso
+                                                       String.Equals(m.ModelDescription, selectedModelKeyLocal, StringComparison.OrdinalIgnoreCase) Then Return True
+                                                    If Not String.IsNullOrWhiteSpace(m.Model) AndAlso
+                                                       String.Equals(m.Model, selectedModelKeyLocal, StringComparison.OrdinalIgnoreCase) Then Return True
+                                                    Return False
+                                                End Function)
+                                            If sel IsNot Nothing Then
+                                                ApplyModelConfig(_context, sel)
+                                                usedAlternate = True
+                                            End If
+                                        Catch
+                                        End Try
+                                    End If
+
+                                    ' Raw call: NO system prompt, NO history packaging
+                                    Dim output = RunLlmAsync("", textBody, useSecondApiLocal, False, fileObject, jobCtsP.Token).GetAwaiter().GetResult()
+                                    If output Is Nothing Then output = String.Empty
+                                    output = SanitizeModelOutputForBrowser(output).Trim()
+                                    If jobCtsP.IsCancellationRequested AndAlso output.Length = 0 Then
+                                        tcsP.TrySetCanceled()
+                                    Else
+                                        If output.Length = 0 Then
+                                            output = If(jobCtsP.IsCancellationRequested, "Aborted by user.", "Error: The model returned no content.")
+                                        End If
+                                        Dim stFin = LoadInkyState()
+                                        stFin.History.Add(New ChatTurn With {
+                                            .Role = "assistant",
+                                            .Markdown = output,
+                                            .Html = MarkdownToHtml(output),
+                                            .Utc = Date.UtcNow
+                                        })
+                                        stFin.LastAssistantText = output
+                                        SaveInkyState(stFin)
+                                        tcsP.TrySetResult(output)
+                                    End If
+                                Catch exOp As OperationCanceledException
+                                    tcsP.TrySetCanceled()
+                                Catch ex As System.Exception
+                                    tcsP.TrySetException(ex)
+                                Finally
+                                    ' Restore config if alternate used
+                                    Try
+                                        If useSecondApiLocal AndAlso (usedAlternate OrElse originalCfgLoadedP) AndAlso originalConfigLoaded Then
+                                            RestoreDefaults(_context, originalConfig)
+                                            originalConfigLoaded = False
+                                        End If
+                                    Catch
+                                    End Try
+                                    Threading.Interlocked.Decrement(activeJobs)
+                                End Try
+                            End Sub)
+
+                        Return JsonOk(New With {
+                            .ok = True,
+                            .job = jobIdP,
+                            .status = "running",
+                            .history = ToBrowserTurns(stPure.History)
+                        })
+
+                    Case "inky_jobstatus"
+                        Dim jobId = j("Job")?.ToString()
+                        If String.IsNullOrWhiteSpace(jobId) Then Return JsonErr("Missing Job id.")
+                        Dim job As LlmJob = Nothing
+                        If Not jobMap.TryGetValue(jobId, job) Then
+                            Return JsonErr("Unknown job.")
+                        End If
+                        ' Cleanup old jobs (lazy TTL)
+                        If (Date.UtcNow - job.CreatedUtc).TotalMinutes > JobTtlMinutes Then
+                            Dim dump As LlmJob = Nothing
+                            jobMap.TryRemove(jobId, dump)
+                            Return JsonErr("Job expired.")
+                        End If
+                        Dim t = job.Tcs.Task
+                        If Not t.IsCompleted Then
+                            Return JsonOk(New With {.ok = True, .job = jobId, .status = "running"})
+                        End If
+                        If t.IsCanceled Then
+                            Return JsonOk(New With {.ok = True, .job = jobId, .status = "canceled"})
+                        ElseIf t.IsFaulted Then
+                            Return JsonOk(New With {.ok = False, .job = jobId, .status = "error", .error = t.Exception.GetBaseException().Message})
+                        Else
+                            Return JsonOk(New With {.ok = True, .job = jobId, .status = "done", .result = t.Result})
+                        End If
+
+                    Case "inky_canceljob"
+                        Dim jobId = j("Job")?.ToString()
+                        If String.IsNullOrWhiteSpace(jobId) Then Return JsonErr("Missing Job id.")
+                        Dim job As LlmJob = Nothing
+                        If Not jobMap.TryGetValue(jobId, job) Then Return JsonErr("Unknown job.")
+                        Try
+                            job.Cts.Cancel()
+                            Return JsonOk(New With {.ok = True, .job = jobId, .status = "cancelRequested"})
                         Catch ex As System.Exception
-                            Return JsonErr("LLM error: " & ex.Message)
-                        Finally
-                            ' WICHTIG: Temp-Datei IMMER löschen – auch wenn wir fileObject oben auf Nothing gesetzt haben.
-                            Try
-                                If Not System.String.IsNullOrWhiteSpace(uploadedTempPath) AndAlso System.IO.File.Exists(uploadedTempPath) Then
-                                    System.IO.File.Delete(uploadedTempPath)
-                                End If
-                            Catch
-                            End Try
-
-                            ' Ursprungs-Konfig wiederherstellen
-                            Try
-                                If useSecond AndAlso (usedAlt OrElse origLoaded) AndAlso originalConfigLoaded Then
-                                    RestoreDefaults(_context, originalConfig)
-                                    originalConfigLoaded = False
-                                End If
-                            Catch
-                            End Try
+                            Return JsonErr("Cancel failed: " & ex.Message)
                         End Try
 
-                        If llmOut Is Nothing Then llmOut = System.String.Empty
-                        llmOut = SanitizeModelOutputForBrowser(llmOut)
-                        Dim cleaned As System.String = llmOut.Trim()
-
-
-                        ' Normalize cancellation message coming from RunLlmAsync (if any)
-
-                        If cleaned.Length > 0 AndAlso cleaned.Equals("Operation was canceled by the user.", StringComparison.OrdinalIgnoreCase) Then
-                            cleaned = "Aborted by user."
-                        End If
-
-                        If cleaned.Length = 0 Then
-                            Dim wasCanceled As System.Boolean = False
-                            Try
-                                wasCanceled = (opCts IsNot Nothing AndAlso opCts.IsCancellationRequested)
-                            Catch
-                                wasCanceled = False
-                            End Try
-
-                            Dim errMsg As System.String = If(wasCanceled, "Aborted by user.", "Error: The model did not provide a response.")
-                            Dim botErr As New ChatTurn With {
-                                .Role = "assistant",
-                                .Markdown = errMsg,
-                                .Html = MarkdownToHtml(errMsg),
-                                .Utc = System.DateTime.UtcNow
-                            }
-                            st.History.Add(botErr)
-                            st.LastAssistantText = errMsg
-                            SaveInkyState(st)
-                            Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
-                        End If
-
-
-                        Dim htmlOut As System.String = MarkdownToHtml(cleaned)
-                        Dim botTurn As New ChatTurn With {
-                            .Role = "assistant",
-                            .Markdown = cleaned,
-                            .Html = htmlOut,
-                            .Utc = System.DateTime.UtcNow
-                        }
-                        st.History.Add(botTurn)
-                        st.LastAssistantText = cleaned
-                        SaveInkyState(st)
-
-                        Return JsonOk(New With {.ok = True, .history = ToBrowserTurns(st.History)})
 
                     Case "inky_clear"
                         Dim stClear As New InkyState()

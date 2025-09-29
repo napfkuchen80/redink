@@ -11525,6 +11525,7 @@ Public Class ThisAddIn
             End If
 
         Catch ex As System.Exception
+            Debug.WriteLine("Bodytext=" & bodyText)
             MessageBox.Show("Error in ShowPaneAsync: " & ex.Message)
         End Try
     End Sub
@@ -21301,7 +21302,7 @@ Public Class ThisAddIn
                         ShowCustomMessageBox("No cleaned text returned - aborting.")
                         Return
                     End If
-                    Dim edited = ShowCustomWindow("The cleaning and anonymization resulted in the following text for your review:", cleaned.Trim(), "Edit text to insert, then press OK or Cancel.", $"{AN} AddClause")
+                    Dim edited = ShowCustomWindow("The cleaning and anonymization resulted in the following text for your review:", cleaned.Trim(), "Edit text to insert, then press OK or Cancel.", $"{AN} AddClause", True)
                     If String.IsNullOrWhiteSpace(edited) Then
                         ShowCustomMessageBox("Operation cancelled (no text).")
                         Return
