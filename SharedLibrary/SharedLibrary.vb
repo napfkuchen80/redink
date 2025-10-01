@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 29.9.2025
+' 1.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -10506,7 +10506,7 @@ Namespace SharedLibrary
                 If IniFilePath = DefaultPath Then
                     ShowCustomMessageBox("Your configuration file has been updated.")
                 Else
-                    ShowCustomMessageBox("Your configuration has been saved To a local configuration file (which will be used going forward until deleted).")
+                    ShowCustomMessageBox("Your configuration has been saved to a local configuration file (which will be used going forward until deleted).")
                 End If
 
                 InitializeConfig(context, False, True)
@@ -10645,7 +10645,247 @@ Namespace SharedLibrary
         End Sub
 
 
+Private Shared Function GetActiveConfigFilePath(context As ISharedContext) As String
+    Dim regPath As String = GetFromRegistry(RegPath_Base, RegPath_IniPath, True)
+    Dim defaultPathApp As String = GetDefaultINIPath(context.RDV)
+    Dim defaultPathWord As String = GetDefaultINIPath("Word")
+    Dim candidate As String
+
+    If Not String.IsNullOrWhiteSpace(regPath) AndAlso RegPath_IniPrio Then
+        candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
+    ElseIf System.IO.File.Exists(defaultPathApp) Then
+        candidate = defaultPathApp
+    ElseIf System.IO.File.Exists(defaultPathWord) Then
+        candidate = defaultPathWord
+    ElseIf Not String.IsNullOrWhiteSpace(regPath) Then
+        candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
+    Else
+        candidate = defaultPathApp
+    End If
+    Return RemoveCR(candidate)
+End Function
+
+
+
+
         Public Shared Function ShowVariableConfigurationWindow(
+        variableNames As List(Of String),
+        variableValues As Dictionary(Of String, Object),
+        context As ISharedContext,
+        Optional ownerForm As Form = Nothing
+    ) As Dictionary(Of String, Object)
+
+            If variableValues Is Nothing Then
+                variableValues = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
+            End If
+
+            Dim abortAndReload As Boolean = False
+            Dim gridTouched As Boolean = False
+
+            Dim form As New Form() With {
+        .Text = "Expert Configuration",
+        .StartPosition = FormStartPosition.CenterScreen,
+        .ClientSize = New Size(900, 520),
+        .Font = New System.Drawing.Font("Segoe UI", 9.0F)
+    }
+
+            ' Icon / logo
+            Try
+                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                form.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+            Catch
+            End Try
+
+            Dim dgv As New DataGridView() With {
+        .Dock = DockStyle.Fill,
+        .AllowUserToAddRows = False,
+        .AllowUserToDeleteRows = False,
+        .AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+        .RowHeadersVisible = False,
+        .SelectionMode = DataGridViewSelectionMode.CellSelect,
+        .MultiSelect = False
+    }
+
+            Dim colVar As New DataGridViewTextBoxColumn() With {.HeaderText = "Variable", .ReadOnly = True, .Name = "colVar"}
+            Dim colVal As New DataGridViewTextBoxColumn() With {.HeaderText = "Value", .Name = "colVal"}
+            dgv.Columns.AddRange(colVar, colVal)
+
+            dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+            dgv.ColumnHeadersHeight = CInt(form.Font.Height * 2.4)
+
+            For Each vName In variableNames
+                Dim val As String = ""
+                If variableValues.ContainsKey(vName) AndAlso variableValues(vName) IsNot Nothing Then
+                    val = variableValues(vName).ToString()
+                End If
+                dgv.Rows.Add(vName, val)
+            Next
+
+            AddHandler dgv.CellValueChanged, Sub() gridTouched = True
+            AddHandler dgv.CurrentCellDirtyStateChanged, Sub()
+                                                             If dgv.IsCurrentCellDirty Then dgv.CommitEdit(DataGridViewDataErrorContexts.Commit)
+                                                         End Sub
+
+            Dim btnSaveClose As New Button() With {.Text = "Save && Close", .AutoSize = True, .Margin = New Padding(10)}
+            Dim btnEditIni As New Button() With {.Text = "Edit .ini Files", .AutoSize = True, .Margin = New Padding(10)}
+            Dim btnCancel As New Button() With {.Text = "Cancel", .AutoSize = True, .Margin = New Padding(10)}
+
+            Dim pnlButtons As New FlowLayoutPanel() With {
+        .Dock = DockStyle.Bottom,
+        .FlowDirection = FlowDirection.RightToLeft,
+        .AutoSize = True,
+        .Padding = New Padding(16, 12, 16, 14),
+        .WrapContents = False
+    }
+            pnlButtons.Controls.AddRange({btnCancel, btnSaveClose, btnEditIni})
+
+            form.Controls.Add(dgv)
+            form.Controls.Add(pnlButtons)
+
+            Dim syncGridToDictionary As Action =
+        Sub()
+            For Each row As DataGridViewRow In dgv.Rows
+                If row.IsNewRow Then Continue For
+                Dim name = CStr(row.Cells("colVar").Value)
+                Dim valueStr = CStr(If(row.Cells("colVal").Value, ""))
+                If Not String.IsNullOrWhiteSpace(name) Then
+                    variableValues(name) = valueStr
+                End If
+            Next
+        End Sub
+
+            AddHandler btnEditIni.Click,
+        Sub()
+            ' Build selectable INI file list
+            Dim fileMap As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+            Dim mainPath As String = Nothing
+            Try
+                mainPath = GetActiveConfigFilePath(context)
+            Catch
+            End Try
+
+            If Not String.IsNullOrWhiteSpace(mainPath) AndAlso System.IO.File.Exists(mainPath) Then
+                fileMap.Add($"Main ({AN2}.ini) - " & mainPath, mainPath)
+            End If
+
+            ' Default per-application INIs
+            For Each kvp In DefaultINIPaths
+                Dim p = ExpandEnvironmentVariables(kvp.Value)
+                If System.IO.File.Exists(p) AndAlso Not fileMap.ContainsValue(p) Then
+                    fileMap.Add($"{kvp.Key} - {p}", p)
+                End If
+            Next
+
+            ' Alternate model path
+            If Not String.IsNullOrWhiteSpace(context.INI_AlternateModelPath) Then
+                Dim alt = ExpandEnvironmentVariables(context.INI_AlternateModelPath)
+                If System.IO.File.Exists(alt) AndAlso Not fileMap.ContainsValue(alt) Then
+                    fileMap.Add("Alternate Model - " & alt, alt)
+                End If
+            End If
+
+            ' Special service path
+            If Not String.IsNullOrWhiteSpace(context.INI_SpecialServicePath) Then
+                Dim sp = ExpandEnvironmentVariables(context.INI_SpecialServicePath)
+                If System.IO.File.Exists(sp) AndAlso Not fileMap.ContainsValue(sp) Then
+                    fileMap.Add("Special Service - " & sp, sp)
+                End If
+            End If
+
+            If fileMap.Count = 0 Then
+                ShowCustomMessageBox("No .ini files found.")
+                Exit Sub
+            End If
+
+            ' Z-order fix: temporarily disable form so selection UI is not blocked
+            Dim wasTopMost = form.TopMost
+            form.TopMost = False
+            form.Enabled = False
+            System.Windows.Forms.Application.DoEvents()
+
+            Dim choice As String = Nothing
+            Try
+                choice = ShowSelectionForm("Select a .ini file to open (ESC to cancel):", "INI Files", fileMap.Keys)
+            Finally
+                form.Enabled = True
+                form.TopMost = wasTopMost
+                form.Activate()
+            End Try
+
+            If String.IsNullOrWhiteSpace(choice) OrElse Not fileMap.ContainsKey(choice) Then Exit Sub
+            Dim selectedPath = fileMap(choice)
+
+            ' Only warn about in-memory vs disk version IF the main config file was chosen
+            If Not String.IsNullOrWhiteSpace(mainPath) AndAlso
+               String.Equals(selectedPath, mainPath, StringComparison.OrdinalIgnoreCase) Then
+
+                Dim proceed = ShowCustomYesNoBox(
+                    "You selected the main '" & AN2 & ".ini' configuration file. " &
+                    "The editor will open the on-disk version. Unsaved grid changes are NOT included unless you click 'Save && Close' first. " &
+                    "Proceed opening the file?",
+                    "Yes, proceed", "No, cancel")
+                If proceed = 2 Then Exit Sub
+            End If
+
+            Try
+                ShowTextFileEditor(selectedPath, "Editing " & selectedPath)
+            Catch ex As Exception
+                ShowCustomMessageBox("Could not open editor: " & ex.Message)
+                Exit Sub
+            End Try
+
+            ' Post-edit logic ONLY for main config file
+            If Not String.IsNullOrWhiteSpace(mainPath) AndAlso
+               String.Equals(selectedPath, mainPath, StringComparison.OrdinalIgnoreCase) Then
+
+                Dim answer = ShowCustomYesNoBox(
+                    "Do you want to reload the updated '" & AN2 & ".ini' from the disk NOW (and discard any changes on the grid or in the memory)?",
+                    "Yes, close and reload", "No, stay here")
+                If answer = 1 Then
+                    abortAndReload = True
+                    form.Close()
+                End If
+            End If
+        End Sub
+
+            AddHandler btnSaveClose.Click,
+        Sub()
+            syncGridToDictionary()
+            form.DialogResult = DialogResult.OK
+            form.Close()
+        End Sub
+
+            AddHandler btnCancel.Click,
+        Sub()
+            variableValues = Nothing
+            form.DialogResult = DialogResult.Cancel
+            form.Close()
+        End Sub
+
+            If ownerForm IsNot Nothing Then
+                form.ShowDialog(ownerForm)
+            Else
+                form.ShowDialog()
+            End If
+
+            If abortAndReload Then
+
+                context.INIloaded = False
+                InitializeConfig(context, False, True)
+
+                Return Nothing
+
+            End If
+
+            If form.DialogResult = DialogResult.OK Then
+                Return variableValues
+            End If
+
+            Return Nothing
+        End Function
+
+
+        Public Shared Function oldShowVariableConfigurationWindow(
                                         variableNames As List(Of String),
                                         variableValues As Dictionary(Of String, Object),
                                         Optional ownerForm As Form = Nothing
@@ -10955,7 +11195,8 @@ Namespace SharedLibrary
             Dim variableNames As New List(Of String)(variableValues.Keys)
 
             ' Call the ShowVariableConfigurationWindow function and get the updated values
-            Dim updatedValues = ShowVariableConfigurationWindow(variableNames, variableValues, ownerform)
+            'Dim updatedValues = ShowVariableConfigurationWindow(variableNames, variableValues, ownerform)
+            Dim updatedValues = ShowVariableConfigurationWindow(variableNames, variableValues, context, ownerform)
 
             If Not IsNothing(updatedValues) Then
 
