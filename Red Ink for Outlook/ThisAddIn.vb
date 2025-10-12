@@ -76,8 +76,9 @@ Public Class ThisAddIn
     Private ReadOnly uiCtx As System.Threading.SynchronizationContext =
         System.Threading.SynchronizationContext.Current
 
-    Private Sub ThisAddIn_Startup() Handles Me.Startup
+    Private delayedStartupOnce As Integer = 0
 
+    Private Sub ThisAddIn_Startup() Handles Me.Startup
         Try
             RemoveHandler Microsoft.Win32.SystemEvents.PowerModeChanged, AddressOf OnPowerModeChanged
         Catch
@@ -104,18 +105,9 @@ Public Class ThisAddIn
         UpdateHandler.HostHandle = hwnd
 
         ' Other tasks that need to be done at startup
-
         mainThreadControl.CreateControl()
 
         outlookExplorer = ComRetry(Function() Application.ActiveExplorer())
-        If outlookExplorer IsNot Nothing Then
-            AddHandler outlookExplorer.Activate, AddressOf Explorer_Activate
-        Else
-            mainThreadControl.BeginInvoke(CType(AddressOf DelayedStartupTasks, MethodInvoker))
-            StartupInitialized = True
-        End If
-
-
         If outlookExplorer IsNot Nothing Then
             AddHandler outlookExplorer.Activate, AddressOf Explorer_Activate
         Else
@@ -128,7 +120,6 @@ Public Class ThisAddIn
         Catch
             activeChatId = 1
         End Try
-
     End Sub
 
     Private Sub Explorer_Activate()
@@ -138,6 +129,9 @@ Public Class ThisAddIn
     End Sub
 
     Private Sub DelayedStartupTasks()
+        ' Run once even if scheduled twice (e.g., event + BeginInvoke)
+        If System.Threading.Interlocked.CompareExchange(delayedStartupOnce, 1, 0) <> 0 Then Return
+
         Try
             InitializeConfig(True, True)
             UpdateHandler.PeriodicCheckForUpdates(INI_UpdateCheckInterval, "Outlook", INI_UpdatePath)

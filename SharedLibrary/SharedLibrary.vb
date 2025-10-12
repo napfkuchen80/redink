@@ -1458,6 +1458,8 @@ Namespace SharedLibrary
         Public Shared ExcelHelperUrl As String = "https://apps.vischer.com/redink/" & ExcelHelper
         Public Shared WordHelperUrl As String = "https://apps.vischer.com/redink/" & WordHelper
 
+        Public Shared AppsUrl As String = "https://apps.vischer.com"
+
         Const Default_SP_Translate As String = "You are a translator that precisely complies with its instructions step by step. Translate in to {TranslateLanguage} the text that is provided to you and is marked as 'Texttoprocess'. When you translate, do not add any other comments and the translation should be of about the same length. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. Remove any double spaces that follow punctuation marks. Before translating, check whether the text is drafted in a formal or informal manner, and maintain such style. If and when asked to translate to a language where the translation of 'you' is translated differently depending on whether it is formal or not, such as German or French, go by default for a formal translation (e.g., 'Sie' or 'vous'), unless the text is clearly very informal, for example, because the text is addressed to a person by their first name or signed only with the first name of a person. {INI_PreCorrection}"
         Const Default_SP_Correct As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to only correct spelling, missing words, clearly unnecessary words, strange or archaic language and poor style. When doing so, do not significantly change the length of the text. Whenever there is a line feed or carriage return in text provided to you, it is essential that you also include such line feed or carriage return in the output you generate. The carriage returns and line feeds in the output must match exactly those in the original text provided to you. Accordingly, if there are two carriage returns or line feeds in succession in the text provided to you, there must also be two carriage returns or line feeds in the text you generate. {INI_PreCorrection}"
         Const Default_SP_Improve As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be much more concise, to the point, better structured and easier to understand and in better, professional style. Change passive voice to active voice, where this makes sense. Remove rendundancies and filler words, except where this is necessary for easy reading and style. When doing so, do not significantly change the length of the text. Also, do not change the overall meaning, tone or content of the text. Do not split up a paragraph unless really necessary for your task, and if you do so, do not insert empty lines (only one linefeed). {INI_PreCorrection}"
@@ -14690,6 +14692,525 @@ Namespace SharedLibrary
         Public Shared MainControl As System.Windows.Forms.Control
         Public Shared HostHandle As IntPtr
 
+        ' Keep a single splash instance across async callbacks
+        Private Shared _splash As SplashScreen
+
+        ' Win32 helpers (kept local to avoid touching existing NativeMethods)
+        <Runtime.InteropServices.DllImport("user32.dll")>
+        Private Shared Function SetWindowPos(hWnd As IntPtr, hWndInsertAfter As IntPtr,
+                                         X As Integer, Y As Integer, cx As Integer, cy As Integer,
+                                         uFlags As UInteger) As Boolean
+        End Function
+
+        Private Shared ReadOnly HWND_TOPMOST As IntPtr = New IntPtr(-1)
+        Private Shared ReadOnly HWND_NOTOPMOST As IntPtr = New IntPtr(-2)
+        Private Const SWP_NOSIZE As UInteger = &H1UI
+        Private Const SWP_NOMOVE As UInteger = &H2UI
+        Private Const SWP_SHOWWINDOW As UInteger = &H40UI
+
+        Private Shared Sub ShowUpdatingSplash(message As String)
+            Try
+                If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
+                    MainControl.Invoke(Sub() ShowUpdatingSplashCore(message))
+                Else
+                    ShowUpdatingSplashCore(message)
+                End If
+            Catch
+                ' ignore splash errors
+            End Try
+        End Sub
+
+        Private Shared Sub ShowUpdatingSplashCore(message As String)
+            Try
+                If _splash Is Nothing OrElse _splash.IsDisposed Then
+                    _splash = New SplashScreen()
+                    Try
+                        _splash.TopMost = True
+                        _splash.ShowInTaskbar = False
+                    Catch
+                    End Try
+                End If
+
+                _splash.UpdateMessage(message)
+                _splash.Show()
+                _splash.BringToFront()
+                _splash.Activate()
+
+                ' Ensure it is on top of all windows
+                Try
+                    NativeMethods.SetForegroundWindow(_splash.Handle)
+                Catch
+                End Try
+                Try
+                    SetWindowPos(_splash.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
+                Catch
+                End Try
+            Catch
+            End Try
+        End Sub
+
+        Private Shared Sub CloseUpdatingSplash()
+            Try
+                If _splash Is Nothing Then Return
+                Dim closer As Action =
+                Sub()
+                    Try
+                        ' Drop topmost before closing to avoid sticking
+                        Try
+                            SetWindowPos(_splash.Handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
+                        Catch
+                        End Try
+                        Try
+                            _splash.TopMost = False
+                        Catch
+                        End Try
+                        _splash.Close()
+                    Finally
+                        _splash = Nothing
+                    End Try
+                End Sub
+
+                If _splash.InvokeRequired Then
+                    _splash.Invoke(closer)
+                Else
+                    closer()
+                End If
+            Catch
+                _splash = Nothing
+            End Try
+        End Sub
+
+
+        Private Class NativeMethods
+            <Runtime.InteropServices.DllImport("user32.dll")>
+            Public Shared Function SetForegroundWindow(hWnd As IntPtr) As Boolean
+            End Function
+        End Class
+
+        ' --- small helper: resilient logging to %AppData%\{AN2}\updater.log
+        Private Shared Sub WriteUpdateLog(message As String, Optional ex As Exception = Nothing)
+            Try
+                Dim logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), SharedMethods.AN2)
+                If Not Directory.Exists(logDir) Then Directory.CreateDirectory(logDir)
+                Dim logPath = Path.Combine(logDir, "updater.log")
+                Dim sb As New StringBuilder()
+                sb.AppendFormat("[{0:yyyy-MM-dd HH:mm:ss}] {1}", Date.Now, message)
+                If ex IsNot Nothing Then
+                    sb.AppendLine()
+                    sb.AppendFormat("  Exception: {0}", ex.GetType().FullName)
+                    sb.AppendLine()
+                    sb.AppendFormat("  Message: {0}", ex.Message)
+                    If ex.HResult <> 0 Then
+                        sb.AppendLine()
+                        sb.AppendFormat("  HResult: 0x{0:X8}", ex.HResult)
+                    End If
+                    If ex.InnerException IsNot Nothing Then
+                        sb.AppendLine()
+                        sb.AppendFormat("  Inner: {0}: {1}", ex.InnerException.GetType().FullName, ex.InnerException.Message)
+                    End If
+                End If
+                File.AppendAllText(logPath, sb.ToString() & Environment.NewLine, Encoding.UTF8)
+            Catch
+                ' never let logging break updater flow
+            End Try
+        End Sub
+
+        Private Shared Function UIInvokePrompt(prompt As String, caption As String) As Integer
+            NativeMethods.SetForegroundWindow(HostHandle)
+            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
+                Dim result As Integer = 0
+                MainControl.Invoke(Sub() result = SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption))
+                Return result
+            Else
+                Return SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption)
+            End If
+        End Function
+
+        Private Shared Sub UIInvokeMessage(msg As String, caption As String)
+            NativeMethods.SetForegroundWindow(HostHandle)
+            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
+                MainControl.Invoke(Sub() SharedMethods.ShowCustomMessageBox(msg, caption))
+            Else
+                SharedMethods.ShowCustomMessageBox(msg, caption)
+            End If
+        End Sub
+
+        Private Shared Function CanShowInteractiveUi() As Boolean
+            Return Environment.UserInteractive
+        End Function
+
+        Private Shared Function GetUrlZoneName(url As String) As String
+            Try
+                Dim z = System.Security.Policy.Zone.CreateFromUrl(url)
+                Return z.SecurityZone.ToString()
+            Catch
+                Return "Unknown"
+            End Try
+        End Function
+
+        Private Shared Function IsTrustNotGranted(ex As Exception) As Boolean
+            If ex Is Nothing Then Return False
+            ' TrustNotGrantedException is a DeploymentException subtype
+            If ex.[GetType]().FullName.EndsWith("TrustNotGrantedException", StringComparison.OrdinalIgnoreCase) Then Return True
+            If ex.Message IsNot Nothing AndAlso ex.Message.IndexOf("User has refused to grant required permissions", StringComparison.OrdinalIgnoreCase) >= 0 Then Return True
+            ' Walk inner exceptions
+            Return IsTrustNotGranted(ex.InnerException)
+        End Function
+
+        Public Sub CheckAndInstallUpdates(appname As String, LocalPath As String)
+            Try
+                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
+                    Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
+                    Dim currentDate As Date = Date.Now
+
+                    WriteUpdateLog($"[CheckAndInstallUpdates] network-deployed={True} app='{appname}' url='{deployment.UpdateLocation}' zone='{GetUrlZoneName(deployment.UpdateLocation.AbsoluteUri)}'")
+
+                    If deployment.CheckForUpdate() Then
+                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox(
+                        $"An update is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.",
+                        "Yes", "No")
+
+                        If dialogResult = 1 Then
+                            Select Case Left(appname, 4)
+                                Case "Word"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Word"))
+                                    My.Settings.LastUpdateCheckWord = currentDate
+                                Case "Exce"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Excel"))
+                                    My.Settings.LastUpdateCheckExcel = currentDate
+                                Case "Outl"
+                                    System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
+                                    My.Settings.LastUpdateCheckOutlook = currentDate
+                            End Select
+                            My.Settings.Save()
+
+                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successful.", $"{SharedMethods.AN} Updater")
+                        End If
+                    Else
+                        SharedMethods.ShowCustomMessageBox($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
+                    End If
+
+                    Select Case Left(appname, 4)
+                        Case "Word" : My.Settings.LastUpdateCheckWord = currentDate
+                        Case "Exce" : My.Settings.LastUpdateCheckExcel = currentDate
+                        Case "Outl" : My.Settings.LastUpdateCheckOutlook = currentDate
+                    End Select
+                    My.Settings.Save()
+                Else
+                    If LocalPath = "" Then
+                        SharedMethods.ShowCustomMessageBox(
+                        $"This version of {SharedMethods.AN} has not been configured with an update path ('UpdatedPath = '). The configuration should refer to the main directory where the installation sources 'word', 'excel' and 'outlook' are stored. You may have to discuss this with your administrator.",
+                        $"{SharedMethods.AN} Updater")
+                    Else
+                        LocalPath = SharedMethods.ExpandEnvironmentVariables(LocalPath)
+                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox(
+                        $"This will initiate the installer for this add-in. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?",
+                        "Yes", "No")
+                        If dialogResult = 1 Then
+                            Dim vstoFilePath As String = ""
+                            Select Case Left(appname, 4)
+                                Case "Word" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
+                                Case "Exce" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"excel\{SharedMethods.AN3} for Excel.vsto")
+                                Case "Outl" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"outlook\{SharedMethods.AN3} for Outlook.vsto")
+                            End Select
+
+                            If System.IO.File.Exists(vstoFilePath) Then
+                                RunVstoInstaller(vstoFilePath)
+                            Else
+                                SharedMethods.ShowCustomMessageBox(
+                                $"Installer '{vstoFilePath}' not found. Check 'UpdatePath =' in the '{SharedMethods.AN2}.ini''.",
+                                $"{SharedMethods.AN} Updater")
+                            End If
+                        End If
+                    End If
+                End If
+            Catch ex As DeploymentException
+                WriteUpdateLog("[CheckAndInstallUpdates] DeploymentException", ex)
+                SharedMethods.ShowCustomMessageBox(
+                $"An error occurred while checking for or installing updates (try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button): " & ex.Message,
+                $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared _appname As String
+        Private Shared _localPath As String
+        Private Shared _checkIntervalInDays As Integer
+
+        Public Shared Sub PeriodicCheckForUpdates(
+        checkIntervalInDays As Integer,
+        appname As String,
+        LocalPath As String)
+
+            Dim splashManagedByOnCheck As Boolean = False
+
+            Try
+                If checkIntervalInDays = 0 Then Return
+                _appname = appname
+                _localPath = LocalPath
+                _checkIntervalInDays = checkIntervalInDays
+
+                Dim lastCheck As Date = If(
+                Left(_appname, 4) = "Word", My.Settings.LastUpdateCheckWord,
+                If(Left(_appname, 4) = "Exce", My.Settings.LastUpdateCheckExcel,
+                If(Left(_appname, 4) = "Outl", My.Settings.LastUpdateCheckOutlook, Date.MinValue)))
+                Dim nowDate As Date = Date.Now
+                Dim days As Double = (nowDate - lastCheck).TotalDays
+
+                WriteUpdateLog($"[PeriodicCheck] app='{_appname}' localPath='{_localPath}' interval={_checkIntervalInDays} lastCheck='{lastCheck:yyyy-MM-dd HH:mm:ss}' ageDays={days:0.0}")
+
+                If days < _checkIntervalInDays AndAlso _checkIntervalInDays > 0 Then
+                    WriteUpdateLog("[PeriodicCheck] skipped - interval not reached")
+                    Return
+                End If
+
+                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(_localPath) Then
+                    Dim dep = ApplicationDeployment.CurrentDeployment
+                    WriteUpdateLog($"[PeriodicCheck] network-deployed url='{dep.UpdateLocation}' zone='{GetUrlZoneName(dep.UpdateLocation.AbsoluteUri)}'")
+
+                    ' Show "Checking for updates …" only while the async check is running.
+                    ShowUpdatingSplash("Checking for updates …")
+                    splashManagedByOnCheck = True
+
+                    RemoveHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
+                    AddHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
+                    dep.CheckForUpdateAsync()
+                Else
+                    Dim vstoFile = Path.Combine(
+                    Environment.ExpandEnvironmentVariables(_localPath),
+                    $"{_appname.ToLowerInvariant()}\{SharedMethods.AN3} for {_appname}.vsto")
+
+                    WriteUpdateLog($"[PeriodicCheck] local-deployed vsto='{vstoFile}'")
+
+                    If File.Exists(vstoFile) Then
+                        ' Only show "Updating …" while actually installing locally
+                        ShowUpdatingSplash("Updating …")
+                        Try
+                            RunVstoInstaller(vstoFile)
+                        Finally
+                            CloseUpdatingSplash()
+                        End Try
+                    Else
+                        UIInvokeMessage(
+                        $"The configuration asks me to check for local updates of {SharedMethods.AN}, but I have not found '{vstoFile}'. Please inform your administrator.",
+                        $"{SharedMethods.AN} Updater")
+                    End If
+
+                    SaveTimestamp(nowDate)
+                End If
+
+            Catch dex As DeploymentException
+                WriteUpdateLog("[PeriodicCheck] DeploymentException", dex)
+                UIInvokeMessage(
+                "The check for new updates could not be completed due to an access right restriction. " &
+                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
+                $"{SharedMethods.AN} Updater")
+                If _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
+
+            Catch ex As Exception
+                WriteUpdateLog("[PeriodicCheck] Unexpected Exception", ex)
+                UIInvokeMessage(
+                $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
+                $"{SharedMethods.AN} Updater")
+
+            Finally
+                ' For network-deployed async checks, OnCheck will close the "Checking …" splash.
+                If Not splashManagedByOnCheck Then
+                    CloseUpdatingSplash()
+                End If
+            End Try
+        End Sub
+
+        Private Shared Sub OnCheck(sender As Object, e As CheckForUpdateCompletedEventArgs)
+            Dim dep = CType(sender, ApplicationDeployment)
+            Dim nowDate As Date = Date.Now
+            Dim saved As Boolean = False
+
+            Try
+                ' The async "Checking …" phase is over; hide that splash first.
+                CloseUpdatingSplash()
+
+                If e.Error IsNot Nothing Then
+                    WriteUpdateLog($"[OnCheck] error url='{dep.UpdateLocation}' zone='{GetUrlZoneName(dep.UpdateLocation.AbsoluteUri)}'", e.Error)
+
+                    If IsTrustNotGranted(e.Error) AndAlso CanShowInteractiveUi() Then
+                        Dim appUrl = dep.UpdateLocation.AbsoluteUri
+                        Dim vstoUrl = appUrl.Replace(".application", ".vsto")
+                        WriteUpdateLog($"[OnCheck] TrustNotGranted → trying interactive VSTOInstaller on '{vstoUrl}'")
+
+                        ShowUpdatingSplash("Updating …")
+                        Try
+                            RunVstoInstaller(vstoUrl)
+                        Finally
+                            CloseUpdatingSplash()
+                        End Try
+
+                        If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+                        Return
+                    End If
+
+                    UIInvokeMessage(
+                "The check for new updates could not be completed due to an access right restriction. " &
+                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
+                $"{SharedMethods.AN} Updater")
+                    If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+                    Return
+                End If
+
+                If e.UpdateAvailable Then
+                    Dim localV = dep.CurrentVersion.ToString()
+                    Dim remoteV = e.AvailableVersion.ToString()
+                    WriteUpdateLog($"[OnCheck] update available current='{localV}' new='{remoteV}' url='{dep.UpdateLocation}'")
+
+                    Dim prompt = $"A new version is available (current: {localV}, new: {remoteV}). Do you want to install it now?"
+                    Dim choice = UIInvokePrompt(prompt, $"{SharedMethods.AN} Updater")
+
+                    If choice = 1 Then
+                        Dim appUrl = dep.UpdateLocation.AbsoluteUri
+                        Dim vstoUrl = appUrl.Replace(".application", ".vsto")
+                        WriteUpdateLog($"[OnCheck] user accepted → installing '{vstoUrl}'")
+
+                        ShowUpdatingSplash("Updating …")
+                        Try
+                            RunVstoInstaller(vstoUrl)
+                        Finally
+                            CloseUpdatingSplash()
+                        End Try
+
+                        SaveTimestamp(nowDate) : saved = True
+                    Else
+                        ' Keep semantics: still allow “pause”, but ensure a last-check is recorded anyway later.
+                        If _checkIntervalInDays = -1 Then
+                            SaveTimestamp(nowDate) : saved = True
+                        ElseIf _checkIntervalInDays > 0 Then
+                            Dim postPrompt = $"Do you want to pause update checks for {_checkIntervalInDays} days?"
+                            Dim postChoice = UIInvokePrompt(postPrompt, $"{SharedMethods.AN} Updater")
+                            If postChoice = 1 Then
+                                SaveTimestamp(nowDate) : saved = True
+                            End If
+                        End If
+                    End If
+                Else
+                    WriteUpdateLog("[OnCheck] no update available")
+                    ' NEW: always record that we checked successfully
+                    If _checkIntervalInDays > 0 Then
+                        SaveTimestamp(nowDate) : saved = True
+                    End If
+                End If
+
+            Catch dex As DeploymentException
+                WriteUpdateLog("[OnCheck] DeploymentException", dex)
+                UIInvokeMessage(
+            "The check for new updates could not be completed due to an access right restriction. " &
+            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+                If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+
+            Catch ex As Exception
+                WriteUpdateLog("[OnCheck] Unexpected Exception", ex)
+                UIInvokeMessage(
+            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
+            $"{SharedMethods.AN} Updater")
+
+            Finally
+                ' Ensure we never leave a splash hanging
+                CloseUpdatingSplash()
+                ' Safety net: if nothing saved yet and interval-based checking is active, persist the last-check timestamp
+                If _checkIntervalInDays > 0 AndAlso Not saved Then
+                    SaveTimestamp(nowDate)
+                End If
+            End Try
+        End Sub
+
+        Private Shared Sub RunVstoInstaller(pathOrUrl As String)
+            ' Try to locate VSTOInstaller in both x64 and x86 common locations
+            Dim candidates As New List(Of String)
+            Try
+                Dim base1 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), "Microsoft Shared", "VSTO")
+                Dim base2 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86), "Microsoft Shared", "VSTO")
+                If Directory.Exists(base1) Then candidates.AddRange(Directory.GetFiles(base1, "VSTOInstaller.exe", SearchOption.AllDirectories))
+                If Directory.Exists(base2) Then candidates.AddRange(Directory.GetFiles(base2, "VSTOInstaller.exe", SearchOption.AllDirectories))
+            Catch
+            End Try
+            Dim installer = candidates.FirstOrDefault()
+
+            If installer Is Nothing Then
+                WriteUpdateLog("[RunVstoInstaller] VSTOInstaller.exe not found")
+                UIInvokeMessage(
+                "The update could not be completed (VSTOInstaller.exe not found). Please inform your administrator.",
+                $"{SharedMethods.AN} Updater")
+                Return
+            End If
+
+            WriteUpdateLog($"[RunVstoInstaller] using='{installer}' target='{pathOrUrl}'")
+
+            ' 1) Silent attempt (fast, no UI)
+            Dim silentOk As Boolean = False
+            Try
+                Dim psiSilent = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}"" /S") With {
+                .UseShellExecute = False,
+                .CreateNoWindow = True
+            }
+                Using p = Process.Start(psiSilent)
+                    p.WaitForExit()
+                    WriteUpdateLog($"[RunVstoInstaller] silent exitCode={p.ExitCode}")
+                    silentOk = (p.ExitCode = 0)
+                End Using
+            Catch ex As Exception
+                WriteUpdateLog("[RunVstoInstaller] silent failed", ex)
+                silentOk = False
+            End Try
+
+            If silentOk Then
+                UIInvokeMessage(
+                "Update completed. It will be active the next time you restart your application.",
+                $"{SharedMethods.AN} Updater")
+                Return
+            End If
+
+            ' 2) Interactive fallback (to show trust consent if policy allows)
+            Try
+                Dim psiUi = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}""") With {
+                .UseShellExecute = False,
+                .CreateNoWindow = False
+            }
+                Using p = Process.Start(psiUi)
+                    p.WaitForExit()
+                    WriteUpdateLog($"[RunVstoInstaller] interactive exitCode={p.ExitCode}")
+                    If p.ExitCode = 0 Then
+                        UIInvokeMessage(
+                        "Update completed. It will be active the next time you restart your application.",
+                        $"{SharedMethods.AN} Updater")
+                    Else
+                        UIInvokeMessage(
+                        "The update could not be completed. A required trust confirmation may have been refused or blocked by policy. You can always try a manual install by opening the Edge browser and visiting " & AppsUrl & ".",
+                        $"{SharedMethods.AN} Updater")
+                    End If
+                End Using
+            Catch ex As Exception
+                WriteUpdateLog("[RunVstoInstaller] interactive failed", ex)
+                UIInvokeMessage(
+                $"The update could not be completed: {ex.Message}. Please inform your administrator. You can always try a manual install by opening the Edge browser and visiting {AppsUrl}.",
+                $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared Sub SaveTimestamp(timeStamp As Date)
+            Select Case Left(_appname, 4)
+                Case "Word" : My.Settings.LastUpdateCheckWord = timeStamp
+                Case "Exce" : My.Settings.LastUpdateCheckExcel = timeStamp
+                Case "Outl" : My.Settings.LastUpdateCheckOutlook = timeStamp
+            End Select
+            My.Settings.Save()
+            WriteUpdateLog($"[SaveTimestamp] {_appname} -> {timeStamp:yyyy-MM-dd HH:mm:ss}")
+        End Sub
+
+    End Class
+
+    Public Class oldUpdateHandler
+
+        Public Shared MainControl As System.Windows.Forms.Control
+        Public Shared HostHandle As IntPtr
+
         Private Class NativeMethods
             <Runtime.InteropServices.DllImport("user32.dll")>
             Public Shared Function SetForegroundWindow(hWnd As IntPtr) As Boolean
@@ -14738,7 +15259,7 @@ Namespace SharedLibrary
                     ' Check for updates
 
                     If deployment.CheckForUpdate() Then
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
+                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update Is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want To install it now? Your Edge browser should open And ask you For confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
 
                         If dialogResult = 1 Then
                             ' Download and apply the update -- removed for the time being due to lack of reliability
@@ -14759,7 +15280,7 @@ Namespace SharedLibrary
                             My.Settings.Save()
 
                             ' Notify the user
-                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
+                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application To see whether it was successul.", $"{SharedMethods.AN} Updater")
                         End If
                     Else
                         SharedMethods.ShowCustomMessageBox($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
@@ -14776,7 +15297,7 @@ Namespace SharedLibrary
                     My.Settings.Save()
                 Else
                     If LocalPath = "" Then
-                        SharedMethods.ShowCustomMessageBox($"This version of {SharedMethods.AN} has not been configured with an update path ('UpdatedPath = '). The configuration should refer to the main directory where the installation sources 'word', 'excel' and 'outlook' are stored. You may have to discuss this with your administrator.", $"{SharedMethods.AN} Updater")
+                        SharedMethods.ShowCustomMessageBox($"This version Of {SharedMethods.AN} has Not been configured With an update path ('UpdatedPath = '). The configuration should refer to the main directory where the installation sources 'word', 'excel' and 'outlook' are stored. You may have to discuss this with your administrator.", $"{SharedMethods.AN} Updater")
                     Else
                         LocalPath = SharedMethods.ExpandEnvironmentVariables(LocalPath)
                         Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"This will initiate the installer for this add-in. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?", "Yes", "No")
@@ -14802,7 +15323,7 @@ Namespace SharedLibrary
                 End If
             Catch ex As DeploymentException
                 ' Handle exceptions related to update checking and applying
-                SharedMethods.ShowCustomMessageBox("An error occurred while checking for or installing updates: " & ex.Message, $"{SharedMethods.AN} Updater")
+                SharedMethods.ShowCustomMessageBox($"An error occurred while checking for or installing updates (try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button): " & ex.Message, $"{SharedMethods.AN} Updater")
             End Try
         End Sub
 
@@ -14817,6 +15338,7 @@ Namespace SharedLibrary
         LocalPath As String)
 
             Try
+
                 If checkIntervalInDays = 0 Then Return
                 _appname = appname
                 _localPath = LocalPath
@@ -14864,7 +15386,7 @@ Namespace SharedLibrary
             Catch dex As DeploymentException
                 UIInvokeMessage(
             "The check for new updates could not be completed due to an access right restriction. " &
-            "Your installation may have to be freshly installed. Please inform your administrator.",
+            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
             $"{SharedMethods.AN} Updater")
                 If _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
 
@@ -14884,7 +15406,7 @@ Namespace SharedLibrary
                     ' access-rights/elevation error
                     UIInvokeMessage(
                 "The check for new updates could not be completed due to an access right restriction. " &
-                "Your installation may have to be freshly installed. Please inform your administrator.",
+                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
                 $"{SharedMethods.AN} Updater")
                     If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
                     Return
@@ -14926,7 +15448,7 @@ Namespace SharedLibrary
             Catch dex As DeploymentException
                 UIInvokeMessage(
             "The check for new updates could not be completed due to an access right restriction. " &
-            "Your installation may have to be freshly installed. Please inform your administrator.",
+            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
             $"{SharedMethods.AN} Updater")
                 If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
 
@@ -14976,134 +15498,6 @@ Namespace SharedLibrary
                 Case "Outl" : My.Settings.LastUpdateCheckOutlook = timeStamp
             End Select
             My.Settings.Save()
-        End Sub
-
-
-
-
-
-        Public Shared Sub oldPeriodicCheckForUpdates(checkIntervalInDays As Integer, appname As String, LocalPath As String)
-            Try
-                ' Get the last update check time from settings
-
-                If checkIntervalInDays = 0 Then Return
-
-                Dim lastCheck As Date
-
-                Select Case Left(appname, 4)
-                    Case "Word"
-                        lastCheck = My.Settings.LastUpdateCheckWord
-                    Case "Exce"
-                        lastCheck = My.Settings.LastUpdateCheckExcel
-                    Case "Outl"
-                        lastCheck = My.Settings.LastUpdateCheckOutlook
-                    Case Else
-                        Return
-                End Select
-
-                Dim currentDate As Date = Date.Now
-
-                ' Calculate the number of days elapsed since the last check
-                Dim elapsedDays As Double = (currentDate - lastCheck).TotalDays
-
-                ' Check for updates if the interval has passed
-                If elapsedDays >= checkIntervalInDays OrElse checkIntervalInDays < 0 Then
-                    ' Ensure the application is ClickOnce deployed
-
-                    If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
-                        Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
-
-                        Dim Dialogresult As Integer = 0
-
-                        ' Check if an update is available
-                        If deployment.CheckForUpdate() Then
-                            Dialogresult = SharedMethods.ShowCustomYesNoBox("An update is available online. Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", If(checkIntervalInDays < 0, "No (configured to check on next startup)", "No, check again in " & checkIntervalInDays & " days"))
-
-                            If Dialogresult = 1 Then
-                                ' Download and apply the update -- removed for the time being due to lack of reliability
-                                ' deployment.Update()
-
-                                Select Case Left(appname, 4)
-                                    Case "Word"
-                                        System.Diagnostics.Process.Start(UpdatePaths("Word"))
-                                    Case "Exce"
-                                        System.Diagnostics.Process.Start(UpdatePaths("Excel"))
-                                    Case "Outl"
-                                        System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
-                                End Select
-
-                                ' Notify the user to restart
-                                SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
-                            End If
-
-                            If Dialogresult = 1 OrElse Dialogresult = 2 Then
-                                ' Update the last check time
-                                Select Case Left(appname, 4)
-                                    Case "Word"
-                                        My.Settings.LastUpdateCheckWord = currentDate
-                                    Case "Exce"
-                                        My.Settings.LastUpdateCheckExcel = currentDate
-                                    Case "Outl"
-                                        My.Settings.LastUpdateCheckOutlook = currentDate
-                                End Select
-                                My.Settings.Save()
-                            End If
-
-                        End If
-                        If Dialogresult = 1 OrElse Dialogresult = 2 Then
-                            ' Update the last check time
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    My.Settings.LastUpdateCheckWord = currentDate
-                                Case "Exce"
-                                    My.Settings.LastUpdateCheckExcel = currentDate
-                                Case "Outl"
-                                    My.Settings.LastUpdateCheckOutlook = currentDate
-                            End Select
-                            My.Settings.Save()
-                        End If
-                    ElseIf Not String.IsNullOrWhiteSpace(LocalPath) Then
-                        LocalPath = SharedMethods.ExpandEnvironmentVariables(LocalPath)
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"Do you want to check for updates? If yes, the installer for this add-in will run. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?", "Yes", If(checkIntervalInDays < 0, "No (configured to check on next startup)", "No, check again in " & checkIntervalInDays & " days"))
-
-                        If dialogResult = 1 Then
-                            Dim vstoFilePath As String = ""
-                            Debug.WriteLine(appname)
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
-                                Case "Exce"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"excel\{SharedMethods.AN3} for Excel.vsto")
-                                Case "Outl"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"outlook\{SharedMethods.AN3} for Outlook.vsto")
-                            End Select
-
-                            If System.IO.File.Exists(vstoFilePath) Then
-                                Process.Start(vstoFilePath)
-                                SharedMethods.ShowCustomMessageBox("The update process has been performed. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
-                            Else
-                                SharedMethods.ShowCustomMessageBox($"Installer '{vstoFilePath}' not found. Check 'UpdatePath =' in the '{SharedMethods.AN2}.ini''.", $"{SharedMethods.AN} Updater")
-                            End If
-                        End If
-                        If dialogResult = 1 OrElse dialogResult = 2 Then
-                            ' Update the last check time
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    My.Settings.LastUpdateCheckWord = currentDate
-                                Case "Exce"
-                                    My.Settings.LastUpdateCheckExcel = currentDate
-                                Case "Outl"
-                                    My.Settings.LastUpdateCheckOutlook = currentDate
-                            End Select
-                            My.Settings.Save()
-                        End If
-
-                    End If
-                End If
-            Catch ex As DeploymentException
-                ' Handle exceptions related to update checking and applying
-                SharedMethods.ShowCustomMessageBox("An error occurred while checking for or installing updates: " & ex.Message, $"{SharedMethods.AN} Updater")
-            End Try
         End Sub
 
 
