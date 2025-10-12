@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 1.10.2025
+' 12.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -37,6 +37,7 @@ Imports System.IO
 Imports System.Linq.Expressions
 Imports System.Net
 Imports System.Net.Http
+Imports System.Net.NetworkInformation
 Imports System.Net.WebSockets
 Imports System.Runtime.CompilerServices
 Imports System.Runtime.InteropServices
@@ -1286,18 +1287,13 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.011025 Gen2 Beta Test"
+    Public Const Version As String = "V.121025 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
     Public Const AN5 As String = "RI" ' for bubble comments 
     Public Const AN6 As String = "Inky" ' for chat
-
-
-    'Public Const SP_MyStyle_Word As String = "Read and deeply analyze all sample documents provided between tags <DOCUMENT00> ... </DOCUMENT00> (00 is a number; there may be many) together with the following additional instructions if present: {OtherPrompt}. Your goals are (A) to produce a thorough, abstract, privacy-safe style analysis for the user without any verbatim or near-verbatim text and without unique named entities, and (B) to append a self-contained, reusable meta-prompt that can be pasted as an addon at the end of any writing instruction so an LLM will write in the same style without needing to reference the analysis. Requirements for (A) Analysis: 1) Cross-document synthesis: separate stable traits from context-specific quirks; cluster sub-styles by context (emails, reports, tutorials, marketing, technical notes) and state triggers. 2) Macro-structure: openings, thesis placement, argument or narrative arcs, section logic, signposting, introductions and conclusions, calls to action, scoping rules. 3) Tone and stance: formality, warmth, hedging vs assertion, confidence calibration, neutrality vs opinionated voice, empathy cues, humor or irony. 4) Audience modeling: assumed knowledge, jargon onboarding, teaching or persuasion patterns, questions, objection handling. 5) Rhetoric: analogies, metaphors, contrasts, problem-solution, story beats, example vs abstraction balance, use of evidence, citation habits, link style. 6) Syntax and rhythm: sentence length ranges and variance, clause chaining, voice balance active vs passive, preferred sentence types, cadence markers (commas, dashes, parentheses, semicolons), punctuation quirks, emoji usage, capitalization habits, list patterns, table or code-block usage. 7) Paragraphing and pacing: typical paragraph length, transition density, discourse markers, abstract-to-concrete flow, definition scaffolding, summary habits. 8) Lexicon without quoting passages: identify categories of favored verbs, adjectives, adverbs; register plain vs ornate; Latinate vs Anglo-Saxon preference; modality words; quantification habits. 9) Consistency rules and exceptions: what never appears, what rarely appears, conditions that trigger tone or structure shifts. 10) Formatting and stylebook: language variant, spelling conventions, Oxford comma, numerals, dates, units, acronyms, headings, figure or table captions, block vs inline quotes. 11) Uncertainty and ethics: how the author signals uncertainty, handles caveats, bias avoidance, disclaimers. 12) Quantified measurements: content-free metrics and ranges for the above (counts, percentages, ranges) without exemplar phrases. 13) Multi-source hygiene: ignore quoted third-party passages that are not the author’s voice, deduplicate near-identical segments, note contradictions and resolve by majority pattern with justification. 14) Output structure for (A): present a concise report in English with sections numbered (1) to (14); include a single inline Style DNA JSON line with generic keys and concrete values, for example {""Formality"":""medium high"",""AvgSentenceWords"":""18-26"",""Voice"":""active>passive"",""Transitions"":""frequent"",""Lists"":""often"",""Hedging"":""low"",""Humor"":""rare"",""Emoji"":""never""}; values must be abstract and safe. 15) Language fidelity for cited words: if you refer to specific single words or short expressions to illustrate lexical tendencies, reproduce them exactly in their original language and casing, including any non-ASCII characters like ä, ö, ü, é, ñ, etc., as-is and unescaped; include only generic, non-proprietary, non-unique words; replace unique terms with placeholders like [domain-term] or [brand-name]. Guardrails: never emit exact substrings beyond common stopwords; do not include proprietary names or confidential data; if browsing the web is possible and URLs are present in the additional instructions, consult them for extra style signals but weight them lower than the inline samples unless explicitly told otherwise; if browsing is unavailable, state that and proceed from local inputs only. Smarter style title generation: build a short, information-dense title that summarizes the overall style in 3-7 words by combining top-ranked attributes from these axes: (a) Formality (low/medium/high), (b) Evidence orientation (data-driven, example-led, principle-first), (c) Domain orientation (technical, business, marketing, educational, policy), (d) Pacing (brisk, moderate, leisurely), (e) Warmth (cool, neutral, warm), (f) Narrative vs analytical balance (story-forward, analysis-forward, hybrid). Title rules: capitalize major words, allow commas or hyphens, avoid brand or person names, avoid filler words, no emojis, ASCII punctuation only. Requirements for (B) Self-contained meta-prompt addon: After the analysis, generate the short descriptive title as above and use it as the [Title] field. Then append exactly two bracketed fields on one line: [Title = <generated style title>] [Prompt = When generating the draft for the user’s preceding task, act as a style emulator and produce the final text in the author’s style. Do not restate the task and do not ask for more information. Enforce the following self-contained Style DNA and rules without referring to any other document: 1) Style DNA JSON: include explicit key:value parameters you inferred covering macro-structure, tone, audience assumptions, rhetoric, syntax and rhythm, paragraphing, lexicon categories, formatting conventions, and uncertainty handling; include numeric ranges where applicable (e.g., AvgSentenceWords, ParagraphLength, TransitionDensity, VoiceBalance). If you list representative words, reproduce them exactly in their original language and casing and include only generic, non-unique words. 2) Structural rules: specify opening patterns, section ordering, signposting habits, and conclusion style to apply. 3) Tone rules: specify targets for formality, warmth, assertiveness vs hedging, and empathy markers. 4) Lexicon rules: specify categories of favored words and safe representative words; exclude unique names or rare proprietary phrases. 5) Punctuation and formatting rules: specify preferred punctuation, list usage, headings, numerals, dates, units, and citation style. 6) Rhetorical frequency: specify expected frequency or ranges for analogies, contrasts, examples, and data references. 7) Safety and ethics: specify how to signal uncertainty and include disclaimers if needed. 8) Fidelity checklist for self-review before output: confirm sentence-length distribution, transition density, voice balance, list usage, and formatting conventions match the specified ranges; confirm no unique terms from samples are reproduced. 9) Knobs: allow small adjustments for formality, pacing, and detail depth to fit the task, staying within the specified ranges by default. 10) Output policy: deliver only the final draft text aligned to the preceding task, with clean formatting, no meta-commentary, no checklists, and no references to any analysis.] Constraints for the entire response: English prose, UTF-8 encoding with readable non-ASCII characters, single line for the two bracketed fields, and include {OtherPrompt} only once as provided."
-    'Public Const SP_MyStyle_Apply As String = "You are a professional copy editor and writer with excellent language and drafting skills. Rewrite the text provided to you between the <TEXTTOPROCESS> tags as per the following style instructions. Do not change any substantive content, do not restructure, do not add or remove paragraphs, do not shorten or extend the text, just adapt the style as per the following style profile (and correct obvious spelling and grammar errors). "
-    'Public Const INI_MyStylePath As String = "C:\Users\david\Desktop\mystyle.ini"
 
 
     Private Const ISearch_MinChars = 500         ' minimum characters for a search hit to be relevant
@@ -1353,7 +1349,6 @@ Public Class ThisAddIn
     Private Const OldRIMenu = AN & " " & ChrW(&HD83D) & ChrW(&HDC09)
     Private Const MinHelperVersion = 1 ' Minimum version of the helper file that is required
 
-    Public Const SearchChunkSize As Integer = 1 ' Size of chunks used for search (in characters)
     Public Const IgnoreMarkups As Boolean = False ' Whether to ignore markups in the text when doing a search
 
     Private Const VoskSource = "https://alphacephei.com/vosk/models"
@@ -2351,6 +2346,15 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_ParseFile As String
+        Get
+            Return _context.SP_ParseFile
+        End Get
+        Set(value As String)
+            _context.SP_ParseFile = value
+        End Set
+    End Property
+
     Public Shared Property SP_WriteNeatly As String
         Get
             Return _context.SP_WriteNeatly
@@ -2896,6 +2900,25 @@ Public Class ThisAddIn
             _context.INI_FindClausePathLocal = value
         End Set
     End Property
+
+    Public Shared Property INI_WebAgentPath As String
+        Get
+            Return _context.INI_WebAgentPath
+        End Get
+        Set(value As String)
+            _context.INI_WebAgentPath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_WebAgentPathLocal As String
+        Get
+            Return _context.INI_WebAgentPathLocal
+        End Get
+        Set(value As String)
+            _context.INI_WebAgentPathLocal = value
+        End Set
+    End Property
+
 
     Public Shared Property INI_DocCheckPath As String
         Get
@@ -3886,7 +3909,7 @@ Public Class ThisAddIn
             End If
 
             Dim result As System.String = Await ProcessSelectedText(
-            InterpolateAtRuntime(SP_Explain),
+            InterpolateAtRuntime(SP_Explain) & " Current Date is: " & DateTime.Now.ToString("dd MMM yyyy", CultureInfo.CurrentCulture),
             True,
             INI_KeepFormat2,
             INI_KeepParaFormatInline,
@@ -4275,7 +4298,6 @@ Public Class ThisAddIn
         Dim Answer As Integer = ShowCustomYesNoBox(Label, "Continue", "Cancel", $"{AN} Define MyStyle",
                                     extraButtonText:="Edit MyStyle prompt file",
                                                             extraButtonAction:=Sub()
-                                                                                   ' Your code here
                                                                                    SLib.ShowTextFileEditor(StylePath, "Edit your MyStyle prompt file (use 'Define MyStyle' to create new prompts automatically):")
                                                                                End Sub)
 
@@ -4909,7 +4931,7 @@ Public Class ThisAddIn
             Dim SlidesInstruct As String = $"with '{SlidesPrefix}' for adding to a Powerpoint file"
             Dim ClipboardInstruct As String = $"with '{ClipboardPrefix}', '{NewdocPrefix}' or '{PanePrefix}' for separate output"
             Dim PromptLibInstruct As String = If(INI_PromptLib, " or press 'OK' for the prompt library", "")
-            Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' for text of a file (txt, docx, pdf) or '{AddDocTrigger}' for an open Word doc"
+            Dim ExtInstruct As String = $"; inlcude '{ExtTrigger}' (multiple times) for text of (a) file(s) (txt, docx, pdf) or '{AddDocTrigger}' for an open Word doc"
             Dim TPMarkupInstruct As String = $"; add '{TPMarkupTriggerInstruct}' if revisions [of user] should be pointed out to the LLM"
             Dim NoFormatInstruct As String = $"; add '{NoFormatTrigger2}'/'{KFTrigger2}'/'{KPFTrigger2}/{SameAsReplaceTrigger}' for overriding formatting defaults"
             Dim AllInstruct As String = $"; add '{AllTrigger}' to select all"
@@ -5070,6 +5092,17 @@ Public Class ThisAddIn
 
             If OtherPrompt.StartsWith("promptlog", StringComparison.OrdinalIgnoreCase) Then
                 ShowAndEditPromptLog()
+                Return
+            End If
+
+            If OtherPrompt.StartsWith("webagentcreator", StringComparison.OrdinalIgnoreCase) Then
+                CreateModifyWebAgentScript()
+                Return
+            End If
+
+
+            If OtherPrompt.StartsWith("webagent", StringComparison.OrdinalIgnoreCase) Then
+                WebAgent()
                 Return
             End If
 
@@ -5877,70 +5910,7 @@ Public Class ThisAddIn
     End Function
 
 
-    Public Function OldGatherSelectedDocuments() As System.String
-        Try
-            Dim app As Microsoft.Office.Interop.Word.Application = Globals.ThisAddIn.Application
 
-            ' collect all open documents (unique by FullName/Name to avoid duplicates from multiple windows)
-            Dim docList As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
-            Dim seen As New System.Collections.Generic.HashSet(Of System.String)(System.StringComparer.OrdinalIgnoreCase)
-
-            For Each doc As Microsoft.Office.Interop.Word.Document In app.Documents
-                Dim key As System.String = If(Not System.String.IsNullOrEmpty(doc.FullName), doc.FullName, doc.Name)
-                If Not seen.Contains(key) Then
-                    seen.Add(key)
-                    docList.Add(doc)
-                End If
-            Next
-
-            If docList.Count = 0 Then Return "NONE"
-
-            ' build selection items for each open document
-            Dim selItems As New System.Collections.Generic.List(Of SelectionItem)()
-            For i As System.Int32 = 0 To docList.Count - 1
-                Dim d As Microsoft.Office.Interop.Word.Document = docList(i)
-                selItems.Add(New SelectionItem($"{d.Name} ({d.FullName})", i + 1))
-            Next
-
-            ' add “All open documents”
-            Dim allIndex As System.Int32 = selItems.Count + 1
-            selItems.Add(New SelectionItem("Add all open documents", allIndex))
-
-            ' prompt user
-            Dim itemsArray As SelectionItem() = selItems.ToArray()
-            Dim picked As System.Int32 = SelectValue(itemsArray, allIndex, "Choose document to add …")
-            If picked < 1 Then Return System.String.Empty
-
-            ' determine targets
-            Dim targets As New System.Collections.Generic.List(Of Microsoft.Office.Interop.Word.Document)()
-            If picked = allIndex Then
-                targets.AddRange(docList)
-            Else
-                targets.Add(docList(picked - 1))
-            End If
-
-            ' build the result string
-            Dim insertedDocuments As System.String = System.String.Empty
-            Dim tagIndex As System.Int32 = 1
-
-            For Each d As Microsoft.Office.Interop.Word.Document In targets
-                insertedDocuments &= $"<DOCUMENT{tagIndex}>" & vbCrLf
-                insertedDocuments &= d.Content.Text & vbCrLf
-                insertedDocuments &= $"</DOCUMENT{tagIndex}>" & vbCrLf
-                tagIndex += 1
-            Next
-
-            If System.String.IsNullOrEmpty(insertedDocuments) Then
-                ShowCustomMessageBox("No content could be retrieved from the selected document(s).")
-                Return System.String.Empty
-            End If
-
-            Return insertedDocuments
-
-        Catch ex As System.Exception
-            Return "ERROR " & ex.Message
-        End Try
-    End Function
 
 
 
@@ -6035,7 +6005,7 @@ Public Class ThisAddIn
     ' - DoMyStyle: Boolean flag whether MyStyleInsert shall be used
 
     ' Global array to store paragraph formatting information
-    Structure ParagraphFormatStructure
+    Structure oldParagraphFormatStructure
         Dim Style As Word.Style
         Dim FontName As String
         Dim FontSize As Nullable(Of Integer)
@@ -6056,6 +6026,38 @@ Public Class ThisAddIn
         Dim LineSpacing As Single
         Dim SpaceBefore As Single
         Dim SpaceAfter As Single
+    End Structure
+
+    Structure ParagraphFormatStructure
+        Dim Style As Word.Style
+        Dim FontName As String
+        Dim FontSize As Nullable(Of Integer)
+        Dim FontBold As Nullable(Of Integer)  ' 1=True, 0=False, Nothing=keep
+        Dim FontItalic As Nullable(Of Integer)
+        Dim FontUnderline As Nullable(Of Word.WdUnderline)
+        Dim FontColor As Nullable(Of Long)
+
+        Dim ListType As Word.WdListType
+        Dim ListTemplate As Word.ListTemplate
+        Dim ListLevel As Integer
+        Dim ListNumber As Integer
+        Dim HasListFormat As Boolean
+
+        Dim Alignment As Word.WdParagraphAlignment
+
+        ' Line spacing + rules
+        Dim LineSpacingRule As Word.WdLineSpacing
+        Dim LineSpacing As Single
+
+        ' Spacing before/after (values and auto flags)
+        Dim SpaceBeforeAuto As Boolean
+        Dim SpaceAfterAuto As Boolean
+        Dim SpaceBefore As Single
+        Dim SpaceAfter As Single
+
+        ' Additional flags affecting spacing behavior
+        Dim NoSpaceBetweenParagraphsOfSameStyle As Boolean
+        Dim DisableLineHeightGrid As Boolean
     End Structure
 
     Dim paragraphFormat() As ParagraphFormatStructure
@@ -6615,7 +6617,11 @@ Public Class ThisAddIn
                                 .Alignment = para.Alignment,
                                 .LineSpacing = para.LineSpacing,
                                 .SpaceBefore = para.SpaceBefore,
-                                .SpaceAfter = para.SpaceAfter
+                                .SpaceAfter = para.SpaceAfter,
+                                .LineSpacingRule = para.LineSpacingRule,
+                                .SpaceBeforeAuto = para.SpaceBeforeAuto,
+                                .SpaceAfterAuto = para.SpaceAfterAuto,
+                                .DisableLineHeightGrid = para.DisableLineHeightGrid
                                         }
 
                         Catch ex As System.Exception
@@ -7332,33 +7338,13 @@ Public Class ThisAddIn
                     Dim commentText As String = parts(1).Trim()
 
                     Try
-                        If findText.Length <= SearchChunkSize Then
-                            ' Use the built-in Find directly if <= 255 characters
-                            With Selection.Find
-                                .ClearFormatting()
-                                .Text = NormalizeTextForSearch(findText, INI_Clean)
-                                .Forward = True
-                                .Wrap = Word.WdFindWrap.wdFindStop
-                                .MatchWildcards = True
-                            End With
-                            Debug.WriteLine($"Searching for: '{findText}' with normalized text: '{Selection.Find.Text}'")
-
-                            If Selection.Find.Execute() Then
-                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & commentText)
-                                BubbleCount += 1
-                            Else
-                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
-                            End If
-
+                        ' Use chunk-by-chunk search for > 255 characters
+                        If FindLongTextInChunks(findText, Selection) Then
+                            ' If found, selection now covers the entire matched text
+                            Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & commentText)
+                            BubbleCount += 1
                         Else
-                            ' Use chunk-by-chunk search for > 255 characters
-                            If FindLongTextInChunks(findText, SearchChunkSize, Selection) Then
-                                ' If found, selection now covers the entire matched text
-                                Globals.ThisAddIn.Application.ActiveDocument.Comments.Add(Selection.Range, $"{AN5}: " & commentText)
-                                BubbleCount += 1
-                            Else
-                                notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
-                            End If
+                            notfoundresponse.Add("'" & findText & "' " & vbCrLf & ChrW(8594) & $" {AN5}: " & commentText & vbCrLf & vbCrLf)
                         End If
 
                     Catch ex As Exception
@@ -7415,9 +7401,77 @@ Public Class ThisAddIn
 
     End Sub
 
-
-
     Public Sub ApplyParagraphFormat(ByRef rng As Word.Range)
+
+        Dim maxParaStylesCount As Integer = paragraphFormat.Length
+        Dim paraCount As Integer = rng.Paragraphs.Count
+
+        If paraCount = 0 Then Exit Sub
+
+        For i As Integer = 1 To paraCount
+            If i - 1 >= maxParaStylesCount Then Exit For
+
+            Dim pf As ParagraphFormatStructure = paragraphFormat(i - 1)
+            Dim pRange As Word.Range = rng.Paragraphs(i).Range
+
+            '--- 1. paragraph style ------------------------------------------------
+            If pf.Style IsNot Nothing Then
+                Try
+                    pRange.Style = pf.Style
+                Catch ex As System.Exception
+                    ' handle / log if necessary
+                End Try
+            End If
+
+            '--- 2. character-level attributes – use them *only when supplied* -----
+            With pRange.Font
+                If Not String.IsNullOrEmpty(pf.FontName) Then .Name = pf.FontName
+                If pf.FontSize.HasValue Then .Size = pf.FontSize.Value
+                If pf.FontBold.HasValue Then .Bold = pf.FontBold.Value
+                If pf.FontItalic.HasValue Then .Italic = pf.FontItalic.Value
+                If pf.FontUnderline.HasValue Then .Underline = pf.FontUnderline.Value
+                If pf.FontColor.HasValue Then .Color = pf.FontColor.Value
+            End With
+
+            '--- 3. list formatting -----------------------------------------------
+            If pf.HasListFormat AndAlso pf.ListTemplate IsNot Nothing Then
+                Try
+                    If pRange.ListFormat.ListType <> Word.WdListType.wdListNoNumbering Then
+                        pRange.ListFormat.RemoveNumbers()
+                    End If
+
+                    pRange.ListFormat.ApplyListTemplateWithLevel(
+                        ListTemplate:=pf.ListTemplate,
+                        ContinuePreviousList:=pf.ListLevel > 0,
+                        ApplyTo:=Word.WdListApplyTo.wdListApplyToWholeList,
+                        DefaultListBehavior:=Word.WdDefaultListBehavior.wdWord10ListBehavior)
+                    pRange.ListFormat.ListLevelNumber = pf.ListLevel
+                Catch ex As System.Exception
+                    ' handle / log if necessary
+                End Try
+            End If
+
+            '--- 4. paragraph-level attributes (spacing restored exactly) ----------
+            With pRange.ParagraphFormat
+                .Alignment = pf.Alignment
+
+                ' Important flags first
+                .DisableLineHeightGrid = pf.DisableLineHeightGrid
+
+                ' Spacing rule, then value
+                .LineSpacingRule = pf.LineSpacingRule
+                .LineSpacing = pf.LineSpacing
+
+                ' Auto spacing flags, then explicit values only if not auto
+                .SpaceBeforeAuto = pf.SpaceBeforeAuto
+                .SpaceAfterAuto = pf.SpaceAfterAuto
+                If Not pf.SpaceBeforeAuto Then .SpaceBefore = pf.SpaceBefore
+                If Not pf.SpaceAfterAuto Then .SpaceAfter = pf.SpaceAfter
+            End With
+        Next
+    End Sub
+
+    Public Sub oldApplyParagraphFormat(ByRef rng As Word.Range)
 
         Dim maxParaStylesCount As Integer = paragraphFormat.Length
         Dim paraCount As Integer = rng.Paragraphs.Count
@@ -7478,87 +7532,7 @@ Public Class ThisAddIn
     End Sub
 
 
-    Public Sub OldApplyParagraphFormat(ByRef rng As Range)
 
-        Dim maxParaStylesCount As Integer = paragraphFormat.Length
-        paraCount = rng.Paragraphs.Count
-
-        If paraCount > 0 Then
-            For i = 1 To paraCount
-                If i - 1 < maxParaStylesCount Then
-                    With rng.Paragraphs(i).Range
-                        Dim format = paragraphFormat(i - 1)
-
-                        ' Apply the stored style
-                        If format.Style IsNot Nothing Then
-                            Try
-                                .Style = format.Style
-                            Catch ex As System.Exception
-                                'Debug.Print($"Error applying style: {ex.Message}")
-                            End Try
-                        End If
-
-                        ' Apply the stored font formatting
-                        With .Font
-                            Try
-                                If Not String.IsNullOrEmpty(format.FontName) Then .Name = format.FontName
-                                If format.FontSize > 0 Then .Size = format.FontSize
-                                If format.FontBold = 0 Or format.FontBold = -1 Then .Bold = format.FontBold
-                                If format.FontItalic = 0 Or format.FontItalic = -1 Then .Italic = format.FontItalic
-                                .Underline = format.FontUnderline
-                                .Color = format.FontColor
-                            Catch ex As System.Exception
-                                'Debug.Writeline($"Error applying font properties: {ex.Message}")
-                            End Try
-                        End With
-
-                        ' Apply list formatting if applicable
-                        If format.HasListFormat AndAlso format.ListTemplate IsNot Nothing Then
-                            Try
-                                If .ListFormat.ListType <> Word.WdListType.wdListNoNumbering Then
-                                    .ListFormat.RemoveNumbers()
-                                End If
-
-                                .ListFormat.ApplyListTemplateWithLevel(
-                                        ListTemplate:=format.ListTemplate,
-                                        ContinuePreviousList:=If(format.ListNumber > 0, True, False),
-                                        ApplyTo:=Word.WdListApplyTo.wdListApplyToWholeList,
-                                        DefaultListBehavior:=Word.WdDefaultListBehavior.wdWord10ListBehavior
-                                    )
-                                .ListFormat.ListLevelNumber = format.ListLevel
-                            Catch ex As System.Exception
-                                'Debug.Writeline($"Error applying list format: {ex.Message}")
-                            End Try
-                        End If
-
-                        ' Apply paragraph alignment
-                        Try
-                            .ParagraphFormat.Alignment = format.Alignment
-                        Catch ex As System.Exception
-                            'Debug.Writeline($"Error applying alignment: {ex.Message}")
-                        End Try
-
-                        ' Apply line spacing
-                        Try
-                            .ParagraphFormat.LineSpacing = format.LineSpacing
-                        Catch ex As System.Exception
-                            'Debug.Writeline($"Error applying line spacing: {ex.Message}")
-                        End Try
-
-                        ' Apply spacing before and after
-                        Try
-                            .ParagraphFormat.SpaceBefore = format.SpaceBefore
-                            .ParagraphFormat.SpaceAfter = format.SpaceAfter
-                        Catch ex As System.Exception
-                            'Debug.Writeline($"Error applying spacing: {ex.Message}")
-                        End Try
-
-                    End With
-                End If
-            Next
-        End If
-
-    End Sub
 
     Public Function CorrectPFORMarkers(ByVal input As String) As String
         Try
@@ -7835,7 +7809,7 @@ Public Class ThisAddIn
 
 
 
-    Public Function FindLongTextInChunks(ByVal findText As String, ByVal chunkSize As Integer, ByRef selection As Word.Selection, Optional Skipdeleted As Boolean = True) As Boolean
+    Public Function FindLongTextInChunks(ByVal findText As String, ByRef selection As Word.Selection, Optional Skipdeleted As Boolean = True) As Boolean
 
         Return WordSearchHelper.FindLongTextAnchoredFast(selection, findText, Skipdeleted)
 
@@ -8026,117 +8000,62 @@ Public Class ThisAddIn
             Dim selectionEnd As Integer = doc.Application.Selection.End
 
             ' 4) Chunk‑ oder Standard‑Suche
-            If oldText.Length > SearchChunkSize Then
-                ' --- Long‑Chunk‑Suche ----------------------------------------
-                doc.Application.Selection.SetRange(workRange.Start, workRange.End)
-                Dim foundAny As Boolean = False
 
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, SearchChunkSize, doc.Application.Selection)
-                    If doc.Application.Selection Is Nothing Then Exit Do
-                    ' Escape‑Taste prüfen
-                    If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then Exit Do
+            ' --- Long‑Chunk‑Suche ----------------------------------------
+            doc.Application.Selection.SetRange(workRange.Start, workRange.End)
+            Dim foundAny As Boolean = False
 
-                    foundAny = True
-                    Dim selRange As Microsoft.Office.Interop.Word.Range = doc.Application.Selection.Range
+            Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, doc.Application.Selection)
+                If doc.Application.Selection Is Nothing Then Exit Do
+                ' Escape‑Taste prüfen
+                If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then Exit Do
 
-                    ' Auf Löschungen prüfen
-                    Dim isDeleted As Boolean = False
-                    For Each rev As Microsoft.Office.Interop.Word.Revision In selRange.Revisions
-                        If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionDelete Then
-                            isDeleted = True
-                            Exit For
-                        End If
-                    Next
+                foundAny = True
+                Dim selRange As Microsoft.Office.Interop.Word.Range = doc.Application.Selection.Range
 
-                    ' Ersetzen
-                    Dim replaceStart As Integer = selRange.Start
-                    Dim replaceEnd As Integer = selRange.End
-                    If Not isDeleted Then
-                        selRange.Text = newTextWithMarker
-                        replaceEnd += newTextWithMarker.Length
-                        selectionEnd += newTextWithMarker.Length
+                ' Auf Löschungen prüfen
+                Dim isDeleted As Boolean = False
+                For Each rev As Microsoft.Office.Interop.Word.Revision In selRange.Revisions
+                    If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionDelete Then
+                        isDeleted = True
+                        Exit For
                     End If
+                Next
 
-                    ' Clamping und Range‑Vorschub
-                    Dim newStart As Integer = System.Math.Max(0, System.Math.Min(replaceEnd, doc.Content.End))
-                    Dim newEnd As Integer = If(OnlySelection,
+                ' Ersetzen
+                Dim replaceStart As Integer = selRange.Start
+                Dim replaceEnd As Integer = selRange.End
+                If Not isDeleted Then
+                    selRange.Text = newTextWithMarker
+                    replaceEnd += newTextWithMarker.Length
+                    selectionEnd += newTextWithMarker.Length
+                End If
+
+                ' Clamping und Range‑Vorschub
+                Dim newStart As Integer = System.Math.Max(0, System.Math.Min(replaceEnd, doc.Content.End))
+                Dim newEnd As Integer = If(OnlySelection,
                                             System.Math.Min(selectionEnd, doc.Content.End),
                                             doc.Content.End)
-                    If newStart <= newEnd Then
-                        doc.Application.Selection.SetRange(newStart, newEnd)
-                    Else
-                        Exit Do
-                    End If
-                Loop
-
-                ' Selektion nur bei Treffern wiederherstellen
-                If foundAny Then
-                    selectionStart = System.Math.Max(0, System.Math.Min(selectionStart, doc.Content.End))
-                    selectionEnd = System.Math.Max(0, System.Math.Min(selectionEnd, doc.Content.End))
-                    If selectionStart <= selectionEnd Then
-                        doc.Application.Selection.SetRange(selectionStart, selectionEnd)
-                        doc.Application.Selection.Select()
-                    End If
+                If newStart <= newEnd Then
+                    doc.Application.Selection.SetRange(newStart, newEnd)
                 Else
-                    Debug.WriteLine("Hinweis: Begriff nicht gefunden, Restore übersprungen.")
+                    Exit Do
                 End If
+            Loop
 
+            ' Selektion nur bei Treffern wiederherstellen
+            If foundAny Then
+                selectionStart = System.Math.Max(0, System.Math.Min(selectionStart, doc.Content.End))
+                selectionEnd = System.Math.Max(0, System.Math.Min(selectionEnd, doc.Content.End))
+                If selectionStart <= selectionEnd Then
+                    doc.Application.Selection.SetRange(selectionStart, selectionEnd)
+                    doc.Application.Selection.Select()
+                End If
             Else
-                ' --- Standard‑Find -------------------------------------------
-                If String.IsNullOrEmpty(oldText) Then
-                    Debug.WriteLine("Hinweis: Suchbegriff leer.")
-                Else
-                    Dim replacementsMade As Boolean = False
-                    Dim initialRangeEnd As Integer = workRange.End
-
-                    Do
-                        If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then Exit Do
-                        oldText = NormalizeTextForSearch(oldText, ThisAddIn.INI_Clean)
-
-                        With workRange.Find
-                            .ClearFormatting()
-                            .Text = oldText
-                            .MatchWildcards = ThisAddIn.INI_Clean
-                            .Forward = True
-                            .Wrap = Microsoft.Office.Interop.Word.WdFindWrap.wdFindStop
-                            .MatchWholeWord = True
-
-                            If .Execute(Replace:=Microsoft.Office.Interop.Word.WdReplace.wdReplaceNone) Then
-                                Dim foundRange As Microsoft.Office.Interop.Word.Range = workRange.Duplicate
-
-                                ' Auf Löschungen prüfen
-                                Dim isDeleted As Boolean = False
-                                For Each rev As Microsoft.Office.Interop.Word.Revision In foundRange.Revisions
-                                    If rev.Type = Microsoft.Office.Interop.Word.WdRevisionType.wdRevisionDelete Then
-                                        isDeleted = True
-                                        Exit For
-                                    End If
-                                Next
-
-                                Dim prevStart As Integer = workRange.Start
-                                If Not isDeleted Then
-                                    foundRange.Text = newTextWithMarker
-                                    replacementsMade = True
-                                    initialRangeEnd += (newTextWithMarker.Length - oldText.Length)
-                                End If
-
-                                ' Arbeitsbereich vorschieben
-                                workRange.Start = foundRange.End
-                                If workRange.Start <= prevStart Then
-                                    workRange.Start = prevStart + 1
-                                End If
-                                workRange.End = System.Math.Min(initialRangeEnd, doc.Content.End)
-                            Else
-                                Exit Do
-                            End If
-                        End With
-                    Loop
-
-                    If Not replacementsMade Then
-                        Debug.WriteLine("Hinweis: Suchbegriff nicht gefunden.")
-                    End If
-                End If
+                Debug.WriteLine("Hinweis: Begriff nicht gefunden, Restore übersprungen.")
             End If
+
+
 
         Catch ex As System.Exception
             MsgBox("Error in SearchReplace: " & ex.Message, MsgBoxStyle.Critical)
@@ -8176,136 +8095,56 @@ Public Class ThisAddIn
             End If
 
 
-            If Len(oldText) > SearchChunkSize Then
+            Dim selectionStart As Integer = doc.Application.Selection.Start
+            Dim selectionEnd As Integer = doc.Application.Selection.End
+            doc.Application.Selection.SetRange(workRange.Start, workRange.End)
+            Dim found As Boolean = False
 
-                Dim selectionStart As Integer = doc.Application.Selection.Start
-                Dim selectionEnd As Integer = doc.Application.Selection.End
-                doc.Application.Selection.SetRange(workRange.Start, workRange.End)
-                Dim found As Boolean = False
+            ' Loop through the content to find and replace all instances
+            Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, doc.Application.Selection) = True
 
-                ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, SearchChunkSize, doc.Application.Selection) = True
+                If doc.Application.Selection Is Nothing Then Exit Do
 
-                    If doc.Application.Selection Is Nothing Then Exit Do
-
-                    If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then
-                        Exit Do
-                    End If
-
-                    found = True
-
-                    Dim isDeleted As Boolean = False
-                    For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
-                        If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                            isDeleted = True
-                            Exit For
-                        End If
-                    Next
-
-                    ' Account for trackchanges being turned on, i.e. the old text remains
-                    Dim currentEnd As Integer = doc.Application.Selection.End
-
-                    ' Replace the found text
-                    If Not isDeleted Then
-                        currentEnd = currentEnd + Len(newTextWithMarker)
-                        selectionEnd = selectionEnd + Len(newTextWithMarker)
-                        doc.Application.Selection.Text = newTextWithMarker
-                    End If
-
-                    ' Check if the collapsed selection has reached the end of the document or the selection
-                    If OnlySelection Then
-                        If currentEnd >= selectionEnd Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, selectionEnd)
-                    Else
-                        If currentEnd >= doc.Content.End Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
-                    End If
-                Loop
-
-                If Not found Then
-                    Debug.WriteLine($"Note: The search term was not found (Chunk Search)." & Environment.NewLine)
+                If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then
+                    Exit Do
                 End If
 
-                doc.Application.Selection.SetRange(selectionStart, selectionEnd)
-                doc.Application.Selection.Select()
+                found = True
 
-            Else
+                Dim isDeleted As Boolean = False
+                For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
+                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                        isDeleted = True
+                        Exit For
+                    End If
+                Next
 
-                If String.IsNullOrEmpty(oldText) Then
-                    Debug.WriteLine($"Note: The search term was empty (bad LLM response)." & Environment.NewLine)
+                ' Account for trackchanges being turned on, i.e. the old text remains
+                Dim currentEnd As Integer = doc.Application.Selection.End
+
+                ' Replace the found text
+                If Not isDeleted Then
+                    currentEnd = currentEnd + Len(newTextWithMarker)
+                    selectionEnd = selectionEnd + Len(newTextWithMarker)
+                    doc.Application.Selection.Text = newTextWithMarker
+                End If
+
+                ' Check if the collapsed selection has reached the end of the document or the selection
+                If OnlySelection Then
+                    If currentEnd >= selectionEnd Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, selectionEnd)
                 Else
-                    Dim replacementsMade As Boolean = False
-                    ' Capture the initial end of the workRange
-                    Dim initialRangeEnd As Integer = workRange.End
-
-                    Do
-
-                        If (GetAsyncKeyState(VK_ESCAPE) And 1) <> 0 Then
-                            Exit Do
-                        End If
-
-                        oldText = NormalizeTextForSearch(oldText, ThisAddIn.INI_Clean)
-
-                        With workRange.Find
-                            .ClearFormatting()
-                            .Text = oldText
-                            If ThisAddIn.INI_Clean Then
-                                .MatchWildcards = True
-                                ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                                '.Text = oldText.Replace(" ", "[ ]@")
-                            Else
-                                .MatchWildcards = False
-                                '.Text = oldText
-                            End If
-                            .Forward = True
-                            .Wrap = Word.WdFindWrap.wdFindStop
-                            .MatchWholeWord = True ' Ensures only whole words are matched
-                            .MatchWildcards = False ' Ensure wildcard mode is on
-                            ' Use ReplaceNone to get the match without automatically replacing it
-                            If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
-
-                                ' Create a duplicate of the found range for the revision check
-                                Dim foundRange As Word.Range = workRange.Duplicate
-
-                                Dim isDeleted As Boolean = False
-                                For Each rev As Word.Revision In foundRange.Revisions
-                                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                                        isDeleted = True
-                                        Exit For
-                                    End If
-                                Next
-
-                                Dim previousStart As Integer = workRange.Start
-
-                                If Not isDeleted Then
-                                    foundRange.Text = newTextWithMarker
-                                    replacementsMade = True
-                                End If
-
-                                ' Adjust the initial end based on the difference in length
-                                initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
-                                ' Move the start of workRange to the end of the found match
-                                workRange.Start = foundRange.End
-
-                                ' Safeguard: Ensure that the search range advances.
-                                If workRange.Start <= previousStart Then
-                                    workRange.Start = previousStart + 1
-                                End If
-
-                                workRange.End = initialRangeEnd
-
-                            Else
-                                Exit Do
-                            End If
-                        End With
-                    Loop
-
-
-                    If Not replacementsMade Then
-                        Debug.WriteLine($"Note: The sarch term was not found." & Environment.NewLine)
-                    End If
+                    If currentEnd >= doc.Content.End Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
                 End If
+            Loop
+
+            If Not found Then
+                Debug.WriteLine($"Note: The search term was not found (Chunk Search)." & Environment.NewLine)
             End If
+
+            doc.Application.Selection.SetRange(selectionStart, selectionEnd)
+            doc.Application.Selection.Select()
 
         Catch ex As System.Exception
             MsgBox("Error in SearchReplace: " & ex.Message, MsgBoxStyle.Critical)
@@ -10569,7 +10408,7 @@ Public Class ThisAddIn
         ByVal workingrange As Word.Range,
         PreserveParagraphFormatInline As Boolean, DoMarkdown As Boolean) As String
 
-        Dim splash As New SLib.SplashScreen("Extracting text and format (tables may take time) ...")
+        Dim splash As New SLib.SplashScreen("Extracting text and format (longer text/tables may take time) ...")
         splash.Show()
         splash.Refresh()
 
@@ -10691,17 +10530,20 @@ Public Class ThisAddIn
                 Debug.WriteLine($"4-4 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
                 Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
 
-                ' 7) Underline  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
-                            f.Text = "([!^13]@)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "<u>\1</u>^13",
-                        Sub(rep)
-                            rep.Underline = Word.WdUnderline.wdUnderlineNone
-                        End Sub)
+
+                ' 7) Underline  (Absatz) --> problematic because of hyperlinks in paragraphs; causes hangs
+                'ReplaceWithinRange(rng,
+                'Sub(f)
+                'f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
+                'f.Text = "([!^13]@)^13"
+                'f.MatchWildcards = True
+                'End Sub,
+                '       "<u>\1</u>^13",
+                'Sub(rep)
+                'rep.Underline = Word.WdUnderline.wdUnderlineNone
+                'End Sub)
+
+
 
                 ' 8) Underline  (Inline)
                 ReplaceWithinRange(rng,
@@ -10715,6 +10557,8 @@ Public Class ThisAddIn
                             rep.Underline = Word.WdUnderline.wdUnderlineNone
                         End Sub)
 
+
+
                 ' 9) Strikethrough  (Absatz)
                 ReplaceWithinRange(rng,
                         Sub(f)
@@ -10727,6 +10571,8 @@ Public Class ThisAddIn
                             rep.StrikeThrough = False
                         End Sub)
 
+
+
                 '10) Strikethrough  (Inline)
                 ReplaceWithinRange(rng,
                         Sub(f)
@@ -10739,147 +10585,11 @@ Public Class ThisAddIn
                             rep.StrikeThrough = False
                         End Sub)
 
-            End If
+                ' Paragraph-like + color suffix:
+                ReplaceWithinRange_Highlight(Application.Selection.Range, keepParagraphBreakOutside:=True, includeColorInTag:=True)
 
-
-            If False Then
-
-                ' 1) Fett + Italic  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Bold = True
-                            f.Font.Italic = True
-                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
-                            f.Text = "(*)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "***\1***^13",
-                        Sub(rep)                          ' nur Bold & Italic abstellen
-                            rep.Bold = False
-                            rep.Italic = False
-                        End Sub)
-
-                ' 2) Fett + Italic  (Inline)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Bold = True
-                            f.Font.Italic = True
-                            f.Font.Underline = Word.WdUnderline.wdUnderlineNone
-                            f.Text = ""
-                            f.MatchWildcards = False
-                        End Sub,
-                        "***^&***",
-                        Sub(rep)
-                            rep.Bold = False
-                            rep.Italic = False
-                        End Sub)
-
-                Debug.WriteLine($"4-2 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
-
-                ' 3) Nur Fett  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Bold = True
-                            f.Text = "(*)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "**\1**^13",
-                        Sub(rep)
-                            rep.Bold = False
-                        End Sub)
-
-                ' 4) Nur Fett  (Inline)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Bold = True
-                            f.Text = ""
-                            f.MatchWildcards = False
-                        End Sub,
-                        "**^&**",
-                        Sub(rep)
-                            rep.Bold = False
-                        End Sub)
-
-                Debug.WriteLine($"4-3 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
-
-
-                ' 5) Nur Italic  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Italic = True
-                            f.Text = "(*)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "*\1*^13",
-                        Sub(rep)
-                            rep.Italic = False
-                        End Sub)
-
-                ' 6) Nur Italic  (Inline)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Italic = True
-                            f.Text = ""
-                            f.MatchWildcards = False
-                        End Sub,
-                        "*^&*",
-                        Sub(rep)
-                            rep.Italic = False
-                        End Sub)
-
-                Debug.WriteLine($"4-4 Range Start = {rng.Start} Selection Start = {Application.Selection.Start}")
-                Debug.WriteLine($"Range End = {rng.End} Selection End = {Application.Selection.End}")
-
-
-                ' 7) Underline  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
-                            f.Text = "(*)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "<u>\1</u>^13",
-                        Sub(rep)
-                            rep.Underline = Word.WdUnderline.wdUnderlineNone
-                        End Sub)
-
-                ' 8) Underline  (Inline)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.Underline = Word.WdUnderline.wdUnderlineSingle
-                            f.Text = ""
-                            f.MatchWildcards = False
-                        End Sub,
-                        "<u>^&</u>",
-                        Sub(rep)
-                            rep.Underline = Word.WdUnderline.wdUnderlineNone
-                        End Sub)
-
-                ' 9) Strikethrough  (Absatz)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.StrikeThrough = True
-                            f.Text = "(*)^13"
-                            f.MatchWildcards = True
-                        End Sub,
-                        "~~\1~~^13",
-                        Sub(rep)
-                            rep.StrikeThrough = False
-                        End Sub)
-
-                '10) Strikethrough  (Inline)
-                ReplaceWithinRange(rng,
-                        Sub(f)
-                            f.Font.StrikeThrough = True
-                            f.Text = ""
-                            f.MatchWildcards = False
-                        End Sub,
-                        "~~^&~~",
-                        Sub(rep)
-                            rep.StrikeThrough = False
-                        End Sub)
+                ' Preserve highlight color for non-yellow: <mark:color>…</mark>
+                ReplaceWithinRange_Highlight(Application.Selection.Range, includeColorInTag:=True)
 
             End If
 
@@ -10982,11 +10692,30 @@ Public Class ThisAddIn
                 Dim fldEndAbs As Integer = scanAbs
                 Dim fldLength As Integer = fldEndAbs - fldStartAbs + 1   'inkl. 0x15
 
+                'placeholders.Add(New PlaceholderInfo With {
+                '.Offset = fldStartAbs - rng.Start,
+                '.Length = fldLength,
+                '.Token = $"{{{{WFLD:{codeText}}}}}"
+                '})
+
+                Dim token As String
+
+                ' Minimal invasive: for hyperlinks, carry the display text alongside the code
+                If fld.Type = Word.WdFieldType.wdFieldHyperlink Then
+                    Dim disp As String = StripSurroundingUTags(fld.Result.Text)
+                    ' Base64 to avoid braces or other token terminators inside text
+                    Dim dispB64 As String = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(If(disp, String.Empty)))
+                    token = $"{{{{WFLD:{codeText}|||{dispB64}}}}}"
+                Else
+                    token = $"{{{{WFLD:{codeText}}}}}"
+                End If
+
                 placeholders.Add(New PlaceholderInfo With {
-        .Offset = fldStartAbs - rng.Start,
-        .Length = fldLength,
-        .Token = $"{{{{WFLD:{codeText}}}}}"
-    })
+                    .Offset = fldStartAbs - rng.Start,
+                    .Length = fldLength,
+                    .Token = token
+                })
+
             Next
 
             '──────────── Absatz-Platzhalter (optional) ───────────────────────
@@ -11085,6 +10814,26 @@ Public Class ThisAddIn
         End Try
     End Function
 
+
+    Private Shared Function StripSurroundingUTags(input As String) As String
+        If String.IsNullOrEmpty(input) Then Return input
+        Dim s = input.Trim()
+
+        ' Fast path
+        If s.StartsWith("<u>", StringComparison.OrdinalIgnoreCase) AndAlso s.EndsWith("</u>", StringComparison.OrdinalIgnoreCase) Then
+            Return s.Substring(3, s.Length - 7)
+        End If
+
+        ' Robust path with optional inner whitespace/newlines
+        Dim m = System.Text.RegularExpressions.Regex.Match(
+        s,
+        "^\s*<u>\s*(.*?)\s*</u>\s*$",
+        System.Text.RegularExpressions.RegexOptions.Singleline Or System.Text.RegularExpressions.RegexOptions.IgnoreCase
+    )
+        If m.Success Then Return m.Groups(1).Value
+
+        Return input
+    End Function
 
 
     Private Sub ReplaceWithinRange(
@@ -11236,6 +10985,89 @@ Public Class ThisAddIn
         rng.SetRange(Start:=originalStart, End:=allowedEnd)
     End Sub
 
+    ' Wrap highlighted text with <mark>…</mark>.
+    ' Options:
+    '  - keepParagraphBreakOutside: keep trailing ^13 outside the tag (paragraph-like behavior)
+    '  - includeColorInTag: for non-yellow highlights, emit <mark:color>…</mark>
+    Private Sub ReplaceWithinRange_Highlight(
+    ByVal rng As Microsoft.Office.Interop.Word.Range,
+    Optional ByVal keepParagraphBreakOutside As Boolean = False,
+    Optional ByVal includeColorInTag As Boolean = False
+)
+        If rng Is Nothing Then Exit Sub
+
+        Dim searchRng As Word.Range = rng.Duplicate
+        With searchRng.Find
+            .ClearFormatting()
+            .Text = ""
+            .Format = True
+            .Highlight = True
+            .MatchWildcards = False
+            .Forward = True
+            .Wrap = Word.WdFindWrap.wdFindStop
+        End With
+
+        While searchRng.Find.Execute()
+            Dim found As Word.Range = searchRng.Duplicate
+            Dim txt As String = found.Text
+            If String.IsNullOrEmpty(txt) Then
+                searchRng.Start = System.Math.Min(searchRng.Start + 1, rng.End)
+                searchRng.End = rng.End
+                If searchRng.Start >= rng.End Then Exit While
+                Continue While
+            End If
+
+            Dim trailingCr As String = ""
+            If keepParagraphBreakOutside AndAlso txt.EndsWith(vbCr) Then
+                trailingCr = vbCr
+                txt = txt.Substring(0, txt.Length - 1)
+            End If
+
+            ' Capture color before clearing
+            Dim hi As Word.WdColorIndex = found.HighlightColorIndex
+
+            Dim openTag As String = "<mark>"
+            If includeColorInTag Then
+                Dim suffix = HighlightIndexToMarkSuffix(hi)
+                If suffix.Length > 0 Then
+                    openTag = "<mark" & suffix & ">"
+                End If
+            End If
+
+            found.Text = openTag & txt & "</mark>" & trailingCr
+
+            ' Clear highlight from inserted text
+            found.HighlightColorIndex = Word.WdColorIndex.wdNoHighlight
+
+            searchRng.Start = found.End
+            searchRng.End = rng.End
+            If searchRng.Start >= rng.End Then Exit While
+        End While
+    End Sub
+
+    Private Shared Function HighlightIndexToMarkSuffix(idx As Word.WdColorIndex) As String
+        ' Return a valid-HTML attribute suffix for use on the opening <mark ...> tag.
+        ' Example usage (caller concatenates): "<mark" & suffix & ">"
+        ' Note: Closing tag should remain plain "</mark>" (no attributes).
+        Select Case idx
+            Case Word.WdColorIndex.wdNoHighlight, Word.WdColorIndex.wdYellow : Return ""                              ' default <mark>
+            Case Word.WdColorIndex.wdBrightGreen : Return " data-ri-color=""brightgreen"""
+            Case Word.WdColorIndex.wdTurquoise : Return " data-ri-color=""turquoise"""
+            Case Word.WdColorIndex.wdPink : Return " data-ri-color=""pink"""
+            Case Word.WdColorIndex.wdBlue : Return " data-ri-color=""blue"""
+            Case Word.WdColorIndex.wdRed : Return " data-ri-color=""red"""
+            Case Word.WdColorIndex.wdDarkBlue : Return " data-ri-color=""darkblue"""
+            Case Word.WdColorIndex.wdTeal : Return " data-ri-color=""teal"""
+            Case Word.WdColorIndex.wdGreen : Return " data-ri-color=""green"""
+            Case Word.WdColorIndex.wdViolet : Return " data-ri-color=""violet"""
+            Case Word.WdColorIndex.wdDarkRed : Return " data-ri-color=""darkred"""
+            Case Word.WdColorIndex.wdDarkYellow : Return " data-ri-color=""darkyellow"""
+            Case Word.WdColorIndex.wdGray25 : Return " data-ri-color=""gray25"""
+            Case Word.WdColorIndex.wdGray50 : Return " data-ri-color=""gray50"""
+            Case Word.WdColorIndex.wdBlack : Return " data-ri-color=""black"""
+            Case Else : Return ""
+        End Select
+    End Function
 
 
 
@@ -11339,7 +11171,39 @@ Public Class ThisAddIn
     Private Sub AddEndnote(doc As Word.Document, insertionRange As Word.Range, noteText As String)
         doc.Endnotes.Add(Range:=insertionRange, Text:=noteText)
     End Sub
+
     Private Sub AddField(doc As Word.Document, insertionRange As Word.Range, fieldText As String)
+        ' fieldText may be either just the code
+        ' or "code|||base64(displayText)" for hyperlink fields
+        Dim fieldCode As String = fieldText
+        Dim displayText As String = Nothing
+
+        Dim parts = fieldText.Split(New String() {"|||"}, 2, StringSplitOptions.None)
+        If parts.Length = 2 Then
+            fieldCode = parts(0).Trim()
+            Try
+                displayText = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(parts(1)))
+            Catch
+                ' Fallback if it wasn't base64-encoded (keeps behavior robust)
+                displayText = parts(1)
+            End Try
+        End If
+
+        ' Insert the field and apply the code
+        Dim fieldRange As Word.Range = insertionRange.Duplicate
+        Dim field As Word.Field = doc.Fields.Add(fieldRange)
+        field.Code.Text = fieldCode
+        field.Update()
+
+        ' If we captured a display text (e.g., from a hyperlink), restore it and lock the field
+        If Not String.IsNullOrEmpty(displayText) Then
+            field.Result.Text = displayText
+            ' Keep the display text stable; remove this if you want updates to overwrite it later
+            field.Locked = True
+        End If
+    End Sub
+
+    Private Sub OldAddField(doc As Word.Document, insertionRange As Word.Range, fieldText As String)
         ' Use the fieldText directly as the field code
         Dim fieldCode As String = fieldText.Trim()
 
@@ -12218,7 +12082,7 @@ Public Class ThisAddIn
                     End If
 
                     Dim findText As String = part.Trim()
-                    If FindLongTextInChunks(findText, SearchChunkSize, selection) And selection IsNot Nothing Then
+                    If FindLongTextInChunks(findText, selection) And selection IsNot Nothing Then
                         'selection.Range.HighlightColorIndex = Word.WdColorIndex.wdYellow
                         doc.Comments.Add(selection.Range, $"{AN5}: '{SearchContext}'")
                         selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
@@ -12255,7 +12119,7 @@ Public Class ThisAddIn
             If Not String.IsNullOrWhiteSpace(LLMResult) Then
                 Dim FindText As String = LLMResult.Trim()
 
-                If FindLongTextInChunks(FindText, SearchChunkSize, selection) And selection IsNot Nothing Then
+                If FindLongTextInChunks(FindText, selection) And selection IsNot Nothing Then
                     wordApp.ActiveWindow.ScrollIntoView(selection.Range, True)
                 Else
                     ShowCustomMessageBox($"The LLM found this section:" & vbCrLf & vbCrLf & FindText & vbCrLf & vbCrLf & $"However, {AN} could not locate it in the document for technical reasons (may be due to special characters, line breaks of the LLM not quoting the text properly).", "Context Search")
@@ -20676,7 +20540,7 @@ Public Class ThisAddIn
             ' 3) Load all libraries (may be multiple segments per file)
             Dim allLibs As List(Of ClauseLibrary) = LoadClauseLibraries(pathGlobal, pathLocal)
             If allLibs Is Nothing OrElse allLibs.Count = 0 Then
-                ShowCustomMessageBox("No clause libraries found. Place files named 'redink-lib-*.txt' in the configured path(s).")
+                ShowCustomMessageBox($"No clause libraries found. Place files named '{AN2}-lib-*.txt' in the configured path(s).")
                 Return
             End If
 
@@ -20831,7 +20695,7 @@ Public Class ThisAddIn
     Private Function EnumerateClauseLibraryFiles(folder As String) As IEnumerable(Of String)
         Dim matches As New List(Of String)
         Try
-            For Each f In IO.Directory.EnumerateFiles(folder, "redink-lib-*.txt", IO.SearchOption.TopDirectoryOnly)
+            For Each f In IO.Directory.EnumerateFiles(folder, $"{AN2}-lib-*.txt", IO.SearchOption.TopDirectoryOnly)
                 matches.Add(f)
             Next
         Catch ex As Exception
@@ -21245,9 +21109,10 @@ Public Class ThisAddIn
                 selectedText = sel.Range.Text
             End If
             selectedText = If(selectedText, "").Trim()
+
             If String.IsNullOrWhiteSpace(selectedText) Then
-                ShowCustomMessageBox("Please select some text first.")
-                Return
+                Dim answer As Integer = ShowCustomYesNoBox("No text is selected to be added to a library. Do you want to manually edit a FindClause library file?", "Yes", "No, abort", AN & " AddClause")
+                If answer <> 1 Then Return
             End If
 
             ' 2) Load all segment libraries (same as FindClause logic)
@@ -21256,14 +21121,68 @@ Public Class ThisAddIn
             Dim pathLocal As String = ExpandEnvironmentVariables(INI_FindClausePathLocal)
             If Not String.IsNullOrEmpty(pathLocal) AndAlso Not pathLocal.EndsWith("\", StringComparison.Ordinal) Then pathLocal &= "\"
 
-            Dim allLibs As List(Of ClauseLibrary) = LoadClauseLibraries(pathGlobal, pathLocal)
-            If allLibs Is Nothing OrElse allLibs.Count = 0 Then
-                ShowCustomMessageBox("No clause library segments found. (redink-lib-*.txt)")
-                Return
-            End If
+            Dim allLibs As List(Of ClauseLibrary)
 
-            ' 3) Build segment display list (Title + filename + (local) if local)
-            allLibs.Sort(Function(a, b) String.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase))
+            If Not String.IsNullOrWhiteSpace(selectedText) Then
+
+                allLibs = LoadClauseLibraries(pathGlobal, pathLocal)
+                If allLibs Is Nothing OrElse allLibs.Count = 0 Then
+                    ShowCustomMessageBox($"No clause library segments found. ({AN2}-lib-*.txt)")
+                    Return
+                End If
+
+            Else
+
+                Try
+                    Dim displayToPath As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+                    Dim options As New List(Of String)
+
+                    Dim dcPaths As New List(Of (p As String, isLocal As Boolean))
+                    If Not String.IsNullOrWhiteSpace(pathGlobal) Then
+                        dcPaths.Add((pathGlobal, False))
+                    End If
+                    If Not String.IsNullOrWhiteSpace(pathLocal) Then
+                        dcPaths.Add((pathLocal, True))
+                    End If
+
+                    For Each tuple In dcPaths
+                        Dim basePath = tuple.p
+                        Dim isLocal = tuple.isLocal
+                        If IO.Directory.Exists(basePath) Then
+                            Dim files = IO.Directory.GetFiles(basePath, $"{AN2}-lib-*.txt", IO.SearchOption.TopDirectoryOnly)
+                            For Each f In files
+                                Dim disp As String = IO.Path.GetFileName(f)
+                                If isLocal Then disp &= " (local)"
+                                If Not displayToPath.ContainsKey(disp) Then
+                                    displayToPath.Add(disp, f)
+                                    options.Add(disp)
+                                End If
+                            Next
+                        End If
+                    Next
+
+                    If options.Count = 0 Then
+                        SLib.ShowCustomMessageBox($"No FindClause library files ({AN2}-lib-*.txt) found in the configured paths.")
+                        Exit Sub
+                    End If
+
+                    ' Let user pick one
+                    Dim selfile As String = SLib.ShowSelectionForm("Select a library file to view or edit:", $"{AN} FindClause library files", options)
+                    If String.IsNullOrWhiteSpace(selfile) Then Exit Sub
+
+                    Dim chosenPath As String = Nothing
+                    If displayToPath.TryGetValue(selfile, chosenPath) AndAlso Not String.IsNullOrWhiteSpace(chosenPath) Then
+                        SLib.ShowTextFileEditor(chosenPath, $"{AN} FindClause library file '{chosenPath}':")
+                    End If
+
+                Catch ex As Exception
+                    SLib.ShowCustomMessageBox("Error while listing FindClause library files:" & vbCrLf & ex.Message)
+                End Try
+                Return
+        End If
+
+        ' 3) Build segment display list (Title + filename + (local) if local)
+        allLibs.Sort(Function(a, b) String.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase))
             Dim segmentDisplayMap As New Dictionary(Of String, ClauseLibrary)(StringComparer.OrdinalIgnoreCase)
             For Each cl In allLibs
                 Dim disp As String = $"{cl.Title} [{IO.Path.GetFileName(cl.SourcePath)}]"
@@ -21693,8 +21612,58 @@ Public Class ThisAddIn
             Dim FromFile As String = ""
 
             If currentSelection.Type = WdSelectionType.wdSelectionIP Then
-                Dim answer As Integer = ShowCustomYesNoBox("You have not selected any text. Do you instead want to analyze text from a document file or Powerpoint presentation?", "Yes", "No")
+
+                Dim answer As Integer = ShowCustomYesNoBox("You have not selected any text. Do you instead want to analyze text from a document file or Powerpoint presentation?", "Yes", "No", AN & " Document Check", Nothing, "", "Edit Script Files",
+                                                                                                                       extraButtonAction:=Sub()
+                                                                                                                                              Try
+                                                                                                                                                  ' Collect DocCheck script files from both paths
+                                                                                                                                                  Dim displayToPath As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+                                                                                                                                                  Dim options As New List(Of String)
+
+                                                                                                                                                  Dim dcPaths As New List(Of (p As String, isLocal As Boolean))
+                                                                                                                                                  If Not String.IsNullOrWhiteSpace(DocCheckPath) Then
+                                                                                                                                                      dcPaths.Add((DocCheckPath, False))
+                                                                                                                                                  End If
+                                                                                                                                                  If Not String.IsNullOrWhiteSpace(DocCheckPathLocal) Then
+                                                                                                                                                      dcPaths.Add((DocCheckPathLocal, True))
+                                                                                                                                                  End If
+
+                                                                                                                                                  For Each tuple In dcPaths
+                                                                                                                                                      Dim basePath = tuple.p
+                                                                                                                                                      Dim isLocal = tuple.isLocal
+                                                                                                                                                      If IO.Directory.Exists(basePath) Then
+                                                                                                                                                          Dim files = IO.Directory.GetFiles(basePath, $"{AN2}-dc-*.txt", IO.SearchOption.TopDirectoryOnly)
+                                                                                                                                                          For Each f In files
+                                                                                                                                                              Dim disp As String = IO.Path.GetFileName(f)
+                                                                                                                                                              If isLocal Then disp &= " (local)"
+                                                                                                                                                              If Not displayToPath.ContainsKey(disp) Then
+                                                                                                                                                                  displayToPath.Add(disp, f)
+                                                                                                                                                                  options.Add(disp)
+                                                                                                                                                              End If
+                                                                                                                                                          Next
+                                                                                                                                                      End If
+                                                                                                                                                  Next
+
+                                                                                                                                                  If options.Count = 0 Then
+                                                                                                                                                      SLib.ShowCustomMessageBox($"No DocCheck script files ({AN2}-dc-*.txt) found in the configured paths.")
+                                                                                                                                                      Exit Sub
+                                                                                                                                                  End If
+
+                                                                                                                                                  ' Let user pick one
+                                                                                                                                                  Dim sel As String = SLib.ShowSelectionForm("Select a DocCheck script to view or edit:", $"{AN} DocCheck Scripts", options)
+                                                                                                                                                  If String.IsNullOrWhiteSpace(sel) Then Exit Sub
+
+                                                                                                                                                  Dim chosenPath As String = Nothing
+                                                                                                                                                  If displayToPath.TryGetValue(sel, chosenPath) AndAlso Not String.IsNullOrWhiteSpace(chosenPath) Then
+                                                                                                                                                      SLib.ShowTextFileEditor(chosenPath, $"{AN} DocCheck Script '{chosenPath}':")
+                                                                                                                                                  End If
+
+                                                                                                                                              Catch ex As Exception
+                                                                                                                                                  SLib.ShowCustomMessageBox("Error while listing DocCheck scripts:" & vbCrLf & ex.Message)
+                                                                                                                                              End Try
+                                                                                                                                          End Sub)
                 If answer = 1 Then
+
 
                     DragDropFormLabel = "Document files (.txt, .docx, .pdf) or Powerpoint (.pptx)."
                     DragDropFormFilter = "Supported Files|*.txt;*.rtf;*.doc;*.docx;*.pdf;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm)|*.txt;*.ini;*.csv;*.log;*.json;*.xml;*.html;*.htm;*.pptx||" &
@@ -21723,8 +21692,12 @@ Public Class ThisAddIn
                         ShowCustomMessageBox("The file you provided did not contain any text - will abort.")
                         Return
                     End If
+                ElseIf answer = 0 Then
+                    Return
                 End If
             End If
+
+
 
             Dim textToAnalyze As System.String = Nothing
 
@@ -21755,7 +21728,7 @@ Public Class ThisAddIn
             ' 2) Load all RuleSets from provided paths
             Dim allRuleSets As System.Collections.Generic.List(Of DocCheckRuleSet) = LoadRuleSets(DocCheckPath, DocCheckPathLocal)
             If allRuleSets Is Nothing OrElse allRuleSets.Count = 0 Then
-                ShowCustomMessageBox("No DocCheck rule sets were found. Place files named 'redink-dc-*.txt' into your configured path(s).")
+                ShowCustomMessageBox($"No DocCheck rule sets were found. Place files named '{AN2}-dc-*.txt' into your configured path(s).")
                 Return
             End If
 
@@ -21785,6 +21758,7 @@ Public Class ThisAddIn
             If FromFile <> "" Then
                 doBubbles = CType(Nothing, Boolean?)
                 doSummary = CType(Nothing, Boolean?)
+                do2ndModel = CType(Nothing, Boolean?)
             End If
 
             OtherPrompt = ""
@@ -21793,12 +21767,16 @@ Public Class ThisAddIn
             p0.Options = New System.Collections.Generic.List(Of System.String)(displayOptions)
             Dim p1 As SLib.InputParameter = New SLib.InputParameter("Check as only one clause", checkOnlyOneClause)
             Dim p2 As SLib.InputParameter = New SLib.InputParameter("Add additional context", addAdditionalContext)
-            Dim p3 As SLib.InputParameter = New SLib.InputParameter("Output as Word Bubbles", doBubbles)
+            Dim p3 As SLib.InputParameter = New SLib.InputParameter("Output as Word bubbles", doBubbles)
             Dim p4 As SLib.InputParameter = New SLib.InputParameter("Bubbles multiclause summary", doSummary)
 
             Dim p5 As SLib.InputParameter
             If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+                do2ndModel = CBool(True)
                 p5 = New SLib.InputParameter("Use a secondary model", do2ndModel)
+            ElseIf INI_SecondAPI Then
+                do2ndModel = CBool(True)
+                p5 = New SLib.InputParameter("Use the secondary model", do2ndModel)
             Else
                 p5 = New SLib.InputParameter("Use the secondary model", do2ndModel)
             End If
@@ -21829,7 +21807,12 @@ Public Class ThisAddIn
                 doSummary = CBool(False)
             End If
 
-            do2ndModel = System.Convert.ToBoolean(params(5).Value)
+            Dim SecondModel = params(5).Value
+            If TypeOf (SecondModel) Is Boolean Then
+                do2ndModel = CBool(SecondModel)
+            Else
+                do2ndModel = CBool(False)
+            End If
             OtherPrompt = System.Convert.ToString(params(6).Value)
 
             ' Resolve selected rule set
@@ -21928,7 +21911,7 @@ Public Class ThisAddIn
     Private Function EnumerateDocCheckFiles(ByVal folder As System.String) As System.Collections.Generic.IEnumerable(Of System.String)
         Dim matches As System.Collections.Generic.List(Of System.String) = New System.Collections.Generic.List(Of System.String)()
         Try
-            For Each f As System.String In System.IO.Directory.EnumerateFiles(folder, "redink-dc-*.txt", System.IO.SearchOption.TopDirectoryOnly)
+            For Each f As System.String In System.IO.Directory.EnumerateFiles(folder, $"{AN2}-dc-*.txt", System.IO.SearchOption.TopDirectoryOnly)
                 matches.Add(f)
             Next
         Catch ex As System.Exception
@@ -22717,8 +22700,1252 @@ Public Class ThisAddIn
     End Function
 
 
+    '=================WebAgent=============================
+
+    Private Function GetWebAgentScriptFile() As String
+        Dim globalPath As String = ExpandEnvironmentVariables(INI_WebAgentPath)
+        Dim localPath As String = ExpandEnvironmentVariables(INI_WebAgentPathLocal)
+
+        Dim candidates As New List(Of (Display As String, FullPath As String, IsLocal As Boolean))
+
+        If String.IsNullOrWhiteSpace(localPath) AndAlso String.IsNullOrWhiteSpace(globalPath) Then
+            ShowCustomMessageBox("No WebAgent paths configured. Please set 'WebAgentPath' / 'WebAgentPathLocal' parameters in the configuration file.", $"{AN} WebAgent")
+            Return Nothing
+        End If
+
+        Try
+            If Not String.IsNullOrWhiteSpace(localPath) AndAlso IO.Directory.Exists(localPath) Then
+                For Each f In IO.Directory.GetFiles(localPath, $"{AN2}-ag-*.json", IO.SearchOption.TopDirectoryOnly)
+                    candidates.Add(($"{IO.Path.GetFileName(f)} (local)", f, True))
+                Next
+            End If
+        Catch ex As Exception
+            ShowCustomMessageBox("Error enumerating local WebAgent scripts: " & ex.Message, $"{AN} WebAgent")
+        End Try
+
+        Try
+            If Not String.IsNullOrWhiteSpace(globalPath) AndAlso IO.Directory.Exists(globalPath) Then
+                For Each f In IO.Directory.GetFiles(globalPath, $"{AN2}-ag-*.json", IO.SearchOption.TopDirectoryOnly)
+                    candidates.Add(($"{IO.Path.GetFileName(f)}", f, False))
+                Next
+            End If
+        Catch ex As Exception
+            ShowCustomMessageBox("Error enumerating global WebAgent scripts: " & ex.Message, $"{AN} WebAgent")
+        End Try
+
+        If candidates.Count = 0 Then
+            ShowCustomMessageBox($"No WebAgent scripts found. Please set 'WebAgentPath' / 'WebAgentPathLocal' parameters in the configuration file and place files named '{AN2}-ag-*.json'.", $"{AN} WebAgent")
+            Return Nothing
+        End If
+
+        ' Local first, then global; alphabetical within group
+        Dim ordered = candidates.
+            OrderByDescending(Function(c) c.IsLocal).
+            ThenBy(Function(c) c.Display, StringComparer.OrdinalIgnoreCase).
+            ToList()
+
+        Dim displayItems = ordered.Select(Function(c) c.Display).ToArray()
+        Dim sel As String = ShowSelectionForm("Select the WebAgent script you want to run:", $"{AN} WebAgent", displayItems)
+        If String.IsNullOrEmpty(sel) Then Return Nothing
+
+        Dim chosen = ordered.FirstOrDefault(Function(o) o.Display = sel)
+        Return chosen.FullPath
+    End Function
+
+    '   {parameter1 = Description; type; default; range-or-options; options}
+    '   {parameter1}  (reference/reuse)
+    Private Function ProcessWebAgentParameterPlaceholders(ByRef script As String) As Boolean
+        Dim defRx As New System.Text.RegularExpressions.Regex("\{\s*parameter(\d+)\s*=\s*(.*?)\}", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
+        Dim refRx As New System.Text.RegularExpressions.Regex("\{\s*parameter(\d+)\s*\}", RegexOptions.IgnoreCase)
+
+        ' Collect definition matches first
+        Dim defMatches = defRx.Matches(script)
+        If defMatches.Count = 0 Then
+            ' No definitions -> nothing to prompt for; still OK (references stay literal)
+            Return True
+        End If
+
+        ' First definition wins per parameter number
+        Dim paramDefs As New Dictionary(Of Integer, (MatchObj As Match, Definition As String))()
+        For Each m As Match In defMatches
+            Dim num = Integer.Parse(m.Groups(1).Value)
+            If Not paramDefs.ContainsKey(num) Then
+                paramDefs(num) = (m, m.Groups(2).Value.Trim())
+            End If
+        Next
+
+        ' Prepare UI parameter list
+        Dim parameterDefs As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)()
+        Dim metaList As New List(Of (ParamNumber As Integer,
+                                     TypeName As String,
+                                     RangeTuple As (Integer?, Integer?),
+                                     DisplayOptions As List(Of String),
+                                     CodeOptions As List(Of String)))()
+
+        For Each num In paramDefs.Keys.OrderBy(Function(i) i)
+            Dim definition = paramDefs(num).Definition
+            Dim segments = definition.Split(";"c).
+                                      Select(Function(s) s.Trim()).
+                                      Where(Function(s) s.Length > 0).ToArray()
+            If segments.Length = 0 Then Continue For
+
+            Dim desc = segments(0)
+            Dim t = If(segments.Length > 1, segments(1).ToLowerInvariant(), "string")
+            Dim defaultStr = If(segments.Length > 2, segments(2), "")
+
+            Dim rangeTuple As (Integer?, Integer?) = (Nothing, Nothing)
+            Dim optsRaw As List(Of String) = Nothing
+
+            If (t = "integer" OrElse t = "long" OrElse t = "double") AndAlso segments.Length > 3 Then
+                If System.Text.RegularExpressions.Regex.IsMatch(segments(3), "^\d+\s*-\s*\d+$") Then
+                    Dim parts = segments(3).Split("-"c)
+                    Dim minVal = Integer.Parse(parts(0))
+                    Dim maxVal = Integer.Parse(parts(1))
+                    rangeTuple = (minVal, maxVal)
+                    If segments.Length > 4 Then
+                        optsRaw = segments(4).Split(","c).Select(Function(o) o.Trim()).
+                                                 Where(Function(o) o.Length > 0).ToList()
+                    End If
+                Else
+                    optsRaw = segments(3).Split(","c).Select(Function(o) o.Trim()).
+                                             Where(Function(o) o.Length > 0).ToList()
+                End If
+            ElseIf t = "string" AndAlso segments.Length > 3 Then
+                optsRaw = segments(3).Split(","c).Select(Function(o) o.Trim()).
+                                         Where(Function(o) o.Length > 0).ToList()
+            End If
+
+            Dim displayList As List(Of String) = Nothing
+            Dim codeList As List(Of String) = Nothing
+            If optsRaw IsNot Nothing AndAlso optsRaw.Count > 0 Then
+                displayList = New List(Of String)()
+                codeList = New List(Of String)()
+                For Each o In optsRaw
+                    If String.IsNullOrWhiteSpace(o) Then Continue For
+                    Dim lbl = o
+                    Dim code = o
+                    Dim idx1 = o.IndexOf("<"c)
+                    Dim idx2 = o.IndexOf(">"c)
+                    If idx1 >= 0 AndAlso idx2 > idx1 Then
+                        lbl = o.Substring(0, idx1).Trim()
+                        code = o.Substring(idx1 + 1, idx2 - idx1 - 1).Trim()
+                    End If
+                    displayList.Add(lbl)
+                    codeList.Add(code)
+                Next
+            End If
+
+            Dim defaultDisplay As Object = defaultStr
+            If codeList IsNot Nothing Then
+                Dim idxDef = codeList.IndexOf(defaultStr)
+                If idxDef >= 0 Then defaultDisplay = displayList(idxDef)
+            End If
+
+            Dim typedDefault As Object
+            Select Case t
+                Case "boolean"
+                    Dim b As Boolean : Boolean.TryParse(defaultStr, b) : typedDefault = b
+                Case "integer"
+                    Dim i As Integer : Integer.TryParse(defaultStr, i) : typedDefault = i
+                Case "long"
+                    Dim l As Long : Long.TryParse(defaultStr, l) : typedDefault = l
+                Case "double"
+                    Dim d As Double : Double.TryParse(defaultStr, d) : typedDefault = d
+                Case Else
+                    typedDefault = defaultDisplay
+            End Select
+
+            If displayList IsNot Nothing Then
+                parameterDefs.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, typedDefault, displayList))
+            Else
+                parameterDefs.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter(desc, typedDefault))
+            End If
+
+            metaList.Add((num, t, rangeTuple, displayList, codeList))
+        Next
+
+        If parameterDefs.Count = 0 Then Return True
+
+        Dim prmArray = parameterDefs.ToArray()
+        If Not ShowCustomVariableInputForm("Please configure your WebAgent parameters:", $"{AN} WebAgent Parameters", prmArray) Then
+            Return False
+        End If
+
+        ' Build final value map
+        Dim valueByParam As New Dictionary(Of Integer, String)()
+        For i = 0 To metaList.Count - 1
+            Dim meta = metaList(i)
+            Dim p = prmArray(i)
+            Dim rawValue = If(p.Value Is Nothing, "", p.Value.ToString()).Trim()
+            Dim finalValue As String
+
+            If meta.TypeName = "boolean" Then
+                finalValue = rawValue.ToLowerInvariant()
+            Else
+                ' Map display -> code
+                If meta.DisplayOptions IsNot Nothing Then
+                    Dim idx = meta.DisplayOptions.IndexOf(rawValue)
+                    If idx >= 0 Then
+                        finalValue = meta.CodeOptions(idx)
+                    Else
+                        finalValue = rawValue
+                    End If
+                Else
+                    Dim rvLower = rawValue.ToLowerInvariant()
+                    If rvLower.StartsWith("(keine auswahl)") OrElse rvLower.StartsWith("(no selection)") OrElse rawValue.StartsWith("---") Then
+                        finalValue = ""
+                    Else
+                        finalValue = rawValue
+                    End If
+                End If
+
+                ' Clamp numeric
+                If (meta.TypeName = "integer" OrElse meta.TypeName = "long" OrElse meta.TypeName = "double") AndAlso (meta.RangeTuple.Item1.HasValue OrElse meta.RangeTuple.Item2.HasValue) Then
+                    Dim num As Double
+                    If Double.TryParse(finalValue, num) Then
+                        If meta.RangeTuple.Item1.HasValue AndAlso num < meta.RangeTuple.Item1.Value Then num = meta.RangeTuple.Item1.Value
+                        If meta.RangeTuple.Item2.HasValue AndAlso num > meta.RangeTuple.Item2.Value Then num = meta.RangeTuple.Item2.Value
+                        If meta.TypeName = "integer" OrElse meta.TypeName = "long" Then
+                            finalValue = CLng(System.Math.Round(num)).ToString()
+                        Else
+                            finalValue = num.ToString()
+                        End If
+                    End If
+                End If
+            End If
+
+            ' Minimal JSON escaping (keep consistent with old behavior)
+            Dim jsonEscaped = finalValue.Replace("\", "\\").Replace("""", "\""")
+            valueByParam(meta.ParamNumber) = jsonEscaped
+        Next
+
+        ' Positional replacement (definitions first)
+        Dim sb As New System.Text.StringBuilder(script)
+
+        ' Replace definitions (remove braces + template)
+        For Each m As Match In defMatches.Cast(Of Match)().OrderByDescending(Function(mm) mm.Index)
+            Dim paramNumber = Integer.Parse(m.Groups(1).Value)
+            Dim repl = If(valueByParam.ContainsKey(paramNumber), valueByParam(paramNumber), "")
+            sb.Remove(m.Index, m.Length)
+            sb.Insert(m.Index, repl)
+        Next
+
+        ' Replace references {parameterN}
+        Dim refMatches = refRx.Matches(sb.ToString())
+        For Each m As Match In refMatches.Cast(Of Match)().OrderByDescending(Function(mm) mm.Index)
+            ' Skip those that were definitions (already replaced)
+            If m.Groups.Count > 0 AndAlso m.Value.Contains("=") Then Continue For
+            Dim paramNumber = Integer.Parse(m.Groups(1).Value)
+            If valueByParam.ContainsKey(paramNumber) Then
+                sb.Remove(m.Index, m.Length)
+                sb.Insert(m.Index, valueByParam(paramNumber))
+            End If
+        Next
+
+        script = sb.ToString()
+        Return True
+    End Function
+
+    Private Function ProcessWebAgentSecretPlaceholders(ByRef script As String) As Boolean
+        ' Looks for:  "env": { "secrets": { "key": "{{secret:Description; type(optional)}}" ... } }
+        ' Prompts user and substitutes the raw value before interpreter sees the script.
+        Try
+            Dim root As JObject = Nothing
+            Try
+                root = JObject.Parse(script)
+            Catch
+                Return True ' let normal JSON error handling later handle issues
+            End Try
+            Dim envObj = TryCast(root("env"), JObject)
+            If envObj Is Nothing Then Return True
+            Dim secretsObj = TryCast(envObj("secrets"), JObject)
+            If secretsObj Is Nothing OrElse secretsObj.Count = 0 Then Return True
+
+            Dim secretDefs As New List(Of (Name As String, Placeholder As String, Desc As String))()
+
+            Dim rx As New Regex("^\{\{\s*secret\s*:(.+?)\}\}$", RegexOptions.IgnoreCase)
+            For Each p In secretsObj.Properties()
+                Dim v = p.Value.ToString().Trim()
+                Dim m = rx.Match(v)
+                If m.Success Then
+                    Dim meta = m.Groups(1).Value.Trim()
+                    ' Allow "Description; type" but we only really use description
+                    Dim segs = meta.Split(";"c).Select(Function(s) s.Trim()).Where(Function(s) s <> "").ToArray()
+                    Dim desc = segs(0)
+                    secretDefs.Add((p.Name, v, desc))
+                End If
+            Next
+            If secretDefs.Count = 0 Then Return True
+
+            Dim ipList As New List(Of SharedLibrary.SharedLibrary.SharedMethods.InputParameter)
+            For Each sd In secretDefs
+                ipList.Add(New SharedLibrary.SharedLibrary.SharedMethods.InputParameter($"Secret: {sd.Name} - {sd.Desc}", ""))
+            Next
+
+            Dim arr = ipList.ToArray()
+            If Not ShowCustomVariableInputForm("Provide secret values (they are not logged):", "WebAgent Secrets", arr) Then
+                Return False
+            End If
+
+            ' Substitute into JSON tree (not by raw string replace to avoid accidental collisions)
+            For i = 0 To secretDefs.Count - 1
+                Dim name = secretDefs(i).Name
+                Dim userVal = CStr(arr(i).Value)
+                secretsObj(name) = userVal
+            Next
+
+            script = root.ToString(Formatting.None)
+            Return True
+        Catch ex As Exception
+            ShowCustomMessageBox("Secret placeholder processing failed: " & ex.Message, AN & " WebAgent")
+            Return False
+        End Try
+    End Function
 
 
+    Private _webAgentRunCts As CancellationTokenSource
+
+    Public Sub CancelWebAgentRun()
+        Try : _webAgentRunCts?.Cancel() : Catch : End Try
+    End Sub
+
+    Private Sub PollEscForCancel(cts As CancellationTokenSource)
+        Try
+            Dim escLatched As Boolean = False
+            While Not cts.IsCancellationRequested
+                Thread.Sleep(150)
+                Dim state = GetAsyncKeyState(VK_ESCAPE)
+                If (state And &H8000) <> 0 Then
+                    ' Debounce: ensure key released once before re-trigger
+                    If Not escLatched Then
+                        escLatched = True
+                        cts.Cancel()
+                        Exit While
+                    End If
+                Else
+                    escLatched = False
+                End If
+            End While
+        Catch
+            ' Ignore polling errors
+        End Try
+    End Sub
+
+    Private Function ConfirmEmailSendSteps(root As JObject) As Integer
+        Try
+            Dim stepsArr = TryCast(root("steps"), JArray)
+            If stepsArr Is Nothing OrElse stepsArr.Count = 0 Then Return True
+
+            Dim emailSteps As New List(Of JObject)
+            For Each st As JObject In stepsArr
+                Dim cmd = st.Value(Of String)("command")
+                If Not String.IsNullOrWhiteSpace(cmd) AndAlso
+                   String.Equals(cmd, "send_email_report", StringComparison.OrdinalIgnoreCase) Then
+                    emailSteps.Add(st)
+                End If
+            Next
+            If emailSteps.Count = 0 Then Return 1 ' no email steps -> OK
+
+            ' Collect recipient info (and optionally smtp_host) to display
+            Dim lines As New List(Of String)
+            For Each st In emailSteps
+                Dim p = TryCast(st("params"), JObject)
+                Dim toRaw As String = p?("to")?.ToString()
+                Dim smtpHost As String = p?("smtp_host")?.ToString()
+                Dim subject As String = p?("subject")?.ToString()
+
+                Dim recipients As String = ""
+                If Not String.IsNullOrWhiteSpace(toRaw) Then
+                    ' Normalize delimiters and trim each
+                    Dim parts = toRaw.Split(New String() {",", ";"}, StringSplitOptions.RemoveEmptyEntries).
+                                      Select(Function(s) s.Trim()).
+                                      Where(Function(s) s <> "")
+                    recipients = String.Join(", ", parts)
+                Else
+                    recipients = "(missing)"
+                End If
+
+                Dim meta As New List(Of String)
+                If Not String.IsNullOrWhiteSpace(subject) Then meta.Add($"Subject: {subject}")
+                If Not String.IsNullOrWhiteSpace(smtpHost) Then meta.Add($"SMTP: {smtpHost}")
+
+                If meta.Count > 0 Then
+                    lines.Add($"- To: {recipients}  [{String.Join(" | ", meta)}]")
+                Else
+                    lines.Add($"- To: {recipients}")
+                End If
+            Next
+
+            Dim msg As String =
+                "Security check: This WebAgent script contains step(s) that will send an e-mail." & vbCrLf & vbCrLf &
+                "Recipients detected:" & vbCrLf &
+                String.Join(vbCrLf, lines) & vbCrLf & vbCrLf &
+                "Do you wish to continue?"
+
+            ' Ask for confirmation
+            Dim ok As Integer = ShowCustomYesNoBox(msg, "Yes", "No, abort")
+            Return ok
+        Catch ex As Exception
+            ' On any unexpected error, be safe and require explicit approval by failing the check
+            ShowCustomMessageBox("Email send confirmation failed: " & ex.Message, $"{AN} WebAgent")
+            Return 0
+        End Try
+    End Function
+
+    Public Async Sub WebAgent()
+
+        If INILoadFail() Then Return
+
+        ' 1) Let user pick a script file (local first) similar to FindClause but using ShowSelectionForm
+        Dim selectedFile As String = GetWebAgentScriptFile()
+        If String.IsNullOrWhiteSpace(selectedFile) Then Exit Sub
+
+        Dim script As String = Nothing
+        Try
+            script = IO.File.ReadAllText(selectedFile, System.Text.Encoding.UTF8)
+        Catch ex As Exception
+            ShowCustomMessageBox("Failed to read script file:" & vbCrLf & selectedFile & vbCrLf & ex.Message, $"{AN} WebAgent")
+            Exit Sub
+        End Try
+
+        If String.IsNullOrWhiteSpace(script) Then
+            ShowCustomMessageBox("Script file is empty: " & selectedFile, $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        ' 2) Detect and process parameter placeholders {{parameterN = ...}}
+        If Not ProcessWebAgentParameterPlaceholders(script) Then
+            ShowCustomMessageBox("WebAgent canceled (no parameters applied).", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        If Not ProcessWebAgentSecretPlaceholders(script) Then
+            ShowCustomMessageBox("WebAgent canceled (secrets).", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        ' 3) Parse (after substitution) to validate + for pre-flight checks
+        Dim rootObj As JObject = Nothing
+        Try
+            rootObj = JObject.Parse(script)
+        Catch ex As Exception
+            SLib.PutInClipboard(ex.Message)
+            ShowCustomMessageBox("Your script contains an incorrect JSON string (error copied to clipboard):" & vbCrLf & ex.Message, $"{AN} WebAgent")
+            Exit Sub
+        End Try
+
+        Dim stepsArr = TryCast(rootObj("steps"), JArray)
+        If stepsArr Is Nothing OrElse stepsArr.Count = 0 Then
+            ShowCustomMessageBox("No steps found in script.", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        If ConfirmEmailSendSteps(rootObj) <> 1 Then
+            ShowCustomMessageBox("WebAgent canceled (email send not approved).", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        ' 4) Pre-flight relative URL warnings
+        Dim baseUrl As String = rootObj.SelectToken("env.base_url")?.ToString()
+        Dim relativeIssues As New List(Of String)
+        For Each st As JObject In stepsArr
+            Dim cmd = st.Value(Of String)("command")
+            If cmd = "open_url" OrElse cmd = "http_request" Then
+                Dim p = TryCast(st("params"), JObject)
+                Dim rawUrl = p?("url")?.ToString()
+                If Not String.IsNullOrWhiteSpace(rawUrl) Then
+                    If Not rawUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) AndAlso
+                       Not rawUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) Then
+                        If String.IsNullOrWhiteSpace(baseUrl) Then
+                            relativeIssues.Add($"Step id='{st.Value(Of String)("id")}' uses relative or scheme-less URL '{rawUrl}' but env.base_url is not set.")
+                        End If
+                    End If
+                Else
+                    relativeIssues.Add($"Step id='{st.Value(Of String)("id")}' has empty or missing params.url.")
+                End If
+            End If
+        Next
+        If relativeIssues.Count > 0 Then
+            Dim warnText As New StringBuilder()
+            warnText.AppendLine("Pre-flight URL warnings:")
+            For Each w In relativeIssues
+                warnText.AppendLine(w)
+            Next
+            ShowCustomMessageBox(warnText.ToString().TrimEnd(), $"{AN} WebAgent", 20)
+        End If
+
+        ' 5) Run interpreter
+        Dim finalMd As String = ""
+        Dim webAgentCompleted As Boolean = False
+        Dim abortedByEsc As Boolean = False
+
+        _webAgentRunCts = New CancellationTokenSource()         ' no fixed timeout
+        Dim ctsWeb = _webAgentRunCts
+
+        ' Fully qualify Task to avoid ambiguity with Microsoft.Office.Interop.Word.Task
+        Dim escMonitor As System.Threading.Tasks.Task =
+            System.Threading.Tasks.Task.Run(Sub() PollEscForCancel(ctsWeb))
+
+        Using interp As New WebAgentInterpreter()
+            Dim sw As Stopwatch = Stopwatch.StartNew()
+            Try
+                finalMd = Await interp.RunAsync(
+                    rootObj.ToString(Formatting.None),
+                    _context,
+                    True,   ' useSecondAPI
+                    True,   ' autoselectModel
+                    ctsWeb.Token)
+
+                webAgentCompleted = True
+
+            Catch ex As OperationCanceledException
+                abortedByEsc = ctsWeb.IsCancellationRequested
+                If abortedByEsc Then
+                    finalMd = "# WebAgent aborted (ESC)" & vbCrLf & "User pressed ESC."
+                Else
+                    finalMd = "# WebAgent run canceled" & vbCrLf & ex.Message
+                End If
+
+            Catch ex As Exception
+                Dim coreMsg = If(String.IsNullOrWhiteSpace(ex.Message), ex.GetType().Name, ex.Message)
+                finalMd = "# WebAgent run failed" & vbCrLf & coreMsg
+            End Try
+            sw.Stop()
+        End Using
+
+        ' Stop ESC monitor task (fully qualified Task to suppress ambiguity)
+        Try
+            ctsWeb.Cancel()
+            System.Threading.Tasks.Task.WaitAny(New System.Threading.Tasks.Task() {escMonitor}, 250)
+        Catch
+        End Try
+
+        Dim isFailure As Boolean =
+                    String.IsNullOrWhiteSpace(finalMd) OrElse
+                    finalMd.StartsWith("# WebAgent run failed", StringComparison.OrdinalIgnoreCase) OrElse
+                    finalMd.StartsWith("# WebAgent run canceled", StringComparison.OrdinalIgnoreCase) OrElse
+                    finalMd.StartsWith("# WebAgent aborted", StringComparison.OrdinalIgnoreCase)
+
+        If Not isFailure Then
+            If finalMd.IndexOf("{{", StringComparison.Ordinal) >= 0 Then
+                finalMd &= vbCrLf & vbCrLf & "_Warning: Unresolved template placeholders remain in output._"
+            End If
+        ElseIf String.IsNullOrWhiteSpace(finalMd) Then
+            finalMd = "# WebAgent produced no output."
+        End If
+
+        InfoBox.ShowInfoBox("")
+
+        Dim DialogResult As String = ShowCustomWindow("The WebAgent produced the following report:", finalMd, "You can edit the report. If you select OK, it will be copied to the clipboard in the original or edited form. You can also have the original inserted or transferred to the pane.", $"{AN} WebAgent", False, False, True, True)
+
+        If DialogResult <> "" AndAlso DialogResult <> "Pane" Then
+            If DialogResult = "Markdown" Then
+                Dim NewDocChoice As Integer = ShowCustomYesNoBox("Do you want to insert the text into a new Word document (if you cancel, it will be in the clipboard with formatting)?", "Yes, new", "No, into my existing doc")
+
+                If NewDocChoice = 1 Then
+                    Dim newDoc As Word.Document = Globals.ThisAddIn.Application.Documents.Add()
+                    Dim currentSelection As Word.Selection = newDoc.Application.Selection
+                    currentSelection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    InsertTextWithMarkdown(currentSelection, finalMd, True, True)
+                ElseIf NewDocChoice = 2 Then
+                    Globals.ThisAddIn.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    Globals.ThisAddIn.Application.Selection.TypeParagraph()
+                    InsertTextWithMarkdown(Globals.ThisAddIn.Application.Selection, vbCrLf & finalMd, False)
+                Else
+                    ShowCustomMessageBox("No text was inserted (but included in the clipboard as RTF).")
+                    SLib.PutInClipboard(finalMd)
+                End If
+            Else
+                SLib.PutInClipboard(DialogResult)
+            End If
+        ElseIf DialogResult = "Pane" Then
+            ShowPaneAsync(
+                "The WebAgent produced the following report:",
+                finalMd,
+                "",
+                AN,
+                noRTF:=False,
+                insertMarkdown:=True
+            )
+        End If
+    End Sub
+
+    Public Const WebAgentJSONInstruct As String =
+        "WEB AGENT SCRIPT SPECIFICATION (for WebAgentInterpreter) " & vbCrLf &
+        "Version: Generated from current interpreter code. Provide this spec verbatim to an LLM so it can reliably author valid scripts." & vbCrLf &
+        "==================================================================================================================" & vbCrLf &
+        "1. TOP-LEVEL JSON STRUCTURE" & vbCrLf &
+        "{""meta"":{...},""env"":{...},""steps"":[ {StepObject}, ... ] }" & vbCrLf &
+        "All fields optional unless marked required." & vbCrLf &
+        "" & vbCrLf &
+        "meta:" & vbCrLf &
+        "  default_timeout_ms : Int (ms for steps without own timeout_ms)" & vbCrLf &
+        "  user_agent         : String (default 'WebAgentInterpreter/1.0')" & vbCrLf &
+        "" & vbCrLf &
+        "env:" & vbCrLf &
+        "  base_url   : String (used for resolving relative URLs)" & vbCrLf &
+        "  headers    : { headerName: value, ... } (applied globally first)" & vbCrLf &
+        "  secrets    : { name: valueOrReference } (if value starts with 'secret://', interpreter tries lookup in internal _secrets; returns '' if missing)" & vbCrLf &
+        "  variables  : { name: initialValue } (arbitrary JSON values become initial _vars entries)" & vbCrLf &
+        "" & vbCrLf &
+        "steps: Array of Step Objects executed sequentially (with possible jumps via on_error.goto or guard.else_goto)." & vbCrLf &
+        "Each Step Object keys:" & vbCrLf &
+        "  id          : String (recommended, used by jumps and reporting)" & vbCrLf &
+        "  command     : String (one of COMMAND LIST below)" & vbCrLf &
+        "  params      : Object (command-specific)" & vbCrLf &
+        "  timeout_ms  : Int (overrides default_timeout_ms for this step)" & vbCrLf &
+        "  retry       : { max:Int, delay_ms:Int, backoff:Double }  (exponential delay = delay_ms * backoff^(attemptIndex))" & vbCrLf &
+        "  on_error    : { action:""continue|goto|abort|retry"", goto:""StepId"" } (if step permanently fails after retries)" & vbCrLf &
+        "                action meanings:" & vbCrLf &
+        "                  continue = swallow error, proceed to next step" & vbCrLf &
+        "                  goto     = jump to specified step id (requires goto field)" & vbCrLf &
+        "                  abort    = rethrow (halts script)" & vbCrLf &
+        "                  retry    = (already exhausted normal retry) will rethrow (use only if you wrap externally)" & vbCrLf &
+        "                if on_error absent and _failHard=False (default), failures do not stop unless thrown" & vbCrLf &
+        "  assign      : { var: ""varName"", path:""jsonPath"" } (stores result; if path given, selects token by JToken.SelectToken)" & vbCrLf &
+        "  guard       : { if:""ConditionExpr"", else_goto:""StepId"" } (skip this step if condition FALSE; optional branch jump)" & vbCrLf &
+        "  wait_for    : { type:""time|url|selector"", ... } (post-step passive check/log – DOES NOT WAIT actively except type=time before step execution)" & vbCrLf &
+        "               time     => { type:""time"", timeout_ms:Int } (pre-step delay)" & vbCrLf &
+        "               url      => { type:""url"", value:""substring expected in last URL"" } (logs if not found)" & vbCrLf &
+        "               selector => { type:""selector"", selector:{...same selector object...} } (logs if missing)" & vbCrLf &
+        "" & vbCrLf &
+        "2. VARIABLE SYSTEM / TEMPLATE EXPANSION" & vbCrLf &
+        "Variables stored in internal _vars dictionary. Placeholders: {{varName}} or nested paths like {{object.prop}}." & vbCrLf &
+        "Special resolution rules:" & vbCrLf &
+        "  - {{env.DESKTOP}} returns user desktop path." & vbCrLf &
+        "  - {{base_url}} returns env.base_url (if set)." & vbCrLf &
+        "  - If placeholder unresolved it is left intact (still '{{...}}') and logged as unresolved." & vbCrLf &
+        "  - Templates are expanded in most string params via ExpandTemplates BEFORE execution." & vbCrLf &
+        "  - 'template' command performs Mustache-like render (supports #section, ^inverted, simple vars, triple {{{var}}}); then a second global variable expansion pass runs." & vbCrLf &
+        "Truthiness (_IsTruthy) for conditions: False if null, empty string, 'false','0','null','none','nil' (case-insensitive); empty non-string IEnumerable => False; everything else True." & vbCrLf &
+        "" & vbCrLf &
+        "3. CONDITION SYNTAX (used in guard.if and if.params.condition)" & vbCrLf &
+        "Supported forms (whitespace tolerant):" & vbCrLf &
+        "  exists {{var}}" & vbCrLf &
+        "  {{var}} == ""literal""            (string comparison, case-insensitive)" & vbCrLf &
+        "  {{var}} contains ""substring""    (case-insensitive)" & vbCrLf &
+        "  {{var}} ~= ""regex""              (Regex, Singleline + IgnoreCase)" & vbCrLf &
+        "  {{var}} == []                     (True if var is null, empty string, or empty enumerable)" & vbCrLf &
+        "Logical OR: expr1 || expr2 || expr3 (evaluated left→right, returns True on first True)." & vbCrLf &
+        "No AND operator explicitly; emulate with nested guards or De Morgan via OR." & vbCrLf &
+        "" & vbCrLf &
+        "4. IMPLICIT / COMMON VARIABLES" & vbCrLf &
+        "  base_url                (from env)" & vbCrLf &
+        "  last_http_status        (Int) after open_url / http_request" & vbCrLf &
+        "  last_http_elapsed_ms    (Int)" & vbCrLf &
+        "  last_step_id            (String)" & vbCrLf &
+        "  lastLlm                 (JObject or wrapper) parsed/sanitized LLM response (+ step/page metadata)" & vbCrLf &
+        "  lastLlm_raw             (Raw LLM text)" & vbCrLf &
+        "  lastLlm_page_url        (URL at time of LLM step)" & vbCrLf &
+        "  lastLlm_latency_ms      (Int)" & vbCrLf &
+        "  auto_links              (List<String>) extracted anchor URLs (auto extraction)" & vbCrLf &
+        "  auto_link_patterns      (List<String>) optional patterns (set via set_var or AddAutoLinkPattern; defaults included)" & vbCrLf &
+        "  auto_link_enable        (Boolean) enable/disable automatic link collection" & vbCrLf &
+        "  auto_link_min           (Int) minimal href length (default 15)" & vbCrLf &
+        "  all_decisions / decision_links (used if a custom step populates them; code supports accumulation pattern)" & vbCrLf &
+        "" & vbCrLf &
+        "5. SELECTOR OBJECT (used in extract_text / extract_html / extract_attribute / internal waits)" & vbCrLf &
+        "{ ""strategy"": ""xpath|css|text|regex"", ""value"": ""selectorValue"", optional:" & vbCrLf &
+        "  ""within"": {SelectorObject}  (scopes selection to nodes returned by nested selector)" & vbCrLf &
+        "  ""relative"": { ""position"": ""first|last|nth"", ""nth"": Int }" & vbCrLf &
+        "}" & vbCrLf &
+        "Strategy behaviors:" & vbCrLf &
+        "  xpath: value is raw XPath" & vbCrLf &
+        "  css  : limited CSS -> XPath translator (supports tag, .class, #id, [attr=value], :nth-child(n), descendant ' ', '>' direct child)" & vbCrLf &
+        "  text : value OR 'exact:literal' (case-insensitive substring unless 'exact:' prefix)" & vbCrLf &
+        "  regex: regex matched against normalized inner text" & vbCrLf &
+        "" & vbCrLf &
+        "6. COMMAND REFERENCE" & vbCrLf &
+        "Command names are case-insensitive; llm_analyze, llm, llmanalyze map to same implementation." & vbCrLf &
+        "" & vbCrLf &
+        "a) set_user_agent" & vbCrLf &
+        "  params: { ""user_agent"": ""string"" }" & vbCrLf &
+        "  result: { user_agent }" & vbCrLf &
+        "" & vbCrLf &
+        "b) set_headers" & vbCrLf &
+        "  params: { ""mode"":""replace|merge"", ""headers"": { name:value,... } }" & vbCrLf &
+        "  'replace' clears previous; 'merge'(default) adds/overwrites." & vbCrLf &
+        "  result: { headers: { ...effectiveHeaders } }" & vbCrLf &
+        "" & vbCrLf &
+        "c) set_cookies" & vbCrLf &
+        "  params: { ""cookies"": [ { name, value, domain, path, secure:Bool?, httpOnly:Bool? }, ... ] }" & vbCrLf &
+        "  result: { count: Int }" & vbCrLf &
+        "" & vbCrLf &
+        "d) open_url" & vbCrLf &
+        "  params: { url:String (required), method:String (default GET), headers:Object?, body:Any?, body_type:""json|form|raw"", return_body:Bool?, timeout_ms:Int?, retry:{max,delay_ms,backoff} }" & vbCrLf &
+        "  Loads page, sets DOM, auto extracts links, sets lastResponseUrl/Body." & vbCrLf &
+        "  result: { status, url, elapsed_ms, (body if return_body=True) }" & vbCrLf &
+        "" & vbCrLf &
+        "e) wait" & vbCrLf &
+        "  params: { ms:Int }" & vbCrLf &
+        "  result: { slept: ms }" & vbCrLf &
+        "" & vbCrLf &
+        "f) find" & vbCrLf &
+        "  params: { ""in"":""varName"", ""text"":""needle"", ""assign"":{""var"":""destVar""} }" & vbCrLf &
+        "  Case-insensitive substring search. result: { found:Boolean, index:Int|-1 }" & vbCrLf &
+        "" & vbCrLf &
+        "g) extract_text" & vbCrLf &
+        "  params: { selector:{...}, all:Bool?(default False), normalize_whitespace:Bool?(default True), regex:String?, group:Int? }" & vbCrLf &
+        "  If all=False ⇒ returns first matched text (after optional regex extraction). If all=True ⇒ returns List<String>." & vbCrLf &
+        "" & vbCrLf &
+        "h) extract_html" & vbCrLf &
+        "  params: { selector:{...}, outer:Bool?(default False) }" & vbCrLf &
+        "  Returns inner (default) or outer HTML of first match or """" if none." & vbCrLf &
+        "" & vbCrLf &
+        "i) extract_attribute" & vbCrLf &
+        "  params: { nodes_var:""varHoldingSerializedNodes"", attribute:""attrName"", var:""targetVar"" }" & vbCrLf &
+        "  Expects nodes_var to contain an enumerable of serialized node dicts (with 'attributes'). Collects attribute values list to targetVar." & vbCrLf &
+        "  result: null (stores list)" & vbCrLf &
+        "" & vbCrLf &
+        "j) download_url" & vbCrLf &
+        "  params: { url, target_dir, filename?, method?, headers?, body?, body_type? }" & vbCrLf &
+        "  Writes file. result: { path, status }" & vbCrLf &
+        "" & vbCrLf &
+        "k) save_file" & vbCrLf &
+        "  params: { path, content, encoding? }" & vbCrLf &
+        "  encoding==""binary"" ⇒ content must be Base64; else UTF-8 text." & vbCrLf &
+        "  result: { path }" & vbCrLf &
+        "" & vbCrLf &
+        "l) read_file" & vbCrLf &
+        "  params: { path, encoding? }" & vbCrLf &
+        "  encoding==""binary"" ⇒ returns Base64; else UTF-8 text." & vbCrLf &
+        "" & vbCrLf &
+        "m) http_request (generic, does NOT auto link-extract unless you parse body via subsequent open_url if needed)" & vbCrLf &
+        "  params: { url, method?, headers?, query:{k:v}, body, body_type, timeout_ms? }" & vbCrLf &
+        "  result: { status, headers:StringDump, body, url } (also sets DOM for body like open_url)" & vbCrLf &
+        "" & vbCrLf &
+        "n) set_var" & vbCrLf &
+        "  params: { name, value } (value may be any JSON; strings get template-expanded)" & vbCrLf &
+        "  result: { name, value }" & vbCrLf &
+        "" & vbCrLf &
+        "o) template" & vbCrLf &
+        "  params: { template:String(Mustache-lite), context:Object }" & vbCrLf &
+        "  Section rules (#name repeats over arrays; ^name for inverted). Triple {{{var}}} leaves raw (then second pass expansion)." & vbCrLf &
+        "  result: rendered String" & vbCrLf &
+        "" & vbCrLf &
+        "p) if" & vbCrLf &
+        "  params: { condition:String, steps:[StepObjects], else_steps:[StepObjects]? }" & vbCrLf &
+        "  Executes branch inline (sub-steps share same variable scope)." & vbCrLf &
+        "" & vbCrLf &
+        "q) foreach" & vbCrLf &
+        "  params: { list:""varNameHoldingArray"", item_var:""loopItemVar"", steps:[...], continue_on_error:Bool?, stop_on_error:Bool?, max_items:Int?, break_if_var_true:""varName"" }" & vbCrLf &
+        "  Loop variables added: item_var, item_var_index." & vbCrLf &
+        "  Error policy precedence: stop_on_error=True overrides continue_on_error." & vbCrLf &
+        "  Optional break_if_var_true variable checked each iteration." & vbCrLf &
+        "  result: { count:<iterationsSeen>, executed:<successfulBodies> }" & vbCrLf &
+        "" & vbCrLf &
+        "r) render_report" & vbCrLf &
+        "  params: { engine:? (ignored currently), template:String, context:Object?, output_path:String? }" & vbCrLf &
+        "  Produces Markdown; writes file if output_path (after expansion and ensuring no '{{' remain). Sets _finalMarkdown." & vbCrLf &
+        "  result: { output: ""(memory)"" or filePath }" & vbCrLf &
+        "" & vbCrLf &
+        "s) delete_file" & vbCrLf &
+        "  params: { path } result: Bool (true if deleted, false if absent/error)" & vbCrLf &
+        "" & vbCrLf &
+        "t) send_email_report" & vbCrLf &
+        "  params (most template-expanded safely):" & vbCrLf &
+        "    to (semicolon or comma separated)" & vbCrLf &
+        "    subject?  body_markdown? (if not full HTML, converted via Markdig)" & vbCrLf &
+        "    smtp_host, smtp_port?, smtp_ssl?(""true|false""), smtp_auth?, smtp_user?, smtp_pass?" & vbCrLf &
+        "    from_email?, from_name?, ip_override?, helo_domain?, net? (network domain override)" & vbCrLf &
+        "  Adds footer '(created using Red Ink WebAgent at <ip> from <domain>)' both HTML & plain." & vbCrLf &
+        "  Sends multipart/alternative (text/plain + text/html)." & vbCrLf &
+        "  result: Bool" & vbCrLf &
+        "" & vbCrLf &
+        "u) log" & vbCrLf &
+        "  params: { level:String, message:String } (message expanded) → appends to internal log." & vbCrLf &
+        "" & vbCrLf &
+        "v) enable_dynamic" & vbCrLf &
+        "  params: (ignored - may be sent same object as step) Enables dynamic fetch expansion (limited to MAX_DYNAMIC_FETCH=10)." & vbCrLf &
+        "" & vbCrLf &
+        "w) array_push" & vbCrLf &
+        "  params: { array:""targetArrayVar"", item_var:""existingVar"" | item:<inlineValue> }" & vbCrLf &
+        "  If array var absent or not JArray, creates new JArray. Appends deep-cloned token." & vbCrLf &
+        "  result: { pushed:Boolean, count:Int, array:String }" & vbCrLf &
+        "" & vbCrLf &
+        "x) llm / llm_analyze / llmanalyze" & vbCrLf &
+        "  params accepted synonyms:" & vbCrLf &
+        "    system | systemPrompt   (system role)" & vbCrLf &
+        "    user | prompt | input | arguments (user prompt text)" & vbCrLf &
+        "    temperature            (string or number; falls back to context INI)" & vbCrLf &
+        "    timeoutMs              (ms for this call)" & vbCrLf &
+        "    status_var             (if set & equals ""404"" and allow_llm_on_404 not true, step skipped)" & vbCrLf &
+        "    inner_attempts:Int     (internal re-tries if non-JSON or invalid, default 1)" & vbCrLf &
+        "    inner_delay_ms:Int     (delay between inner attempts)" & vbCrLf &
+        "  Validation / gating flags:" & vbCrLf &
+        "    retry_on_invalid:Bool       (throw if invalid so outer step retry triggers)" & vbCrLf &
+        "    reject_if_empty:Bool        (empty sanitized output invalid)" & vbCrLf &
+        "    reject_if_plaintext:Bool    (non-JSON invalid unless allow_non_json)" & vbCrLf &
+        "    allow_non_json:Bool         (overrides reject_if_plaintext)" & vbCrLf &
+        "    require_key:""k1,k2""        (all keys must exist unless require_key_all=False)" & vbCrLf &
+        "    require_key_all:Bool        (default True)" & vbCrLf &
+        "    require_array_key:""arr1,arr2"" (each must be JSON array)" & vbCrLf &
+        "    require_min_items:Int       (applies to each require_array_key array)" & vbCrLf &
+        "    log_raw:Bool                (dump raw output to debug file if debug enabled)" & vbCrLf &
+        "    max_preview:Int             (UI preview length, default 250)" & vbCrLf &
+        "  Output handling:" & vbCrLf &
+        "    - Removes fenced code blocks, prefers JSON in them, else tries first JSON substring." & vbCrLf &
+        "    - Wraps plaintext if needed with markers (_invalid reasons) if validation fails." & vbCrLf &
+        "    - Stores structured result in lastLlm and metadata fields; raw text in lastLlm_raw." & vbCrLf &
+        "" & vbCrLf &
+        "7. RETRY MECHANICS" & vbCrLf &
+        "At STEP level: 'retry' object controls entire step body incl. network call(s)." & vbCrLf &
+        "At SUB-STEPS inside foreach/if: internal retry loops replicate same pattern (attempt logging)." & vbCrLf &
+        "Backoff formula: effectiveDelay = delay_ms * (backoff ^ attemptIndex). attemptIndex starts at 0." & vbCrLf &
+        "" & vbCrLf &
+        "8. ERROR HANDLING" & vbCrLf &
+        "Network transient statuses recognized (IsTransientStatus): 408,425,429,500,502,503,504 cause automatic retry if step retry configured." & vbCrLf &
+        "on_error applied after all retries fail." & vbCrLf &
+        "failHard flag FALSE (compiled constant) so unhandled non-network failures usually logged and may proceed unless thrown." & vbCrLf &
+        "" & vbCrLf &
+        "9. DYNAMIC EXPANSION" & vbCrLf &
+        "enable_dynamic triggers post-load scanning of scripts & inline code for index_aza.php patterns and fetches up to MAX_DYNAMIC_FETCH (10) additional resources, appending their content to DOM HTML." & vbCrLf &
+        "" & vbCrLf &
+        "10. AUTO LINK EXTRACTION" & vbCrLf &
+        "After open_url/http_request load, AutoExtractLinks() collects anchors (//a[@href]) whose href length >= auto_link_min and matches any regex in auto_link_patterns (default supplied). Stored as auto_links list." & vbCrLf &
+        "Control flags via set_var: auto_link_enable (Bool), auto_link_patterns (List<String> or String), auto_link_min (Int)." & vbCrLf &
+        "" & vbCrLf &
+        "11. TEMPLATE SYSTEM (SimpleMustacheRender)" & vbCrLf &
+        "Supported: {{var}}, {{{var}}}, sections: {{#name}}...{{/name}}, inverted {{^name}}...{{/name}}. No lambdas. Nested keys via JSON paths inside context or top-level context properties." & vbCrLf &
+        "Unresolved vars are left as {{var}} for second pass global expansion." & vbCrLf &
+        "" & vbCrLf &
+        "12. ASSIGN PATH SEMANTICS" & vbCrLf &
+        "If assign.path present, interpreter converts result object to JToken, then SelectToken(path). If token missing, stores null." & vbCrLf &
+        "Use standard JSONPath-like JToken paths (e.g. 'data.items[0].title')." & vbCrLf &
+        "" & vbCrLf &
+        "13. FILE ENCODING NOTES" & vbCrLf &
+        "save_file / read_file with encoding 'binary' use Base64 payloads." & vbCrLf &
+        "download_url always writes raw bytes to file; does not auto base64 them." & vbCrLf &
+        "" & vbCrLf &
+        "14. URL RESOLUTION" & vbCrLf &
+        "Relative URL precedence: lastResponseUrl (if any) → base_url → unchanged string." & vbCrLf &
+        "Markdown-style [text](url) patterns sanitized; angle brackets <...> stripped if present." & vbCrLf &
+        "" & vbCrLf &
+        "15. LLM RESULT SANITIZATION LOGIC (SanitizeLlmResult)" & vbCrLf &
+        "1) Extract fenced code block(s) ```lang ...```; if any block parses as JSON, first one returned." & vbCrLf &
+        "2) Remove code fences if present; attempt full parse; else extract first balanced {...} or [...] substring; else strip stray backticks." & vbCrLf &
+        "" & vbCrLf &
+        "16. LOOP / FOREACH CAUTIONS" & vbCrLf &
+        "Inside foreach, modifications to item_var can affect subsequent logic but original enumerable enumerated from snapshot at loop start." & vbCrLf &
+        "break_if_var_true evaluated after iteration body." & vbCrLf &
+        "" & vbCrLf &
+        "17. DEBUG FLAGS (set via variables to True/False):" & vbCrLf &
+        "  debug, debug_allAttempts, debug_substeps, debug_var_changes, debug_include_script, debug_summary, debug_clear_llm_state," & vbCrLf &
+        "  allow_llm_on_404, llm_rethrow_all" & vbCrLf &
+        "Enable by setting corresponding variable to 'true' (string) or Boolean True (set_var)." & vbCrLf &
+        "" & vbCrLf &
+        "18. EXAMPLE MINIMAL SCRIPT" & vbCrLf &
+        "{""meta"":{""default_timeout_ms"":15000}," & vbCrLf &
+        """env"":{""base_url"":""https://example.com"",""variables"":{""searchTerm"":""widgets""}}," & vbCrLf &
+        """steps"":[ " & vbCrLf &
+        " {""id"":""open"",""command"":""open_url"",""params"":{""url"":""/products?q={{searchTerm}}""}, ""retry"":{""max"":2,""delay_ms"":1000,""backoff"":2}}," & vbCrLf &
+        " {""id"":""extract"",""command"":""extract_text"",""params"":{""selector"":{""strategy"":""css"",""value"":""h1""}}, ""assign"":{""var"":""pageTitle""}}," & vbCrLf &
+        " {""id"":""decide"",""command"":""if"",""params"":{""condition"":""{{pageTitle}} contains \""Widget\"""",""steps"":[{""id"":""ok"",""command"":""log"",""params"":{""level"":""info"",""message"":""Title ok: {{pageTitle}}""}}],""else_steps"":[{""id"":""warn"",""command"":""log"",""params"":{""level"":""warn"",""message"":""Unexpected title: {{pageTitle}}""}}]}}," & vbCrLf &
+        " {""id"":""llm"",""command"":""llm_analyze"",""params"":{""system"":""Summarize the title."",""user"":""Title: {{pageTitle}}"",""reject_if_empty"":true,""retry_on_invalid"":true,""require_key"":""summary""},""assign"":{""var"":""llmOut""}}," & vbCrLf &
+        " {""id"":""report"",""command"":""render_report"",""params"":{""template"":""# Report\n\nTitle: {{pageTitle}}\n\nLLM: {{llmOut.summary}}"",""output_path"":""{{env.DESKTOP}}\\report.md""}} ]}" & vbCrLf &
+        "" & vbCrLf &
+        "19. COMMON PITFALLS & PREVENTION" & vbCrLf &
+        "- Unresolved placeholders: Always ensure variables exist before referencing; logs show '[template] Unresolved placeholder'." & vbCrLf &
+        "- Using extract_attribute without serialized nodes: Must have a variable containing a list of serialized node objects (normally produced by a custom step; not directly by extract_text/html)." & vbCrLf &
+        "- Relying on AND logic: Use nested if or guard chains (no direct AND operator)." & vbCrLf &
+        "- LLM JSON validation: Provide explicit require_key / require_array_key for deterministic retries." & vbCrLf &
+        "- Guard skip logic: When guard condition false, step is skipped but considered successful; else_goto processed if provided." & vbCrLf &
+        "- open_url vs http_request: open_url supports return_body flag; http_request always returns body. Both set DOM context." & vbCrLf &
+        "- Binary file save/read: Must supply Base64 string when encoding=""binary""." & vbCrLf &
+        "- foreach list missing: Loop silently returns {count:0,executed:0} (log warns) – ensure list variable exists." & vbCrLf &
+        "" & vbCrLf &
+        "20. RECOMMENDED LLM AUTHORING GUIDELINES" & vbCrLf &
+        "- Always produce valid UTF-8 JSON with top-level object and 'steps' array." & vbCrLf &
+        "- Include 'id' for every step (unique, short, no spaces)." & vbCrLf &
+        "- For network steps requiring resilience, add retry:{max,delay_ms,backoff} AND (optionally) on_error to control flow." & vbCrLf &
+        "- Use assign with path when extracting subset from complex results (e.g., assign.path:'data.items[0]')." & vbCrLf &
+        "- For conditional branching prefer explicit if command rather than abusing guard for multi-step blocks." & vbCrLf &
+        "- For loops, ensure the source list variable is known to exist (initialize via set_var or prior assign)." & vbCrLf &
+        "- Provide require_key / require_array_key in llm_analyze to harden JSON outputs; combine with retry_on_invalid for reliability." & vbCrLf &
+        "- Avoid inventing unsupported commands or fields (strict list above)." & vbCrLf &
+        "- Keep URLs absolute or ensure base_url defined for relative forms." & vbCrLf &
+        "- Use enable_dynamic only when needed (dynamic pages); avoids extra fetch overhead." & vbCrLf &
+        "" & vbCrLf &
+        "END OF SPEC" & vbCrLf
+
+    Public Const WebAgentParameterSpec As String =
+            "WEB AGENT PARAMETER PLACEHOLDER SPEC (Additive to Main Script Spec)" & vbCrLf &
+            "Purpose: Enable runtime user parameterization inside a WebAgent script via numbered placeholders." & vbCrLf &
+            "-------------------------------------------------------------------------------------------------" & vbCrLf &
+            "OVERVIEW:" & vbCrLf &
+            "- Parameter DEFINITIONS embed inline in the script: {parameterN=...definition...}" & vbCrLf &
+            "- Parameter REFERENCES elsewhere: {parameterN}" & vbCrLf &
+            "- Definitions are collected, a dialog prompts user for values (unless zero definitions)." & vbCrLf &
+            "- After confirmation: definitions are removed and replaced by resolved (escaped) values; all matching {parameterN} references substituted with same value." & vbCrLf &
+            "- If user cancels, processing returns False and caller should abort execution." & vbCrLf &
+            "" & vbCrLf &
+            "REGEX MATCHES:" & vbCrLf &
+            "- Definition regex:  { parameter(\d+)= (.*?) }   (whitespace tolerant)" & vbCrLf &
+            "- Reference regex:   { parameter(\d+) }" & vbCrLf &
+            "" & vbCrLf &
+            "UNIQUENESS & ORDER:" & vbCrLf &
+            "- First definition for a given N wins; duplicates with same N are ignored." & vbCrLf &
+            "- UI prompt order = ascending parameter number." & vbCrLf &
+            "- Replacement inside script done from the end backward (reverse index) to preserve positions." & vbCrLf &
+            "" & vbCrLf &
+            "DEFINITION SYNTAX (semicolon-separated segments):" & vbCrLf &
+            "  {parameterN=Description ; Type ; DefaultValue ; RangeOrOptions ; ExtraOptions }" & vbCrLf &
+            "  Minimal form: {parameter1=Choose item} (Type defaults to string, default empty)" & vbCrLf &
+            "" & vbCrLf &
+            "SEGMENTS:" & vbCrLf &
+            "  [0] Description (mandatory, shown in UI)" & vbCrLf &
+            "  [1] Type (optional) → one of: string | integer | long | double | boolean (case-insensitive; default=string)" & vbCrLf &
+            "  [2] Default value (optional; interpreted per type)" & vbCrLf &
+            "  [3] EITHER a numeric range (only for integer/long/double) in form MIN-MAX (digits only) OR a comma list of options" & vbCrLf &
+            "  [4] If [3] was a range and this segment exists → treated as additional options list (comma separated)" & vbCrLf &
+            "" & vbCrLf &
+            "OPTIONS SYNTAX:" & vbCrLf &
+            "- Comma-separated: OptionA,OptionB,OptionC" & vbCrLf &
+            "- Each option may embed a display/code pair:  Display Text <actual_code>" & vbCrLf &
+            "  * If no <...> part present, display = code." & vbCrLf &
+            "  * The UI shows display text; stored code value is inserted into script." & vbCrLf &
+            "- Default value resolution: If DefaultValue matches a code entry, UI pre-selects corresponding display." & vbCrLf &
+            "" & vbCrLf &
+            "RANGE HANDLING (for numeric types):" & vbCrLf &
+            "- Pattern: ^\\d+\\s*-\\s*\\d+$ (integers only). Extracted as inclusive [min,max]." & vbCrLf &
+            "- User input (after mapping) clamped into range if parse succeeds." & vbCrLf &
+            "- For integer/long: value rounded (Math.Round) then cast to integral." & vbCrLf &
+            "- For double: stored as parsed (range still integer endpoints)." & vbCrLf &
+            "" & vbCrLf &
+            "TYPE PARSING & DEFAULTS:" & vbCrLf &
+            "- boolean: Boolean.TryParse; output lowercased 'true'/'false'." & vbCrLf &
+            "- integer/long: Integer/Long.TryParse; fallback 0 if invalid." & vbCrLf &
+            "- double: Double.TryParse (culture invariant rules depend on environment; recommend dot decimal)." & vbCrLf &
+            "- string: raw (after display→code mapping if options provided)." & vbCrLf &
+            "" & vbCrLf &
+            "SPECIAL / EMPTY SELECTION HANDLING:" & vbCrLf &
+            "- If chosen value (case-insensitive) starts with '(keine auswahl)', '(no selection)', or '---' → final inserted value = empty string." & vbCrLf &
+            "" & vbCrLf &
+            "JSON ESCAPING:" & vbCrLf &
+            "- Only backslash (\ → \\) and double quote ("" → \"") are escaped before insertion." & vbCrLf &
+            "- No other JSON normalization (caller must ensure placement inside valid JSON string literal positions)." & vbCrLf &
+            "" & vbCrLf &
+            "REFERENCE REPLACEMENT:" & vbCrLf &
+            "- Definitions are replaced in place (the entire {parameterN=...} token → final value)." & vbCrLf &
+            "- Simple references {parameterN} replaced with same value if definition existed." & vbCrLf &
+            "- References to undefined parameter numbers are left untouched." & vbCrLf &
+            "" & vbCrLf &
+            "BEHAVIOR WITH NO DEFINITIONS:" & vbCrLf &
+            "- Function returns True immediately; no prompt; references remain unchanged (allowing static placeholders)." & vbCrLf &
+            "" & vbCrLf &
+            "VALID EXAMPLES:" & vbCrLf &
+            "  {parameter1=API environment ; string ; prod ; prod<https://api.prod.example> , staging<https://api.staging.example> , dev<http://localhost:8080>} " & vbCrLf &
+            "  {parameter2=Max retries ; integer ; 3 ; 0-10}" & vbCrLf &
+            "  {parameter3=Confidence threshold ; double ; 0.65 ; 0-1 ; 0.25,0.5,0.65,0.75,0.9}" & vbCrLf &
+            "  {parameter4=Enable verbose logging ; boolean ; true}" & vbCrLf &
+            "  {parameter5=Output format ; string ; json ; json<application/json>,xml<application/xml>}" & vbCrLf &
+            "" & vbCrLf &
+            "UI PROMPT ORDER & CORRELATION:" & vbCrLf &
+            "- User sees description; for enumerated selections a dropdown of display labels." & vbCrLf &
+            "- After submit each selected/entered value is transformed (display→code, clamped, escaped) then substituted." & vbCrLf &
+            "" & vbCrLf &
+            "EDGE CASES / SAFEGUARDS:" & vbCrLf &
+            "- Whitespace around semicolons ignored (segments trimmed)." & vbCrLf &
+            "- Extra segments beyond defined semantics are ignored." & vbCrLf &
+            "- If range present but user input not numeric, original string left (then possibly empty if sentinel)." & vbCrLf &
+            "- Multiple identical options allowed but first matching code resolves default." & vbCrLf &
+            "- Duplicate parameter definitions: only first retained; later ones inert text until replaced when earlier removal shifts indexes (safe due to reverse replacement)." & vbCrLf &
+            "" & vbCrLf &
+            "INTEGRATION INTO JSON SCRIPTS:" & vbCrLf &
+            "- Place definitions where a literal value will finally appear (e.g. in place of a string literal's value body)." & vbCrLf &
+            "- Example inside JSON (ensure resulting JSON remains valid *after* replacement):" & vbCrLf &
+            "  ""url"": ""{parameter1=https://api.example.com ; string ; https://api.example.com}/v1/items""  (NOT RECOMMENDED because the definition will collapse into a raw URL → better put definition alone then follow with concatenation outside or define before and reference)" & vbCrLf &
+            "- Recommended pattern: define at top (outside JSON structural tokens if pre-processed) or as value of a string field by itself: ""base_url"": ""{parameter1=Base URL ; string ; https://api.example.com}""" & vbCrLf &
+            "" & vbCrLf &
+            "RECOMMENDED AUTHORING RULES FOR LLM:" & vbCrLf &
+            "- Use sequential numbering starting at 1; avoid gaps unless intentional." & vbCrLf &
+            "- Use descriptive, concise descriptions (≤ 60 chars)." & vbCrLf &
+            "- Provide defaults that yield a runnable script without user edits when possible." & vbCrLf &
+            "- Use ranges only when numeric validation is concretely useful; otherwise supply enumerated options." & vbCrLf &
+            "- Always ensure final substituted form keeps JSON valid (surround with quotes if expecting string)." & vbCrLf &
+            "- Do NOT reference {parameterN} without defining it unless deliberately leaving literal marker." & vbCrLf &
+            "" & vbCrLf &
+            "NON-VALID / ANTI-PATTERNS:" & vbCrLf &
+            "- {parameter1=}  (missing description)" & vbCrLf &
+            "- {parameterX=...} where X not numeric" & vbCrLf &
+            "- Embedding raw unescaped quotes in definition segments causing broken JSON context." & vbCrLf &
+            "" & vbCrLf &
+            "POST-PROCESSING OUTCOME SUMMARY:" & vbCrLf &
+            "- Success → script mutated with raw values inserted, function True." & vbCrLf &
+            "- Cancel → script unchanged from original input (except maybe partial test state), function False." & vbCrLf &
+            "" & vbCrLf &
+            "SECURITY CONSIDERATIONS:" & vbCrLf &
+            "- Only minimal JSON escaping; if values may inject additional JSON structure, caller must sandbox or further sanitize." & vbCrLf &
+            "- Angle-bracket code extraction is purely syntactic; no HTML interpretation." & vbCrLf &
+            "" & vbCrLf &
+            "QUICK TEMPLATE FOR LLM GENERATION:" & vbCrLf &
+            "- Integer with range: {parameter1=Retry count ; integer ; 3 ; 0-10}" & vbCrLf &
+            "- Double with options: {parameter2=Threshold ; double ; 0.75 ; 0.25,0.5,0.75,0.9}" & vbCrLf &
+            "- Enum string: {parameter3=Mode ; string ; safe ; safe<safe>,fast<fast>,audit<audit>}" & vbCrLf &
+            "- Boolean: {parameter4=Enable cache ; boolean ; false}" & vbCrLf &
+            "" & vbCrLf &
+            "END OF PARAMETER SPEC"
+
+    Public Async Sub CreateModifyWebAgentScript()
+
+        If INILoadFail() Then Return
+
+        ' 0) Preconditions: paths configured?
+
+        Dim globalPath As String = ExpandEnvironmentVariables(INI_WebAgentPath)
+        Dim localPath As String = ExpandEnvironmentVariables(INI_WebAgentPathLocal)
+
+        If (String.IsNullOrWhiteSpace(globalPath) AndAlso String.IsNullOrWhiteSpace(localPath)) Then
+            ShowCustomMessageBox("No WebAgent paths configured ('WebAgentPath' / 'WebAgentPathLocal' parameters in the configuration file).", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        ' Pick working directory (prefer local if available)
+        Dim targetDir As String = If(Not String.IsNullOrWhiteSpace(localPath) AndAlso IO.Directory.Exists(localPath),
+                                     localPath,
+                                     If(Not String.IsNullOrWhiteSpace(globalPath) AndAlso IO.Directory.Exists(globalPath),
+                                        globalPath,
+                                        Nothing))
+        If String.IsNullOrWhiteSpace(targetDir) Then
+            ShowCustomMessageBox("Neither configured WebAgent directory exists.", $"{AN} WebAgent")
+            Exit Sub
+        End If
+
+        ' 1) New vs Amend
+        Dim modeChoice = ShowCustomYesNoBox(
+            "Do you want to create a new WebAgent script or amend an existing one?",
+            "New",
+            "Amend existing",
+            $"{AN} WebAgent")
+        If modeChoice = 0 Then Exit Sub
+
+        Dim existingScriptPath As String = Nothing
+        Dim originalScriptText As String = Nothing
+        Dim isAmend As Boolean = (modeChoice = 2)
+
+        If isAmend Then
+            existingScriptPath = GetWebAgentScriptFile()
+            If String.IsNullOrWhiteSpace(existingScriptPath) Then Exit Sub
+            Try
+                ' Read current script (initial content before possible user edits)
+                originalScriptText = IO.File.ReadAllText(existingScriptPath, System.Text.Encoding.UTF8)
+
+                ' Open in embedded text editor so user can review / edit.
+                ' (Editor saves directly to the same path when user clicks Save.)
+                SharedLibrary.SharedLibrary.SharedMethods.ShowTextFileEditor(existingScriptPath, $"{AN} WebAgent Script '{existingScriptPath}' (you can have it amended by the LLM once you close the editor):")
+
+                ' Ask whether to proceed with automatic LLM amendment after editor closes
+                Dim amendChoice As Integer = SharedLibrary.SharedLibrary.SharedMethods.ShowCustomYesNoBox(
+                    bodyText:="Do you want to automatically amend the script using the LLM now?",
+                    button1Text:="Yes",
+                    button2Text:="No",
+                    header:=$"{AN} WebAgent"
+                )
+
+                ' Convention: assuming ShowCustomYesNoBox returns 1 for first button ("Yes"), 2 for second.
+                If amendChoice <> 1 Then
+                    ' User chose not to proceed with LLM amendment
+                    Exit Sub
+                End If
+
+                ' Re-read file to capture any edits the user may have saved
+                Try
+                    originalScriptText = IO.File.ReadAllText(existingScriptPath, System.Text.Encoding.UTF8)
+                Catch exReload As Exception
+                    ShowCustomMessageBox("Failed to re-read edited script before amendment:" & vbCrLf & exReload.Message, $"{AN} WebAgent")
+                    Exit Sub
+                End Try
+
+            Catch ex As Exception
+                ShowCustomMessageBox("Unable to read existing script:" & vbCrLf & ex.Message, $"{AN} WebAgent")
+                Exit Sub
+            End Try
+        End If
+
+        ' 2) If new, gather filename
+        Dim newScriptPath As String = existingScriptPath
+        If Not isAmend Then
+            Dim defaultName As String = $"{AN2}-ag-newscript.json"
+            Dim rxName As New System.Text.RegularExpressions.Regex($"^{AN2}-ag-[a-z0-9._-]+\.json$", RegexOptions.IgnoreCase)
+            Do
+                Dim nameInput = ShowCustomInputBox($"Enter new script file name (pattern: {AN2}-ag-*.json)", $"{AN} WebAgent", True, defaultName)
+                If String.IsNullOrWhiteSpace(nameInput) Then Exit Sub
+                nameInput = nameInput.Trim()
+                If Not rxName.IsMatch(nameInput) Then
+                    ShowCustomMessageBox($"File name does not comply with pattern '{AN2}-ag-*.json'.", $"{AN} WebAgent")
+                    Continue Do
+                End If
+                Dim fullCandidate = IO.Path.Combine(targetDir, nameInput)
+                If IO.File.Exists(fullCandidate) Then
+                    Dim ow = ShowCustomYesNoBox($"File '{nameInput}' already exists. Overwrite?", "Yes", "No", $"{AN} WebAgent")
+                    If ow = 1 Then
+                        newScriptPath = fullCandidate
+                        Exit Do
+                    ElseIf ow = 0 Then
+                        Exit Sub
+                    Else
+                        Continue Do
+                    End If
+                Else
+                    newScriptPath = fullCandidate
+                    Exit Do
+                End If
+            Loop
+        End If
+
+        If String.IsNullOrWhiteSpace(newScriptPath) Then Exit Sub
+
+        ' 3) User instructions
+        Dim instruction = ShowCustomInputBox("You are about to have the LLM create or amend your script. For this purpose, describe what the WebAgent script shall do or how it shall be changed (note: user parameters need to be defined manually as per the user manual):", $"{AN} WebAgent", False, "")
+        If String.IsNullOrWhiteSpace(instruction) Then Exit Sub
+        OtherPrompt = instruction.Trim()
+
+        If OtherPrompt = "" Then Return
+
+        Dim useSecondAPI As Boolean = False
+
+        Try
+
+            ' 4) Primary vs Secondary model
+            If INI_SecondAPI Then
+                Dim modelChoice = ShowCustomYesNoBox("Select the model to generate or modify the script:", "Primary", "Secondary", $"{AN} WebAgent")
+                If modelChoice = 0 Then Exit Sub
+                If modelChoice = 2 Then
+                    useSecondAPI = True
+
+                    ' Attempt to autoload alternate model (best effort, non-fatal)
+                    If Not String.IsNullOrWhiteSpace(INI_AlternateModelPath) Then
+
+                        If Not ShowModelSelection(_context, INI_AlternateModelPath) Then
+                            originalConfigLoaded = False
+                            Return
+                        End If
+
+                    End If
+
+                End If
+            End If
+
+            ' 5) Build user prompt (with optional existing script)
+            Dim userPromptBuilder As New System.Text.StringBuilder()
+            userPromptBuilder.Append("<USERPROMPT>").Append(OtherPrompt).Append("</USERPROMPT>")
+            If isAmend AndAlso Not String.IsNullOrWhiteSpace(originalScriptText) Then
+                userPromptBuilder.Append("<SCRIPT>").Append(originalScriptText).Append("</SCRIPT>")
+            End If
+            Dim userPromptFinal = userPromptBuilder.ToString()
+
+            ' 6) Call LLM to generate/amend script
+            Dim generated As String = Nothing
+            Try
+                generated = Await LLM(WebAgentJSONInstruct & " " & WebAgentParameterSpec, userPromptFinal, "", "", 0, useSecondAPI)
+            Catch ex As Exception
+                ShowCustomMessageBox("LLM call failed: " & ex.Message, $"{AN} WebAgent")
+                Exit Sub
+            End Try
+            If String.IsNullOrWhiteSpace(generated) Then
+                ShowCustomMessageBox("The LLM returned no content.", $"{AN} WebAgent")
+                Exit Sub
+            End If
+
+            generated = WebAgentInterpreter.SanitizeLlmResult(generated)
+
+            ' 7) Backup existing (only first time, not in auto-correct loop)
+            If IO.File.Exists(newScriptPath) AndAlso Not isAmend = False Then
+                ' If amending existing or overwriting, make backup
+                Try
+                    SharedLibrary.SharedLibrary.SharedMethods.RenameFileToBak(newScriptPath)
+                Catch
+                End Try
+            ElseIf IO.File.Exists(newScriptPath) AndAlso Not isAmend Then
+                ' Overwriting a new-specified existing file
+                Try
+                    SharedLibrary.SharedLibrary.SharedMethods.RenameFileToBak(newScriptPath)
+                Catch
+                End Try
+            End If
+
+            ' 8) Save initial result
+            Try
+                IO.File.WriteAllText(newScriptPath, generated, System.Text.Encoding.UTF8)
+            Catch ex As Exception
+                ShowCustomMessageBox("Failed to save generated script (script is in the clipboard instead):" & vbCrLf & ex.Message, $"{AN} WebAgent")
+                PutInClipboard(generated)
+                Exit Sub
+            End Try
+
+            ' 9) Validate JSON, with optional auto-correct loop
+            Dim keepLoop As Boolean = True
+            Dim firsttry As Boolean = True
+            While keepLoop
+                Dim parseOk As Boolean = True
+                Dim parseError As String = Nothing
+                Try
+                    Newtonsoft.Json.Linq.JObject.Parse(IO.File.ReadAllText(newScriptPath, System.Text.Encoding.UTF8))
+                Catch ex As Exception
+                    parseOk = False
+                    parseError = ex.Message
+                End Try
+
+                If parseOk Then
+                    keepLoop = False ' done
+                    If firsttry Then
+                        ShowCustomMessageBox("The JSON script created by the LLM has been tested for validity and was saved to:" & vbCrLf & vbCrLf & newScriptPath, $"{AN} WebAgent")
+                    Else
+                        ShowCustomMessageBox("The JSON script created by the LLM is now valid and was saved to:" & vbCrLf & vbCrLf & newScriptPath, $"{AN} WebAgent")
+                    End If
+                Else
+                    Dim choice = ShowCustomYesNoBox($"The script JSON is invalid (it was saved anyway). Error:{vbCrLf}{parseError}{vbCrLf}{vbCrLf}Attempt auto-correction?", "Yes", "No", $"{AN} WebAgent")
+                    If choice = 1 Then
+                        ' Auto-correct
+                        Dim brokenJson = IO.File.ReadAllText(newScriptPath, System.Text.Encoding.UTF8)
+                        Dim correctionSystem =
+                        "You are a strict JSON repair assistant. Fix structural JSON errors ONLY. Preserve semantic content & keys. Output EXACTLY one corrected JSON object, no comments, no prose."
+                        Dim correctionUser =
+                        "<BROKEN_JSON>" & brokenJson & "</BROKEN_JSON><ERROR_MESSAGE>" & parseError & "</ERROR_MESSAGE>"
+                        Dim corrected As String = Nothing
+                        Try
+                            corrected = Await LLM(correctionSystem, correctionUser, "", "", 0, useSecondAPI)
+                        Catch ex As Exception
+                            ShowCustomMessageBox("Auto-correction LLM call failed: " & ex.Message, $"{AN} WebAgent")
+                            keepLoop = False
+                            Exit While
+                        End Try
+                        If String.IsNullOrWhiteSpace(corrected) Then
+                            ShowCustomMessageBox("Auto-correction returned empty content.", $"{AN} WebAgent")
+                            keepLoop = False
+                            Exit While
+                        End If
+                        Try
+                            IO.File.WriteAllText(newScriptPath, corrected, System.Text.Encoding.UTF8)
+                        Catch ex As Exception
+                            ShowCustomMessageBox("Failed to save corrected script (script is in the clipboard instead):" & ex.Message, $"{AN} WebAgent")
+                            PutInClipboard(corrected)
+                            keepLoop = False
+                            Exit While
+                        End Try
+                        ' Loop will re-validate
+                    Else
+                        keepLoop = False
+                    End If
+                    firsttry = False
+                End If
+            End While
+
+        Catch
+        Finally
+            If UseSecondAPI And originalConfigLoaded Then
+                RestoreDefaults(_context, originalConfig)
+                originalConfigLoaded = False
+            End If
+        End Try
+
+        ' 10) Show final file
+        Try
+            ShowTextFileEditor(newScriptPath, $"{AN} WebAgent Script '{newScriptPath}'" & "(you can now add user parameters, e.g. '{{parameter1 = Date; String; 1.10.2025}}' - see user manual): ")
+        Catch
+        End Try
+
+    End Sub
 
 End Class
 

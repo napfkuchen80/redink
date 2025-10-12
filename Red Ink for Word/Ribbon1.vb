@@ -179,4 +179,12 @@ Public Class Ribbon1
     Private Sub RI_AddClause_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_AddClause.Click
         Globals.ThisAddIn.AddClause()
     End Sub
+
+    Private Sub RI_WebAgent_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_WebAgent.Click
+        Globals.ThisAddIn.WebAgent()
+    End Sub
+
+    Private Sub RI_EditWebAgent_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_EditWebAgent.Click
+        Globals.ThisAddIn.CreateModifyWebAgentScript()
+    End Sub
 End Class

@@ -149,6 +149,126 @@ Namespace My
                 Me("NotAlwaysOnTop") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property CSV_Prompt() As String
+            Get
+                Return CType(Me("CSV_Prompt"),String)
+            End Get
+            Set
+                Me("CSV_Prompt") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute(";")>  _
+        Public Property CSV_Separator() As String
+            Get
+                Return CType(Me("CSV_Separator"),String)
+            End Get
+            Set
+                Me("CSV_Separator") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property CSV_Columns() As String
+            Get
+                Return CType(Me("CSV_Columns"),String)
+            End Get
+            Set
+                Me("CSV_Columns") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("50")>  _
+        Public Property CSV_ChunkSize() As Integer
+            Get
+                Return CType(Me("CSV_ChunkSize"),Integer)
+            End Get
+            Set
+                Me("CSV_ChunkSize") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property CSV_StartSelection() As Integer
+            Get
+                Return CType(Me("CSV_StartSelection"),Integer)
+            End Get
+            Set
+                Me("CSV_StartSelection") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property CSV_EndSelection() As Integer
+            Get
+                Return CType(Me("CSV_EndSelection"),Integer)
+            End Get
+            Set
+                Me("CSV_EndSelection") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("1")>  _
+        Public Property CSV_ResultStartLine() As Integer
+            Get
+                Return CType(Me("CSV_ResultStartLine"),Integer)
+            End Get
+            Set
+                Me("CSV_ResultStartLine") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("1")>  _
+        Public Property CSV_ResultStartColumn() As Integer
+            Get
+                Return CType(Me("CSV_ResultStartColumn"),Integer)
+            End Get
+            Set
+                Me("CSV_ResultStartColumn") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("2")>  _
+        Public Property CSV_Attemps() As Integer
+            Get
+                Return CType(Me("CSV_Attemps"),Integer)
+            End Get
+            Set
+                Me("CSV_Attemps") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("True")>  _
+        Public Property CSV_UseSecondModel() As Boolean
+            Get
+                Return CType(Me("CSV_UseSecondModel"),Boolean)
+            End Get
+            Set
+                Me("CSV_UseSecondModel") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

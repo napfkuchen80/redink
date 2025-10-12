@@ -86,6 +86,7 @@ Partial Class Ribbon1
         Me.RI_CreatePodcast = Me.Factory.CreateRibbonButton
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
         Me.RI_DefineMyStyle = Me.Factory.CreateRibbonButton
+        Me.RI_WebAgent = Me.Factory.CreateRibbonButton
         Me.RI_Anonymization = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
@@ -105,6 +106,7 @@ Partial Class Ribbon1
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
+        Me.RI_EditWebAgent = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -317,6 +319,8 @@ Partial Class Ribbon1
         Me.Menu3.Items.Add(Me.RI_CreatePodcast)
         Me.Menu3.Items.Add(Me.RI_CreateAudio)
         Me.Menu3.Items.Add(Me.RI_DefineMyStyle)
+        Me.Menu3.Items.Add(Me.RI_WebAgent)
+        Me.Menu3.Items.Add(Me.RI_EditWebAgent)
         Me.Menu3.Items.Add(Me.RI_Anonymization)
         Me.Menu3.Label = "Analyze"
         Me.Menu3.Name = "Menu3"
@@ -403,6 +407,14 @@ Partial Class Ribbon1
         Me.RI_DefineMyStyle.OfficeImageId = "DisplayForm"
         Me.RI_DefineMyStyle.ScreenTip = "Analyze your writing style and create a MyStyle prompt based on it"
         Me.RI_DefineMyStyle.ShowImage = True
+        '
+        'RI_WebAgent
+        '
+        Me.RI_WebAgent.Label = "Run WebAgent"
+        Me.RI_WebAgent.Name = "RI_WebAgent"
+        Me.RI_WebAgent.OfficeImageId = "TransitionTimeAutomaticallyAfter"
+        Me.RI_WebAgent.ScreenTip = "Will run the integrated WebAgent with the script selected"
+        Me.RI_WebAgent.ShowImage = True
         '
         'RI_Anonymization
         '
@@ -571,6 +583,14 @@ Partial Class Ribbon1
         Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
         Me.RI_Chat.ShowImage = True
         '
+        'RI_EditWebAgent
+        '
+        Me.RI_EditWebAgent.Label = "Edit WebAgent"
+        Me.RI_EditWebAgent.Name = "RI_EditWebAgent"
+        Me.RI_EditWebAgent.OfficeImageId = "CreateCodeSnippet"
+        Me.RI_EditWebAgent.ScreenTip = "Allows you to create or edit a WebAgent script using your LLM"
+        Me.RI_EditWebAgent.ShowImage = True
+        '
         'Ribbon1
         '
         Me.Name = "Ribbon1"
@@ -726,6 +746,14 @@ Partial Class Ribbon1
             Me.RI_AddClause.Visible = True
         End If
 
+        If Trim(ThisAddIn.INI_WebAgentPath) = "" And Trim(ThisAddIn.INI_WebAgentPathLocal) = "" Then
+            Me.RI_WebAgent.Visible = False
+            Me.RI_EditWebAgent.Visible = False
+        Else
+            Me.RI_WebAgent.Visible = True
+            Me.RI_EditWebAgent.Visible = True
+        End If
+
         Dim LastFreestylePrompt As String = My.Settings.LastFreestylePrompt
         If Trim(LastFreestylePrompt) = "" Then
             Me.RI_FreestyleRepeat.Enabled = False
@@ -795,6 +823,8 @@ Partial Class Ribbon1
     Friend WithEvents RI_DocCheck As RibbonButton
     Friend WithEvents RI_FindClause As RibbonButton
     Friend WithEvents RI_AddClause As RibbonButton
+    Friend WithEvents RI_WebAgent As RibbonButton
+    Friend WithEvents RI_EditWebAgent As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

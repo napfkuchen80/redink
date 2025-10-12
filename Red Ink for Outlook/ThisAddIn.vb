@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 1.10.2025
+' 12.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -183,7 +183,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.011025 Gen2 Beta Test"
+    Public Const Version As String = "V.121025 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -1086,6 +1086,14 @@ Public Class ThisAddIn
         End Set
     End Property
 
+    Public Shared Property SP_ParseFile As String
+        Get
+            Return _context.SP_ParseFile
+        End Get
+        Set(value As String)
+            _context.SP_ParseFile = value
+        End Set
+    End Property
     Public Shared Property SP_WriteNeatly As String
         Get
             Return _context.SP_WriteNeatly
@@ -1602,6 +1610,24 @@ Public Class ThisAddIn
         End Get
         Set(value As String)
             _context.INI_FindClausePathLocal = value
+        End Set
+    End Property
+
+    Public Shared Property INI_WebAgentPath As String
+        Get
+            Return _context.INI_WebAgentPath
+        End Get
+        Set(value As String)
+            _context.INI_WebAgentPath = value
+        End Set
+    End Property
+
+    Public Shared Property INI_WebAgentPathLocal As String
+        Get
+            Return _context.INI_WebAgentPathLocal
+        End Get
+        Set(value As String)
+            _context.INI_WebAgentPathLocal = value
         End Set
     End Property
 

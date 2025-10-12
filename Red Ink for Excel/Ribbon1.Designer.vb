@@ -65,6 +65,7 @@ Partial Class Ribbon1
         Me.RI_Shorten = Me.Factory.CreateRibbonButton
         Me.RI_Anonymize = Me.Factory.CreateRibbonButton
         Me.RI_SwitchParty = Me.Factory.CreateRibbonButton
+        Me.RI_CSVAnalyze = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
         Me.RI_Undo = Me.Factory.CreateRibbonButton
@@ -115,6 +116,7 @@ Partial Class Ribbon1
         Me.Menu1.Items.Add(Me.RI_FreestyleAM)
         Me.Menu1.Items.Add(Me.RI_Undo)
         Me.Menu1.Items.Add(Me.Menu2)
+        Me.Menu1.Items.Add(Me.RI_CSVAnalyze)
         Me.Menu1.Items.Add(Me.RI_Chat)
         Me.Menu1.Items.Add(Me.Settings)
         Me.Menu1.Label = "Task"
@@ -194,6 +196,14 @@ Partial Class Ribbon1
         Me.RI_SwitchParty.OfficeImageId = "AddDepartment"
         Me.RI_SwitchParty.ScreenTip = "Will switch two parties in the text of the selected cells"
         Me.RI_SwitchParty.ShowImage = True
+        '
+        'RI_CSVAnalyze
+        '
+        Me.RI_CSVAnalyze.Label = "Analyze CSV"
+        Me.RI_CSVAnalyze.Name = "RI_CSVAnalyze"
+        Me.RI_CSVAnalyze.OfficeImageId = "GetPowerQueryDataFromCsv"
+        Me.RI_CSVAnalyze.ScreenTip = "Will parse through a CSV and analyze its content"
+        Me.RI_CSVAnalyze.ShowImage = True
         '
         'RI_FreestyleNM
         '
@@ -392,6 +402,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_FreestyleNM2 As Microsoft.Office.Tools.Ribbon.RibbonButton
     Friend WithEvents RI_Undo As RibbonButton
     Friend WithEvents RI_Chat As RibbonButton
+    Friend WithEvents RI_CSVAnalyze As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

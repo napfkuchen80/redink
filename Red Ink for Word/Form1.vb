@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 30.8.2025
+' 7.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -46,6 +46,7 @@ Public Class frmAIChat
     Const AN As String = "Red Ink"
     Const AN5 As String = "Inky"   ' for Chatbox
 
+    Const MarkerChar As String = ChrW(&HE000)
 
     Private PreceedingNewline As String = ""
     Private OldChat As String = ""
@@ -613,12 +614,51 @@ Public Class frmAIChat
 
     End Sub
 
+
+    Private Function DecodeParagraphMarks(raw As String) As String
+        If String.IsNullOrEmpty(raw) Then Return ""
+
+        ' 1. Unify actual control characters first
+        raw = raw.Replace(vbCrLf, vbCr).Replace(vbLf, vbCr)
+
+        ' 2. Word Find tokens → paragraph
+        raw = Regex.Replace(raw, "\^p", vbCr, RegexOptions.IgnoreCase)
+        raw = Regex.Replace(raw, "\^0*13", vbCr, RegexOptions.IgnoreCase)
+
+        ' 3. Convert literal (escaped) sequences coming from LLM output:
+        '    - \r\n  → single paragraph break (treat as one)
+        '    - \n    → paragraph
+        '    - \r    → paragraph
+        '    Only when NOT double-escaped (i.e. ignore \\r, \\n).
+        raw = Regex.Replace(raw, "(?<!\\)\\r\\n", vbCr, RegexOptions.IgnoreCase)
+        raw = Regex.Replace(raw, "(?<!\\)\\r", vbCr, RegexOptions.IgnoreCase)
+        raw = Regex.Replace(raw, "(?<!\\)\\n", vbCr, RegexOptions.IgnoreCase)
+
+        ' 4. (Optional) Collapse any accidental multiple consecutive paragraphs caused by mixed encodings
+        '    Comment out if you intentionally need empties:
+        ' raw = Regex.Replace(raw, vbCr & "{2,}", vbCr & vbCr)
+
+        Return raw
+    End Function
+
+    Private Function EnsureParagraphs(text As String) As String
+        If String.IsNullOrEmpty(text) Then Return ""
+        Return DecodeParagraphMarks(text)
+    End Function
+
+    Private Function CleanArgument(arg As String) As String
+        If arg Is Nothing Then Return ""
+        arg = DecodeParagraphMarks(arg)
+        ' Trim but keep leading/trailing paragraph marks if they were intentional:
+        ' Only trim spaces/tabs.
+        Return Regex.Replace(arg, "^[ \t]+|[ \t]+$", "")
+    End Function
+
     Public Class ParsedCommand
         Public Property Command As String
         Public Property Argument1 As String
         Public Property Argument2 As String
     End Class
-
 
     ' Parses the input string for embedded commands of the format:
     ' [#command: @@argument1@@ §§argument2§§ #]
@@ -626,7 +666,6 @@ Public Class frmAIChat
     ' argument2 is optional; if not present, it defaults to "".
     Private Function ParseCommands(input As String) As List(Of ParsedCommand)
         Dim results As New List(Of ParsedCommand)
-
         Try
             ' ------------------------------------------------------------------------------
             ' REGEX PATTERN to parse blocks shaped like
@@ -675,46 +714,29 @@ Public Class frmAIChat
             ' • You can change the delimiters if needed—just keep the same “tempered
             '   greedy token” logic so the inner data remains safe.
             ' ------------------------------------------------------------------------------
-
-
-
             Dim pattern As String = "\[#(?<cmd>[^:]+):\s*@@(?<arg1>(?:[^@]|@(?!@))*?)@@\s*(?:§§(?<arg2>(?:[^§]|§(?!§))*?)§§)?\s*#\]"
-
-            'Old: Dim pattern As String = "\[#(?<cmd>[^:]+):\s*@@(?<arg1>[^@]+)@@\s*(?:§§(?<arg2>[^§]*)§§)?\s*#\]"
-
-            Dim regex As New Regex(pattern)
+            Dim regex As New Regex(pattern, RegexOptions.Singleline)
 
             For Each m As Match In regex.Matches(input)
                 Dim pc As New ParsedCommand()
-
                 pc.Command = m.Groups("cmd").Value.Trim()
-                pc.Argument1 = m.Groups("arg1").Value.Trim()
 
-                ' If arg2 wasn't found, it might be blank
-                If m.Groups("arg2") IsNot Nothing Then
-                    pc.Argument2 = m.Groups("arg2").Value.Trim().Replace("\r\n", vbCrLf).Replace("\n", vbCrLf).Replace("\r", vbCrLf)
-                End If
+                Dim raw1 As String = m.Groups("arg1").Value
+                Dim raw2 As String = If(m.Groups("arg2") IsNot Nothing, m.Groups("arg2").Value, "")
 
-                If String.IsNullOrWhiteSpace(pc.Argument2) Then
-                    pc.Argument2 = ""
-                    If pc.Command = "REPLACE" Then
-                        pc.Argument1 = pc.Argument1.Replace("\r\n", "^p").Replace("\n", "^p").Replace("\r", "^p")
-                        pc.Argument1 = pc.Argument1.Replace(vbCrLf, "^p").Replace(vbCr, "^p").Replace(vbLf, "^p")
-                    End If
-                Else
-                    pc.Argument1 = pc.Argument1.Replace("\r\n", "^p").Replace("\n", "^p").Replace("\r", "^p")
-                    pc.Argument1 = pc.Argument1.Replace(vbCrLf, "^p").Replace(vbCr, "^p").Replace(vbLf, "^p")
-                End If
+                pc.Argument1 = CleanArgument(raw1)
+                pc.Argument2 = CleanArgument(raw2)
 
-                If Not results.Any(Function(x) x.Command = pc.Command AndAlso x.Argument1 = pc.Argument1 AndAlso x.Argument2 = pc.Argument2) Then
+                ' If REPLACE (any case) and no Argument2 -> treat as delete (keep arg2 empty)
+                ' (No extra transformation needed now.)
+                If Not results.Any(Function(x) x.Command.Equals(pc.Command, StringComparison.OrdinalIgnoreCase) _
+                                        AndAlso x.Argument1 = pc.Argument1 AndAlso x.Argument2 = pc.Argument2) Then
                     results.Add(pc)
                 End If
             Next
-
-        Catch ex As System.Exception
+        Catch ex As Exception
             MsgBox("Error in ParseCommands: " & ex.Message, MsgBoxStyle.Critical)
         End Try
-
         Return results
     End Function
 
@@ -784,7 +806,7 @@ Public Class frmAIChat
                     LastCommandsList = CommandsList
                     InfoBox.ShowInfoBox("Executing bot commands ('Esc' to abort):" & Environment.NewLine & Environment.NewLine & CommandsList)
                     System.Threading.Thread.Sleep(500)
-                    ExecuteReplaceCommand(pc.Argument1, pc.Argument2, OnlySelection, ChrW(&HD83D))
+                    ExecuteReplaceCommand(pc.Argument1, pc.Argument2, OnlySelection, MarkerChar)
 
                 Case "insertafter"
                     CommandsList = $"Inserting '{pc.Argument2}' after '{pc.Argument1}'" & Environment.NewLine & CommandsList
@@ -834,62 +856,32 @@ Public Class frmAIChat
     End Sub
 
     Private Sub ReplaceSpecialCharacter(Optional OnlySelection As Boolean = False)
-        Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
 
-        ' Store the original track changes setting and author
-        Dim trackChangesEnabled As Boolean = doc.TrackRevisions
-        Dim originalAuthor As String = doc.Application.UserName
+        Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
+        Dim trackChangesEnabled = doc.TrackRevisions
 
         Try
-
-            doc.Application.Activate()
-            doc.Activate()
-
-            ' Enable track changes and set author 
             doc.TrackRevisions = True
-            ' doc.Application.UserName = AN
+            Dim rng As Word.Range =
+            If(OnlySelection AndAlso Not String.IsNullOrEmpty(doc.Application.Selection.Text),
+               doc.Application.Selection.Range.Duplicate,
+               doc.Content.Duplicate)
 
-            ' Determine the range to operate on
-            Dim rng As Word.Range
-            If OnlySelection Then
-                If doc.Application.Selection Is Nothing OrElse doc.Application.Selection.Range.Text = "" Then
-                    OnlySelection = False
-                    rng = doc.Content
-                Else
-                    rng = doc.Application.Selection.Range
-                End If
-            Else
-                rng = doc.Content
-            End If
-
-            ' Define the character to be replaced
-            Dim specialChar As String = ChrW(&HD83D)
-
-            ' Loop through and replace occurrences of the character
-            Dim replacementsMade As Boolean = False
-            Do
-                With rng.Find
-                    .ClearFormatting()
-                    .Text = specialChar
-                    .Replacement.ClearFormatting()
-                    .Replacement.Text = "" ' Replace with empty string
-                    .Forward = True
-                    .Wrap = Word.WdFindWrap.wdFindStop ' Do not loop around
-                    If .Execute(Replace:=Word.WdReplace.wdReplaceOne) Then
-                        replacementsMade = True
-                    Else
-                        Exit Do
-                    End If
-                End With
-            Loop
-
-        Catch ex As System.Exception
+            With rng.Find
+                .ClearFormatting()
+                .Text = MarkerChar
+                .Replacement.ClearFormatting()
+                .Replacement.Text = ""
+                .Forward = True
+                .Wrap = Word.WdFindWrap.wdFindStop
+                Do While .Execute(Replace:=Word.WdReplace.wdReplaceOne)
+                    ' keep looping until none left
+                Loop
+            End With
+        Catch ex As Exception
             MsgBox("Error in ReplaceSpecialCharacter: " & ex.Message, MsgBoxStyle.Critical)
-
         Finally
-            ' Restore the original track changes setting and author
             doc.TrackRevisions = trackChangesEnabled
-            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 
@@ -908,6 +900,12 @@ Public Class frmAIChat
             doc.TrackRevisions = True
             'doc.Application.UserName = AN
 
+            searchTerm = DecodeParagraphMarks(searchTerm)
+            If String.IsNullOrWhiteSpace(searchTerm) Then
+                CommandsList = $"Note: Empty search term (ignored)." & Environment.NewLine & CommandsList
+                Exit Sub
+            End If
+
             ' Define the starting selection based on OnlySelection
             If OnlySelection Then
                 If doc.Application.Selection Is Nothing OrElse doc.Application.Selection.Range.Text = "" Then
@@ -925,7 +923,7 @@ Public Class frmAIChat
             Dim maxStuckLimit As Integer = 2        ' Maximum allowed stuck occurrences
 
             ' Loop through the content to find and mark all instances
-            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
+            Do While Globals.ThisAddIn.FindLongTextInChunks(searchTerm, doc.Application.Selection) = True
 
                 If doc.Application.Selection Is Nothing Then Exit Do
 
@@ -1000,7 +998,6 @@ Public Class frmAIChat
     End Sub
 
 
-
     Private Sub ExecuteReplaceCommand(oldText As String, newText As String, OnlySelection As Boolean, Marker As String)
         Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
 
@@ -1008,6 +1005,14 @@ Public Class frmAIChat
         Dim originalAuthor As String = doc.Application.UserName
 
         Try
+
+            oldText = DecodeParagraphMarks(oldText)
+            newText = DecodeParagraphMarks(newText)
+
+            If String.IsNullOrWhiteSpace(oldText) Then
+                CommandsList = $"Note: Empty search term (ignored)." & Environment.NewLine & CommandsList
+                Exit Sub
+            End If
 
             doc.Application.Activate()
             doc.Activate()
@@ -1029,140 +1034,63 @@ Public Class frmAIChat
 
             Debug.WriteLine($"Replacing '{oldText}' with '{newText}'")
 
-            Dim newTextWithMarker As String = ""
+            Dim newTextWithMarker As String
             If newText.Length > 2 Then
                 newTextWithMarker = $"{newText.Substring(0, newText.Length - 2)}{Marker}{newText.Substring(newText.Length - 2)}"
             Else
                 newTextWithMarker = newText
             End If
 
-            If Len(oldText) > ThisAddIn.SearchChunkSize Then
-
-                Dim selectionStart As Integer = doc.Application.Selection.Start
+            Dim selectionStart As Integer = doc.Application.Selection.Start
                 Dim selectionEnd As Integer = doc.Application.Selection.End
                 doc.Application.Selection.SetRange(workRange.Start, workRange.End)
                 Dim found As Boolean = False
 
-                ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
+            ' Loop through the content to find and replace all instances
+            Do While Globals.ThisAddIn.FindLongTextInChunks(oldText, doc.Application.Selection) = True
 
-                    If doc.Application.Selection Is Nothing Then Exit Do
+                If doc.Application.Selection Is Nothing Then Exit Do
 
-                    If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
-                        Exit Do
+                If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
+                    Exit Do
+                End If
+
+                found = True
+
+                Dim isDeleted As Boolean = False
+                For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
+                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
+                        isDeleted = True
+                        Exit For
                     End If
+                Next
 
-                    found = True
+                ' Account for trackchanges being turned on, i.e. the old text remains
+                Dim currentEnd As Integer = doc.Application.Selection.End
+                If Not isDeleted Then
+                    currentEnd = currentEnd + Len(newTextWithMarker)
+                    selectionEnd = selectionEnd + Len(newTextWithMarker)
+                    ' Replace the found text
+                    doc.Application.Selection.Text = newTextWithMarker
+                End If
 
-                    Dim isDeleted As Boolean = False
-                    For Each rev As Word.Revision In doc.Application.Selection.Range.Revisions
-                        If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                            isDeleted = True
-                            Exit For
-                        End If
-                    Next
+                ' Check if the collapsed selection has reached the end of the document or the selection
+                If OnlySelection Then
+                    If currentEnd >= selectionEnd Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, selectionEnd)
+                Else
+                    If currentEnd >= doc.Content.End Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
+                End If
+            Loop
 
-                    ' Account for trackchanges being turned on, i.e. the old text remains
-                    Dim currentEnd As Integer = doc.Application.Selection.End
-                    If Not isDeleted Then
-                        currentEnd = currentEnd + Len(newTextWithMarker)
-                        selectionEnd = selectionEnd + Len(newTextWithMarker)
-                        ' Replace the found text
-                        doc.Application.Selection.Text = newTextWithMarker
-                    End If
-
-                    ' Check if the collapsed selection has reached the end of the document or the selection
-                    If OnlySelection Then
-                        If currentEnd >= selectionEnd Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, selectionEnd)
-                    Else
-                        If currentEnd >= doc.Content.End Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
-                    End If
-                Loop
-
-                If Not found Then
+            If Not found Then
                     CommandsList = $"Note: The search term was not found (Chunk Search)." & Environment.NewLine & CommandsList
                 End If
 
                 doc.Application.Selection.SetRange(selectionStart, selectionEnd)
                 doc.Application.Selection.Select()
 
-            Else
-
-                If String.IsNullOrEmpty(oldText) Then
-                    CommandsList = $"Note: The search term was empty (bad LLM response)." & Environment.NewLine & CommandsList
-                Else
-
-                    Dim replacementsMade As Boolean = False
-                    Dim initialRangeEnd As Integer = workRange.End
-                    Do
-
-                        If (GetAsyncKeyState(System.Windows.Forms.Keys.Escape) And 1) <> 0 Then
-                            Exit Do
-                        End If
-
-                        oldText = ThisAddIn.NormalizeTextForSearch(oldText, ThisAddIn.INI_Clean)
-                        With workRange.Find
-                            .ClearFormatting()
-                            If ThisAddIn.INI_Clean Then
-                                .MatchWildcards = True
-                                ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                                '.Text = oldText.Replace(" ", "[ ]@")
-                            Else
-                                .MatchWildcards = False
-                                '.Text = oldText
-                            End If
-                            .Text = oldText
-                            .Forward = True
-                            .Wrap = Word.WdFindWrap.wdFindStop
-                            .MatchWholeWord = False
-                            ' Use ReplaceNone to get the match without automatically replacing it
-                            If .Execute(Replace:=Word.WdReplace.wdReplaceNone) Then
-
-                                ' Create a duplicate of the found range for the revision check
-                                Dim foundRange As Word.Range = workRange.Duplicate
-
-                                Dim isDeleted As Boolean = False
-                                For Each rev As Word.Revision In foundRange.Revisions
-                                    If rev.Type = Word.WdRevisionType.wdRevisionDelete Then
-                                        isDeleted = True
-                                        Exit For
-                                    End If
-                                Next
-
-                                Dim previousStart As Integer = workRange.Start
-
-                                If Not isDeleted Then
-                                    foundRange.Text = newTextWithMarker
-                                    replacementsMade = True
-                                End If
-
-                                ' Adjust the initial end based on the difference in length
-                                initialRangeEnd = initialRangeEnd + IIf(isDeleted, 0, Len(newTextWithMarker) - Len(oldText))
-                                ' Move the start of workRange to the end of the found match
-                                workRange.Start = foundRange.End
-
-                                ' Safeguard: Ensure that the search range advances.
-                                If workRange.Start <= previousStart Then
-                                    workRange.Start = previousStart + 1
-                                End If
-
-                                workRange.End = initialRangeEnd
-
-                            Else
-                                Exit Do
-                            End If
-                        End With
-
-                    Loop
-
-                    If Not replacementsMade Then
-                        CommandsList = $"Note: The resarch term was not found." & Environment.NewLine & CommandsList
-                    End If
-
-                End If
-            End If
 
         Catch ex As System.Exception
             MsgBox("Error in ExecuteReplaceCommand: " & ex.Message, MsgBoxStyle.Critical)
@@ -1182,6 +1110,12 @@ Public Class frmAIChat
         Dim originalAuthor As String = doc.Application.UserName
 
         Try
+            searchText = DecodeParagraphMarks(searchText)
+            newText = DecodeParagraphMarks(newText)
+            If String.IsNullOrWhiteSpace(searchText) Then
+                CommandsList = $"Note: Empty insertion anchor (ignored)." & Environment.NewLine & CommandsList
+                Exit Sub
+            End If
 
             doc.Application.Activate()
             doc.Activate()
@@ -1205,83 +1139,51 @@ Public Class frmAIChat
 
             Dim found As Boolean = False
 
-            ' Handle cases where searchText exceeds 255 characters
-            If Len(searchText) > ThisAddIn.SearchChunkSize Then
 
-                Dim selectionStart As Integer = doc.Application.Selection.Start
+            Dim selectionStart As Integer = doc.Application.Selection.Start
                 Dim selectionEnd As Integer = doc.Application.Selection.End
 
                 doc.Application.Selection.SetRange(workrange.Start, workrange.End)
 
-                ' Loop through the content to find and replace all instances
-                Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, ThisAddIn.SearchChunkSize, doc.Application.Selection) = True
+            ' Loop through the content to find and replace all instances
+            Do While Globals.ThisAddIn.FindLongTextInChunks(searchText, doc.Application.Selection) = True
 
-                    If doc.Application.Selection Is Nothing Then Exit Do
+                If doc.Application.Selection Is Nothing Then Exit Do
 
-                    found = True
+                found = True
 
-                    ' Account for trackchanges being turned on, i.e. the old text remains
-                    Dim currentEnd As Integer = doc.Application.Selection.End + Len(newText)
-                    selectionEnd = selectionEnd + Len(newText)
+                ' Account for trackchanges being turned on, i.e. the old text remains
+                Dim currentEnd As Integer = doc.Application.Selection.End + Len(newText)
+                selectionEnd = selectionEnd + Len(newText)
 
-                    ' Insert the found text
-                    If InsertBefore Then
-                        doc.Application.Selection.InsertBefore(newText)
-                    Else
-                        doc.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                        doc.Application.Selection.Text = newText & doc.Application.Selection.Text
-                    End If
+                ' Insert the found text
+                If InsertBefore Then
+                    doc.Application.Selection.InsertBefore(newText)
+                Else
+                    doc.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
+                    doc.Application.Selection.Text = newText & doc.Application.Selection.Text
+                End If
 
-                    ' Check if the collapsed selection has reached the end of the document or the selection
-                    If OnlySelection Then
-                        If currentEnd >= selectionEnd Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, selectionEnd)
-                    Else
-                        If currentEnd >= doc.Content.End Then Exit Do
-                        doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
-                    End If
-                Loop
+                ' Check if the collapsed selection has reached the end of the document or the selection
+                If OnlySelection Then
+                    If currentEnd >= selectionEnd Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, selectionEnd)
+                Else
+                    If currentEnd >= doc.Content.End Then Exit Do
+                    doc.Application.Selection.SetRange(currentEnd, doc.Content.End)
+                End If
+            Loop
 
-                If Not found Then
+            If Not found Then
                     CommandsList = $"Note: The search term was not found (Chunk Search)." & Environment.NewLine & CommandsList
                 End If
 
                 doc.Application.Selection.SetRange(selectionStart, selectionEnd)
                 doc.Application.Selection.Select()
 
-            Else
-                ' Use Word's Find functionality for shorter searchText
-                searchText = ThisAddIn.NormalizeTextForSearch(searchText, ThisAddIn.INI_Clean)
-                With workrange.Find
-                    .ClearFormatting()
-                    If ThisAddIn.INI_Clean Then
-                        .MatchWildcards = True
-                        ' turn each " " into "[ ]@" so Word will match 1+ spaces
-                        '.Text = searchText.Replace(" ", "[ ]@")
-                    Else
-                        .MatchWildcards = False
-                        '.Text = searchText
-                    End If
-                    .Text = searchText
-                    .Forward = True
-                    .Wrap = Word.WdFindWrap.wdFindStop ' Stop after searching once
-                    If .Execute() Then
-                        found = True
-                        ' Insert new text before or after the found text
-                        If InsertBefore Then
-                            workrange.InsertBefore(newText)
-                        Else
-                            workrange.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
-                            workrange.Text = newText & workrange.Text
-                        End If
 
-                        ' Select the newly inserted text
-                        workrange.Select()
-                    End If
-                End With
-            End If
 
-            If Not found Then
+                If Not found Then
                 CommandsList = $"Note: The insertion point was not found." & Environment.NewLine & CommandsList
             End If
 
@@ -1295,8 +1197,25 @@ Public Class frmAIChat
         End Try
     End Sub
 
-
     Private Sub ExecuteInsertCommand(newText As String)
+        Dim doc = Globals.ThisAddIn.Application.ActiveDocument
+        Dim trackChangesEnabled = doc.TrackRevisions
+        Try
+            newText = DecodeParagraphMarks(newText)
+            ' Ensure single paragraph delimiter style (Word uses Chr(13))
+            newText = newText.Replace(vbCrLf, vbCr).Replace(vbLf, vbCr)
+            doc.TrackRevisions = True
+            Dim selection = doc.Application.Selection
+            selection.Collapse(Word.WdCollapseDirection.wdCollapseStart)
+            selection.Text = newText
+        Catch ex As Exception
+            MsgBox("Error in ExecuteInsertCommand: " & ex.Message, MsgBoxStyle.Critical)
+        Finally
+            doc.TrackRevisions = trackChangesEnabled
+        End Try
+    End Sub
+
+    Private Sub oldExecuteInsertCommand(newText As String)
 
         Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
 
@@ -1305,6 +1224,8 @@ Public Class frmAIChat
         Dim originalAuthor As String = doc.Application.UserName
 
         Try
+
+            newText = DecodeParagraphMarks(newText)
 
             doc.Application.Activate()
             doc.Activate()

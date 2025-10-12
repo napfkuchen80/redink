@@ -87,5 +87,7 @@ Public Class Ribbon1
         Globals.ThisAddIn.ShowChatForm()
     End Sub
 
-
+    Private Sub RI_CSVAnalyze_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_CSVAnalyze.Click
+        Globals.ThisAddIn.AnalyzeCsvWithLLM()
+    End Sub
 End Class

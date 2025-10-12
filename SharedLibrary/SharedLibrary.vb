@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 1.10.2025
+' 12.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -33,15 +33,20 @@ Imports System.IO
 Imports System.Management
 Imports System.Net
 Imports System.Net.Http
+Imports System.Net.Security
 Imports System.Reflection
 Imports System.Reflection.Emit
 Imports System.Runtime.InteropServices
 Imports System.Runtime.InteropServices.WindowsRuntime
+Imports System.Security.Authentication
+Imports System.Security.Cryptography.X509Certificates
 Imports System.Text
 Imports System.Text.RegularExpressions
 Imports System.Threading
 Imports System.Windows.Forms
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Tab
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Window
+Imports FxResources.System
 Imports HtmlAgilityPack
 Imports Markdig
 Imports Markdig.Extensions
@@ -72,11 +77,11 @@ Imports Org.BouncyCastle.Security
 Imports Org.BouncyCastle.Utilities
 Imports Org.BouncyCastle.Utilities.IO.Pem
 Imports SharedLibrary.MarkdownToRtf
+Imports SharedLibrary.SharedLibrary
 Imports SharedLibrary.SharedLibrary.SharedContext
 Imports SharedLibrary.SharedLibrary.SharedMethods
 Imports UglyToad.PdfPig
 Imports UglyToad.PdfPig.Content
-
 
 Namespace SharedLibrary
 
@@ -206,6 +211,7 @@ Namespace SharedLibrary
             Property SP_ContextSearchMulti As String
             Property SP_WriteNeatly As String
             Property SP_RangeOfCells As String
+            Property SP_ParseFile As String
             Property SP_Add_KeepFormulasIntact As String
             Property SP_Add_KeepHTMLIntact As String
             Property SP_Add_KeepInlineIntact As String
@@ -252,6 +258,9 @@ Namespace SharedLibrary
             Property INI_SpecialServicePath As String
             Property INI_FindClausePath As String
             Property INI_FindClausePathLocal As String
+            Property INI_WebAgentPath As String
+            Property INI_WebAgentPathLocal As String
+
             Property INI_DocCheckPath As String
             Property INI_DocCheckPathLocal As String
             Property INI_PromptLibPath_Transcript As String
@@ -391,6 +400,7 @@ Namespace SharedLibrary
         Public Property SP_ContextSearch As String Implements ISharedContext.SP_ContextSearch
         Public Property SP_ContextSearchMulti As String Implements ISharedContext.SP_ContextSearchMulti
         Public Property SP_RangeOfCells As String Implements ISharedContext.SP_RangeOfCells
+        Public Property SP_ParseFile As String Implements ISharedContext.SP_ParseFile
         Public Property SP_WriteNeatly As String Implements ISharedContext.SP_WriteNeatly
         Public Property SP_Add_KeepFormulasIntact As String Implements ISharedContext.SP_Add_KeepFormulasIntact
         Public Property SP_Add_KeepHTMLIntact As String Implements ISharedContext.SP_Add_KeepHTMLIntact
@@ -438,6 +448,8 @@ Namespace SharedLibrary
         Public Property INI_SpecialServicePath As String Implements ISharedContext.INI_SpecialServicePath
         Public Property INI_FindClausePath As String Implements ISharedContext.INI_FindClausePath
         Public Property INI_FindClausePathLocal As String Implements ISharedContext.INI_FindClausePathLocal
+        Public Property INI_WebAgentPath As String Implements ISharedContext.INI_WebAgentPath
+        Public Property INI_WebAgentPathLocal As String Implements ISharedContext.INI_WebAgentPathLocal
         Public Property INI_DocCheckPath As String Implements ISharedContext.INI_DocCheckPath
         Public Property INI_DocCheckPathLocal As String Implements ISharedContext.INI_DocCheckPathLocal
         Public Property INI_PromptLibPath_Transcript As String Implements ISharedContext.INI_PromptLibPath_Transcript
@@ -1357,6 +1369,9 @@ Namespace SharedLibrary
         Public Const RKModeTrigger2 As String = "(rkmode_longest)"
         Public Const RKModeTrigger3 As String = "(rkmode_first)"
 
+        Public Const WebAgent_DefaultFromEMail As String = "noreply@noreply.com"
+        Public Const WebAgent_DefaultFromName As String = AN & " WebAgent"
+
         Private Const ISearch_MaxTries = 30          ' maximum number of search hits to be tried
         Private Const ISearch_MaxMaxDepth = 10       ' maximum number of search levels to crawl a website
         Private Const ISearch_MaxResults = 15        ' maximum number of search results
@@ -1457,6 +1472,7 @@ Namespace SharedLibrary
         Const Default_SP_SwitchParty As String = "You are a legal professional And editor with excellent language, logical And rhetorical skills that precisely complies with its instructions step by step. Your task is to swap parties in a text and adapt the text to still read correctly. To do so, rewrite the text that is provided to you and is marked as 'TEXTTOPROCESS' as if '{OldParty}' were '{NewParty}' preserving all other information, but ensure that in particular all pronouns, titles, possessive forms and the use of plural and singular are appropriately adjusted. If {OldParty} or {NewParty} is not a name, treat it based on its meaning, even if it starts with a capital letter. \n {INI_PreCorrection}"
         Const Default_SP_Anonymize As String = "You are very careful editor And legal professional that precisely complies with its instructions step by step. Fully anonymize the text that Is provided to you And Is marked as 'TEXTTOPROCESS'. Do so only by replacing any names, companies, businesses, parties, organizations, proprietary product names, unknown abbreviations, personal addresses, e-mail accounts, phone numbers, IDs, credit card information, account numbers and other identifying information by the expression '[redacted]' and before providing the result, check whether there is no information left that could directly or indirectly identify any person, company, business, party or organization, including information that could link to them by doing an Internet search, and if so, redact it as well. {INI_PreCorrection}"
         Const Default_SP_RangeOfCells As String = "You are an expert in analyzing and explaining Excel files to non-experts And in drafting Excel formulas for use within Excel. You precisely comply With your instructions. Perform the instruction '{OtherPrompt}' using the range of cells provided You between the tags <RANGEOFCELLS> ... </RANGEOFCELLS>. When providing your advice, follow this exact format for each suggestion: \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] in the next line. 5. Ensure that each instruction is on a new line. 6. If a formula or value is not required for a cell, leave that part out or indicate it as empty. {INI_PreCorrection}"
+        Const Default_SP_ParseFile As String = "You are a precise, deterministic CSV analyzer. The user will provide intent and a data block wrapped in <LINESTOPROCESS>…</LINESTOPROCESS>. Inside that block, the first row is a header where the first column is 'LineInFile' (absolute file line number) and subsequent columns are the CSV headers; each subsequent row is data. The delimiter between columns is the user-specified separator, which is '{Separator}' (i.e. do not assume it is a comma). Task: apply the user’s intent to each data row; output only positive hits as a flat string in this exact format: lineNumber@@result§§§lineNumber@@result… (two fields per record via @@; records separated by §§§). Rules: (1) Ignore the header row for the actual analyzes, use it only to understand the structure of the lines of data contained in LINESTOPROCESS, i.e. the sequences and name of the fields/columns/segments provided and divided by the separator; (2) Use the provided separator only to parse, not in the output; (3) Do not echo inputs, prose, JSON, or code; output only the specified flat format; (4) If no rows match, return exactly [NORESULT]; (5) Keep result concise, single-line, and free of '@@' or '§§§' (replace such characters with spaces if present); (6) Never fabricate data; preserve LineInFile as given; (7) Trim spaces around delimiters; (8) Process only rows within the provided block; (9) follow these rules strictly and very carefully, as your output will otherwise be void. {INI_PreCorrection} \n The user's intent and instruction to follow is: {OtherPrompt} \n\n"
         Const Default_SP_WriteNeatly As String = "You are a legal professional with very good language skills that precisely complies with its instructions step by step. Amend the text that is provided to you, in its original language, and is marked as 'Texttoprocess' to be a coherent, concise and easy to understand text based the text and keywords in the provided text, without changing or adding any meaning or information to it, but taking into account the following context, if any: '{Context}' {INI_PreCorrection}"
         Const Default_SP_Add_KeepFormulasIntact As String = "Beware, the text contains an Excel formula. Unless expressly instructed otherwise, make sure that the formula still works as intended."
         Const Default_SP_Add_KeepHTMLIntact As String = "When completing your task, leave any HTML tags within 'TEXTTOPROCESS' fully intact in the output and never include your instructions in the output (just your barebones work result).."
@@ -2106,6 +2122,10 @@ Namespace SharedLibrary
 
                 System.Diagnostics.Debug.WriteLine("PreFinalHTML=" & formattedText)
 
+                formattedText = FixMarkTagsForWord(formattedText)
+
+                System.Diagnostics.Debug.WriteLine("PreFinalHTML[after-mark]=" & formattedText)
+
                 ' --- 1) HTML laden und <br> in eigene <p>-Elemente aufsplitten ---
                 Dim doc As New HtmlAgilityPack.HtmlDocument()
                 doc.LoadHtml(formattedText)
@@ -2322,6 +2342,61 @@ Namespace SharedLibrary
                 System.Windows.Forms.MessageBox.Show("InsertTextWithFormat Error: " & ex.Message)
             End Try
         End Sub
+
+
+        Private Shared Function FixMarkTagsForWord(html As String, Optional defaultColor As String = "yellow") As String
+            If String.IsNullOrEmpty(html) Then Return html
+
+            Dim opts As RegexOptions = RegexOptions.IgnoreCase Or RegexOptions.CultureInvariant Or RegexOptions.Singleline
+
+            ' 1) Convert <mark data-ri-color="...">...</mark> → <span style="background:css; mso-highlight:token">...</span>
+            html = System.Text.RegularExpressions.Regex.Replace(
+                html,
+                "<\s*mark\b[^>]*data-ri-color\s*=\s*['""]?(?<color>[^'""\s>]+)['""]?[^>]*>",
+                Function(m As Match)
+                    Dim token = m.Groups("color").Value.Trim().ToLowerInvariant()
+                    Dim css = MsoHighlightToCssColor(token)
+                    Return $"<span style=""background:{css}; mso-highlight:{token}"">"
+                End Function,
+                opts)
+
+            ' 2) Convert plain <mark>...</mark> (yellow) → <span style="...">...</span>
+            html = System.Text.RegularExpressions.Regex.Replace(
+                html,
+                "<\s*mark\s*>",
+                "<span style=""mso-highlight:yellow"">",
+                opts)
+
+            ' "<span style=""background:yellow; mso-highlight:yellow"">",
+
+            ' 3) Close tags
+            html = System.Text.RegularExpressions.Regex.Replace(html, "</\s*mark\s*>", "</span>", opts)
+
+            Return html
+        End Function
+
+        ' Map Word highlight token to a broadly supported CSS color keyword for background fill
+        Private Shared Function MsoHighlightToCssColor(mso As String) As String
+            Select Case mso
+                Case "yellow" : Return "yellow"
+                Case "brightgreen" : Return "lime"
+                Case "turquoise" : Return "aqua"
+                Case "pink" : Return "fuchsia"
+                Case "blue" : Return "blue"
+                Case "red" : Return "red"
+                Case "darkblue" : Return "navy"
+                Case "teal" : Return "teal"
+                Case "green" : Return "green"
+                Case "violet" : Return "purple"
+                Case "darkred" : Return "maroon"
+                Case "darkyellow" : Return "olive"
+                Case "gray50" : Return "gray"
+                Case "gray25" : Return "silver"
+                Case "black" : Return "black"
+                Case Else : Return "yellow"
+            End Select
+        End Function
+
 
 
 
@@ -3437,7 +3512,7 @@ Namespace SharedLibrary
                                     ElseIf response.StatusCode = 429 Then
                                         ' If we received a 429 error and haven't exhausted our retries, loop to retry.
                                         If attempt = maxRetries Then
-                                            If Not Hidesplash Then ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient).") Else Return $"HTTP Error {response.StatusCode} when accessing the LLM endpoint: Too many requests in too short time; try to reformulate your request or limit your command ({AN} already tried to pause, but it was not sufficient)."
+                                            If Not Hidesplash Then ShowCustomMessageBox($"HTTP Error {response.StatusCode} when accessing the LLM endpoint: This error is typically either because (1) you issued too many or too complex requests in too short time; try to reformulate your request or limit your command ({AN} already tried to slow down, but it was not sufficient), or (2) you have not yet correctly configured your service account (e.g., with OpenAI API, you have to have a credit card registered and an amount entered before you generate your API key).") Else Return $"HTTP Error {response.StatusCode} when accessing the LLM endpoint: This error is typically either because (1) you issued too many or too complex requests in too short time; try to reformulate your request or limit your command ({AN} already tried to slow down, but it was not sufficient), or (2) you have not yet correctly configured your service account (e.g., with OpenAI API, you have to have a credit card registered and an amount entered before you generate your API key)."
                                             Return ""
                                         End If
                                         ' Otherwise, continue the loop to retry the request.
@@ -3458,7 +3533,7 @@ Namespace SharedLibrary
                                     Debug.WriteLine($"RECEIVED FROM API:{Environment.NewLine}{responseText}")
                                     Try
                                         Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
-                                        Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug.txt")
+                                        Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug.json")
                                         System.IO.File.WriteAllText(debugFilePath, responseText)
                                     Catch
                                         ' Silent fail
@@ -3536,7 +3611,7 @@ Namespace SharedLibrary
                                         Debug.WriteLine($"RECEIVED FROM API (GET):{Environment.NewLine}{getResponseText}")
                                         Try
                                             Dim desktopPath As String = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
-                                            Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug_GET.txt")
+                                            Dim debugFilePath As String = System.IO.Path.Combine(desktopPath, "RI_Debug_GET.json")
                                             System.IO.File.WriteAllText(debugFilePath, responseText)
                                         Catch
                                             ' Silent fail
@@ -4195,7 +4270,7 @@ Namespace SharedLibrary
             Dim sb As New StringBuilder()
             sb.AppendLine()
             sb.AppendLine()
-            sb.AppendLine(vbCrLf & "References:")
+            sb.AppendLine(vbCrLf & vbCrLf & "References:")
             For i As Integer = 0 To citationList.Count - 1
                 'sb.AppendLine($"[{i + 1}] {citationList(i)}")
                 ' jede URL im Text als [URL](URL) maskieren
@@ -5160,6 +5235,7 @@ Namespace SharedLibrary
                 context.SP_ContextSearch = If(configDict.ContainsKey("SP_ContextSearch"), configDict("SP_ContextSearch"), Default_SP_ContextSearch)
                 context.SP_ContextSearchMulti = If(configDict.ContainsKey("SP_ContextSearchMulti"), configDict("SP_ContextSearchMulti"), Default_SP_ContextSearchMulti)
                 context.SP_RangeOfCells = If(configDict.ContainsKey("SP_RangeOfCells"), configDict("SP_RangeOfCells"), Default_SP_RangeOfCells)
+                context.SP_ParseFile = If(configDict.ContainsKey("SP_ParseFile"), configDict("SP_ParseFile"), Default_SP_ParseFile)
                 context.SP_WriteNeatly = If(configDict.ContainsKey("SP_WriteNeatly"), configDict("SP_WriteNeatly"), Default_SP_WriteNeatly)
                 context.SP_Add_KeepFormulasIntact = If(configDict.ContainsKey("SP_Add_KeepFormulasIntact"), configDict("SP_Add_KeepFormulasIntact"), Default_SP_Add_KeepFormulasIntact)
                 context.SP_Add_KeepHTMLIntact = If(configDict.ContainsKey("SP_Add_KeepHTMLIntact"), configDict("SP_Add_KeepHTMLIntact"), Default_SP_Add_KeepHTMLIntact)
@@ -5227,6 +5303,8 @@ Namespace SharedLibrary
                 context.INI_MyStylePath = If(configDict.ContainsKey("MyStylePath"), configDict("MyStylePath"), "")
                 context.INI_AlternateModelPath = If(configDict.ContainsKey("AlternateModelPath"), configDict("AlternateModelPath"), "")
                 context.INI_SpecialServicePath = If(configDict.ContainsKey("SpecialServicePath"), configDict("SpecialServicePath"), "")
+                context.INI_WebAgentPath = If(configDict.ContainsKey("WebAgentPath"), configDict("WebAgentPath"), "")
+                context.INI_WebAgentPathLocal = If(configDict.ContainsKey("WebAgentPathLocal"), configDict("WebAgentPathLocal"), "")
                 context.INI_FindClausePath = If(configDict.ContainsKey("FindClausePath"), configDict("FindClausePath"), "")
                 context.INI_FindClausePathLocal = If(configDict.ContainsKey("FindClausePathLocal"), configDict("FindClausePathLocal"), "")
                 context.INI_DocCheckPath = If(configDict.ContainsKey("DocCheckPath"), configDict("DocCheckPath"), "")
@@ -5321,7 +5399,7 @@ Namespace SharedLibrary
                 LicensedTill = If(configDict.ContainsKey("LicensedTill"), CDate(configDict("LicensedTill")), MaxUseDate)
 
                 If DateTime.Now.AddDays(+7) > LicensedTill Then
-                    ShowCustomMessageBox($"Your configured license for {AN} for {context.RDV} will expire in {DateDiff(DateInterval.Day, DateTime.Now, LicensedTill) + 1} days. Please contact your administrator or update the configuration file.", AN, 10)
+                    ShowCustomMessageBox($"Your configured license for {AN} for {context.RDV} will expire in {Microsoft.VisualBasic.DateAndTime.DateDiff(Microsoft.VisualBasic.DateInterval.Day, DateTime.Now, LicensedTill) + 1} days. Please contact your administrator or update the configuration file.", AN, 10)
                 End If
 
                 If Now > LicensedTill Then
@@ -5334,11 +5412,11 @@ Namespace SharedLibrary
                 End If
 
                 ' Additional configurations for OAuth2
-                context.TokenExpiry = DateAdd(DateInterval.Year, -1, DateTime.Now)
+                context.TokenExpiry = Microsoft.VisualBasic.DateAndTime.DateAdd(Microsoft.VisualBasic.DateInterval.Year, -1, DateTime.Now)
                 context.DecodedAPI = ""
                 context.INI_APIKeyBack = context.INI_APIKey
 
-                context.TokenExpiry_2 = DateAdd(DateInterval.Year, -1, DateTime.Now)
+                context.TokenExpiry_2 = Microsoft.VisualBasic.DateAndTime.DateAdd(Microsoft.VisualBasic.DateInterval.Year, -1, DateTime.Now)
                 context.DecodedAPI_2 = ""
                 context.INI_APIKeyBack_2 = context.INI_APIKey_2
 
@@ -5564,7 +5642,7 @@ Namespace SharedLibrary
                 mc.APIKeyBack = mc.APIKey
 
                 ' Additional configurations for OAuth2
-                mc.TokenExpiry = DateAdd(DateInterval.Year, -1, DateTime.Now)
+                mc.TokenExpiry = Microsoft.VisualBasic.DateAndTime.DateAdd(Microsoft.VisualBasic.DateInterval.Year, -1, DateTime.Now)
                 mc.DecodedAPI = ""
 
                 ' Check and decrypt API keys
@@ -6335,6 +6413,7 @@ Namespace SharedLibrary
                                           End Sub
 
             ' Dialog anzeigen
+            inputForm.TopMost = True
             inputForm.ShowDialog()
             Return selectedOption
         End Function
@@ -6550,187 +6629,12 @@ Namespace SharedLibrary
                 Debug.WriteLine("Final text: " & finalText)
                 Return finalText
             Else
-                    Return If(Not SimpleInput, "ESC", "")
-            End If
-        End Function
-
-
-        Public Shared Function oldShowCustomInputBox(
-                                                    prompt As String,
-                                                    title As String,
-                                                    SimpleInput As Boolean,
-                                                    Optional DefaultValue As String = "",
-                                                    Optional CtrlP As String = ""
-                                                ) As String
-
-            ' Create and configure the form
-            Dim inputForm As New Form() With {
-        .Opacity = 0,
-        .Text = title,
-        .FormBorderStyle = FormBorderStyle.FixedDialog,
-        .StartPosition = FormStartPosition.CenterScreen,
-        .MaximizeBox = False,
-        .MinimizeBox = False,
-        .ShowInTaskbar = False,
-        .TopMost = True,
-        .AutoScaleMode = AutoScaleMode.Font,
-        .AutoSize = True,
-        .AutoSizeMode = AutoSizeMode.GrowAndShrink
-    }
-
-            ' Set the icon
-            Dim bmp As New Bitmap(My.Resources.Red_Ink_Logo)
-            inputForm.Icon = Icon.FromHandle(bmp.GetHicon())
-
-            ' Standard font
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            inputForm.Font = standardFont
-
-            ' Main flow panel (vertical stack, auto‐sized, padding)
-            Dim mainFlow As New FlowLayoutPanel() With {
-        .FlowDirection = FlowDirection.TopDown,
-        .Dock = DockStyle.Fill,
-        .AutoSize = True,
-        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        .Padding = New Padding(20),
-        .MaximumSize = New Size(640 + 100, 0)   ' Limit total width
-    }
-
-            ' Prompt label
-            Dim promptLabel As New System.Windows.Forms.Label() With {
-        .Text = prompt,
-        .Font = standardFont,
-        .AutoSize = True,
-        .MaximumSize = New Size(600 + 100, 0)   ' Wrap at 600px
-    }
-            mainFlow.Controls.Add(promptLabel)
-
-            ' Input TextBox
-            Dim inputTextBox As New TextBox() With {
-        .Font = standardFont,
-        .Multiline = Not SimpleInput,
-        .WordWrap = True,
-        .ScrollBars = If(SimpleInput, ScrollBars.None, ScrollBars.Vertical),
-        .Width = 600 + 100,
-        .Text = DefaultValue
-    }
-            If SimpleInput Then
-                ' Single‐line height
-                inputTextBox.Height = TextRenderer.MeasureText("Wy", standardFont).Height + 6
-            Else
-                ' Multi‐line height
-                inputTextBox.Height = 150
-            End If
-            mainFlow.Controls.Add(inputTextBox)
-
-            ' KeyDown handlers for Enter/Escape
-            If SimpleInput Then
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True
-                                                     End If
-                                                 End Sub
-            Else
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.Enter AndAlso e.Modifiers = Keys.Control Then
-                                                         inputForm.DialogResult = DialogResult.OK
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True
-                                                     ElseIf e.KeyCode = Keys.Escape Then
-                                                         inputForm.DialogResult = DialogResult.Cancel
-                                                         inputForm.Close()
-                                                         e.SuppressKeyPress = True
-                                                     End If
-                                                 End Sub
-            End If
-
-            ' Ctrl+P insertion, if provided
-            If Not String.IsNullOrEmpty(CtrlP) Then
-                AddHandler inputTextBox.KeyDown, Sub(sender, e)
-                                                     If e.KeyCode = Keys.P AndAlso e.Modifiers = Keys.Control Then
-                                                         Dim selPos = inputTextBox.SelectionStart
-                                                         inputTextBox.Text = inputTextBox.Text.Insert(selPos, CtrlP)
-                                                         inputTextBox.SelectionStart = selPos + CtrlP.Length
-                                                         e.SuppressKeyPress = True
-                                                     End If
-                                                 End Sub
-            End If
-
-            ' OK and Cancel buttons
-            Dim okButton As New Button() With {
-        .Text = "OK",
-        .AutoSize = True,
-        .Font = standardFont
-    }
-            Dim cancelButton As New Button() With {
-        .Text = "Cancel",
-        .AutoSize = True,
-        .Font = standardFont
-    }
-
-            AddHandler okButton.Click, Sub()
-                                           inputForm.DialogResult = DialogResult.OK
-                                           inputForm.Close()
-                                       End Sub
-            AddHandler cancelButton.Click, Sub()
-                                               inputForm.DialogResult = DialogResult.Cancel
-                                               inputForm.Close()
-                                           End Sub
-
-            ' Bottom flow panel for buttons
-            Dim bottomFlow As New FlowLayoutPanel() With {
-        .FlowDirection = FlowDirection.LeftToRight,
-        .AutoSize = True,
-        .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        .Margin = New Padding(0, 20, 0, 0)
-    }
-            bottomFlow.Controls.Add(okButton)
-            bottomFlow.Controls.Add(cancelButton)
-            mainFlow.Controls.Add(bottomFlow)
-
-            ' Add layout to form
-            inputForm.Controls.Add(mainFlow)
-
-            ' Ensure the form is top‐most and focused
-            inputForm.TopMost = True
-            inputForm.BringToFront()
-            inputForm.Focus()
-
-            ' Show the dialog, optionally owned by Outlook
-            Dim Result As DialogResult
-            If title.Contains("Browser") Then
-                Dim outlookApp As Object = CreateObject("Outlook.Application")
-                If outlookApp IsNot Nothing Then
-                    Dim explorer As Object = outlookApp.GetType().InvokeMember(
-                "ActiveExplorer",
-                BindingFlags.GetProperty, Nothing, outlookApp, Nothing
-            )
-                    If explorer IsNot Nothing Then
-                        explorer.GetType().InvokeMember(
-                    "WindowState",
-                    BindingFlags.SetProperty, Nothing, explorer, New Object() {1})
-                        explorer.GetType().InvokeMember(
-                    "Activate",
-                    BindingFlags.InvokeMethod, Nothing, explorer, Nothing)
-                    End If
-                End If
-                inputForm.Opacity = 1
-                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
-                Result = inputForm.ShowDialog(New WindowWrapper(outlookHwnd))
-            Else
-                inputForm.Opacity = 1
-                Result = inputForm.ShowDialog()
-            End If
-
-            ' Return the entered text or appropriate default
-            If Result = DialogResult.OK Then
-                Return inputTextBox.Text
-            Else
                 Return If(Not SimpleInput, "ESC", "")
             End If
         End Function
+
+
+
 
 
         Public Shared Function ShowCustomYesNoBox(
@@ -6907,7 +6811,216 @@ Namespace SharedLibrary
             Return result
         End Function
 
+
         Public Shared Sub ShowCustomMessageBox(
+    ByVal bodyText As String,
+    Optional header As String = AN,
+    Optional autoCloseSeconds As System.Nullable(Of Integer) = Nothing,
+    Optional Defaulttext As String = " - execution continues meanwhile",
+    Optional SeparateThread As Boolean = False,
+    Optional extraButtonText As String = Nothing,
+    Optional extraButtonAction As System.Action = Nothing,
+    Optional CloseAfterExtra As Boolean = False
+)
+            If System.String.IsNullOrWhiteSpace(header) Then header = AN
+            Dim isTruncated As System.Boolean = False
+            If bodyText IsNot Nothing AndAlso bodyText.Length > 10000 Then
+                bodyText = bodyText.Substring(0, 10000) & "(...)"
+                isTruncated = True
+            End If
+
+            Dim messageForm As New System.Windows.Forms.Form() With {
+        .Opacity = 0,
+        .Text = header,
+        .FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
+        .StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
+        .MaximizeBox = False,
+        .MinimizeBox = False,
+        .ShowInTaskbar = False,
+        .TopMost = True,
+        .AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font,
+        .AutoSize = False
+    }
+
+            Dim bmpIcon As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            messageForm.Icon = System.Drawing.Icon.FromHandle(bmpIcon.GetHicon())
+
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            messageForm.Font = standardFont
+
+            Dim wa As System.Drawing.Rectangle = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea
+            Dim paddingAll As System.Int32 = 20
+            Dim gapAboveButtons As System.Int32 = 10 ' keep existing gap logic
+            Dim spacerExtra As System.Int32 = 20    ' NEW: extra space between text and buttons
+            Dim minContentWidth As System.Int32 = 360
+            Dim startContentWidth As System.Int32 = 500
+            Dim maxWindowWidth As System.Int32 = CInt(System.Math.Floor(wa.Width * 0.9))
+            Dim maxWindowHeight As System.Int32 = CInt(System.Math.Floor(wa.Height * 0.9))
+
+            Dim okButton As New System.Windows.Forms.Button() With {.Text = "OK", .AutoSize = True, .Font = standardFont, .Margin = New System.Windows.Forms.Padding(0)}
+            Dim countdownLabel As New System.Windows.Forms.Label() With {.Font = standardFont, .AutoSize = True, .Margin = New System.Windows.Forms.Padding(8, 0, 0, 0)}
+            Dim userClicked As System.Boolean = False
+            AddHandler okButton.Click, Sub()
+                                           userClicked = True
+                                           messageForm.Close()
+                                       End Sub
+
+            Dim bottomFlow As New System.Windows.Forms.FlowLayoutPanel() With {
+        .FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+        .AutoSize = True,
+        .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+        .Margin = New System.Windows.Forms.Padding(0)
+    }
+            bottomFlow.Controls.Add(okButton)
+
+            ' optional extra button
+            If (Not autoCloseSeconds.HasValue) AndAlso
+       (Not System.String.IsNullOrEmpty(extraButtonText)) AndAlso
+       (extraButtonAction IsNot Nothing) Then
+
+                Dim extraButton As New System.Windows.Forms.Button() With {
+            .Text = extraButtonText,
+            .AutoSize = True,
+            .Font = standardFont,
+            .Margin = New System.Windows.Forms.Padding(8, 0, 0, 0)
+        }
+                AddHandler extraButton.Click,
+            Sub()
+                Try
+                    extraButtonAction.Invoke()
+                Catch ex As System.Exception
+                End Try
+                If CloseAfterExtra Then messageForm.Close()
+            End Sub
+                bottomFlow.Controls.Add(extraButton)
+            End If
+            If autoCloseSeconds.HasValue Then bottomFlow.Controls.Add(countdownLabel)
+
+            bottomFlow.PerformLayout()
+            Dim bottomSize As System.Drawing.Size = bottomFlow.PreferredSize
+            Dim reservedBottomHeight As System.Int32 = bottomSize.Height + gapAboveButtons
+
+            Dim bodyLabel As New System.Windows.Forms.Label() With {
+        .Text = If(bodyText, System.String.Empty),
+        .Font = standardFont,
+        .AutoSize = True,
+        .Margin = New System.Windows.Forms.Padding(0)
+    }
+
+            Dim GetLabelPreferred As System.Func(Of System.Int32, System.Drawing.Size) =
+        Function(w As System.Int32) As System.Drawing.Size
+            bodyLabel.MaximumSize = New System.Drawing.Size(System.Math.Max(1, w), 0)
+            Return bodyLabel.GetPreferredSize(New System.Drawing.Size(System.Math.Max(1, w), 0))
+        End Function
+
+            Dim contentWidth As System.Int32 = System.Math.Max(minContentWidth, System.Math.Min(startContentWidth, maxWindowWidth - 2 * paddingAll))
+            Dim pref As System.Drawing.Size = GetLabelPreferred(contentWidth)
+            Dim maxBodyHeightNoScroll As System.Int32 = System.Math.Max(100, maxWindowHeight - reservedBottomHeight - spacerExtra - 2 * paddingAll) ' include spacer in budget
+
+            While (pref.Height > maxBodyHeightNoScroll) AndAlso ((contentWidth + 2 * paddingAll) < maxWindowWidth)
+                Dim stepW As System.Int32 = System.Math.Max(24, (maxWindowWidth - 2 * paddingAll - contentWidth) \ 3)
+                contentWidth = System.Math.Min(maxWindowWidth - 2 * paddingAll, contentWidth + stepW)
+                pref = GetLabelPreferred(contentWidth)
+            End While
+
+            Dim needScroll As System.Boolean = pref.Height > maxBodyHeightNoScroll
+            Dim usableTextWidth As System.Int32 = contentWidth
+            If needScroll Then
+                usableTextWidth = System.Math.Max(100, contentWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth)
+                pref = GetLabelPreferred(usableTextWidth)
+            End If
+
+            Dim bodyPanelHeight As System.Int32 = If(needScroll, maxBodyHeightNoScroll, pref.Height)
+
+            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
+        .AutoScroll = False,
+        .AutoSize = False,
+        .Size = New System.Drawing.Size(contentWidth, bodyPanelHeight),
+        .Margin = New System.Windows.Forms.Padding(0),
+        .Padding = New System.Windows.Forms.Padding(0)
+    }
+            bodyScrollPanel.HorizontalScroll.Enabled = False
+            bodyScrollPanel.HorizontalScroll.Visible = False
+
+            bodyLabel.MaximumSize = New System.Drawing.Size(usableTextWidth, 0)
+            bodyScrollPanel.Controls.Add(bodyLabel)
+            bodyLabel.Location = New System.Drawing.Point(0, 0)
+
+            If needScroll Then
+                bodyScrollPanel.AutoScroll = True
+                bodyScrollPanel.AutoScrollMinSize = New System.Drawing.Size(usableTextWidth, pref.Height)
+            End If
+
+            ' --- MAIN TABLE: now 3 rows: [text][SPACER][buttons] ---
+            Dim table As New System.Windows.Forms.TableLayoutPanel() With {
+        .Dock = System.Windows.Forms.DockStyle.Fill,
+        .ColumnCount = 1,
+        .RowCount = 3, ' NEW
+        .Padding = New System.Windows.Forms.Padding(paddingAll),
+        .AutoSize = False,
+        .Margin = New System.Windows.Forms.Padding(0)
+    }
+            table.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0F))
+            table.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, bodyPanelHeight))  ' text
+            table.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, spacerExtra))       ' NEW spacer
+            table.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))                    ' buttons
+
+            table.Controls.Add(bodyScrollPanel, 0, 0)
+
+            ' NEW spacer: exact +20 px above the buttons
+            Dim spacer As New System.Windows.Forms.Panel() With {.Height = spacerExtra, .Width = 1, .Margin = New System.Windows.Forms.Padding(0)}
+            table.Controls.Add(spacer, 0, 1)
+
+            Dim bottomHost As New System.Windows.Forms.Panel() With {.AutoSize = True, .Margin = New System.Windows.Forms.Padding(0)}
+            bottomHost.Padding = New System.Windows.Forms.Padding(0, gapAboveButtons, 0, 0)
+            bottomHost.Controls.Add(bottomFlow)
+            table.Controls.Add(bottomHost, 0, 2)
+
+            messageForm.Controls.Clear()
+            messageForm.Controls.Add(table)
+
+            ' Final size: include spacerExtra
+            Dim clientW As System.Int32 = contentWidth + 2 * paddingAll
+            Dim clientH As System.Int32 = bodyPanelHeight + spacerExtra + reservedBottomHeight + 2 * paddingAll
+            clientW = System.Math.Min(clientW, maxWindowWidth)
+            clientH = System.Math.Min(clientH, maxWindowHeight)
+            messageForm.ClientSize = New System.Drawing.Size(clientW, clientH)
+
+            If autoCloseSeconds.HasValue Then
+                Dim remaining As System.Int32 = autoCloseSeconds.Value
+                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
+                AddHandler t.Tick,
+            Sub()
+                remaining -= 1
+                If remaining > 0 Then
+                    countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
+                Else
+                    t.Stop()
+                    If Not userClicked Then
+                        messageForm.Close()
+                    End If
+                End If
+            End Sub
+                t.Start()
+
+                messageForm.Opacity = 1
+                If SeparateThread Then
+                    messageForm.ShowDialog()
+                Else
+                    messageForm.Show()
+                    System.Windows.Forms.Application.DoEvents()
+                End If
+            Else
+                messageForm.Opacity = 1
+                messageForm.ShowDialog()
+            End If
+        End Sub
+
+
+
+
+        Public Shared Sub oldShowCustomMessageBox(
     ByVal bodyText As String,
     Optional header As String = AN,
     Optional autoCloseSeconds As Integer? = Nothing,
@@ -7083,344 +7196,6 @@ Namespace SharedLibrary
                     End If
                 End If
             End Sub
-                t.Start()
-
-                messageForm.Opacity = 1
-                If SeparateThread Then
-                    messageForm.ShowDialog()
-                Else
-                    messageForm.Show()
-                    System.Windows.Forms.Application.DoEvents()
-                End If
-            Else
-                messageForm.Opacity = 1
-                messageForm.ShowDialog()
-            End If
-        End Sub
-
-
-
-        Public Shared Sub oldShowCustomMessageBox(
-                                    ByVal bodyText As String,
-                                    Optional header As String = AN,
-                                    Optional autoCloseSeconds As Integer? = Nothing,
-                                    Optional Defaulttext As String = " - execution continues meanwhile",
-                                    Optional SeparateThread As Boolean = False,
-                                    Optional extraButtonText As String = Nothing,
-                                    Optional extraButtonAction As System.Action = Nothing,
-                                    Optional CloseAfterExtra As Boolean = False
-                                )
-            ' Truncate if too long
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-            Dim isTruncated As Boolean = False
-            If bodyText.Length > 10000 Then
-                bodyText = bodyText.Substring(0, 10000) & "(...)"
-                isTruncated = True
-            End If
-
-            ' Create and configure form
-            Dim messageForm As New Form() With {
-                            .Opacity = 0,
-                            .Text = header,
-                            .FormBorderStyle = FormBorderStyle.FixedDialog,
-                            .StartPosition = FormStartPosition.CenterScreen,
-                            .MaximizeBox = False,
-                            .MinimizeBox = False,
-                            .ShowInTaskbar = False,
-                            .TopMost = True,
-                            .AutoScaleMode = AutoScaleMode.Font,
-                            .AutoSize = True,
-                            .AutoSizeMode = AutoSizeMode.GrowAndShrink
-                        }
-
-            ' Icon
-            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
-            messageForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
-
-            ' Font
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            messageForm.Font = standardFont
-
-            ' Layout
-            Dim maxLabelWidth = 500
-            Dim mainFlow As New FlowLayoutPanel() With {
-            .FlowDirection = FlowDirection.TopDown,
-            .Dock = DockStyle.Fill,
-            .AutoSize = True,
-            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            .Padding = New Padding(20),
-            .MaximumSize = New Size(maxLabelWidth + 40, 0)
-        }
-
-            ' Body label
-            'Dim bodyLabel As New System.Windows.Forms.Label() With {
-            '.Text = bodyText,
-            '.Font = standardFont,
-            '.AutoSize = True,
-            '.MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
-            '}
-            'mainFlow.Controls.Add(bodyLabel)
-
-            ' Measure text to decide if scrolling is needed
-            Dim maxVisibleHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height \ 2
-            Dim measured As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(
-                    bodyText,
-                    standardFont,
-                    New System.Drawing.Size(maxLabelWidth, Integer.MaxValue),
-                    System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
-                )
-
-            ' Scrollable container that only shows scrollbars if content exceeds size
-            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
-                    .AutoScroll = True,
-                    .AutoSize = False,
-                    .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0),
-                    .Padding = New System.Windows.Forms.Padding(0),
-                    .Size = New System.Drawing.Size(maxLabelWidth, Math.Min(measured.Height, maxVisibleHeight))
-                }
-
-            ' Body label inside scroll panel
-            Dim bodyLabel As New System.Windows.Forms.Label() With {
-                    .Text = bodyText,
-                    .Font = standardFont,
-                    .AutoSize = True,
-                    .MaximumSize = New System.Drawing.Size(maxLabelWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth, 0)
-                }
-            bodyScrollPanel.Controls.Add(bodyLabel)
-            mainFlow.Controls.Add(bodyScrollPanel)
-
-            ' OK button and countdown
-            Dim okButton As New Button() With {
-            .Text = "OK",
-            .AutoSize = True,
-            .Font = standardFont
-        }
-            Dim countdownLabel As New System.Windows.Forms.Label() With {
-            .Font = standardFont,
-            .AutoSize = True
-        }
-
-            Dim userClicked As Boolean = False
-
-            AddHandler okButton.Click, Sub()
-                                           userClicked = True
-                                           messageForm.Close()
-                                       End Sub
-
-            ' Bottom flow
-            Dim bottomFlow As New FlowLayoutPanel() With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            .Margin = New Padding(0, 20, 0, 0)
-        }
-            bottomFlow.Controls.Add(okButton)
-
-            bottomFlow.Controls.Add(okButton)
-
-            ' --- optional extra button (only when NOT auto-closing) ---
-            If (Not autoCloseSeconds.HasValue) AndAlso
-                   (Not String.IsNullOrEmpty(extraButtonText)) AndAlso
-                   (extraButtonAction IsNot Nothing) Then
-
-                Dim extraButton As New System.Windows.Forms.Button() With {
-                        .Text = extraButtonText,
-                        .AutoSize = True,
-                        .Font = standardFont
-                    }
-
-                AddHandler extraButton.Click,
-                        Sub()
-                            Try
-                                extraButtonAction.Invoke()
-                            Catch ex As System.Exception
-                                ' Optional: log or handle exception if needed
-                            End Try
-                            If CloseAfterExtra Then messageForm.Close()
-                        End Sub
-
-                bottomFlow.Controls.Add(extraButton)
-            End If
-
-
-
-            If autoCloseSeconds.HasValue Then
-                bottomFlow.Controls.Add(countdownLabel)
-            End If
-            mainFlow.Controls.Add(bottomFlow)
-
-            messageForm.Controls.Add(mainFlow)
-
-            ' Auto-close
-
-            If autoCloseSeconds.HasValue Then
-                Dim remaining = autoCloseSeconds.Value
-                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
-                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
-                AddHandler t.Tick, Sub()
-                                       remaining -= 1
-                                       If remaining > 0 Then
-                                           countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
-                                       Else
-                                           t.Stop()
-                                           If Not userClicked Then
-                                               messageForm.Close()
-                                           End If
-                                       End If
-                                   End Sub
-                t.Start()
-
-                messageForm.Opacity = 1
-                If SeparateThread Then
-                    messageForm.ShowDialog()
-                Else
-                    messageForm.Show()
-                    System.Windows.Forms.Application.DoEvents()
-                End If
-            Else
-                messageForm.Opacity = 1
-                messageForm.ShowDialog()
-            End If
-        End Sub
-
-
-
-        Public Shared Sub veryoldShowCustomMessageBox(
-                                    ByVal bodyText As String,
-                                    Optional header As String = AN,
-                                    Optional autoCloseSeconds As Integer? = Nothing,
-                                    Optional Defaulttext As String = " - execution continues meanwhile",
-                                    Optional SeparateThread As Boolean = False
-                                )
-            ' Truncate if too long
-            If String.IsNullOrWhiteSpace(header) Then header = AN
-            Dim isTruncated As Boolean = False
-            If bodyText.Length > 10000 Then
-                bodyText = bodyText.Substring(0, 10000) & "(...)"
-                isTruncated = True
-            End If
-
-            ' Create and configure form
-            Dim messageForm As New Form() With {
-                            .Opacity = 0,
-                            .Text = header,
-                            .FormBorderStyle = FormBorderStyle.FixedDialog,
-                            .StartPosition = FormStartPosition.CenterScreen,
-                            .MaximizeBox = False,
-                            .MinimizeBox = False,
-                            .ShowInTaskbar = False,
-                            .TopMost = True,
-                            .AutoScaleMode = AutoScaleMode.Font,
-                            .AutoSize = True,
-                            .AutoSizeMode = AutoSizeMode.GrowAndShrink
-                        }
-
-            ' Icon
-            Dim bmpIcon As New Bitmap(My.Resources.Red_Ink_Logo)
-            messageForm.Icon = Icon.FromHandle(bmpIcon.GetHicon())
-
-            ' Font
-            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-            messageForm.Font = standardFont
-
-            ' Layout
-            Dim maxLabelWidth = 500
-            Dim mainFlow As New FlowLayoutPanel() With {
-            .FlowDirection = FlowDirection.TopDown,
-            .Dock = DockStyle.Fill,
-            .AutoSize = True,
-            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            .Padding = New Padding(20),
-            .MaximumSize = New Size(maxLabelWidth + 40, 0)
-        }
-
-            ' Body label
-            'Dim bodyLabel As New System.Windows.Forms.Label() With {
-            '.Text = bodyText,
-            '.Font = standardFont,
-            '.AutoSize = True,
-            '.MaximumSize = New Size(maxLabelWidth, Screen.PrimaryScreen.WorkingArea.Height \ 2)
-            '}
-            'mainFlow.Controls.Add(bodyLabel)
-
-            ' Measure text to decide if scrolling is needed
-            Dim maxVisibleHeight As Integer = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height \ 2
-            Dim measured As System.Drawing.Size = System.Windows.Forms.TextRenderer.MeasureText(
-                    bodyText,
-                    standardFont,
-                    New System.Drawing.Size(maxLabelWidth, Integer.MaxValue),
-                    System.Windows.Forms.TextFormatFlags.WordBreak Or System.Windows.Forms.TextFormatFlags.TextBoxControl
-                )
-
-            ' Scrollable container that only shows scrollbars if content exceeds size
-            Dim bodyScrollPanel As New System.Windows.Forms.Panel() With {
-                    .AutoScroll = True,
-                    .AutoSize = False,
-                    .Margin = New System.Windows.Forms.Padding(0, 0, 0, 0),
-                    .Padding = New System.Windows.Forms.Padding(0),
-                    .Size = New System.Drawing.Size(maxLabelWidth, Math.Min(measured.Height, maxVisibleHeight))
-                }
-
-            ' Body label inside scroll panel
-            Dim bodyLabel As New System.Windows.Forms.Label() With {
-                    .Text = bodyText,
-                    .Font = standardFont,
-                    .AutoSize = True,
-                    .MaximumSize = New System.Drawing.Size(maxLabelWidth - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth, 0)
-                }
-            bodyScrollPanel.Controls.Add(bodyLabel)
-            mainFlow.Controls.Add(bodyScrollPanel)
-
-            ' OK button and countdown
-            Dim okButton As New Button() With {
-            .Text = "OK",
-            .AutoSize = True,
-            .Font = standardFont
-        }
-            Dim countdownLabel As New System.Windows.Forms.Label() With {
-            .Font = standardFont,
-            .AutoSize = True
-        }
-
-            Dim userClicked As Boolean = False
-
-            AddHandler okButton.Click, Sub()
-                                           userClicked = True
-                                           messageForm.Close()
-                                       End Sub
-
-            ' Bottom flow
-            Dim bottomFlow As New FlowLayoutPanel() With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            .Margin = New Padding(0, 20, 0, 0)
-        }
-            bottomFlow.Controls.Add(okButton)
-            If autoCloseSeconds.HasValue Then
-                bottomFlow.Controls.Add(countdownLabel)
-            End If
-            mainFlow.Controls.Add(bottomFlow)
-
-            messageForm.Controls.Add(mainFlow)
-
-            ' Auto-close
-
-            If autoCloseSeconds.HasValue Then
-                Dim remaining = autoCloseSeconds.Value
-                countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
-                Dim t As New System.Windows.Forms.Timer() With {.Interval = 1000}
-                AddHandler t.Tick, Sub()
-                                       remaining -= 1
-                                       If remaining > 0 Then
-                                           countdownLabel.Text = $"(closes in {remaining} seconds{Defaulttext})"
-                                       Else
-                                           t.Stop()
-                                           If Not userClicked Then
-                                               messageForm.Close()
-                                           End If
-                                       End If
-                                   End Sub
                 t.Start()
 
                 messageForm.Opacity = 1
@@ -8357,42 +8132,34 @@ Namespace SharedLibrary
                 ) As IntPtr
         End Function
 
-        ' Nachricht zum Abfragen der aktuellen Event‑Maske
-        Const EM_GETEVENTMASK As Integer = &H43B
-        Const EM_SETEVENTMASK As Integer = &H44C              ' Nachricht zum Setzen des Event-Mask-Flags
-        Const ENM_LINKS As Integer = &H20                     ' Link‑Events einschalten
-
-        Private Const EM_AUTOURLDETECT As Integer = &H45A
-
 
         Public Shared Function ShowCustomWindow(
-                            introLine As String,
-                            ByVal bodyText As String,
-                            finalRemark As String,
-                            header As String,
-                            Optional NoRTF As Boolean = False,
-                            Optional Getfocus As Boolean = False,
-                            Optional InsertMarkdown As Boolean = False,
-                            Optional TransferToPane As Boolean = False,
-                            Optional parentWindowHwnd As IntPtr = Nothing
-                        ) As String
-
+            introLine As String,
+            ByVal bodyText As String,
+            finalRemark As String,
+            header As String,
+            Optional NoRTF As Boolean = False,
+            Optional Getfocus As Boolean = False,
+            Optional InsertMarkdown As Boolean = False,
+            Optional TransferToPane As Boolean = False,
+            Optional parentWindowHwnd As IntPtr = Nothing
+        ) As String
 
             ' Ursprünglichen Text merken
             Dim OriginalText As String = bodyText
 
             ' --- Abstände & Konstanten ---
             Const leftMargin As Integer = 10
-            Const rightPadding As Integer = 10    ' jetzt 10 px
-            Const spacing As Integer = 10         ' zwischen Label/TextBox
+            Const rightPadding As Integer = 10
+            Const spacing As Integer = 10
             Const gapButtons As Integer = 10
-            Const remarkToButtonSpacing As Integer = 20  ' immer 20 px zwischen (finalRemark) und Buttons
-            Const bottomPadding As Integer = 20   ' immer 20 px unter den Buttons
+            Const remarkToButtonSpacing As Integer = 20
+            Const bottomPadding As Integer = 20
 
             ' --- Controls anlegen ---
             Dim styledForm As New System.Windows.Forms.Form()
             Dim introLabel As New System.Windows.Forms.Label()
-            Dim bodyTextBox As New System.Windows.Forms.RichTextBox()
+            Dim bodyTextBox As New RichTextBox()
             Dim finalRemarkLabel As New System.Windows.Forms.Label()
             Dim btnEdited As New System.Windows.Forms.Button()
             Dim btnOriginal As New System.Windows.Forms.Button()
@@ -8400,6 +8167,10 @@ Namespace SharedLibrary
             Dim btnPane As New System.Windows.Forms.Button()
             Dim btnCancel As New System.Windows.Forms.Button()
             Dim toolStrip As New System.Windows.Forms.ToolStrip()
+            Dim lblHint As New System.Windows.Forms.Label() With {
+        .AutoSize = False,
+        .TextAlign = ContentAlignment.MiddleRight
+    }
 
             ' --- Screen / Max-Größe berechnen ---
             Dim scrW = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Width
@@ -8408,7 +8179,7 @@ Namespace SharedLibrary
             Dim maxH = Math.Min(scrH \ 2, (maxW * 9) \ 16)
             maxW = Math.Min(maxW, (maxH * 16) \ 9)
 
-            ' --- Fallback–Minima für Breite/Höhe ---
+            ' --- Fallback–Minima ---
             Const minFormWStatic As Integer = 400
             Const minFormHStatic As Integer = 300
 
@@ -8421,7 +8192,6 @@ Namespace SharedLibrary
             styledForm.ShowInTaskbar = False
             styledForm.TopMost = True
             styledForm.CancelButton = btnCancel
-            ' Nur statisches Fallback-Minimum
             styledForm.MinimumSize = New System.Drawing.Size(minFormWStatic, minFormHStatic)
 
             ' Icon
@@ -8439,52 +8209,85 @@ Namespace SharedLibrary
             introLabel.Location = New System.Drawing.Point(leftMargin, spacing)
             introLabel.Width = maxW - leftMargin - rightPadding
             introLabel.Height = introLabel.PreferredHeight
-            introLabel.Anchor = System.Windows.Forms.AnchorStyles.Top Or System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+            introLabel.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
             styledForm.Controls.Add(introLabel)
 
-            ' --- Buttons anlegen & messen ---
+            ' --- Buttons ---
             btnEdited.Text = "OK, use edited text"
-            Dim szE = System.Windows.Forms.TextRenderer.MeasureText(btnEdited.Text, stdFont)
-            btnEdited.Size = New System.Drawing.Size(szE.Width + 20, szE.Height + 10)
+            Dim szE = TextRenderer.MeasureText(btnEdited.Text, stdFont)
+            btnEdited.Size = New Size(szE.Width + 20, szE.Height + 10)
 
             btnOriginal.Text = "OK, use original text"
-            Dim szO = System.Windows.Forms.TextRenderer.MeasureText(btnOriginal.Text, stdFont)
-            btnOriginal.Size = New System.Drawing.Size(szO.Width + 20, szE.Height + 10)
+            Dim szO = TextRenderer.MeasureText(btnOriginal.Text, stdFont)
+            btnOriginal.Size = New Size(szO.Width + 20, szE.Height + 10)
 
             If TransferToPane Then
                 btnPane.Text = "Transfer to pane"
-                Dim szP = System.Windows.Forms.TextRenderer.MeasureText(btnPane.Text, stdFont)
-                btnPane.Size = New System.Drawing.Size(szP.Width + 20, szE.Height + 10)
+                Dim szP = TextRenderer.MeasureText(btnPane.Text, stdFont)
+                btnPane.Size = New Size(szP.Width + 20, szE.Height + 10)
                 styledForm.Controls.Add(btnPane)
             End If
 
             If InsertMarkdown Then
                 btnMark.Text = "Insert original text with formatting"
-                Dim szM = System.Windows.Forms.TextRenderer.MeasureText(btnMark.Text, stdFont)
-                btnMark.Size = New System.Drawing.Size(szM.Width + 20, szE.Height + 10)
+                Dim szM = TextRenderer.MeasureText(btnMark.Text, stdFont)
+                btnMark.Size = New Size(szM.Width + 20, szE.Height + 10)
                 styledForm.Controls.Add(btnMark)
             End If
 
             btnCancel.Text = "Cancel"
-            Dim szC = System.Windows.Forms.TextRenderer.MeasureText(btnCancel.Text, stdFont)
-            btnCancel.Size = New System.Drawing.Size(szC.Width + 20, szE.Height + 10)
+            Dim szC = TextRenderer.MeasureText(btnCancel.Text, stdFont)
+            btnCancel.Size = New Size(szC.Width + 20, szE.Height + 10)
 
-            ' Füge die Buttons jetzt schon ans Formular (Position später)
             styledForm.Controls.Add(btnEdited)
             styledForm.Controls.Add(btnOriginal)
             styledForm.Controls.Add(btnCancel)
 
-            ' --- BodyTextBox ---
-            bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            ' --- BodyTextBox (align with CustomPaneControl) ---
+            bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, FontStyle.Regular, GraphicsUnit.Point)
             bodyTextBox.Multiline = True
-            bodyTextBox.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical
+            bodyTextBox.ScrollBars = RichTextBoxScrollBars.Vertical
             bodyTextBox.WordWrap = True
+            bodyTextBox.HideSelection = False
+            bodyTextBox.DetectUrls = True
             bodyTextBox.Location = New System.Drawing.Point(leftMargin, introLabel.Bottom + spacing)
             bodyTextBox.Width = maxW - leftMargin - rightPadding
             bodyTextBox.Height = maxH - introLabel.Bottom - spacing
-            bodyTextBox.MinimumSize = New System.Drawing.Size(bodyTextBox.Width, bodyTextBox.Height)
-            bodyTextBox.Anchor = System.Windows.Forms.AnchorStyles.Top Or System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+            bodyTextBox.MinimumSize = New Size(bodyTextBox.Width, bodyTextBox.Height)
+            bodyTextBox.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
             styledForm.Controls.Add(bodyTextBox)
+
+            ' LinkClicked: open directly (no Ctrl modifier), like CustomPaneControl
+            AddHandler bodyTextBox.LinkClicked,
+        Sub(senderObj As Object, e As LinkClickedEventArgs)
+            Try
+                System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo(e.LinkText) With {.UseShellExecute = True})
+            Catch
+                ' ignore
+            End Try
+        End Sub
+
+            ' Copy handler: match CustomPaneControl behavior
+            AddHandler bodyTextBox.KeyDown,
+        Sub(sender As Object, e As System.Windows.Forms.KeyEventArgs)
+            If (e.Control AndAlso (e.KeyCode = Keys.C OrElse e.KeyCode = Keys.Insert)) Then
+                Try
+                    If Not NoRTF Then
+                        SharedMethods.CopySelectionExcludingTrailingNbsp(bodyTextBox)
+                    Else
+                        If bodyTextBox.SelectionLength > 0 Then
+                            SharedMethods.PutInClipboard(bodyTextBox.SelectedText)
+                        Else
+                            SharedMethods.PutInClipboard(bodyTextBox.Text)
+                        End If
+                    End If
+                    e.Handled = True
+                Catch
+                    ' fallback to default if anything goes wrong
+                End Try
+            End If
+            ' Do not intercept Ctrl+A (same as CustomPaneControl)
+        End Sub
 
             ' --- Optionales End-Label ---
             Dim hasRemark = Not String.IsNullOrEmpty(finalRemark)
@@ -8493,191 +8296,210 @@ Namespace SharedLibrary
                 finalRemarkLabel.Font = stdFont
                 finalRemarkLabel.AutoSize = False
                 finalRemarkLabel.Width = bodyTextBox.MinimumSize.Width
-                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(finalRemarkLabel.Width, 0)).Height
-                finalRemarkLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right
+                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New Size(finalRemarkLabel.Width, 0)).Height
+                finalRemarkLabel.Anchor = AnchorStyles.Left Or AnchorStyles.Right
                 styledForm.Controls.Add(finalRemarkLabel)
             End If
 
-            ' --- ToolStrip aufbauen ---
-            toolStrip.Dock = System.Windows.Forms.DockStyle.None
+            ' --- ToolStrip ---
+            toolStrip.Dock = DockStyle.None
             For Each sym In New String() {"B", "I", "U", "•"}
-                Dim tsb As New System.Windows.Forms.ToolStripButton(sym) With {
-            .Font = New System.Drawing.Font(stdFont, If(sym = "B", System.Drawing.FontStyle.Bold, If(sym = "I", System.Drawing.FontStyle.Italic, If(sym = "U", System.Drawing.FontStyle.Underline, System.Drawing.FontStyle.Regular)))),
+                Dim tsb As New ToolStripButton(sym) With {
+            .Font = New System.Drawing.Font(stdFont, If(sym = "B",
+                                                FontStyle.Bold,
+                                                If(sym = "I",
+                                                   FontStyle.Italic,
+                                                   If(sym = "U",
+                                                      FontStyle.Underline,
+                                                      FontStyle.Regular)))),
             .Name = "tsb" & sym
         }
-                AddHandler tsb.Click, Sub(s, e)
-                                          If bodyTextBox.SelectionLength > 0 Then
-                                              Select Case DirectCast(s, System.Windows.Forms.ToolStripButton).Name
-                                                  Case "tsbB"
-                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Bold)
-                                                  Case "tsbI"
-                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Italic)
-                                                  Case "tsbU"
-                                                      bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Underline)
-                                                  Case "tsb•"
-                                                      bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
-                                                      bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
-                                                      bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
-                                              End Select
-                                          End If
-                                      End Sub
+                AddHandler tsb.Click,
+            Sub(s, e)
+                If bodyTextBox.SelectionLength > 0 Then
+                    Select Case DirectCast(s, ToolStripButton).Name
+                        Case "tsbB"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Bold)
+                        Case "tsbI"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Italic)
+                        Case "tsbU"
+                            bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Underline)
+                        Case "tsb•"
+                            bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
+                            bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
+                            bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
+                    End Select
+                End If
+            End Sub
                 toolStrip.Items.Add(tsb)
             Next
             styledForm.Controls.Add(toolStrip)
 
-            ' --- Dynamische Mindestgröße berechnen inkl. finalRemark & Buttons ---
+            ' Hint label (update text; no Ctrl+Click requirement)
+            lblHint.Text = "Click a link to open"
+            lblHint.Font = New System.Drawing.Font(stdFont, FontStyle.Italic)
+            lblHint.ForeColor = Color.DimGray
+            lblHint.Height = szE.Height + 6
+            styledForm.Controls.Add(lblHint)
+
+            ' --- Dynamische Mindestgröße ---
             Dim bodyTop = bodyTextBox.Top
             Dim bodyMinH = bodyTextBox.MinimumSize.Height
             Dim remHeight = If(hasRemark,
-                      finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(bodyTextBox.MinimumSize.Width, 0)).Height,
-                      0)
+               finalRemarkLabel.GetPreferredSize(New Size(bodyTextBox.MinimumSize.Width, 0)).Height,
+               0)
             Dim btnH = btnEdited.Height
 
-            Dim dynamicMinH = bodyTop _
-                      + bodyMinH _
-                      + If(hasRemark,
-                            spacing + remHeight + remarkToButtonSpacing,
-                            remarkToButtonSpacing) _
-                      + btnH _
-                      + bottomPadding
+            Dim dynamicMinH = bodyTop +
+              bodyMinH +
+              If(hasRemark,
+                 spacing + remHeight + remarkToButtonSpacing,
+                 remarkToButtonSpacing) +
+              btnH +
+              bottomPadding
 
-            ' Mindestbreite: reicht für BodyTextBox + padding, Intro-Label und alle Buttons
             Dim w1 = leftMargin + bodyTextBox.MinimumSize.Width + rightPadding
             Dim introMinW = leftMargin + introLabel.PreferredWidth + rightPadding
-            Dim totalBtnW = btnEdited.Width + gapButtons + btnOriginal.Width _
-                    + If(InsertMarkdown, gapButtons + btnMark.Width, 0) _
-                    + If(TransferToPane, gapButtons + btnPane.Width, 0) _
-                    + gapButtons + btnCancel.Width
+            Dim totalBtnW = btnEdited.Width + gapButtons + btnOriginal.Width +
+            If(InsertMarkdown, gapButtons + btnMark.Width, 0) +
+            If(TransferToPane, gapButtons + btnPane.Width, 0) +
+            gapButtons + btnCancel.Width
             Dim w3 = leftMargin + totalBtnW + rightPadding
             Dim dynamicMinW = Math.Max(Math.Max(w1, introMinW), w3)
 
-            ' Setze die wirklich gültige MinimumSize
-            styledForm.MinimumSize = New System.Drawing.Size(
+            styledForm.MinimumSize = New Size(
         Math.Max(minFormWStatic, dynamicMinW),
         Math.Max(minFormHStatic, dynamicMinH)
     )
 
-            ' --- Resize-Handler: Positionen & Größen anpassen ---
-            AddHandler styledForm.Resize, Sub(s, e)
-                                              Dim fW = styledForm.ClientSize.Width
-                                              Dim fH = styledForm.ClientSize.Height
+            ' --- Resize Handler ---
+            AddHandler styledForm.Resize,
+        Sub(s, e)
+            Dim fW = styledForm.ClientSize.Width
+            Dim fH = styledForm.ClientSize.Height
 
-                                              ' Intro-Label
-                                              introLabel.Width = fW - leftMargin - rightPadding
+            introLabel.Width = fW - leftMargin - rightPadding
 
-                                              ' BodyTextBox Breite/Höhe
-                                              Dim newW = fW - leftMargin - rightPadding
-                                              bodyTextBox.Width = Math.Max(bodyTextBox.MinimumSize.Width, newW)
-                                              Dim usedBelow = If(hasRemark,
-                           spacing + finalRemarkLabel.Height + remarkToButtonSpacing,
-                           remarkToButtonSpacing) _
-                        + btnH + bottomPadding
-                                              Dim availH = fH - bodyTop - usedBelow
-                                              bodyTextBox.Height = Math.Max(bodyTextBox.MinimumSize.Height, availH)
+            Dim newW = fW - leftMargin - rightPadding
+            bodyTextBox.Width = Math.Max(bodyTextBox.MinimumSize.Width, newW)
 
-                                              ' finalRemarkLabel darunter
-                                              If hasRemark Then
-                                                  finalRemarkLabel.Width = bodyTextBox.Width
-                                                  finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New System.Drawing.Size(finalRemarkLabel.Width, 0)).Height
-                                                  finalRemarkLabel.Location = New System.Drawing.Point(leftMargin, bodyTextBox.Bottom + spacing)
-                                              End If
+            Dim usedBelow = If(hasRemark,
+                               spacing + finalRemarkLabel.Height + remarkToButtonSpacing,
+                               remarkToButtonSpacing) +
+                            btnH + bottomPadding
+            Dim availH = fH - bodyTop - usedBelow
+            bodyTextBox.Height = Math.Max(bodyTextBox.MinimumSize.Height, availH)
 
-                                              ' Buttons immer 20px über dem unteren Fensterrand
-                                              Dim btnY = fH - btnH - bottomPadding
-                                              btnEdited.Location = New System.Drawing.Point(leftMargin, btnY)
-                                              btnOriginal.Location = New System.Drawing.Point(btnEdited.Right + gapButtons, btnY)
-                                              If InsertMarkdown Then
-                                                  btnMark.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
-                                                  If TransferToPane Then
-                                                      btnPane.Location = New System.Drawing.Point(btnMark.Right + gapButtons, btnY)
-                                                      btnCancel.Location = New System.Drawing.Point(btnPane.Right + gapButtons, btnY)
-                                                  Else
-                                                      btnCancel.Location = New System.Drawing.Point(btnMark.Right + gapButtons, btnY)
-                                                  End If
-                                              ElseIf TransferToPane Then
-                                                  btnPane.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
-                                                  btnCancel.Location = New System.Drawing.Point(btnPane.Right + gapButtons, btnY)
-                                              Else
-                                                  btnCancel.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
-                                              End If
+            If hasRemark Then
+                finalRemarkLabel.Width = bodyTextBox.Width
+                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New Size(finalRemarkLabel.Width, 0)).Height
+                finalRemarkLabel.Location = New System.Drawing.Point(leftMargin, bodyTextBox.Bottom + spacing)
+            End If
 
-                                              ' ToolStrip oberhalb der TextBox am rechten Rand
-                                              toolStrip.Location = New System.Drawing.Point(
-            leftMargin + bodyTextBox.Width - toolStrip.Width,
-            bodyTextBox.Top - toolStrip.Height - spacing
-        )
-                                              toolStrip.BringToFront()
-                                          End Sub
+            Dim btnY = fH - btnH - bottomPadding
+            btnEdited.Location = New System.Drawing.Point(leftMargin, btnY)
+            btnOriginal.Location = New System.Drawing.Point(btnEdited.Right + gapButtons, btnY)
 
-            ' --- Initialgröße setzen (>= dynamicMin & >= max) und Layout triggern ---
+            Dim nextX = btnOriginal.Right
+            If InsertMarkdown Then
+                btnMark.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
+                nextX = btnMark.Right
+            End If
+            If TransferToPane Then
+                btnPane.Location = New System.Drawing.Point(nextX + gapButtons, btnY)
+                nextX = btnPane.Right
+            End If
+            btnCancel.Location = New System.Drawing.Point(nextX + gapButtons, btnY)
+
+            ' Toolstrip above textbox right aligned
+            toolStrip.Location = New System.Drawing.Point(
+                leftMargin + bodyTextBox.Width - toolStrip.Width,
+                bodyTextBox.Top - toolStrip.Height - spacing
+            )
+            toolStrip.BringToFront()
+
+            ' Hint label aligns with right edge above buttons
+            lblHint.Width = 180
+            lblHint.Location = New System.Drawing.Point(fW - lblHint.Width - rightPadding, introLabel.Top)
+        End Sub
+
+            ' --- Initialgröße ---
             Dim initW = Math.Max(maxW, styledForm.MinimumSize.Width)
             Dim initH = Math.Max(maxH, styledForm.MinimumSize.Height)
-            styledForm.ClientSize = New System.Drawing.Size(initW, initH)
+            styledForm.ClientSize = New Size(initW, initH)
             styledForm.PerformLayout()
-
             styledForm.MinimumSize = styledForm.Size
 
+            ' --- Content assignment (match CustomPaneControl) ---
+            Dim rtf As String = Nothing
+            If Not NoRTF Then
+                rtf = MarkdownToRtfConverter.Convert(bodyText)
+            End If
 
-            Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
-            bodyTextBox.Rtf = rtf
+            Try
+                If NoRTF Then
+                    bodyTextBox.Text = bodyText
+                Else
+                    bodyTextBox.Rtf = rtf
+                    ' Append NBSPs for hyperlinks (same as CustomPaneControl)
+                    SharedMethods.AppendNbspForHyperlinks(bodyTextBox, rtf)
+                End If
+            Catch ex As System.ComponentModel.Win32Exception
+                bodyTextBox.Text = bodyText
+            Catch
+                bodyTextBox.Text = bodyText
+            End Try
 
-            SendMessage(bodyTextBox.Handle, EM_AUTOURLDETECT, CType(1, IntPtr), IntPtr.Zero)
+            ' Ensure URL detection is enabled (same as CustomPaneControl)
             bodyTextBox.DetectUrls = True
-            bodyTextBox.Refresh()
             bodyTextBox.Select(0, 0)
-
-            ' Add the normal LinkClicked handler too
-            AddHandler bodyTextBox.LinkClicked, Sub(sender As Object, e As LinkClickedEventArgs)
-                                                    Try
-                                                        Dim psi As New System.Diagnostics.ProcessStartInfo() With {
-                                                                .FileName = e.LinkText,
-                                                                .UseShellExecute = True
-                                                            }
-                                                        System.Diagnostics.Process.Start(psi)
-                                                    Catch ex As Exception
-                                                        Debug.WriteLine("Cannot open link: " & e.LinkText)
-                                                    End Try
-                                                End Sub
 
             Dim OriginalTextBox As String = bodyTextBox.Text
 
-            ' --- Button-Handler (unverändert) ---
+            ' --- Button-Handler ---
             Dim returnValue As String = String.Empty
 
-            AddHandler btnEdited.Click, Sub()
-                                            returnValue = If(NoRTF, bodyTextBox.Text, bodyTextBox.Rtf)
-                                            styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
-                                            styledForm.Close()
-                                        End Sub
+            AddHandler btnEdited.Click,
+        Sub()
+            returnValue = If(NoRTF, bodyTextBox.Text, bodyTextBox.Rtf)
+            styledForm.DialogResult = DialogResult.OK
+            styledForm.Close()
+        End Sub
 
-            AddHandler btnOriginal.Click, Sub()
-                                              returnValue = If(NoRTF, OriginalText, rtf)
-                                              styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
-                                              styledForm.Close()
-                                          End Sub
+            AddHandler btnOriginal.Click,
+        Sub()
+            returnValue = If(NoRTF, OriginalText, If(rtf, bodyText))
+            styledForm.DialogResult = DialogResult.OK
+            styledForm.Close()
+        End Sub
 
             If InsertMarkdown Then
-                AddHandler btnMark.Click, Sub()
-                                              returnValue = "Markdown"
-                                              styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
-                                              styledForm.Close()
-                                          End Sub
-            End If
-            If TransferToPane Then
-                AddHandler btnPane.Click, Sub()
-                                              If bodyTextBox.Text.Trim() = OriginalTextBox.Trim() OrElse ShowCustomYesNoBox($"Your changes will be lost and the pane will again show the original text (unless you put it in the clipboard manually). Continue?", "Yes", "No") = 1 Then
-                                                  returnValue = "Pane"
-                                                  styledForm.DialogResult = System.Windows.Forms.DialogResult.OK
-                                                  styledForm.Close()
-                                              End If
-                                          End Sub
+                AddHandler btnMark.Click,
+            Sub()
+                returnValue = "Markdown"
+                styledForm.DialogResult = DialogResult.OK
+                styledForm.Close()
+            End Sub
             End If
 
-            AddHandler btnCancel.Click, Sub()
-                                            returnValue = String.Empty
-                                            styledForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
-                                            styledForm.Close()
-                                        End Sub
+            If TransferToPane Then
+                AddHandler btnPane.Click,
+            Sub()
+                If bodyTextBox.Text.Trim() = OriginalTextBox.Trim() OrElse
+                   ShowCustomYesNoBox($"Your changes will be lost and the pane will again show the original text (unless you put it in the clipboard manually). Continue?", "Yes", "No") = 1 Then
+                    returnValue = "Pane"
+                    styledForm.DialogResult = DialogResult.OK
+                    styledForm.Close()
+                End If
+            End Sub
+            End If
+
+            AddHandler btnCancel.Click,
+        Sub()
+            returnValue = String.Empty
+            styledForm.DialogResult = DialogResult.Cancel
+            styledForm.Close()
+        End Sub
 
             ' --- Dialog anzeigen ---
             styledForm.BringToFront()
@@ -8693,346 +8515,161 @@ Namespace SharedLibrary
             End If
 
             Return returnValue
-
         End Function
 
+        Public Shared Function OldShowCustomWindow(
+                    introLine As String,
+                    ByVal bodyText As String,
+                    finalRemark As String,
+                    header As String,
+                    Optional NoRTF As Boolean = False,
+                    Optional Getfocus As Boolean = False,
+                    Optional InsertMarkdown As Boolean = False,
+                    Optional TransferToPane As Boolean = False,
+                    Optional parentWindowHwnd As IntPtr = Nothing
+                ) As String
 
+            ' Ursprünglichen Text merken
+            Dim OriginalText As String = bodyText
 
-        ' Add this constant for mouse message
-        Private Const WM_LBUTTONDOWN As Integer = &H201
+            ' --- Abstände & Konstanten ---
+            Const leftMargin As Integer = 10
+            Const rightPadding As Integer = 10
+            Const spacing As Integer = 10
+            Const gapButtons As Integer = 10
+            Const remarkToButtonSpacing As Integer = 20
+            Const bottomPadding As Integer = 20
 
+            ' --- Controls anlegen ---
+            Dim styledForm As New System.Windows.Forms.Form()
+            Dim introLabel As New System.Windows.Forms.Label()
+            ' (Changed: subclass for robust hyperlinking)
+            Dim bodyTextBox As New RichTextBox()
+            Dim finalRemarkLabel As New System.Windows.Forms.Label()
+            Dim btnEdited As New System.Windows.Forms.Button()
+            Dim btnOriginal As New System.Windows.Forms.Button()
+            Dim btnMark As New System.Windows.Forms.Button()
+            Dim btnPane As New System.Windows.Forms.Button()
+            Dim btnCancel As New System.Windows.Forms.Button()
+            Dim toolStrip As New System.Windows.Forms.ToolStrip()
+            Dim lblHint As New System.Windows.Forms.Label() With {
+        .AutoSize = False,
+        .TextAlign = ContentAlignment.MiddleRight
+    }
 
-        Public Shared Property TaskPanes As CustomTaskPaneCollection
+            ' --- Screen / Max-Größe berechnen ---
+            Dim scrW = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Width
+            Dim scrH = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height
+            Dim maxW = scrW \ 2
+            Dim maxH = Math.Min(scrH \ 2, (maxW * 9) \ 16)
+            maxW = Math.Min(maxW, (maxH * 16) \ 9)
 
-        Public Shared Sub Initialize(panes As CustomTaskPaneCollection)
-            TaskPanes = panes
-        End Sub
+            ' --- Fallback–Minima ---
+            Const minFormWStatic As Integer = 400
+            Const minFormHStatic As Integer = 300
 
-        Public Class PaneManager
+            ' --- Formular-Eigenschaften ---
+            styledForm.Text = header
+            styledForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            styledForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            styledForm.MaximizeBox = True
+            styledForm.MinimizeBox = False
+            styledForm.ShowInTaskbar = False
+            styledForm.TopMost = True
+            styledForm.CancelButton = btnCancel
+            styledForm.MinimumSize = New System.Drawing.Size(minFormWStatic, minFormHStatic)
 
-            ' Jetzt referenzieren wir ganz eindeutig den VSTO-Typ:
-            Private Shared CurrentCustomTaskPane As Microsoft.Office.Tools.CustomTaskPane
+            ' Icon
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            styledForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
 
-            Public Shared Async Function ShowMyPane(
-                                introLine As String,
-                                bodyText As String,
-                                finalRemark As String,
-                                header As String,
-                                Optional noRTF As Boolean = False,
-                                Optional insertMarkdown As Boolean = False,
-                                Optional mergeCallback As IntelligentMergeCallback = Nothing
-                            ) As Task(Of String)
+            ' Einheitliche Schrift
+            Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            styledForm.Font = stdFont
 
-                If TaskPanes Is Nothing Then
-                    Return String.Empty
-                End If
+            ' --- Intro-Label ---
+            introLabel.Text = introLine
+            introLabel.Font = stdFont
+            introLabel.AutoSize = False
+            introLabel.Location = New System.Drawing.Point(leftMargin, spacing)
+            introLabel.Width = maxW - leftMargin - rightPadding
+            introLabel.Height = introLabel.PreferredHeight
+            introLabel.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
+            styledForm.Controls.Add(introLabel)
 
-                ' Asynchron warten, ohne den UI-Thread zu blockieren:
-                Dim result = Await PaneManager.ShowCustomPane(
-                                                            TaskPanes,
-                                                            introLine,
-                                                            bodyText,
-                                                            finalRemark,
-                                                            header,
-                                                            noRTF,
-                                                            insertMarkdown,
-                                                            mergeCallback
-                                                        )
+            ' --- Buttons ---
+            btnEdited.Text = "OK, use edited text"
+            Dim szE = TextRenderer.MeasureText(btnEdited.Text, stdFont)
+            btnEdited.Size = New Size(szE.Width + 20, szE.Height + 10)
 
-                Return result
-            End Function
+            btnOriginal.Text = "OK, use original text"
+            Dim szO = TextRenderer.MeasureText(btnOriginal.Text, stdFont)
+            btnOriginal.Size = New Size(szO.Width + 20, szE.Height + 10)
 
-            Public Shared Function ShowCustomPane(
-                XtaskPanes As Microsoft.Office.Tools.CustomTaskPaneCollection,
-                introLine As String,
-                bodyText As String,
-                finalRemark As String,
-                header As String,
-                Optional noRTF As Boolean = False,
-                Optional insertMarkdown As Boolean = False,
-                Optional mergeCallback As IntelligentMergeCallback = Nothing
-            ) As System.Threading.Tasks.Task(Of String)
+            If TransferToPane Then
+                btnPane.Text = "Transfer to pane"
+                Dim szP = TextRenderer.MeasureText(btnPane.Text, stdFont)
+                btnPane.Size = New Size(szP.Width + 20, szE.Height + 10)
+                styledForm.Controls.Add(btnPane)
+            End If
 
-                ' Wenn‘s schon eins gibt, zuerst entfernen
-                If CurrentCustomTaskPane IsNot Nothing Then
-                    Try
-                        CurrentCustomTaskPane.Visible = False
-                        XtaskPanes.Remove(CurrentCustomTaskPane)
-                    Catch comEx As System.Runtime.InteropServices.COMException
-                        ' Pane war bereits entfernt oder ungültig – ignorieren
-                    End Try
-                    CurrentCustomTaskPane = Nothing
-                End If
+            If InsertMarkdown Then
+                btnMark.Text = "Insert original text with formatting"
+                Dim szM = TextRenderer.MeasureText(btnMark.Text, stdFont)
+                btnMark.Size = New Size(szM.Width + 20, szE.Height + 10)
+                styledForm.Controls.Add(btnMark)
+            End If
 
-                ' neues Control + Pane anlegen
-                Dim ctrl As New CustomPaneControl() With {.MergeCallback = mergeCallback}
-                Dim pane = XtaskPanes.Add(ctrl, header)
+            btnCancel.Text = "Cancel"
+            Dim szC = TextRenderer.MeasureText(btnCancel.Text, stdFont)
+            btnCancel.Size = New Size(szC.Width + 20, szE.Height + 10)
 
-                ' Eindeutig die Core-Enums benutzen:
-                pane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight
-                pane.DockPositionRestrict = Microsoft.Office.Core.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNone
-                pane.Width = If(My.Settings.panewidth > 0, My.Settings.panewidth, Default_PaneWidth)
-                pane.Visible = True
-                ctrl.ParentPane = pane
-                CurrentCustomTaskPane = pane
+            styledForm.Controls.Add(btnEdited)
+            styledForm.Controls.Add(btnOriginal)
+            styledForm.Controls.Add(btnCancel)
 
-                Return ctrl.ShowPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
-            End Function
+            ' --- BodyTextBox ---
+            bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, FontStyle.Regular, GraphicsUnit.Point)
+            bodyTextBox.Multiline = True
+            bodyTextBox.ScrollBars = RichTextBoxScrollBars.Vertical
+            bodyTextBox.WordWrap = True
+            bodyTextBox.Location = New System.Drawing.Point(leftMargin, introLabel.Bottom + spacing)
+            bodyTextBox.Width = maxW - leftMargin - rightPadding
+            bodyTextBox.Height = maxH - introLabel.Bottom - spacing
+            bodyTextBox.MinimumSize = New Size(bodyTextBox.Width, bodyTextBox.Height)
+            bodyTextBox.Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Right
+            ' keep editable; ctrl-click required to open links
+            styledForm.Controls.Add(bodyTextBox)
 
-        End Class
-
-
-        Public Class CustomPaneControl
-
-            Inherits UserControl
-            Public Property MergeCallback As IntelligentMergeCallback
-
-            <DllImport("user32.dll", CharSet:=CharSet.Auto)>
-            Private Shared Function SendMessage(
-                    ByVal hWnd As IntPtr,
-                    ByVal msg As Integer,
-                    ByVal wParam As IntPtr,
-                    ByVal lParam As IntPtr
-                ) As IntPtr
-            End Function
-
-            Private Const EM_AUTOURLDETECT As Integer = &H45A
-
-            ''' <summary>Wird vom PaneManager gesetzt.</summary>
-            Public Property ParentPane As Microsoft.Office.Tools.CustomTaskPane
-
-            Private tcs As System.Threading.Tasks.TaskCompletionSource(Of String)
-            Private originalText As String
-            Private NoRTF As Boolean
-            Private InsertMarkdown As Boolean
-
-            ' --- Controls ---
-            Private introLabel As System.Windows.Forms.Label
-            Private toolStrip As ToolStrip
-            Private bodyTextBox As RichTextBox
-            Private finalRemarkLabel As System.Windows.Forms.Label
-            Private btnTable As TableLayoutPanel
-            Private btnMerge As Button
-            Private btnSelected As Button
-            Private btnMark As Button
-            Private btnCancel As Button
-            Private toolTip As ToolTip
-            Private NoMerge As Boolean
-
-            Public Sub New()
-                InitializeComponent()
-                Me.Dock = DockStyle.Fill
-                AddHandler Me.Resize, AddressOf OnControlResize
-            End Sub
-
-            Private Sub OnControlResize(sender As Object, e As EventArgs)
-                If ParentPane IsNot Nothing Then
-                    ' Aktuelle Breite des Panes in den Settings sichern
-                    My.Settings.PaneWidth = ParentPane.Width
-                    My.Settings.Save()
-                End If
-            End Sub
-
-            Private Sub InitializeComponent()
-                ' --- Konstanten ---
-                Const padding As Integer = 10
-
-                NoMerge = String.IsNullOrEmpty(SP_MergePrompt_Cached)
-
-                ' Schrift
-                Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F, FontStyle.Regular, GraphicsUnit.Point)
-                Me.Font = stdFont
-
-                ' ToolTip
-                toolTip = New ToolTip() With {.ShowAlways = True}
-
-                ' Äußeres TableLayoutPanel
-                Dim tbl As New TableLayoutPanel() With {
-            .Dock = DockStyle.Fill,
-            .ColumnCount = 1,
-            .RowCount = 5,
-            .Padding = New Padding(padding)
-        }
-                tbl.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
-                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' Intro
-                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' ToolStrip
-                tbl.RowStyles.Add(New RowStyle(SizeType.Percent, 100)) ' BodyTextBox
-                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' FinalRemark
-                tbl.RowStyles.Add(New RowStyle(SizeType.AutoSize))    ' Buttons
-                Me.Controls.Add(tbl)
-
-                ' 1) Intro-Label
-                introLabel = New System.Windows.Forms.Label() With {
-            .AutoSize = True,
-            .Dock = DockStyle.Fill,
-            .Font = stdFont,
-            .TextAlign = ContentAlignment.MiddleLeft
-        }
-                tbl.Controls.Add(introLabel, 0, 0)
-
-                ' 2) ToolStrip
-                toolStrip = New ToolStrip() With {
-            .GripStyle = ToolStripGripStyle.Hidden,
-            .Dock = DockStyle.Fill,
-            .Padding = New Padding(0)
-        }
-                For Each sym In New String() {"B", "I", "U", "•"}
-                    Dim tsb As New ToolStripButton(sym) With {
-                .Font = New System.Drawing.Font(stdFont,
-                    If(sym = "B", FontStyle.Bold,
-                    If(sym = "I", FontStyle.Italic,
-                    If(sym = "U", FontStyle.Underline,
-                    FontStyle.Regular)))),
-                .Name = "tsb" & sym,
-                .DisplayStyle = ToolStripItemDisplayStyle.Text
-            }
-                    AddHandler tsb.Click, AddressOf ToolStripButton_Click
-                    toolStrip.Items.Add(tsb)
-                Next
-                tbl.Controls.Add(toolStrip, 0, 1)
-
-                ' 3) BodyTextBox
-                bodyTextBox = New System.Windows.Forms.RichTextBox() With {
-                            .Dock = DockStyle.Fill,
-                            .DetectUrls = True,
-                            .Font = New System.Drawing.Font("Segoe UI", 10.0F, FontStyle.Regular, GraphicsUnit.Point),
-                            .WordWrap = True,
-                            .ScrollBars = RichTextBoxScrollBars.Vertical,
-                            .BorderStyle = BorderStyle.FixedSingle
-                        }
-                AddHandler bodyTextBox.LinkClicked, AddressOf BodyTextBox_LinkClicked
-                tbl.Controls.Add(bodyTextBox, 0, 2)
-
-                ' 4) FinalRemark-Label
-                finalRemarkLabel = New System.Windows.Forms.Label() With {
-            .AutoSize = True,
-            .Dock = DockStyle.Fill,
-            .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style),
-            .TextAlign = ContentAlignment.MiddleLeft
-        }
-                tbl.Controls.Add(finalRemarkLabel, 0, 3)
-
-                ' 5) Buttons-TableLayoutPanel
-                btnTable = New TableLayoutPanel() With {
-            .Dock = DockStyle.Fill,
-            .ColumnCount = 4,
-            .RowCount = 1,
-            .Margin = New Padding(0)
-        }
-                For i As Integer = 1 To 4
-                    btnTable.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25))
-                Next
-                ' Buttons
-
-                If NoMerge Then
-                    btnMerge = New Button() With {.Text = "Apply selection", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                    btnSelected = New Button() With {.Text = "Copy selection", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                    btnMark = New Button() With {.Text = "Apply all", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Visible = False, .Padding = New Padding(3)}
-                    btnCancel = New Button() With {.Text = "Close", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                Else
-                    btnMerge = New Button() With {.Text = "Merge selection", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                    btnSelected = New Button() With {.Text = "Copy selection", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                    btnMark = New Button() With {.Text = "Insert && close", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Visible = False, .Padding = New Padding(3)}
-                    btnCancel = New Button() With {.Text = "Close", .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1, stdFont.Style), .Padding = New Padding(3)}
-                End If
-
-                ' Helfer-Funktion
-                Dim addBtn = Sub(btn As Button, col As Integer, tip As String)
-                                 btn.Dock = DockStyle.Fill
-                                 btn.AutoSize = False
-                                 btn.AutoEllipsis = True
-                                 AddHandler btn.Click, AddressOf Button_Click
-                                 toolTip.SetToolTip(btn, tip)
-                                 btnTable.Controls.Add(btn, col, 0)
-                             End Sub
-
-                If NoMerge Then
-                    addBtn(btnMerge, 0, "Inserts selected square brackets into your worksheet, where possible")
-                    addBtn(btnSelected, 1, "") ' "Copy selection to the clipboard"
-                    addBtn(btnMark, 2, "Inserts all square brackets into your worksheet, where possible")
-                    addBtn(btnCancel, 3, "") ' "Close the pane without copying the text to the clipboard"
-                Else
-                    addBtn(btnMerge, 0, "") ' "Merge selected text intelligently"
-                    addBtn(btnSelected, 1, "") ' "Copy selection to the clipboard"
-                    addBtn(btnMark, 2, "Insert the original text with its formatting and close") ' Insert the original text with its formatting and close
-                    addBtn(btnCancel, 3, "") ' "Close the pane without copying the text to the clipboard"
-                End If
-
-                tbl.Controls.Add(btnTable, 0, 4)
-            End Sub
-
-            ''' <summary>Zeigt den Pane und gibt asynchron das Ergebnis zurück.</summary>
-            Public Function ShowPane(introLine As String,
-                             bodyText As String,
-                             finalRemark As String,
-                             header As String,
-                             Optional noRTF As Boolean = False,
-                             Optional insertMarkdown As Boolean = False) As System.Threading.Tasks.Task(Of String)
-
-                Me.originalText = bodyText
-                Me.NoRTF = noRTF
-                Me.InsertMarkdown = insertMarkdown
-
-                introLabel.Text = introLine
+            ' --- Optionales End-Label ---
+            Dim hasRemark = Not String.IsNullOrEmpty(finalRemark)
+            If hasRemark Then
                 finalRemarkLabel.Text = finalRemark
-                btnMark.Visible = insertMarkdown
+                finalRemarkLabel.Font = stdFont
+                finalRemarkLabel.AutoSize = False
+                finalRemarkLabel.Width = bodyTextBox.MinimumSize.Width
+                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New Size(finalRemarkLabel.Width, 0)).Height
+                finalRemarkLabel.Anchor = AnchorStyles.Left Or AnchorStyles.Right
+                styledForm.Controls.Add(finalRemarkLabel)
+            End If
 
-                ' RTF-Init
-                bodyTextBox.Rtf = MarkdownToRtfConverter.Convert(bodyText)
-
-                SendMessage(bodyTextBox.Handle, EM_AUTOURLDETECT, CType(1, IntPtr), IntPtr.Zero)
-                bodyTextBox.DetectUrls = True
-                bodyTextBox.Refresh()
-
-                tcs = New System.Threading.Tasks.TaskCompletionSource(Of String)()
-                Return tcs.Task
-            End Function
-
-            Private Sub BodyTextBox_LinkClicked(
-                            sender As Object,
-                            e As LinkClickedEventArgs
-                        )
-                Try
-                    ' .UseShellExecute = True is required on .NET Core / .NET 5+
-                    Process.Start(New ProcessStartInfo(e.LinkText) With {.UseShellExecute = True})
-                Catch ex As System.Exception
-                    MessageBox.Show("Could not open link: " & ex.Message)
-                End Try
-            End Sub
-
-            Private Sub Button_Click(sender As Object, e As EventArgs)
-                Dim btn = DirectCast(sender, Button)
-                Dim result As String = String.Empty
-                If btn Is btnSelected Then
-                    If NoRTF Then PutInClipboard(bodyTextBox.SelectedText) Else PutInClipboard(bodyTextBox.SelectedRtf)
-                    Return
-                End If
-                If btn Is btnMerge Then
-                    Dim cb = Me.MergeCallback
-                    If cb IsNot Nothing Then
-                        cb.Invoke(bodyTextBox.SelectedText)
-                    End If
-                    Return
-                End If
-                If btn Is btnMark Then
-                    If NoMerge Then
-                        Dim cb = Me.MergeCallback
-                        If cb IsNot Nothing Then
-                            cb.Invoke(bodyTextBox.Text)
-                        End If
-                        Return
-                    Else
-                        result = "Markdown"
-                    End If
-                End If
-                tcs.TrySetResult(result)
-                HidePane()
-            End Sub
-
-            Private Sub ToolStripButton_Click(sender As Object, e As EventArgs)
-                Dim tsb = DirectCast(sender, ToolStripButton)
+            ' --- ToolStrip ---
+            toolStrip.Dock = DockStyle.None
+            For Each sym In New String() {"B", "I", "U", "•"}
+                Dim tsb As New ToolStripButton(sym) With {
+            .Font = New System.Drawing.Font(stdFont, If(sym = "B",
+                                        FontStyle.Bold,
+                                        If(sym = "I",
+                                           FontStyle.Italic,
+                                           If(sym = "U",
+                                              FontStyle.Underline,
+                                              FontStyle.Regular)))),
+            .Name = "tsb" & sym
+        }
+                AddHandler tsb.Click,
+            Sub(s, e)
                 If bodyTextBox.SelectionLength > 0 Then
-                    Select Case tsb.Name
+                    Select Case DirectCast(s, ToolStripButton).Name
                         Case "tsbB"
                             bodyTextBox.SelectionFont = New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor FontStyle.Bold)
                         Case "tsbI"
@@ -9046,17 +8683,809 @@ Namespace SharedLibrary
                     End Select
                 End If
             End Sub
+                toolStrip.Items.Add(tsb)
+            Next
+            styledForm.Controls.Add(toolStrip)
+
+            ' Hint label (Ctrl+Click)
+            lblHint.Text = "Ctrl+Click to open link"
+            lblHint.Font = New System.Drawing.Font(stdFont, FontStyle.Italic)
+            lblHint.ForeColor = Color.DimGray
+            lblHint.Height = szE.Height + 6
+            styledForm.Controls.Add(lblHint)
+
+            ' --- Dynamische Mindestgröße ---
+            Dim bodyTop = bodyTextBox.Top
+            Dim bodyMinH = bodyTextBox.MinimumSize.Height
+            Dim remHeight = If(hasRemark,
+                       finalRemarkLabel.GetPreferredSize(New Size(bodyTextBox.MinimumSize.Width, 0)).Height,
+                       0)
+            Dim btnH = btnEdited.Height
+
+            Dim dynamicMinH = bodyTop +
+                      bodyMinH +
+                      If(hasRemark,
+                         spacing + remHeight + remarkToButtonSpacing,
+                         remarkToButtonSpacing) +
+                      btnH +
+                      bottomPadding
+
+            Dim w1 = leftMargin + bodyTextBox.MinimumSize.Width + rightPadding
+            Dim introMinW = leftMargin + introLabel.PreferredWidth + rightPadding
+            Dim totalBtnW = btnEdited.Width + gapButtons + btnOriginal.Width +
+                    If(InsertMarkdown, gapButtons + btnMark.Width, 0) +
+                    If(TransferToPane, gapButtons + btnPane.Width, 0) +
+                    gapButtons + btnCancel.Width
+            Dim w3 = leftMargin + totalBtnW + rightPadding
+            Dim dynamicMinW = Math.Max(Math.Max(w1, introMinW), w3)
+
+            styledForm.MinimumSize = New Size(
+        Math.Max(minFormWStatic, dynamicMinW),
+        Math.Max(minFormHStatic, dynamicMinH)
+    )
+
+            ' --- Resize Handler ---
+            AddHandler styledForm.Resize,
+        Sub(s, e)
+            Dim fW = styledForm.ClientSize.Width
+            Dim fH = styledForm.ClientSize.Height
+
+            introLabel.Width = fW - leftMargin - rightPadding
+
+            Dim newW = fW - leftMargin - rightPadding
+            bodyTextBox.Width = Math.Max(bodyTextBox.MinimumSize.Width, newW)
+
+            Dim usedBelow = If(hasRemark,
+                               spacing + finalRemarkLabel.Height + remarkToButtonSpacing,
+                               remarkToButtonSpacing) +
+                            btnH + bottomPadding
+            Dim availH = fH - bodyTop - usedBelow
+            bodyTextBox.Height = Math.Max(bodyTextBox.MinimumSize.Height, availH)
+
+            If hasRemark Then
+                finalRemarkLabel.Width = bodyTextBox.Width
+                finalRemarkLabel.Height = finalRemarkLabel.GetPreferredSize(New Size(finalRemarkLabel.Width, 0)).Height
+                finalRemarkLabel.Location = New System.Drawing.Point(leftMargin, bodyTextBox.Bottom + spacing)
+            End If
+
+            Dim btnY = fH - btnH - bottomPadding
+            btnEdited.Location = New System.Drawing.Point(leftMargin, btnY)
+            btnOriginal.Location = New System.Drawing.Point(btnEdited.Right + gapButtons, btnY)
+
+            Dim nextX = btnOriginal.Right
+            If InsertMarkdown Then
+                btnMark.Location = New System.Drawing.Point(btnOriginal.Right + gapButtons, btnY)
+                nextX = btnMark.Right
+            End If
+            If TransferToPane Then
+                btnPane.Location = New System.Drawing.Point(nextX + gapButtons, btnY)
+                nextX = btnPane.Right
+            End If
+            btnCancel.Location = New System.Drawing.Point(nextX + gapButtons, btnY)
+
+            ' Toolstrip above textbox right aligned
+            toolStrip.Location = New System.Drawing.Point(
+                leftMargin + bodyTextBox.Width - toolStrip.Width,
+                bodyTextBox.Top - toolStrip.Height - spacing
+            )
+            toolStrip.BringToFront()
+
+            ' Hint label aligns with right edge above buttons
+            lblHint.Width = 180
+            lblHint.Location = New System.Drawing.Point(fW - lblHint.Width - rightPadding, introLabel.Top)
+        End Sub
+
+            ' --- Initialgröße ---
+            Dim initW = Math.Max(maxW, styledForm.MinimumSize.Width)
+            Dim initH = Math.Max(maxH, styledForm.MinimumSize.Height)
+            styledForm.ClientSize = New Size(initW, initH)
+            styledForm.PerformLayout()
+            styledForm.MinimumSize = styledForm.Size
+
+            ' --- RTF setzen ---
+            Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
+            Try
+                'bodyTextBox.LoadRtfAndBuildLinks(rtf)
+                bodyTextBox.Rtf = rtf
+            Catch ex As System.ComponentModel.Win32Exception
+                bodyTextBox.Text = bodyText
+                bodyTextBox.Rtf = rtf
+                'bodyTextBox.LoadRtfAndBuildLinks(bodyText) ' fallback plain text build
+            Catch
+                bodyTextBox.Text = bodyText
+                bodyTextBox.Rtf = rtf
+                'bodyTextBox.LoadRtfAndBuildLinks(bodyText)
+            End Try
+            bodyTextBox.Select(0, 0)
+
+            Dim rtfApplied As Boolean = False
+            Try
+                bodyTextBox.Rtf = rtf
+                rtfApplied = True
+            Catch ex As System.ComponentModel.Win32Exception
+                ' 1411 = invalid class name -> fallback
+                If ex.NativeErrorCode = 1411 OrElse ex.Message.IndexOf("Fensterklassenname", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    bodyTextBox.Text = bodyText   ' fallback to plain text
+                Else
+                    bodyTextBox.Text = bodyText
+                End If
+            Catch ex As Exception
+                bodyTextBox.Text = bodyText
+            End Try
+
+            ' Re-run URL detection after whichever content we ended up with
+            'Try
+            'bodyTextBox.DetectUrls = False
+            'bodyTextBox.DetectUrls = True
+            'Catch
+            'End Try
+
+            ' Force fresh URL detection (some RichEdit versions need a toggle post-assignment)
+            'bodyTextBox.DetectUrls = False
+            'bodyTextBox.DetectUrls = True
+            'bodyTextBox.Refresh()
+            'bodyTextBox.Select(0, 0)
+
+            ' Standard LinkClicked (fires only if RichEdit recognizes link AND ctrl pressed for our UX)
+            AddHandler bodyTextBox.LinkClicked,
+        Sub(senderObj As Object, e As LinkClickedEventArgs)
+            If (Control.ModifierKeys And Keys.Control) = Keys.Control Then
+                Try
+                    Dim psi As New ProcessStartInfo() With {
+                        .FileName = e.LinkText,
+                        .UseShellExecute = True
+                    }
+                    Process.Start(psi)
+                Catch ex As Exception
+                    Debug.WriteLine("Cannot open link: " & e.LinkText)
+                End Try
+            End If
+        End Sub
+
+            ' Ctrl+Click fallback: open URL under cursor if auto-detect did not trigger
+            AddHandler bodyTextBox.MouseUp,
+        Sub(sender As Object, e As MouseEventArgs)
+            If e.Button <> MouseButtons.Left Then Return
+            If (Control.ModifierKeys And Keys.Control) = 0 Then Return
+
+            ' If a LinkClicked already fired this click, caret usually sits inside link; we still try fallback safely
+            Dim charIndex = bodyTextBox.GetCharIndexFromPosition(e.Location)
+            If charIndex < 0 OrElse charIndex >= bodyTextBox.TextLength Then Return
+
+            Dim text = bodyTextBox.Text
+            Dim start = charIndex
+            While start > 0 AndAlso Not Char.IsWhiteSpace(text(start - 1)) AndAlso Not Char.IsControl(text(start - 1))
+                start -= 1
+            End While
+            Dim [end] = charIndex
+            While [end] < text.Length AndAlso Not Char.IsWhiteSpace(text([end])) AndAlso Not Char.IsControl(text([end]))
+                [end] += 1
+            End While
+            If [end] <= start Then Return
+            Dim candidate = text.Substring(start, [end] - start).Trim().TrimEnd("."c, ";"c, ","c, ")"c)
+
+            If candidate.Length > 5 AndAlso (candidate.StartsWith("http://", StringComparison.OrdinalIgnoreCase) OrElse
+                                             candidate.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) Then
+                Try
+                    Process.Start(New ProcessStartInfo With {
+                        .FileName = candidate,
+                        .UseShellExecute = True
+                    })
+                Catch
+                End Try
+            End If
+        End Sub
+
+            Dim OriginalTextBox As String = bodyTextBox.Text
+
+            ' --- Button-Handler ---
+            Dim returnValue As String = String.Empty
+
+            AddHandler btnEdited.Click,
+        Sub()
+            returnValue = If(NoRTF, bodyTextBox.Text, bodyTextBox.Rtf)
+            styledForm.DialogResult = DialogResult.OK
+            styledForm.Close()
+        End Sub
+
+            AddHandler btnOriginal.Click,
+        Sub()
+            returnValue = If(NoRTF, OriginalText, rtf)
+            styledForm.DialogResult = DialogResult.OK
+            styledForm.Close()
+        End Sub
+
+            If InsertMarkdown Then
+                AddHandler btnMark.Click,
+            Sub()
+                returnValue = "Markdown"
+                styledForm.DialogResult = DialogResult.OK
+                styledForm.Close()
+            End Sub
+            End If
+
+            If TransferToPane Then
+                AddHandler btnPane.Click,
+            Sub()
+                If bodyTextBox.Text.Trim() = OriginalTextBox.Trim() OrElse
+                   ShowCustomYesNoBox($"Your changes will be lost and the pane will again show the original text (unless you put it in the clipboard manually). Continue?", "Yes", "No") = 1 Then
+                    returnValue = "Pane"
+                    styledForm.DialogResult = DialogResult.OK
+                    styledForm.Close()
+                End If
+            End Sub
+            End If
+
+            AddHandler btnCancel.Click,
+        Sub()
+            returnValue = String.Empty
+            styledForm.DialogResult = DialogResult.Cancel
+            styledForm.Close()
+        End Sub
+
+            ' --- Dialog anzeigen ---
+            styledForm.BringToFront()
+            styledForm.Focus()
+
+            If parentWindowHwnd <> IntPtr.Zero Then
+                styledForm.ShowDialog(New WindowWrapper(parentWindowHwnd))
+            ElseIf Getfocus Then
+                Dim outlookHwnd As IntPtr = FindWindow("rctrl_renwnd32", Nothing)
+                styledForm.ShowDialog(New WindowWrapper(outlookHwnd))
+            Else
+                styledForm.ShowDialog()
+            End If
+
+            Return returnValue
+        End Function
+
+        Public Shared Property TaskPanes As CustomTaskPaneCollection
+
+        Public Shared Sub Initialize(panes As CustomTaskPaneCollection)
+            TaskPanes = panes
+        End Sub
+
+
+        Public Class PaneManager
+
+            Private Shared CurrentCustomTaskPane As Microsoft.Office.Tools.CustomTaskPane
+
+            Public Shared Async Function ShowMyPane(
+        introLine As String,
+        bodyText As String,
+        finalRemark As String,
+        header As String,
+        Optional noRTF As Boolean = False,
+        Optional insertMarkdown As Boolean = False,
+        Optional mergeCallback As IntelligentMergeCallback = Nothing
+    ) As Task(Of String)
+
+                If TaskPanes Is Nothing Then
+                    Return String.Empty
+                End If
+
+                Dim result = Await PaneManager.ShowCustomPane(
+            TaskPanes,
+            introLine,
+            bodyText,
+            finalRemark,
+            header,
+            noRTF,
+            insertMarkdown,
+            mergeCallback
+        )
+
+                Return result
+            End Function
+
+            Public Shared Function ShowCustomPane(
+        XtaskPanes As Microsoft.Office.Tools.CustomTaskPaneCollection,
+        introLine As String,
+        bodyText As String,
+        finalRemark As String,
+        header As String,
+        Optional noRTF As Boolean = False,
+        Optional insertMarkdown As Boolean = False,
+        Optional mergeCallback As IntelligentMergeCallback = Nothing
+    ) As Task(Of String)
+
+                If CurrentCustomTaskPane IsNot Nothing Then
+                    Try
+                        CurrentCustomTaskPane.Visible = False
+                        XtaskPanes.Remove(CurrentCustomTaskPane)
+                    Catch
+                    End Try
+                    CurrentCustomTaskPane = Nothing
+                End If
+
+                Dim ctrl As New CustomPaneControl() With {.MergeCallback = mergeCallback}
+                Dim pane = XtaskPanes.Add(ctrl, header)
+                pane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight
+                pane.DockPositionRestrict = Microsoft.Office.Core.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNone
+                pane.Width = If(My.Settings.PaneWidth > 0, My.Settings.PaneWidth, Default_PaneWidth)
+                pane.Visible = True
+                ctrl.ParentPane = pane
+                CurrentCustomTaskPane = pane
+
+                Return ctrl.ShowPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
+            End Function
+
+        End Class
+
+
+        Public Class CustomPaneControl
+            Inherits System.Windows.Forms.UserControl
+
+            Private Const EM_AUTOURLDETECT As Integer = &H45A
+
+            Private tcs As System.Threading.Tasks.TaskCompletionSource(Of String)
+            Private originalText As String
+            Private NoRTF As Boolean
+            Private InsertMarkdown As Boolean
+            Private NoMerge As Boolean
+
+            Private introLabel As System.Windows.Forms.Label
+            Private toolStrip As System.Windows.Forms.ToolStrip
+            Private bodyTextBox As System.Windows.Forms.RichTextBox
+            Private finalRemarkLabel As System.Windows.Forms.Label
+            Private btnTable As System.Windows.Forms.TableLayoutPanel
+            Private btnMerge As System.Windows.Forms.Button
+            Private btnSelected As System.Windows.Forms.Button
+            Private btnMark As System.Windows.Forms.Button
+            Private btnCancel As System.Windows.Forms.Button
+            Private toolTip As System.Windows.Forms.ToolTip
+
+            Private ReadOnly urlRegex As System.Text.RegularExpressions.Regex =
+            New System.Text.RegularExpressions.Regex("https?://[^\s<>()]+",
+                System.Text.RegularExpressions.RegexOptions.Compiled Or System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+
+            Public Property MergeCallback As IntelligentMergeCallback
+            Public Property ParentPane As Microsoft.Office.Tools.CustomTaskPane
+
+            <System.Runtime.InteropServices.DllImport("user32.dll", CharSet:=System.Runtime.InteropServices.CharSet.Auto)>
+            Private Shared Function SendMessage(hWnd As System.IntPtr, msg As Integer, wParam As System.IntPtr, lParam As System.IntPtr) As System.IntPtr
+            End Function
+
+            Public Sub New()
+                MyBase.New()
+                InitializeComponent()
+            End Sub
+
+            ' -------------------- Initialization --------------------
+            Private Sub InitializeComponent()
+                Const padding As Integer = 10
+                NoMerge = String.IsNullOrEmpty(SharedMethods.SP_MergePrompt_Cached)
+
+                Dim stdFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                Me.Font = stdFont
+                Me.Dock = System.Windows.Forms.DockStyle.Fill
+
+                toolTip = New System.Windows.Forms.ToolTip() With {.ShowAlways = True}
+
+                Dim tbl As New System.Windows.Forms.TableLayoutPanel() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .ColumnCount = 1,
+                .RowCount = 5,
+                .Padding = New System.Windows.Forms.Padding(padding)
+            }
+                tbl.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100.0!))
+                tbl.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+                tbl.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+                tbl.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0!))
+                tbl.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+                tbl.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+                Me.Controls.Add(tbl)
+
+                introLabel = New System.Windows.Forms.Label() With {
+                .AutoSize = True,
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .Font = stdFont,
+                .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            }
+                tbl.Controls.Add(introLabel, 0, 0)
+
+                toolStrip = New System.Windows.Forms.ToolStrip() With {
+                .GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden,
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .Padding = New System.Windows.Forms.Padding(0),
+                .AutoSize = False,
+                .Height = 26,
+                .RenderMode = System.Windows.Forms.ToolStripRenderMode.System
+            }
+
+                Dim buttonFont As New System.Drawing.Font(stdFont.FontFamily, 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                For Each sym In New String() {"B", "I", "U", "•"}
+                    Dim style As System.Drawing.FontStyle =
+                    If(sym = "B", System.Drawing.FontStyle.Bold,
+                    If(sym = "I", System.Drawing.FontStyle.Italic,
+                    If(sym = "U", System.Drawing.FontStyle.Underline, System.Drawing.FontStyle.Regular)))
+                    Dim tsb As New System.Windows.Forms.ToolStripButton(sym) With {
+                    .Font = New System.Drawing.Font(buttonFont, style),
+                    .Name = "tsb" & sym,
+                    .DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text,
+                    .AutoSize = False,
+                    .Width = 28,
+                    .Height = 24,
+                    .Margin = New System.Windows.Forms.Padding(0),
+                    .Padding = New System.Windows.Forms.Padding(0),
+                    .TextImageRelation = System.Windows.Forms.TextImageRelation.Overlay
+                }
+                    AddHandler tsb.Click, AddressOf ToolStripButton_Click
+                    toolStrip.Items.Add(tsb)
+                Next
+                tbl.Controls.Add(toolStrip, 0, 1)
+
+                bodyTextBox = New System.Windows.Forms.RichTextBox() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .DetectUrls = True,
+                .HideSelection = False,
+                .WordWrap = True
+            }
+                bodyTextBox.Font = New System.Drawing.Font("Segoe UI", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+
+                AddHandler bodyTextBox.LinkClicked, AddressOf BodyTextBox_LinkClicked
+                AddHandler bodyTextBox.KeyDown, AddressOf BodyTextBox_KeyDown
+                tbl.Controls.Add(bodyTextBox, 0, 2)
+
+                finalRemarkLabel = New System.Windows.Forms.Label() With {
+                .AutoSize = True,
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .Font = New System.Drawing.Font(stdFont.FontFamily, stdFont.Size - 1.0F, stdFont.Style),
+                .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            }
+                tbl.Controls.Add(finalRemarkLabel, 0, 3)
+
+                btnTable = New System.Windows.Forms.TableLayoutPanel() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .ColumnCount = 4,
+                .RowCount = 1,
+                .Margin = New System.Windows.Forms.Padding(0)
+            }
+                For i As Integer = 1 To 4
+                    btnTable.ColumnStyles.Add(New System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.0!))
+                Next
+
+                If NoMerge Then
+                    btnMerge = New System.Windows.Forms.Button() With {.Text = "Apply selection"}
+                    btnSelected = New System.Windows.Forms.Button() With {.Text = "Copy selection"}
+                    btnMark = New System.Windows.Forms.Button() With {.Text = "Apply all", .Visible = False}
+                    btnCancel = New System.Windows.Forms.Button() With {.Text = "Close"}
+                Else
+                    btnMerge = New System.Windows.Forms.Button() With {.Text = "Merge selection"}
+                    btnSelected = New System.Windows.Forms.Button() With {.Text = "Copy selection"}
+                    btnMark = New System.Windows.Forms.Button() With {.Text = "Insert && close", .Visible = False}
+                    btnCancel = New System.Windows.Forms.Button() With {.Text = "Close"}
+                End If
+
+                Dim addBtn =
+                Sub(b As System.Windows.Forms.Button, col As Integer, tip As String)
+                    b.Dock = System.Windows.Forms.DockStyle.Fill
+                    b.AutoEllipsis = True
+                    b.Margin = New System.Windows.Forms.Padding(2)
+                    AddHandler b.Click, AddressOf Button_Click
+                    toolTip.SetToolTip(b, tip)
+                    btnTable.Controls.Add(b, col, 0)
+                End Sub
+
+                If NoMerge Then
+                    addBtn(btnMerge, 0, "")
+                    addBtn(btnSelected, 1, "")
+                    addBtn(btnMark, 2, "")
+                    addBtn(btnCancel, 3, "")
+                Else
+                    addBtn(btnMerge, 0, "")
+                    addBtn(btnSelected, 1, "")
+                    addBtn(btnMark, 2, "Insert original text and close")
+                    addBtn(btnCancel, 3, "")
+                End If
+
+                tbl.Controls.Add(btnTable, 0, 4)
+                AddHandler Me.Resize, AddressOf OnControlResize
+            End Sub
+
+
+            Private Sub BodyTextBox_KeyDown(sender As Object, e As System.Windows.Forms.KeyEventArgs)
+                ' Intercept Copy (Ctrl+C) and Copy (Ctrl+Insert) to exclude trailing NBSPs when entire text is selected.
+                If e.Control AndAlso (e.KeyCode = Keys.C) OrElse (e.Modifiers = Keys.Control AndAlso e.KeyCode = Keys.Insert) Then
+                    Try
+                        If Not NoRTF Then
+                            SharedMethods.CopySelectionExcludingTrailingNbsp(bodyTextBox)
+                        Else
+                            ' Plain text mode: default behavior is fine; use PutInClipboard to preserve existing behavior.
+                            If bodyTextBox.SelectionLength > 0 Then
+                                SharedMethods.PutInClipboard(bodyTextBox.SelectedText)
+                            Else
+                                SharedMethods.PutInClipboard(bodyTextBox.Text)
+                            End If
+                        End If
+                        e.Handled = True
+                    Catch
+                        ' fallback to default behavior if anything goes wrong
+                    End Try
+                End If
+
+                ' Intercept Select All (Ctrl+A) only to avoid changing default selection behavior.
+                ' We don't alter Ctrl+A here; copy-time trimming handles the clipboard contents.
+            End Sub
+
+
+            ' -------------------- Public API --------------------
+            Public Function ShowPane(introLine As String,
+                                 bodyText As String,
+                                 finalRemark As String,
+                                 header As String,
+                                 Optional noRTF As Boolean = False,
+                                 Optional insertMarkdown As Boolean = False) As System.Threading.Tasks.Task(Of String)
+
+                tcs = New System.Threading.Tasks.TaskCompletionSource(Of String)()
+                Me.NoRTF = noRTF
+                Me.InsertMarkdown = insertMarkdown
+                originalText = bodyText
+
+                ' Make pane visible first
+                If ParentPane IsNot Nothing Then
+                    ParentPane.Width = SharedMethods.Default_PaneWidth
+                    ParentPane.Visible = True
+                End If
+
+                ' Ensure control is created
+                If Not bodyTextBox.IsHandleCreated Then
+                    bodyTextBox.CreateControl()
+                End If
+
+                System.Windows.Forms.Application.DoEvents()
+                System.Threading.Thread.Sleep(50)
+
+                introLabel.Text = introLine
+                finalRemarkLabel.Text = finalRemark
+                btnMark.Visible = insertMarkdown
+
+                Try
+                    If noRTF Then
+                        bodyTextBox.Text = bodyText
+                    Else
+                        Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
+                        bodyTextBox.Rtf = If(rtf, String.Empty)
+
+                        ' append non-breaking spaces equal to total length of hyperlinks found in the RTF
+                        AppendNbspForHyperlinks(bodyTextBox, rtf)
+                    End If
+                Catch ex As Exception
+                    Debug.WriteLine($"[CustomPaneControl] Error setting content: {ex.Message}")
+                    bodyTextBox.Text = bodyText
+                End Try
+
+                ' Ensure URL detection is enabled by the control
+                bodyTextBox.DetectUrls = True
+
+                System.Windows.Forms.Application.DoEvents()
+
+                bodyTextBox.Select(0, 0)
+
+                Try
+                    bodyTextBox.Focus()
+                Catch
+                End Try
+
+                Return tcs.Task
+            End Function
+
+            Public ReadOnly Property BodyBox As System.Windows.Forms.RichTextBox
+                Get
+                    Return bodyTextBox
+                End Get
+            End Property
+
+            ' -------------------- Handlers --------------------
+            Private Sub ToolStripButton_Click(sender As Object, e As System.EventArgs)
+                Dim tsb = DirectCast(sender, System.Windows.Forms.ToolStripButton)
+                If bodyTextBox.SelectionLength > 0 AndAlso bodyTextBox.SelectionFont IsNot Nothing Then
+                    Select Case tsb.Name
+                        Case "tsbB"
+                            bodyTextBox.SelectionFont =
+                            New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Bold)
+                        Case "tsbI"
+                            bodyTextBox.SelectionFont =
+                            New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Italic)
+                        Case "tsbU"
+                            bodyTextBox.SelectionFont =
+                            New System.Drawing.Font(bodyTextBox.SelectionFont, bodyTextBox.SelectionFont.Style Xor System.Drawing.FontStyle.Underline)
+                        Case "tsb•"
+                            bodyTextBox.SelectionIndent = If(bodyTextBox.SelectionIndent = 20, 0, 20)
+                            bodyTextBox.SelectionBullet = Not bodyTextBox.SelectionBullet
+                            bodyTextBox.BulletIndent = If(bodyTextBox.BulletIndent = 15, 0, 15)
+                    End Select
+                End If
+            End Sub
+
+            Private Sub BodyTextBox_LinkClicked(sender As Object, e As System.Windows.Forms.LinkClickedEventArgs)
+                System.Diagnostics.Debug.WriteLine($"CustomPaneControl: Received LinkClicked event with URL: {e.LinkText}")
+                SafeOpenLink(e.LinkText)
+            End Sub
+
+            Private Sub Button_Click(sender As Object, e As System.EventArgs)
+                Dim btn = DirectCast(sender, System.Windows.Forms.Button)
+                Dim result As String = String.Empty
+
+                If btn Is btnSelected Then
+                    If NoRTF Then
+                        SharedMethods.PutInClipboard(bodyTextBox.SelectedText)
+                    Else
+                        ' Use helper that will perform a safe copy (preserving RTF) but exclude trailing nbsp when entire text is selected
+                        SharedMethods.CopySelectionExcludingTrailingNbsp(bodyTextBox)
+                    End If
+                    Return
+                End If
+
+                If btn Is btnMerge Then
+                    Dim cb = MergeCallback
+                    If cb IsNot Nothing Then cb.Invoke(bodyTextBox.SelectedText)
+                    Return
+                End If
+
+                If btn Is btnMark Then
+                    If NoMerge Then
+                        Dim cb = MergeCallback
+                        If cb IsNot Nothing Then cb.Invoke(bodyTextBox.Text)
+                        Return
+                    Else
+                        result = "Markdown"
+                    End If
+                End If
+
+                tcs.TrySetResult(result)
+                HidePane()
+            End Sub
+
+            ' -------------------- Helpers --------------------
+            Private Sub OnControlResize(sender As Object, e As System.EventArgs)
+                If ParentPane IsNot Nothing Then
+                    My.Settings.PaneWidth = ParentPane.Width
+                    My.Settings.Save()
+                End If
+            End Sub
+
+            Private Sub SafeOpenLink(url As String)
+                Try
+                    System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo(url) With {.UseShellExecute = True})
+                Catch
+                End Try
+            End Sub
 
             Private Sub HidePane()
                 Try
                     If ParentPane IsNot Nothing Then ParentPane.Visible = False
                 Catch
-                    ' Handle errors silently
                 End Try
             End Sub
+
+            ' -------------------- Dispose --------------------
+            Protected Overrides Sub Dispose(disposing As Boolean)
+                Try
+                    If disposing Then
+                        toolTip?.Dispose()
+                        toolStrip?.Dispose()
+                    End If
+                Finally
+                    MyBase.Dispose(disposing)
+                End Try
+            End Sub
+
         End Class
 
+        Public Shared Sub AppendNbspForHyperlinks(targetBox As RichTextBox, rtf As String)
+            If targetBox Is Nothing OrElse String.IsNullOrEmpty(rtf) Then Return
 
+            Dim totalLength As Integer = 0
+
+            ' 1) Find HYPERLINK field URLs in RTF (fldinst HYPERLINK "url")
+            Dim fldRegex As New Regex("HYPERLINK\s+""([^""]+)""", RegexOptions.IgnoreCase)
+            For Each m As Match In fldRegex.Matches(rtf)
+                totalLength += m.Groups(1).Value.Length
+            Next
+
+            ' 2) Also catch plain http/https occurrences that may appear in the RTF
+            Dim urlRegex As New Regex("https?://[^\s\\\}\)\]""<>]+", RegexOptions.IgnoreCase)
+            For Each m As Match In urlRegex.Matches(rtf)
+                totalLength += m.Value.Length
+            Next
+
+            If totalLength <= 0 Then Return
+
+            ' Insert one paragraph and then neutral NBSPs so they are not clickable / styled as links.
+            Try
+                ' Move caret to end
+                targetBox.SelectionStart = targetBox.TextLength
+
+                ' Insert single paragraph break (one CRLF)
+                ' Using SelectedText to safely append without manual RTF manipulation.
+                ' Temporarily disable URL auto-detection so insertion cannot become an auto-link.
+                Dim prevDetect As Boolean = targetBox.DetectUrls
+                targetBox.DetectUrls = False
+
+                targetBox.SelectedText = vbCrLf
+
+                ' Ensure insertion formatting is neutral: set selection font/color to control defaults
+                Try
+                    If targetBox.SelectionFont IsNot Nothing Then
+                        targetBox.SelectionFont = New System.Drawing.Font(targetBox.Font, System.Drawing.FontStyle.Regular)
+                    Else
+                        targetBox.SelectionFont = targetBox.Font
+                    End If
+                Catch
+                    ' ignore font-setting errors
+                End Try
+                Try
+                    targetBox.SelectionColor = targetBox.ForeColor
+                Catch
+                End Try
+
+                ' Insert NBSP characters (U+00A0)
+                targetBox.SelectionStart = targetBox.TextLength
+                targetBox.SelectedText = New String(ChrW(&HA0), totalLength)
+
+                ' Restore URL detection and scroll to caret
+                targetBox.DetectUrls = prevDetect
+                targetBox.ScrollToCaret()
+            Catch ex As Exception
+                ' swallow - resilient helper
+            End Try
+        End Sub
+
+        Public Shared Sub CopySelectionExcludingTrailingNbsp(rtb As RichTextBox)
+            If rtb Is Nothing Then Return
+
+            Try
+                Dim hasSel As Boolean = rtb.SelectionLength > 0
+                Dim rtfSource As String = If(hasSel, rtb.SelectedRtf, rtb.Rtf)
+                Dim plainSource As String = If(hasSel, rtb.SelectedText, rtb.Text)
+
+                ' Count trailing NBSP (U+00A0) in the chosen plain text
+                Dim trailing As Integer = 0
+                For i As Integer = plainSource.Length - 1 To 0 Step -1
+                    If AscW(plainSource(i)) = &HA0 Then
+                        trailing += 1
+                    Else
+                        Exit For
+                    End If
+                Next
+
+                ' Trim plain text by removing trailing NBSP only
+                Dim plainTrimmed As String = If(trailing > 0 AndAlso plainSource.Length >= trailing,
+                                                plainSource.Substring(0, plainSource.Length - trailing),
+                                                plainSource)
+
+                ' Trim RTF by loading into a temporary RichTextBox and deleting trailing NBSP chars
+                Dim rtfTrimmed As String = rtfSource
+                If trailing > 0 AndAlso Not String.IsNullOrEmpty(rtfSource) Then
+                    Using tmp As New RichTextBox()
+                        tmp.Rtf = rtfSource
+                        If tmp.TextLength >= trailing Then
+                            tmp.Select(tmp.TextLength - trailing, trailing)
+                            tmp.SelectedText = "" ' delete trailing NBSPs
+                            rtfTrimmed = tmp.Rtf
+                        End If
+                    End Using
+                End If
+
+                ' Put both formats in the clipboard
+                Dim dataObj As New DataObject()
+                dataObj.SetData(DataFormats.Rtf, rtfTrimmed)
+                dataObj.SetData(DataFormats.UnicodeText, plainTrimmed)
+                dataObj.SetData(DataFormats.Text, plainTrimmed)
+                Clipboard.SetDataObject(dataObj, True)
+            Catch
+                ' Fallback: default copy behavior
+                Try
+                    If rtb.SelectionLength > 0 Then
+                        rtb.Copy()
+                    Else
+                        Clipboard.SetText(rtb.Text)
+                    End If
+                Catch
+                End Try
+            End Try
+        End Sub
 
         Public Class InputParameter
             Public Property Name As String
@@ -9844,6 +10273,10 @@ Namespace SharedLibrary
                     Return context.INI_FindClausePath
                 Case "FindClausePathLocal"
                     Return context.INI_FindClausePathLocal
+                Case "WebAgentPath"
+                    Return context.INI_WebAgentPath
+                Case "WebAgentPathLocal"
+                    Return context.INI_WebAgentPathLocal
                 Case "DocCheckPath"
                     Return context.INI_DocCheckPath
                 Case "DocCheckPathLocal"
@@ -10030,6 +10463,10 @@ Namespace SharedLibrary
                     context.INI_AlternateModelPath = value
                 Case "SpecialServicePath"
                     context.INI_SpecialServicePath = value
+                Case "WebAgentPath"
+                    context.INI_WebAgentPath = value
+                Case "WebAgentPathLocal"
+                    context.INI_WebAgentPathLocal = value
                 Case "FindClausePath"
                     context.INI_FindClausePath = value
                 Case "FindClausePathLocal"
@@ -10335,6 +10772,8 @@ Namespace SharedLibrary
                     {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"FindClausePath", context.INI_FindClausePath},
                     {"FindClausePathLocal", context.INI_FindClausePathLocal},
+                    {"WebAgentPath", context.INI_WebAgentPath},
+                    {"WebAgentPathLocal", context.INI_WebAgentPathLocal},
                     {"DocCheckPath", context.INI_DocCheckPath},
                     {"DocCheckPathLocal", context.INI_DocCheckPathLocal},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript},
@@ -10369,6 +10808,7 @@ Namespace SharedLibrary
                     {"SP_ContextSearch", context.SP_ContextSearch},
                     {"SP_ContextSearchMulti", context.SP_ContextSearchMulti},
                     {"SP_RangeOfCells", context.SP_RangeOfCells},
+                    {"SP_ParseFile", context.SP_ParseFile},
                     {"SP_WriteNeatly", context.SP_WriteNeatly},
                     {"SP_Add_KeepFormulasIntact", context.SP_Add_KeepFormulasIntact},
                     {"SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact},
@@ -10424,6 +10864,7 @@ Namespace SharedLibrary
                     {"SP_ContextSearch", Default_SP_ContextSearch},
                     {"SP_ContextSearchMultiple", Default_SP_ContextSearchMulti},
                     {"SP_RangeOfCells", Default_SP_RangeOfCells},
+                    {"SP_ParseFile", Default_SP_ParseFile},
                     {"SP_WriteNeatly", Default_SP_WriteNeatly},
                     {"SP_Add_KeepFormulasIntact", Default_SP_Add_KeepFormulasIntact},
                     {"SP_Add_KeepHTMLIntact", Default_SP_Add_KeepHTMLIntact},
@@ -10584,6 +11025,8 @@ Namespace SharedLibrary
                     {"SpecialServicePath", context.INI_SpecialServicePath},
                     {"FindClausePath", context.INI_FindClausePath},
                     {"FindClausePathLocal", context.INI_FindClausePathLocal},
+                    {"WebAgentPath", context.INI_WebAgentPath},
+                    {"WebAgentPathLocal", context.INI_WebAgentPathLocal},
                     {"DocCheckPath", context.INI_DocCheckPath},
                     {"DocCheckPathLocal", context.INI_DocCheckPathLocal},
                     {"PromptLib_Transcript", context.INI_PromptLibPath_Transcript}
@@ -10645,25 +11088,25 @@ Namespace SharedLibrary
         End Sub
 
 
-Private Shared Function GetActiveConfigFilePath(context As ISharedContext) As String
-    Dim regPath As String = GetFromRegistry(RegPath_Base, RegPath_IniPath, True)
-    Dim defaultPathApp As String = GetDefaultINIPath(context.RDV)
-    Dim defaultPathWord As String = GetDefaultINIPath("Word")
-    Dim candidate As String
+        Private Shared Function GetActiveConfigFilePath(context As ISharedContext) As String
+            Dim regPath As String = GetFromRegistry(RegPath_Base, RegPath_IniPath, True)
+            Dim defaultPathApp As String = GetDefaultINIPath(context.RDV)
+            Dim defaultPathWord As String = GetDefaultINIPath("Word")
+            Dim candidate As String
 
-    If Not String.IsNullOrWhiteSpace(regPath) AndAlso RegPath_IniPrio Then
-        candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
-    ElseIf System.IO.File.Exists(defaultPathApp) Then
-        candidate = defaultPathApp
-    ElseIf System.IO.File.Exists(defaultPathWord) Then
-        candidate = defaultPathWord
-    ElseIf Not String.IsNullOrWhiteSpace(regPath) Then
-        candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
-    Else
-        candidate = defaultPathApp
-    End If
-    Return RemoveCR(candidate)
-End Function
+            If Not String.IsNullOrWhiteSpace(regPath) AndAlso RegPath_IniPrio Then
+                candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
+            ElseIf System.IO.File.Exists(defaultPathApp) Then
+                candidate = defaultPathApp
+            ElseIf System.IO.File.Exists(defaultPathWord) Then
+                candidate = defaultPathWord
+            ElseIf Not String.IsNullOrWhiteSpace(regPath) Then
+                candidate = System.IO.Path.Combine(ExpandEnvironmentVariables(regPath), $"{AN2}.ini")
+            Else
+                candidate = defaultPathApp
+            End If
+            Return RemoveCR(candidate)
+        End Function
 
 
 
@@ -11138,6 +11581,8 @@ End Function
             variableValues.Add("SpecialServicePath", context.INI_SpecialServicePath)
             variableValues.Add("FindClausePath", context.INI_FindClausePath)
             variableValues.Add("FindClausePathLocal", context.INI_FindClausePathLocal)
+            variableValues.Add("WebagentPath", context.INI_WebAgentPath)
+            variableValues.Add("WebagentPathLocal", context.INI_WebAgentPathLocal)
             variableValues.Add("DocCheckPath", context.INI_DocCheckPath)
             variableValues.Add("DocCheckPathLocal", context.INI_DocCheckPathLocal)
             variableValues.Add("PromptLib_Transcript", context.INI_PromptLibPath_Transcript)
@@ -11172,6 +11617,7 @@ End Function
             variableValues.Add("SP_ContextSearch", context.SP_ContextSearch)
             variableValues.Add("SP_ContextSearchMulti", context.SP_ContextSearchMulti)
             variableValues.Add("SP_RangeOfCells", context.SP_RangeOfCells)
+            variableValues.Add("SP_ParseFile", context.SP_ParseFile)
             variableValues.Add("SP_WriteNeatly", context.SP_WriteNeatly)
             variableValues.Add("SP_Add_KeepFormulasIntact", context.SP_Add_KeepFormulasIntact)
             variableValues.Add("SP_Add_KeepHTMLIntact", context.SP_Add_KeepHTMLIntact)
@@ -11202,69 +11648,69 @@ End Function
 
                 ' Update the original variables with the returned values
                 If updatedValues.ContainsKey("APIKey") Then context.INI_APIKeyBack = updatedValues("APIKey")
-                    If updatedValues.ContainsKey("Temperature") Then context.INI_Temperature = updatedValues("Temperature")
-                    If updatedValues.ContainsKey("Timeout") Then context.INI_Timeout = CLng(updatedValues("Timeout"))
-                    If updatedValues.ContainsKey("MaxOutputToken") Then context.INI_MaxOutputToken = CInt(updatedValues("MaxOutputToken"))
-                    If updatedValues.ContainsKey("Model") Then context.INI_Model = updatedValues("Model")
-                    If updatedValues.ContainsKey("Endpoint") Then context.INI_Endpoint = updatedValues("Endpoint")
-                    If updatedValues.ContainsKey("HeaderA") Then context.INI_HeaderA = updatedValues("HeaderA")
-                    If updatedValues.ContainsKey("HeaderB") Then context.INI_HeaderB = updatedValues("HeaderB")
-                    If updatedValues.ContainsKey("APICall") Then context.INI_APICall = updatedValues("APICall")
-                    If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
-                    If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
-                    If updatedValues.ContainsKey("Anon") Then context.INI_Anon = updatedValues("Anon")
-                    If updatedValues.ContainsKey("TokenCount") Then context.INI_TokenCount = updatedValues("TokenCount")
-                    If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
-                    If updatedValues.ContainsKey("Clean") Then context.INI_Clean = CBool(updatedValues("Clean"))
-                    If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
-                    If updatedValues.ContainsKey("PostCorrection") Then context.INI_PostCorrection = updatedValues("PostCorrection")
-                    If updatedValues.ContainsKey("APIEncrypted") Then context.INI_APIEncrypted = CBool(updatedValues("APIEncrypted"))
-                    If updatedValues.ContainsKey("APIKeyPrefix") Then context.INI_APIKeyPrefix = updatedValues("APIKeyPrefix")
-                    If updatedValues.ContainsKey("MarkupMethodOutlook") Then context.INI_MarkupMethodOutlook = CInt(updatedValues("MarkupMethodOutlook"))
-                    If updatedValues.ContainsKey("MarkupDiffCap") Then context.INI_MarkupDiffCap = CInt(updatedValues("MarkupDiffCap"))
-                    If updatedValues.ContainsKey("MarkupRegexCap") Then context.INI_MarkupRegexCap = CInt(updatedValues("MarkupRegexCap"))
-                    If updatedValues.ContainsKey("ChatCap") Then context.INI_ChatCap = CInt(updatedValues("ChatCap"))
-                    If updatedValues.ContainsKey("OAuth2") Then context.INI_OAuth2 = CBool(updatedValues("OAuth2"))
-                    If updatedValues.ContainsKey("OAuth2ClientMail") Then context.INI_OAuth2ClientMail = updatedValues("OAuth2ClientMail")
-                    If updatedValues.ContainsKey("OAuth2Scopes") Then context.INI_OAuth2Scopes = updatedValues("OAuth2Scopes")
-                    If updatedValues.ContainsKey("OAuth2Endpoint") Then context.INI_OAuth2Endpoint = updatedValues("OAuth2Endpoint")
-                    If updatedValues.ContainsKey("OAuth2ATExpiry") Then context.INI_OAuth2ATExpiry = CLng(updatedValues("OAuth2ATExpiry"))
-                    If updatedValues.ContainsKey("SecondAPI") Then context.INI_SecondAPI = CBool(updatedValues("SecondAPI"))
-                    If updatedValues.ContainsKey("APIKey_2") Then context.INI_APIKeyBack_2 = updatedValues("APIKey_2")
-                    If updatedValues.ContainsKey("Temperature_2") Then context.INI_Temperature_2 = updatedValues("Temperature_2")
-                    If updatedValues.ContainsKey("Timeout_2") Then context.INI_Timeout_2 = CLng(updatedValues("Timeout_2"))
-                    If updatedValues.ContainsKey("MaxOutputToken_2") Then context.INI_MaxOutputToken_2 = CInt(updatedValues("MaxOutputToken_2"))
-                    If updatedValues.ContainsKey("Model_2") Then context.INI_Model_2 = updatedValues("Model_2")
-                    If updatedValues.ContainsKey("Endpoint_2") Then context.INI_Endpoint_2 = updatedValues("Endpoint_2")
-                    If updatedValues.ContainsKey("HeaderA_2") Then context.INI_HeaderA_2 = updatedValues("HeaderA_2")
-                    If updatedValues.ContainsKey("HeaderB_2") Then context.INI_HeaderB_2 = updatedValues("HeaderB_2")
-                    If updatedValues.ContainsKey("APICall_2") Then context.INI_APICall_2 = updatedValues("APICall_2")
-                    If updatedValues.ContainsKey("APICall_Object_2") Then context.INI_APICall_Object_2 = updatedValues("APICall_Object_2")
-                    If updatedValues.ContainsKey("Response_2") Then context.INI_Response_2 = updatedValues("Response_2")
-                    If updatedValues.ContainsKey("Anon_2") Then context.INI_Anon_2 = updatedValues("Anon_2")
-                    If updatedValues.ContainsKey("TokenCount_2") Then context.INI_TokenCount_2 = updatedValues("TokenCount_2")
-                    If updatedValues.ContainsKey("APIEncrypted_2") Then context.INI_APIEncrypted_2 = CBool(updatedValues("APIEncrypted_2"))
-                    If updatedValues.ContainsKey("APIKeyPrefix_2") Then context.INI_APIKeyPrefix_2 = updatedValues("APIKeyPrefix_2")
-                    If updatedValues.ContainsKey("OAuth2_2") Then context.INI_OAuth2_2 = CBool(updatedValues("OAuth2_2"))
-                    If updatedValues.ContainsKey("OAuth2ClientMail_2") Then context.INI_OAuth2ClientMail_2 = updatedValues("OAuth2ClientMail_2")
-                    If updatedValues.ContainsKey("OAuth2Scopes_2") Then context.INI_OAuth2Scopes_2 = updatedValues("OAuth2Scopes_2")
-                    If updatedValues.ContainsKey("OAuth2Endpoint_2") Then context.INI_OAuth2Endpoint_2 = updatedValues("OAuth2Endpoint_2")
-                    If updatedValues.ContainsKey("OAuth2ATExpiry_2") Then context.INI_OAuth2ATExpiry_2 = CLng(updatedValues("OAuth2ATExpiry_2"))
-                    If updatedValues.ContainsKey("APIDebug") Then context.INI_APIDebug = CBool(updatedValues("APIDebug"))
-                    If updatedValues.ContainsKey("UsageRestrictions") Then context.INI_UsageRestrictions = updatedValues("UsageRestrictions")
-                    If updatedValues.ContainsKey("Language1") Then context.INI_Language1 = updatedValues("Language1")
-                    If updatedValues.ContainsKey("Language2") Then context.INI_Language2 = updatedValues("Language2")
-                    If updatedValues.ContainsKey("KeepFormat1") Then context.INI_KeepFormat1 = CBool(updatedValues("KeepFormat1"))
-                    If updatedValues.ContainsKey("MarkdownConvert") Then context.INI_MarkdownConvert = CBool(updatedValues("MarkdownConvert"))
-                    If updatedValues.ContainsKey("KeepFormat2") Then context.INI_KeepFormat2 = CBool(updatedValues("KeepFormat2"))
-                    If updatedValues.ContainsKey("KeepFormatCap") Then context.INI_KeepFormatCap = CInt(updatedValues("KeepFormatCap"))
-                    If updatedValues.ContainsKey("KeepParaFormatInline") Then context.INI_KeepParaFormatInline = CBool(updatedValues("KeepParaFormatInline"))
-                    If updatedValues.ContainsKey("ReplaceText1") Then context.INI_ReplaceText1 = CBool(updatedValues("ReplaceText1"))
-                    If updatedValues.ContainsKey("ReplaceText2") Then context.INI_ReplaceText2 = CBool(updatedValues("ReplaceText2"))
-                    If updatedValues.ContainsKey("DoMarkupOutlook") Then context.INI_DoMarkupOutlook = CBool(updatedValues("DoMarkupOutlook"))
-                    If updatedValues.ContainsKey("DoMarkupWord") Then context.INI_DoMarkupWord = CBool(updatedValues("DoMarkupWord"))
-                    If updatedValues.ContainsKey("SP_Translate") Then context.SP_Translate = updatedValues("SP_Translate")
-                    If updatedValues.ContainsKey("SP_Correct") Then context.SP_Correct = updatedValues("SP_Correct")
+                If updatedValues.ContainsKey("Temperature") Then context.INI_Temperature = updatedValues("Temperature")
+                If updatedValues.ContainsKey("Timeout") Then context.INI_Timeout = CLng(updatedValues("Timeout"))
+                If updatedValues.ContainsKey("MaxOutputToken") Then context.INI_MaxOutputToken = CInt(updatedValues("MaxOutputToken"))
+                If updatedValues.ContainsKey("Model") Then context.INI_Model = updatedValues("Model")
+                If updatedValues.ContainsKey("Endpoint") Then context.INI_Endpoint = updatedValues("Endpoint")
+                If updatedValues.ContainsKey("HeaderA") Then context.INI_HeaderA = updatedValues("HeaderA")
+                If updatedValues.ContainsKey("HeaderB") Then context.INI_HeaderB = updatedValues("HeaderB")
+                If updatedValues.ContainsKey("APICall") Then context.INI_APICall = updatedValues("APICall")
+                If updatedValues.ContainsKey("APICall_Object") Then context.INI_APICall_Object = updatedValues("APICall_Object")
+                If updatedValues.ContainsKey("Response") Then context.INI_Response = updatedValues("Response")
+                If updatedValues.ContainsKey("Anon") Then context.INI_Anon = updatedValues("Anon")
+                If updatedValues.ContainsKey("TokenCount") Then context.INI_TokenCount = updatedValues("TokenCount")
+                If updatedValues.ContainsKey("DoubleS") Then context.INI_DoubleS = CBool(updatedValues("DoubleS"))
+                If updatedValues.ContainsKey("Clean") Then context.INI_Clean = CBool(updatedValues("Clean"))
+                If updatedValues.ContainsKey("PreCorrection") Then context.INI_PreCorrection = updatedValues("PreCorrection")
+                If updatedValues.ContainsKey("PostCorrection") Then context.INI_PostCorrection = updatedValues("PostCorrection")
+                If updatedValues.ContainsKey("APIEncrypted") Then context.INI_APIEncrypted = CBool(updatedValues("APIEncrypted"))
+                If updatedValues.ContainsKey("APIKeyPrefix") Then context.INI_APIKeyPrefix = updatedValues("APIKeyPrefix")
+                If updatedValues.ContainsKey("MarkupMethodOutlook") Then context.INI_MarkupMethodOutlook = CInt(updatedValues("MarkupMethodOutlook"))
+                If updatedValues.ContainsKey("MarkupDiffCap") Then context.INI_MarkupDiffCap = CInt(updatedValues("MarkupDiffCap"))
+                If updatedValues.ContainsKey("MarkupRegexCap") Then context.INI_MarkupRegexCap = CInt(updatedValues("MarkupRegexCap"))
+                If updatedValues.ContainsKey("ChatCap") Then context.INI_ChatCap = CInt(updatedValues("ChatCap"))
+                If updatedValues.ContainsKey("OAuth2") Then context.INI_OAuth2 = CBool(updatedValues("OAuth2"))
+                If updatedValues.ContainsKey("OAuth2ClientMail") Then context.INI_OAuth2ClientMail = updatedValues("OAuth2ClientMail")
+                If updatedValues.ContainsKey("OAuth2Scopes") Then context.INI_OAuth2Scopes = updatedValues("OAuth2Scopes")
+                If updatedValues.ContainsKey("OAuth2Endpoint") Then context.INI_OAuth2Endpoint = updatedValues("OAuth2Endpoint")
+                If updatedValues.ContainsKey("OAuth2ATExpiry") Then context.INI_OAuth2ATExpiry = CLng(updatedValues("OAuth2ATExpiry"))
+                If updatedValues.ContainsKey("SecondAPI") Then context.INI_SecondAPI = CBool(updatedValues("SecondAPI"))
+                If updatedValues.ContainsKey("APIKey_2") Then context.INI_APIKeyBack_2 = updatedValues("APIKey_2")
+                If updatedValues.ContainsKey("Temperature_2") Then context.INI_Temperature_2 = updatedValues("Temperature_2")
+                If updatedValues.ContainsKey("Timeout_2") Then context.INI_Timeout_2 = CLng(updatedValues("Timeout_2"))
+                If updatedValues.ContainsKey("MaxOutputToken_2") Then context.INI_MaxOutputToken_2 = CInt(updatedValues("MaxOutputToken_2"))
+                If updatedValues.ContainsKey("Model_2") Then context.INI_Model_2 = updatedValues("Model_2")
+                If updatedValues.ContainsKey("Endpoint_2") Then context.INI_Endpoint_2 = updatedValues("Endpoint_2")
+                If updatedValues.ContainsKey("HeaderA_2") Then context.INI_HeaderA_2 = updatedValues("HeaderA_2")
+                If updatedValues.ContainsKey("HeaderB_2") Then context.INI_HeaderB_2 = updatedValues("HeaderB_2")
+                If updatedValues.ContainsKey("APICall_2") Then context.INI_APICall_2 = updatedValues("APICall_2")
+                If updatedValues.ContainsKey("APICall_Object_2") Then context.INI_APICall_Object_2 = updatedValues("APICall_Object_2")
+                If updatedValues.ContainsKey("Response_2") Then context.INI_Response_2 = updatedValues("Response_2")
+                If updatedValues.ContainsKey("Anon_2") Then context.INI_Anon_2 = updatedValues("Anon_2")
+                If updatedValues.ContainsKey("TokenCount_2") Then context.INI_TokenCount_2 = updatedValues("TokenCount_2")
+                If updatedValues.ContainsKey("APIEncrypted_2") Then context.INI_APIEncrypted_2 = CBool(updatedValues("APIEncrypted_2"))
+                If updatedValues.ContainsKey("APIKeyPrefix_2") Then context.INI_APIKeyPrefix_2 = updatedValues("APIKeyPrefix_2")
+                If updatedValues.ContainsKey("OAuth2_2") Then context.INI_OAuth2_2 = CBool(updatedValues("OAuth2_2"))
+                If updatedValues.ContainsKey("OAuth2ClientMail_2") Then context.INI_OAuth2ClientMail_2 = updatedValues("OAuth2ClientMail_2")
+                If updatedValues.ContainsKey("OAuth2Scopes_2") Then context.INI_OAuth2Scopes_2 = updatedValues("OAuth2Scopes_2")
+                If updatedValues.ContainsKey("OAuth2Endpoint_2") Then context.INI_OAuth2Endpoint_2 = updatedValues("OAuth2Endpoint_2")
+                If updatedValues.ContainsKey("OAuth2ATExpiry_2") Then context.INI_OAuth2ATExpiry_2 = CLng(updatedValues("OAuth2ATExpiry_2"))
+                If updatedValues.ContainsKey("APIDebug") Then context.INI_APIDebug = CBool(updatedValues("APIDebug"))
+                If updatedValues.ContainsKey("UsageRestrictions") Then context.INI_UsageRestrictions = updatedValues("UsageRestrictions")
+                If updatedValues.ContainsKey("Language1") Then context.INI_Language1 = updatedValues("Language1")
+                If updatedValues.ContainsKey("Language2") Then context.INI_Language2 = updatedValues("Language2")
+                If updatedValues.ContainsKey("KeepFormat1") Then context.INI_KeepFormat1 = CBool(updatedValues("KeepFormat1"))
+                If updatedValues.ContainsKey("MarkdownConvert") Then context.INI_MarkdownConvert = CBool(updatedValues("MarkdownConvert"))
+                If updatedValues.ContainsKey("KeepFormat2") Then context.INI_KeepFormat2 = CBool(updatedValues("KeepFormat2"))
+                If updatedValues.ContainsKey("KeepFormatCap") Then context.INI_KeepFormatCap = CInt(updatedValues("KeepFormatCap"))
+                If updatedValues.ContainsKey("KeepParaFormatInline") Then context.INI_KeepParaFormatInline = CBool(updatedValues("KeepParaFormatInline"))
+                If updatedValues.ContainsKey("ReplaceText1") Then context.INI_ReplaceText1 = CBool(updatedValues("ReplaceText1"))
+                If updatedValues.ContainsKey("ReplaceText2") Then context.INI_ReplaceText2 = CBool(updatedValues("ReplaceText2"))
+                If updatedValues.ContainsKey("DoMarkupOutlook") Then context.INI_DoMarkupOutlook = CBool(updatedValues("DoMarkupOutlook"))
+                If updatedValues.ContainsKey("DoMarkupWord") Then context.INI_DoMarkupWord = CBool(updatedValues("DoMarkupWord"))
+                If updatedValues.ContainsKey("SP_Translate") Then context.SP_Translate = updatedValues("SP_Translate")
+                If updatedValues.ContainsKey("SP_Correct") Then context.SP_Correct = updatedValues("SP_Correct")
                 If updatedValues.ContainsKey("SP_Improve") Then context.SP_Improve = updatedValues("SP_Improve")
                 If updatedValues.ContainsKey("SP_Explain") Then context.SP_Explain = updatedValues("SP_Explain")
                 If updatedValues.ContainsKey("SP_FindClause") Then context.SP_FindClause = updatedValues("SP_FindClause")
@@ -11275,81 +11721,84 @@ End Function
                 If updatedValues.ContainsKey("SP_DocCheck_MultiClauseSum_Bubbles") Then context.SP_DocCheck_MultiClauseSum_Bubbles = updatedValues("SP_DocCheck_MultiClauseSum_Bubbles")
                 If updatedValues.ContainsKey("SP_SuggestTitles") Then context.SP_SuggestTitles = updatedValues("SP_SuggestTitles")
                 If updatedValues.ContainsKey("SP_Friendly") Then context.SP_Friendly = updatedValues("SP_Friendly")
-                    If updatedValues.ContainsKey("SP_Convincing") Then context.SP_Convincing = updatedValues("SP_Convincing")
-                    If updatedValues.ContainsKey("SP_NoFillers") Then context.SP_NoFillers = updatedValues("SP_NoFillers")
-                    If updatedValues.ContainsKey("SP_Podcast") Then context.SP_Podcast = updatedValues("SP_Podcast")
-                    If updatedValues.ContainsKey("SP_MyStyle_Word") Then context.SP_MyStyle_Word = updatedValues("SP_MyStyle_Word")
-                    If updatedValues.ContainsKey("SP_MyStyle_Outlook") Then context.SP_MyStyle_Outlook = updatedValues("SP_MyStyle_Outlook")
-                    If updatedValues.ContainsKey("SP_MyStyle_Apply") Then context.SP_MyStyle_Apply = updatedValues("SP_MyStyle_Apply")
-                    If updatedValues.ContainsKey("SP_Shorten") Then context.SP_Shorten = updatedValues("SP_Shorten")
-                    If updatedValues.ContainsKey("SP_InsertClipboard") Then context.SP_InsertClipboard = updatedValues("SP_InsertClipboard")
-                    If updatedValues.ContainsKey("SP_Summarize") Then context.SP_Summarize = updatedValues("SP_Summarize")
-                    If updatedValues.ContainsKey("SP_MailReply") Then context.SP_MailReply = updatedValues("SP_MailReply")
-                    If updatedValues.ContainsKey("SP_MailSumup") Then context.SP_MailSumup = updatedValues("SP_MailSumup")
-                    If updatedValues.ContainsKey("SP_MailSumup2") Then context.SP_MailSumup2 = updatedValues("SP_MailSumup2")
-                    If updatedValues.ContainsKey("SP_FreestyleText") Then context.SP_FreestyleText = updatedValues("SP_FreestyleText")
-                    If updatedValues.ContainsKey("SP_FreestyleNoText") Then context.SP_FreestyleNoText = updatedValues("SP_FreestyleNoText")
-                    If updatedValues.ContainsKey("SP_SwitchParty") Then context.SP_SwitchParty = updatedValues("SP_SwitchParty")
-                    If updatedValues.ContainsKey("SP_Anonymize") Then context.SP_Anonymize = updatedValues("SP_Anonymize")
-                    If updatedValues.ContainsKey("SP_ContextSearch") Then context.SP_ContextSearch = updatedValues("SP_ContextSearch")
-                    If updatedValues.ContainsKey("SP_ContextSearchMulti") Then context.SP_ContextSearchMulti = updatedValues("SP_ContextSearchMulti")
-                    If updatedValues.ContainsKey("SP_RangeOfCells") Then context.SP_RangeOfCells = updatedValues("SP_RangeOfCells")
-                    If updatedValues.ContainsKey("SP_WriteNeatly") Then context.SP_WriteNeatly = updatedValues("SP_WriteNeatly")
-                    If updatedValues.ContainsKey("SP_Add_KeepFormulasIntact") Then context.SP_Add_KeepFormulasIntact = updatedValues("SP_Add_KeepFormulasIntact")
-                    If updatedValues.ContainsKey("SP_Add_KeepHTMLIntact") Then context.SP_Add_KeepHTMLIntact = updatedValues("SP_Add_KeepHTMLIntact")
-                    If updatedValues.ContainsKey("SP_Add_KeepInlineIntact") Then context.SP_Add_KeepInlineIntact = updatedValues("SP_Add_KeepInlineIntact")
-                    If updatedValues.ContainsKey("SP_Add_Bubbles") Then context.SP_Add_Bubbles = updatedValues("SP_Add_Bubbles")
-                    If updatedValues.ContainsKey("SP_Add_Batch") Then context.SP_Add_Batch = updatedValues("SP_Add_Batch")
-                    If updatedValues.ContainsKey("SP_Add_Slides") Then context.SP_Add_Slides = updatedValues("SP_Add_Slides")
-                    If updatedValues.ContainsKey("SP_BubblesExcel") Then context.SP_BubblesExcel = updatedValues("SP_BubblesExcel")
-                    If updatedValues.ContainsKey("SP_Add_Revisions") Then context.SP_Add_Revisions = updatedValues("SP_Add_Revisions")
-                    If updatedValues.ContainsKey("SP_MarkupRegex") Then context.SP_MarkupRegex = updatedValues("SP_MarkupRegex")
-                    If updatedValues.ContainsKey("SP_ChatWord") Then context.SP_ChatWord = updatedValues("SP_ChatWord")
-                    If updatedValues.ContainsKey("SP_Chat") Then context.SP_Chat = updatedValues("SP_Chat")
-                    If updatedValues.ContainsKey("SP_Add_ChatWord_Commands") Then context.SP_Add_ChatWord_Commands = updatedValues("SP_Add_ChatWord_Commands")
-                    If updatedValues.ContainsKey("SP_ChatExcel") Then context.SP_ChatExcel = updatedValues("SP_ChatExcel")
-                    If updatedValues.ContainsKey("SP_Add_ChatExcel_Commands") Then context.SP_Add_ChatExcel_Commands = updatedValues("SP_Add_ChatExcel_Commands")
-                    If updatedValues.ContainsKey("SP_Add_MergePrompt") Then context.SP_Add_MergePrompt = updatedValues("SP_Add_MergePrompt")
-                    If updatedValues.ContainsKey("SP_MergePrompt") Then context.SP_MergePrompt = updatedValues("SP_MergePrompt")
-                    If updatedValues.ContainsKey("SP_MergePrompt2") Then context.SP_MergePrompt2 = updatedValues("SP_MergePrompt2")
-                    If updatedValues.ContainsKey("ISearch") Then context.INI_ISearch = CBool(updatedValues("ISearch"))
-                    If updatedValues.ContainsKey("ISearch_Approve") Then context.INI_ISearch_Approve = CBool(updatedValues("ISearch_Approve"))
-                    If updatedValues.ContainsKey("ISearch_URL") Then context.INI_ISearch_URL = updatedValues("ISearch_URL")
-                    If updatedValues.ContainsKey("ISearch_ResponseMask1") Then context.INI_ISearch_ResponseMask1 = updatedValues("ISearch_ResponseMask1")
-                    If updatedValues.ContainsKey("ISearch_ResponseMask2") Then context.INI_ISearch_ResponseMask2 = updatedValues("ISearch_ResponseMask2")
-                    If updatedValues.ContainsKey("ISearch_Name") Then context.INI_ISearch_Name = updatedValues("ISearch_Name")
-                    If updatedValues.ContainsKey("ISearch_Tries") Then context.INI_ISearch_Tries = CInt(updatedValues("ISearch_Tries"))
-                    If updatedValues.ContainsKey("ISearch_Results") Then context.INI_ISearch_Results = CInt(updatedValues("ISearch_Results"))
-                    If updatedValues.ContainsKey("ISearch_MaxDepth") Then context.INI_ISearch_MaxDepth = CInt(updatedValues("ISearch_MaxDepth"))
-                    If updatedValues.ContainsKey("ISearch_Timeout") Then context.INI_ISearch_Timeout = CLng(updatedValues("ISearch_Timeout"))
-                    If updatedValues.ContainsKey("ISearch_SearchTerm_SP") Then context.INI_ISearch_SearchTerm_SP = updatedValues("ISearch_SearchTerm_SP")
-                    If updatedValues.ContainsKey("ISearch_Apply_SP") Then context.INI_ISearch_Apply_SP = updatedValues("ISearch_Apply_SP")
-                    If updatedValues.ContainsKey("ISearch_Apply_SP_Markup") Then context.INI_ISearch_Apply_SP_Markup = updatedValues("ISearch_Apply_SP_Markup")
-                    If updatedValues.ContainsKey("Lib") Then context.INI_Lib = CBool(updatedValues("Lib"))
-                    If updatedValues.ContainsKey("Lib_File") Then context.INI_Lib_File = updatedValues("Lib_File")
-                    If updatedValues.ContainsKey("Lib_Timeout") Then context.INI_Lib_Timeout = CLng(updatedValues("Lib_Timeout"))
-                    If updatedValues.ContainsKey("Lib_Find_SP") Then context.INI_Lib_Find_SP = updatedValues("Lib_Find_SP")
-                    If updatedValues.ContainsKey("Lib_Apply_SP") Then context.INI_Lib_Apply_SP = updatedValues("Lib_Apply_SP")
-                    If updatedValues.ContainsKey("Lib_Apply_SP_Markup") Then context.INI_Lib_Apply_SP_Markup = updatedValues("Lib_Apply_SP_Markup")
-                    If updatedValues.ContainsKey("ISearch_Apply_SP_Markup") Then context.INI_ISearch_Apply_SP_Markup = updatedValues("ISearch_Apply_SP_Markup")
-                    If updatedValues.ContainsKey("MarkupMethodHelper") Then context.INI_MarkupMethodHelper = CInt(updatedValues("MarkupMethodHelper"))
-                    If updatedValues.ContainsKey("MarkupMethodWord") Then context.INI_MarkupMethodWord = CInt(updatedValues("MarkupMethodWord"))
-                    If updatedValues.ContainsKey("ShortcutsWordExcel") Then context.INI_ShortcutsWordExcel = updatedValues("ShortcutsWordExcel")
-                    If updatedValues.ContainsKey("ContextMenu") Then context.INI_ContextMenu = updatedValues("ContextMenu")
-                    If updatedValues.ContainsKey("UpdateCheckInterval") Then context.INI_UpdateCheckInterval = CInt(updatedValues("UpdateCheckInterval"))
-                    If updatedValues.ContainsKey("UpdatePath") Then context.INI_UpdatePath = updatedValues("UpdatePath")
-                    If updatedValues.ContainsKey("SpeechModelPath") Then context.INI_SpeechModelPath = updatedValues("SpeechModelPath")
-                    If updatedValues.ContainsKey("LocalModelPath") Then context.INI_LocalModelPath = updatedValues("LocalModelPath")
-                    If updatedValues.ContainsKey("TTSEndpoint") Then context.INI_TTSEndpoint = updatedValues("TTSEndpoint")
-                    If updatedValues.ContainsKey("PromptLib") Then context.INI_PromptLibPath = updatedValues("PromptLib")
-                    If updatedValues.ContainsKey("MyStylePath") Then context.INI_MyStylePath = updatedValues("MyStylePath")
-                    If updatedValues.ContainsKey("AlternateModelPath") Then context.INI_AlternateModelPath = updatedValues("AlternateModelPath")
+                If updatedValues.ContainsKey("SP_Convincing") Then context.SP_Convincing = updatedValues("SP_Convincing")
+                If updatedValues.ContainsKey("SP_NoFillers") Then context.SP_NoFillers = updatedValues("SP_NoFillers")
+                If updatedValues.ContainsKey("SP_Podcast") Then context.SP_Podcast = updatedValues("SP_Podcast")
+                If updatedValues.ContainsKey("SP_MyStyle_Word") Then context.SP_MyStyle_Word = updatedValues("SP_MyStyle_Word")
+                If updatedValues.ContainsKey("SP_MyStyle_Outlook") Then context.SP_MyStyle_Outlook = updatedValues("SP_MyStyle_Outlook")
+                If updatedValues.ContainsKey("SP_MyStyle_Apply") Then context.SP_MyStyle_Apply = updatedValues("SP_MyStyle_Apply")
+                If updatedValues.ContainsKey("SP_Shorten") Then context.SP_Shorten = updatedValues("SP_Shorten")
+                If updatedValues.ContainsKey("SP_InsertClipboard") Then context.SP_InsertClipboard = updatedValues("SP_InsertClipboard")
+                If updatedValues.ContainsKey("SP_Summarize") Then context.SP_Summarize = updatedValues("SP_Summarize")
+                If updatedValues.ContainsKey("SP_MailReply") Then context.SP_MailReply = updatedValues("SP_MailReply")
+                If updatedValues.ContainsKey("SP_MailSumup") Then context.SP_MailSumup = updatedValues("SP_MailSumup")
+                If updatedValues.ContainsKey("SP_MailSumup2") Then context.SP_MailSumup2 = updatedValues("SP_MailSumup2")
+                If updatedValues.ContainsKey("SP_FreestyleText") Then context.SP_FreestyleText = updatedValues("SP_FreestyleText")
+                If updatedValues.ContainsKey("SP_FreestyleNoText") Then context.SP_FreestyleNoText = updatedValues("SP_FreestyleNoText")
+                If updatedValues.ContainsKey("SP_SwitchParty") Then context.SP_SwitchParty = updatedValues("SP_SwitchParty")
+                If updatedValues.ContainsKey("SP_Anonymize") Then context.SP_Anonymize = updatedValues("SP_Anonymize")
+                If updatedValues.ContainsKey("SP_ContextSearch") Then context.SP_ContextSearch = updatedValues("SP_ContextSearch")
+                If updatedValues.ContainsKey("SP_ContextSearchMulti") Then context.SP_ContextSearchMulti = updatedValues("SP_ContextSearchMulti")
+                If updatedValues.ContainsKey("SP_RangeOfCells") Then context.SP_RangeOfCells = updatedValues("SP_RangeOfCells")
+                If updatedValues.ContainsKey("SP_ParseFile") Then context.SP_ParseFile = updatedValues("SP_ParseFile")
+                If updatedValues.ContainsKey("SP_WriteNeatly") Then context.SP_WriteNeatly = updatedValues("SP_WriteNeatly")
+                If updatedValues.ContainsKey("SP_Add_KeepFormulasIntact") Then context.SP_Add_KeepFormulasIntact = updatedValues("SP_Add_KeepFormulasIntact")
+                If updatedValues.ContainsKey("SP_Add_KeepHTMLIntact") Then context.SP_Add_KeepHTMLIntact = updatedValues("SP_Add_KeepHTMLIntact")
+                If updatedValues.ContainsKey("SP_Add_KeepInlineIntact") Then context.SP_Add_KeepInlineIntact = updatedValues("SP_Add_KeepInlineIntact")
+                If updatedValues.ContainsKey("SP_Add_Bubbles") Then context.SP_Add_Bubbles = updatedValues("SP_Add_Bubbles")
+                If updatedValues.ContainsKey("SP_Add_Batch") Then context.SP_Add_Batch = updatedValues("SP_Add_Batch")
+                If updatedValues.ContainsKey("SP_Add_Slides") Then context.SP_Add_Slides = updatedValues("SP_Add_Slides")
+                If updatedValues.ContainsKey("SP_BubblesExcel") Then context.SP_BubblesExcel = updatedValues("SP_BubblesExcel")
+                If updatedValues.ContainsKey("SP_Add_Revisions") Then context.SP_Add_Revisions = updatedValues("SP_Add_Revisions")
+                If updatedValues.ContainsKey("SP_MarkupRegex") Then context.SP_MarkupRegex = updatedValues("SP_MarkupRegex")
+                If updatedValues.ContainsKey("SP_ChatWord") Then context.SP_ChatWord = updatedValues("SP_ChatWord")
+                If updatedValues.ContainsKey("SP_Chat") Then context.SP_Chat = updatedValues("SP_Chat")
+                If updatedValues.ContainsKey("SP_Add_ChatWord_Commands") Then context.SP_Add_ChatWord_Commands = updatedValues("SP_Add_ChatWord_Commands")
+                If updatedValues.ContainsKey("SP_ChatExcel") Then context.SP_ChatExcel = updatedValues("SP_ChatExcel")
+                If updatedValues.ContainsKey("SP_Add_ChatExcel_Commands") Then context.SP_Add_ChatExcel_Commands = updatedValues("SP_Add_ChatExcel_Commands")
+                If updatedValues.ContainsKey("SP_Add_MergePrompt") Then context.SP_Add_MergePrompt = updatedValues("SP_Add_MergePrompt")
+                If updatedValues.ContainsKey("SP_MergePrompt") Then context.SP_MergePrompt = updatedValues("SP_MergePrompt")
+                If updatedValues.ContainsKey("SP_MergePrompt2") Then context.SP_MergePrompt2 = updatedValues("SP_MergePrompt2")
+                If updatedValues.ContainsKey("ISearch") Then context.INI_ISearch = CBool(updatedValues("ISearch"))
+                If updatedValues.ContainsKey("ISearch_Approve") Then context.INI_ISearch_Approve = CBool(updatedValues("ISearch_Approve"))
+                If updatedValues.ContainsKey("ISearch_URL") Then context.INI_ISearch_URL = updatedValues("ISearch_URL")
+                If updatedValues.ContainsKey("ISearch_ResponseMask1") Then context.INI_ISearch_ResponseMask1 = updatedValues("ISearch_ResponseMask1")
+                If updatedValues.ContainsKey("ISearch_ResponseMask2") Then context.INI_ISearch_ResponseMask2 = updatedValues("ISearch_ResponseMask2")
+                If updatedValues.ContainsKey("ISearch_Name") Then context.INI_ISearch_Name = updatedValues("ISearch_Name")
+                If updatedValues.ContainsKey("ISearch_Tries") Then context.INI_ISearch_Tries = CInt(updatedValues("ISearch_Tries"))
+                If updatedValues.ContainsKey("ISearch_Results") Then context.INI_ISearch_Results = CInt(updatedValues("ISearch_Results"))
+                If updatedValues.ContainsKey("ISearch_MaxDepth") Then context.INI_ISearch_MaxDepth = CInt(updatedValues("ISearch_MaxDepth"))
+                If updatedValues.ContainsKey("ISearch_Timeout") Then context.INI_ISearch_Timeout = CLng(updatedValues("ISearch_Timeout"))
+                If updatedValues.ContainsKey("ISearch_SearchTerm_SP") Then context.INI_ISearch_SearchTerm_SP = updatedValues("ISearch_SearchTerm_SP")
+                If updatedValues.ContainsKey("ISearch_Apply_SP") Then context.INI_ISearch_Apply_SP = updatedValues("ISearch_Apply_SP")
+                If updatedValues.ContainsKey("ISearch_Apply_SP_Markup") Then context.INI_ISearch_Apply_SP_Markup = updatedValues("ISearch_Apply_SP_Markup")
+                If updatedValues.ContainsKey("Lib") Then context.INI_Lib = CBool(updatedValues("Lib"))
+                If updatedValues.ContainsKey("Lib_File") Then context.INI_Lib_File = updatedValues("Lib_File")
+                If updatedValues.ContainsKey("Lib_Timeout") Then context.INI_Lib_Timeout = CLng(updatedValues("Lib_Timeout"))
+                If updatedValues.ContainsKey("Lib_Find_SP") Then context.INI_Lib_Find_SP = updatedValues("Lib_Find_SP")
+                If updatedValues.ContainsKey("Lib_Apply_SP") Then context.INI_Lib_Apply_SP = updatedValues("Lib_Apply_SP")
+                If updatedValues.ContainsKey("Lib_Apply_SP_Markup") Then context.INI_Lib_Apply_SP_Markup = updatedValues("Lib_Apply_SP_Markup")
+                If updatedValues.ContainsKey("ISearch_Apply_SP_Markup") Then context.INI_ISearch_Apply_SP_Markup = updatedValues("ISearch_Apply_SP_Markup")
+                If updatedValues.ContainsKey("MarkupMethodHelper") Then context.INI_MarkupMethodHelper = CInt(updatedValues("MarkupMethodHelper"))
+                If updatedValues.ContainsKey("MarkupMethodWord") Then context.INI_MarkupMethodWord = CInt(updatedValues("MarkupMethodWord"))
+                If updatedValues.ContainsKey("ShortcutsWordExcel") Then context.INI_ShortcutsWordExcel = updatedValues("ShortcutsWordExcel")
+                If updatedValues.ContainsKey("ContextMenu") Then context.INI_ContextMenu = updatedValues("ContextMenu")
+                If updatedValues.ContainsKey("UpdateCheckInterval") Then context.INI_UpdateCheckInterval = CInt(updatedValues("UpdateCheckInterval"))
+                If updatedValues.ContainsKey("UpdatePath") Then context.INI_UpdatePath = updatedValues("UpdatePath")
+                If updatedValues.ContainsKey("SpeechModelPath") Then context.INI_SpeechModelPath = updatedValues("SpeechModelPath")
+                If updatedValues.ContainsKey("LocalModelPath") Then context.INI_LocalModelPath = updatedValues("LocalModelPath")
+                If updatedValues.ContainsKey("TTSEndpoint") Then context.INI_TTSEndpoint = updatedValues("TTSEndpoint")
+                If updatedValues.ContainsKey("PromptLib") Then context.INI_PromptLibPath = updatedValues("PromptLib")
+                If updatedValues.ContainsKey("MyStylePath") Then context.INI_MyStylePath = updatedValues("MyStylePath")
+                If updatedValues.ContainsKey("AlternateModelPath") Then context.INI_AlternateModelPath = updatedValues("AlternateModelPath")
                 If updatedValues.ContainsKey("SpecialServicePath") Then context.INI_SpecialServicePath = updatedValues("SpecialServicePath")
                 If updatedValues.ContainsKey("FindClausePath") Then context.INI_FindClausePath = updatedValues("FindClausePath")
                 If updatedValues.ContainsKey("FindClausePathLocal") Then context.INI_FindClausePathLocal = updatedValues("FindClausePathLocal")
+                If updatedValues.ContainsKey("WebAgentPath") Then context.INI_WebAgentPath = updatedValues("WebAgentPath")
+                If updatedValues.ContainsKey("WebAgentPathLocal") Then context.INI_WebAgentPathLocal = updatedValues("WebAgentPathLocal")
                 If updatedValues.ContainsKey("DocCheckPath") Then context.INI_DocCheckPath = updatedValues("DocCheckPath")
-                    If updatedValues.ContainsKey("DocCheckPathLocal") Then context.INI_DocCheckPathLocal = updatedValues("DocCheckPathLocal")
-                    If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
+                If updatedValues.ContainsKey("DocCheckPathLocal") Then context.INI_DocCheckPathLocal = updatedValues("DocCheckPathLocal")
+                If updatedValues.ContainsKey("PromptLib_Transcript") Then context.INI_PromptLibPath_Transcript = updatedValues("PromptLib_Transcript")
 
                 ' Call UpdateAppConfig after all updates
                 UpdateAppConfig(context)
@@ -12383,6 +12832,323 @@ End Function
                 ' Non-fatal
             End Try
 
+            ' Root container
+            Dim rootPanel As New System.Windows.Forms.TableLayoutPanel()
+            rootPanel.Dock = System.Windows.Forms.DockStyle.Fill
+            rootPanel.BackColor = System.Drawing.Color.Transparent
+            rootPanel.ColumnCount = 1
+            rootPanel.RowCount = 3
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Label
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Editor
+            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Buttons
+            rootPanel.Padding = New System.Windows.Forms.Padding(15, 12, 15, 10)
+            editorForm.Controls.Add(rootPanel)
+
+            ' Header label
+            Dim headerLabel As New System.Windows.Forms.Label()
+            headerLabel.AutoSize = True
+            headerLabel.Text = If(headerText, System.String.Empty)
+            headerLabel.UseCompatibleTextRendering = True
+            headerLabel.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+            headerLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right Or System.Windows.Forms.AnchorStyles.Top
+            rootPanel.Controls.Add(headerLabel, 0, 0)
+
+            ' Text editor
+            Dim textEditor As New System.Windows.Forms.TextBox()
+            textEditor.Multiline = True
+            textEditor.ScrollBars = System.Windows.Forms.ScrollBars.Vertical
+            textEditor.WordWrap = True
+            textEditor.AcceptsReturn = True
+            textEditor.AcceptsTab = True
+            textEditor.Dock = System.Windows.Forms.DockStyle.Fill
+            textEditor.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
+            textEditor.Font = New System.Drawing.Font("Consolas", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            rootPanel.Controls.Add(textEditor, 0, 1)
+
+            ' Bottom buttons
+            Dim flowButtons As New System.Windows.Forms.FlowLayoutPanel()
+            flowButtons.AutoSize = True
+            flowButtons.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            flowButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight
+            flowButtons.WrapContents = False
+            flowButtons.Dock = System.Windows.Forms.DockStyle.Left
+            flowButtons.Margin = New System.Windows.Forms.Padding(15, 15, 0, 15)
+            flowButtons.Padding = New System.Windows.Forms.Padding(0)
+            rootPanel.Controls.Add(flowButtons, 0, 2)
+
+            ' Save button
+            Dim btnSave As New System.Windows.Forms.Button()
+            btnSave.Text = "&Save"
+            btnSave.AutoSize = True
+            btnSave.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnSave.Margin = New System.Windows.Forms.Padding(0, 0, 12, 0)
+            btnSave.Padding = New System.Windows.Forms.Padding(5)
+
+            ' Cancel button
+            Dim btnCancel As New System.Windows.Forms.Button()
+            btnCancel.Text = "Cancel"
+            btnCancel.AutoSize = True
+            btnCancel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+            btnCancel.Margin = New System.Windows.Forms.Padding(0)
+            btnCancel.Padding = New System.Windows.Forms.Padding(5)
+
+            ' (NEW) JSON toggle button (added only when applicable later)
+            Dim btnToggleJson As System.Windows.Forms.Button = Nothing
+
+            flowButtons.Controls.Add(btnSave)
+            flowButtons.Controls.Add(btnCancel)
+
+            ' Enter = Save, Esc = Cancel
+            editorForm.AcceptButton = btnSave
+            editorForm.CancelButton = btnCancel
+
+            ' Adjust label wrapping on resize
+            AddHandler editorForm.Resize, Sub(sender As System.Object, e As System.EventArgs)
+                                              Try
+                                                  headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
+                                              Catch ex As System.Exception
+                                              End Try
+                                          End Sub
+
+            ' --- Load file content ---
+            Dim originalLoadedText As String = System.String.Empty
+            Try
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        originalLoadedText = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8)
+                    Catch exUtf8 As System.Exception
+                        Try
+                            originalLoadedText = System.IO.File.ReadAllText(filePath)
+                        Catch exDefault As System.Exception
+                            ShowCustomMessageBox("Failed to read file:" & System.Environment.NewLine & exDefault.Message)
+                        End Try
+                    End Try
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while loading the file:" & System.Environment.NewLine & ex.Message)
+            End Try
+            textEditor.Text = originalLoadedText
+
+            ' --- Minimal invasive JSON pretty-print support ---
+            Dim isJsonFile As Boolean = False
+            Dim originalJsonRaw As String = Nothing
+            Dim formattedJson As String = Nothing
+            Dim jsonCurrentlyFormatted As Boolean = False
+
+            Try
+                If filePath.EndsWith(".json", System.StringComparison.OrdinalIgnoreCase) Then
+                    isJsonFile = True
+                    ' Heuristic: attempt parse only if it starts with { or [
+                    Dim trimmed = originalLoadedText.TrimStart()
+                    If trimmed.StartsWith("{") OrElse trimmed.StartsWith("[") Then
+                        Dim tok As Newtonsoft.Json.Linq.JToken = Nothing
+                        Try
+                            tok = Newtonsoft.Json.Linq.JToken.Parse(originalLoadedText)
+                        Catch parseEx As System.Exception
+                            tok = Nothing ' Invalid JSON – we do nothing, keep raw
+                        End Try
+                        If tok IsNot Nothing Then
+                            originalJsonRaw = originalLoadedText
+                            formattedJson = tok.ToString(Newtonsoft.Json.Formatting.Indented)
+                            textEditor.Text = formattedJson
+                            jsonCurrentlyFormatted = True
+
+                            ' Add toggle button
+                            btnToggleJson = New System.Windows.Forms.Button()
+                            btnToggleJson.Text = "Minify JSON"
+                            btnToggleJson.AutoSize = True
+                            btnToggleJson.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
+                            btnToggleJson.Margin = New System.Windows.Forms.Padding(0, 0, 12, 0)
+                            btnToggleJson.Padding = New System.Windows.Forms.Padding(5)
+
+                            ' Insert just before Cancel (after Save)
+                            flowButtons.Controls.Add(btnToggleJson)
+                            flowButtons.Controls.SetChildIndex(btnToggleJson, 1)
+
+                            AddHandler btnToggleJson.Click,
+                                Sub()
+                                    Try
+                                        If Not isJsonFile OrElse originalJsonRaw Is Nothing Then Return
+                                        If jsonCurrentlyFormatted Then
+                                            ' Switch to minified
+                                            Dim tok2 = Newtonsoft.Json.Linq.JToken.Parse(originalJsonRaw)
+                                            textEditor.Text = tok2.ToString(Newtonsoft.Json.Formatting.None)
+                                            btnToggleJson.Text = "Pretty JSON"
+                                        Else
+                                            ' Switch to formatted
+                                            Dim tok2 = Newtonsoft.Json.Linq.JToken.Parse(originalJsonRaw)
+                                            textEditor.Text = tok2.ToString(Newtonsoft.Json.Formatting.Indented)
+                                            btnToggleJson.Text = "Minify JSON"
+                                        End If
+                                        jsonCurrentlyFormatted = Not jsonCurrentlyFormatted
+                                    Catch toggleEx As System.Exception
+                                        ShowCustomMessageBox("JSON toggle failed: " & toggleEx.Message)
+                                    End Try
+                                End Sub
+                        End If
+                    End If
+                End If
+            Catch ex As System.Exception
+                ' Non-fatal JSON formatting failure
+            End Try
+
+            ' Save logic
+            Dim doSave As System.Action =
+        Sub()
+            Try
+                Dim dir As System.String = System.IO.Path.GetDirectoryName(filePath)
+                If dir Is Nothing OrElse dir.Trim().Length = 0 Then
+                    ShowCustomMessageBox("Invalid file path or directory.")
+                    Return
+                End If
+                If Not System.IO.Directory.Exists(dir) Then
+                    ShowCustomMessageBox("Directory does not exist: " & dir)
+                    Return
+                End If
+
+                Dim bakPath As System.String = filePath & ".bak"
+
+                If System.IO.File.Exists(filePath) Then
+                    Try
+                        System.IO.File.Copy(filePath, bakPath, True)
+                    Catch exCopy As System.Exception
+                        ShowCustomMessageBox("Failed to create backup file:" & System.Environment.NewLine & exCopy.Message)
+                        Return
+                    End Try
+                End If
+
+                Try
+                    Dim enc As System.Text.Encoding = New System.Text.UTF8Encoding(True)
+                    System.IO.File.WriteAllText(filePath, textEditor.Text, enc)
+                Catch exWrite As System.Exception
+                    ShowCustomMessageBox("Failed to save file:" & System.Environment.NewLine & exWrite.Message)
+                    Return
+                End Try
+
+                editorForm.DialogResult = System.Windows.Forms.DialogResult.OK
+                editorForm.Close()
+
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while saving:" & System.Environment.NewLine & ex.Message)
+            End Try
+        End Sub
+
+            ' Event bindings
+            AddHandler btnSave.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                          doSave()
+                                      End Sub
+
+            AddHandler btnCancel.Click, Sub(sender As System.Object, e As System.EventArgs)
+                                            editorForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
+                                            editorForm.Close()
+                                        End Sub
+
+            ' Keyboard shortcuts: Ctrl+S (save), Ctrl+Shift+F (toggle JSON formatting)
+            AddHandler editorForm.KeyDown,
+        Sub(sender As System.Object, e As System.Windows.Forms.KeyEventArgs)
+            Try
+                If e.Control AndAlso e.KeyCode = System.Windows.Forms.Keys.S Then
+                    e.SuppressKeyPress = True
+                    doSave()
+                ElseIf e.Control AndAlso e.Shift AndAlso e.KeyCode = System.Windows.Forms.Keys.F Then
+                    If btnToggleJson IsNot Nothing Then
+                        e.SuppressKeyPress = True
+                        btnToggleJson.PerformClick()
+                    End If
+                End If
+            Catch ex As System.Exception
+            End Try
+        End Sub
+
+            AddHandler editorForm.Shown,
+    Sub(sender As System.Object, e As System.EventArgs)
+        Try
+            textEditor.SelectionStart = 0
+            textEditor.SelectionLength = 0
+        Catch ex As System.Exception
+        End Try
+    End Sub
+
+            ' Show modal window
+            Try
+                Dim active As System.Windows.Forms.IWin32Window = System.Windows.Forms.Form.ActiveForm
+                If active IsNot Nothing Then
+                    editorForm.ShowDialog(active)
+                Else
+                    editorForm.ShowDialog()
+                End If
+            Catch ex As System.Exception
+                Try
+                    editorForm.Show()
+                Catch exShow As System.Exception
+                    ShowCustomMessageBox("Failed to display editor window:" & System.Environment.NewLine & exShow.Message)
+                End Try
+            End Try
+        End Sub
+
+        Public Shared Sub OldShowTextFileEditor(ByVal filePath As System.String, ByVal headerText As System.String)
+            ' --- Guard & Input Validation ---
+            Try
+                If filePath Is Nothing OrElse filePath.Trim().Length = 0 Then
+                    ShowCustomMessageBox("No file path was provided.")
+                    Return
+                End If
+            Catch ex As System.Exception
+                ShowCustomMessageBox("Unexpected error while validating input: " & ex.Message)
+                Return
+            End Try
+
+            ' --- Create Form & Controls ---
+            Dim editorForm As New System.Windows.Forms.Form()
+            editorForm.Text = "Text File Editor"
+            editorForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            editorForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
+            editorForm.MinimizeBox = True
+            editorForm.MaximizeBox = True
+            editorForm.ShowInTaskbar = True
+            editorForm.KeyPreview = True
+            editorForm.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
+
+            ' Initial size based on screen (height = 60% of working area; width keeps 9:6 ratio)
+            Try
+                Dim scr As System.Windows.Forms.Screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position)
+                Dim wa As System.Drawing.Rectangle = scr.WorkingArea
+
+                Dim targetHeight As System.Int32 = System.Convert.ToInt32(System.Math.Floor(wa.Height * 0.6R))
+                If targetHeight < 540 Then targetHeight = 540
+
+                Dim targetWidth As System.Int32 = System.Convert.ToInt32(System.Math.Floor(targetHeight * 9.0R / 6.0R))
+                If targetWidth > wa.Width Then
+                    targetWidth = wa.Width
+                    targetHeight = System.Convert.ToInt32(System.Math.Floor(targetWidth * 6.0R / 9.0R))
+                End If
+
+                editorForm.ClientSize = New System.Drawing.Size(targetWidth, targetHeight)
+                Dim minW As System.Int32 = System.Math.Max(780, System.Convert.ToInt32(System.Math.Floor(targetWidth / 2.0R)))
+                Dim minH As System.Int32 = System.Math.Max(540, System.Convert.ToInt32(System.Math.Floor(targetHeight / 2.0R)))
+                editorForm.MinimumSize = New System.Drawing.Size(minW, minH)
+            Catch ex As System.Exception
+                editorForm.ClientSize = New System.Drawing.Size(1560, 1080)
+                editorForm.MinimumSize = New System.Drawing.Size(780, 540)
+            End Try
+
+            ' Set icon
+            Try
+                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+                editorForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
+            ' Set predefined font
+            Try
+                Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+                editorForm.Font = standardFont
+            Catch ex As System.Exception
+                ' Non-fatal
+            End Try
+
             ' Root container (15px padding left/right, bottom still 10)
             Dim rootPanel As New System.Windows.Forms.TableLayoutPanel()
             rootPanel.Dock = System.Windows.Forms.DockStyle.Fill
@@ -12578,250 +13344,6 @@ End Function
             End Try
         End Sub
 
-
-        Public Shared Sub oldShowTextFileEditor(ByVal filePath As System.String, ByVal headerText As System.String)
-            ' --- Guard & Input Validation ---
-            Try
-                If filePath Is Nothing OrElse filePath.Trim().Length = 0 Then
-                    ShowCustomMessageBox("No file path was provided.")
-                    Return
-                End If
-            Catch ex As System.Exception
-                ShowCustomMessageBox("Unexpected error while validating input: " & ex.Message)
-                Return
-            End Try
-
-            ' --- Create Form & Controls (all fully qualified) ---
-            Dim editorForm As New System.Windows.Forms.Form()
-            editorForm.Text = "Text File Editor"
-            editorForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-            editorForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable
-            editorForm.MinimizeBox = True
-            editorForm.MaximizeBox = True
-            editorForm.ShowInTaskbar = True
-            editorForm.KeyPreview = True
-            editorForm.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi
-
-            ' Initial size based on screen (height = 60% of working area; width keeps 9:6 ratio)
-            Try
-                Dim scr As System.Windows.Forms.Screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position)
-                Dim wa As System.Drawing.Rectangle = scr.WorkingArea
-
-                Dim targetHeight As System.Int32 = System.Convert.ToInt32(System.Math.Floor(wa.Height * 0.6R))
-                ' Keep a sensible minimum height
-                If targetHeight < 540 Then
-                    targetHeight = 540
-                End If
-
-                Dim targetWidth As System.Int32 = System.Convert.ToInt32(System.Math.Floor(targetHeight * 9.0R / 6.0R))
-
-                ' If width exceeds working area, clamp and recompute height to preserve 9:6
-                If targetWidth > wa.Width Then
-                    targetWidth = wa.Width
-                    targetHeight = System.Convert.ToInt32(System.Math.Floor(targetWidth * 6.0R / 9.0R))
-                End If
-
-                editorForm.ClientSize = New System.Drawing.Size(targetWidth, targetHeight)
-                ' Reasonable minimum size at half of initial (but at least 780x540)
-                Dim minW As System.Int32 = System.Math.Max(780, System.Convert.ToInt32(System.Math.Floor(targetWidth / 2.0R)))
-                Dim minH As System.Int32 = System.Math.Max(540, System.Convert.ToInt32(System.Math.Floor(targetHeight / 2.0R)))
-                editorForm.MinimumSize = New System.Drawing.Size(minW, minH)
-            Catch ex As System.Exception
-                ' Fallback if anything goes wrong determining screen size
-                editorForm.ClientSize = New System.Drawing.Size(1560, 1080)
-                editorForm.MinimumSize = New System.Drawing.Size(780, 540)
-            End Try
-
-            ' Set icon (as requested)
-            Try
-                Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
-                editorForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
-            Catch ex As System.Exception
-                ' Non-fatal
-            End Try
-
-            ' Set predefined font (as requested)
-            Try
-                Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
-                editorForm.Font = standardFont
-            Catch ex As System.Exception
-                ' Non-fatal
-            End Try
-
-            ' Root container
-            Dim rootPanel As New System.Windows.Forms.TableLayoutPanel()
-            rootPanel.Dock = System.Windows.Forms.DockStyle.Fill
-            rootPanel.BackColor = System.Drawing.Color.Transparent
-            rootPanel.ColumnCount = 1
-            rootPanel.RowCount = 3
-            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Label
-            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0F)) ' Editor
-            rootPanel.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize)) ' Buttons
-            rootPanel.Padding = New System.Windows.Forms.Padding(12, 12, 12, 10) ' bottom pad exactly 10
-            editorForm.Controls.Add(rootPanel)
-
-            ' Header label with wrapping & auto-size
-            Dim headerLabel As New System.Windows.Forms.Label()
-            headerLabel.AutoSize = True
-            headerLabel.Text = If(headerText, System.String.Empty)
-            headerLabel.UseCompatibleTextRendering = True
-            headerLabel.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
-            headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
-            headerLabel.Anchor = System.Windows.Forms.AnchorStyles.Left Or System.Windows.Forms.AnchorStyles.Right Or System.Windows.Forms.AnchorStyles.Top
-            rootPanel.Controls.Add(headerLabel, 0, 0)
-
-            ' Multiline text editor (word-wrapped)
-            Dim textEditor As New System.Windows.Forms.TextBox()
-            textEditor.Multiline = True
-            textEditor.ScrollBars = System.Windows.Forms.ScrollBars.Vertical
-            textEditor.WordWrap = True
-            textEditor.AcceptsReturn = True
-            textEditor.AcceptsTab = True
-            textEditor.Dock = System.Windows.Forms.DockStyle.Fill
-            textEditor.Margin = New System.Windows.Forms.Padding(0, 0, 0, 8)
-            textEditor.Font = New System.Drawing.Font("Consolas", 10.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
-            rootPanel.Controls.Add(textEditor, 0, 1)
-
-            ' Bottom buttons (left-aligned, auto-size; avoids extra bottom space)
-            Dim flowButtons As New System.Windows.Forms.FlowLayoutPanel()
-            flowButtons.AutoSize = True
-            flowButtons.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-            flowButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight
-            flowButtons.WrapContents = False
-            flowButtons.Dock = System.Windows.Forms.DockStyle.Left
-            flowButtons.Margin = New System.Windows.Forms.Padding(0)
-            flowButtons.Padding = New System.Windows.Forms.Padding(0)
-            rootPanel.Controls.Add(flowButtons, 0, 2)
-
-            Dim btnSave As New System.Windows.Forms.Button()
-            btnSave.Text = "&Save"
-            btnSave.AutoSize = True
-            btnSave.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-            btnSave.Margin = New System.Windows.Forms.Padding(0, 0, 8, 0)
-
-            Dim btnCancel As New System.Windows.Forms.Button()
-            btnCancel.Text = "Cancel"
-            btnCancel.AutoSize = True
-            btnCancel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink
-            btnCancel.Margin = New System.Windows.Forms.Padding(0)
-
-            flowButtons.Controls.Add(btnSave)
-            flowButtons.Controls.Add(btnCancel)
-
-            ' Make Enter = Save, Esc = Cancel
-            editorForm.AcceptButton = btnSave
-            editorForm.CancelButton = btnCancel
-
-            ' Ensure label wraps correctly on resize by adjusting MaximumSize.Width
-            AddHandler editorForm.Resize, Sub(sender As System.Object, e As System.EventArgs)
-                                              Try
-                                                  headerLabel.MaximumSize = New System.Drawing.Size(editorForm.ClientSize.Width - (rootPanel.Padding.Left + rootPanel.Padding.Right), 0)
-                                              Catch ex As System.Exception
-                                                  ' Non-fatal
-                                              End Try
-                                          End Sub
-
-            ' Load file content
-            Try
-                If System.IO.File.Exists(filePath) Then
-                    Try
-                        textEditor.Text = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8)
-                    Catch exUtf8 As System.Exception
-                        Try
-                            textEditor.Text = System.IO.File.ReadAllText(filePath)
-                        Catch exDefault As System.Exception
-                            ShowCustomMessageBox("Failed to read file:" & System.Environment.NewLine & exDefault.Message)
-                            textEditor.Text = System.String.Empty
-                        End Try
-                    End Try
-                Else
-                    textEditor.Text = System.String.Empty
-                End If
-            Catch ex As System.Exception
-                ShowCustomMessageBox("Unexpected error while loading the file:" & System.Environment.NewLine & ex.Message)
-                textEditor.Text = System.String.Empty
-            End Try
-
-            ' Save logic (creates/overwrites .bak, then writes file)
-            Dim doSave As System.Action =
-        Sub()
-            Try
-                Dim dir As System.String = System.IO.Path.GetDirectoryName(filePath)
-                If dir Is Nothing OrElse dir.Trim().Length = 0 Then
-                    ShowCustomMessageBox("Invalid file path or directory.")
-                    Return
-                End If
-                If Not System.IO.Directory.Exists(dir) Then
-                    ShowCustomMessageBox("Directory does not exist: " & dir)
-                    Return
-                End If
-
-                Dim bakPath As System.String = filePath & ".bak"
-
-                If System.IO.File.Exists(filePath) Then
-                    Try
-                        System.IO.File.Copy(filePath, bakPath, True)
-                    Catch exCopy As System.Exception
-                        ShowCustomMessageBox("Failed to create backup file:" & System.Environment.NewLine & exCopy.Message)
-                        Return
-                    End Try
-                End If
-
-                Try
-                    Dim enc As System.Text.Encoding = New System.Text.UTF8Encoding(True)
-                    System.IO.File.WriteAllText(filePath, textEditor.Text, enc)
-                Catch exWrite As System.Exception
-                    ShowCustomMessageBox("Failed to save file:" & System.Environment.NewLine & exWrite.Message)
-                    Return
-                End Try
-
-                editorForm.DialogResult = System.Windows.Forms.DialogResult.OK
-                editorForm.Close()
-
-            Catch ex As System.Exception
-                ShowCustomMessageBox("Unexpected error while saving:" & System.Environment.NewLine & ex.Message)
-            End Try
-        End Sub
-
-            ' Wire up events
-            AddHandler btnSave.Click, Sub(sender As System.Object, e As System.EventArgs)
-                                          doSave()
-                                      End Sub
-
-            AddHandler btnCancel.Click, Sub(sender As System.Object, e As System.EventArgs)
-                                            editorForm.DialogResult = System.Windows.Forms.DialogResult.Cancel
-                                            editorForm.Close()
-                                        End Sub
-
-            ' Keyboard shortcuts (Ctrl+S)
-            AddHandler editorForm.KeyDown,
-        Sub(sender As System.Object, e As System.Windows.Forms.KeyEventArgs)
-            Try
-                If e.Control AndAlso e.KeyCode = System.Windows.Forms.Keys.S Then
-                    e.SuppressKeyPress = True
-                    doSave()
-                End If
-            Catch ex As System.Exception
-                ' Non-fatal
-            End Try
-        End Sub
-
-            ' Show the editor window modally relative to the active window (if any)
-            Try
-                Dim active As System.Windows.Forms.IWin32Window = System.Windows.Forms.Form.ActiveForm
-                If active IsNot Nothing Then
-                    editorForm.ShowDialog(active)
-                Else
-                    editorForm.ShowDialog()
-                End If
-            Catch ex As System.Exception
-                Try
-                    editorForm.Show()
-                Catch exShow As System.Exception
-                    ShowCustomMessageBox("Failed to display editor window:" & System.Environment.NewLine & exShow.Message)
-                End Try
-            End Try
-        End Sub
 
 
         Public Class InfoBox
@@ -16795,7 +17317,7 @@ Namespace MarkdownToRtf
         ''' <returns>RTF-formatierte Zeichenfolge.</returns>
         Public Function Convert(markdownText As String) As String
 
-            markdownText = System.Text.RegularExpressions.Regex.Unescape(markdownText)
+            'markdownText = System.Text.RegularExpressions.Regex.Unescape(markdownText)
             markdownText = System.Text.RegularExpressions.Regex.Replace(
                         markdownText,
                         "^[ \t]+(?=>)",       ' „jede Folge von Leerzeichen/Tabs direkt vor einem >“
@@ -16807,12 +17329,12 @@ Namespace MarkdownToRtf
             ' 1) Markdown parsen
             'Dim pipeline = New Markdig.MarkdownPipelineBuilder().Build()
             Dim pipeline = New Markdig.MarkdownPipelineBuilder() _
-                  .UseAdvancedExtensions() _
+                        .UseAdvancedExtensions() _
                         .UsePipeTables() _
-            .UseGridTables() _
-            .UseFootnotes() _
-                  .UseEmojiAndSmiley() _
-                  .Build()
+                        .UseGridTables() _
+                        .UseFootnotes() _
+                        .UseEmojiAndSmiley() _
+                        .Build()
             Dim document = Markdig.Markdown.Parse(markdownText, pipeline)
 
             Dim fnDefs As New Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)()
@@ -16869,57 +17391,6 @@ Namespace MarkdownToRtf
             rtf.AppendLine("\pard\brdrb\brdrs\brdrw10\par")
         End Sub
 
-        Private Sub OldConvertCodeBlock(
-    rtf As System.Text.StringBuilder,
-    codeBlock As Markdig.Syntax.FencedCodeBlock,
-    fnDefs As System.Collections.Generic.Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)
-)
-            ' 1) Monospace aktivieren (\f1) und kleinere Schrift (\fs18)
-            rtf.Append("\par\f1\fs18 ")
-
-            ' 2) alle Zeilen des Codeblocks
-            For Each lineInfo In codeBlock.Lines.Lines
-                Dim slice = lineInfo.Slice
-
-                ' --> hier die Null‐Checks
-                If slice.Text Is Nothing Then
-                    ' Das ist der “Sentinel” – wenn Du eine leere Zeile willst:
-                    ' rtf.Append("\line ")
-                    Continue For
-                End If
-
-                ' Jetzt ist slice.Text garantiert nicht Nothing
-                Dim raw As String = slice.Text.Substring(slice.Start, slice.Length)
-                Dim esc As String = EscapeRtf(raw)
-                rtf.Append(esc)
-                rtf.Append("\line ")
-            Next
-
-            ' 3) zurück zur Standard‑Schrift (\f0) und ‑größe (\fs20)
-            rtf.Append("\f0\fs20\par")
-        End Sub
-
-        ' Overload für CodeBlock 
-        Private Sub OldConvertCodeBlock(
-    rtf As System.Text.StringBuilder,
-    codeBlock As Markdig.Syntax.CodeBlock
-)
-            ' Monospace + kleinere Schrift
-            rtf.Append("\par\f1\fs18 ")
-            For Each lineInfo In codeBlock.Lines.Lines
-                Dim slice = lineInfo.Slice
-                If slice.Text Is Nothing Then
-                    ' leere Zeile
-                    ' rtf.Append("\line ")
-                    Continue For
-                End If
-                Dim raw As String = slice.Text.Substring(slice.Start, slice.Length)
-                Dim esc As String = EscapeRtf(raw)
-                rtf.Append(esc)
-                rtf.Append("\line ")
-            Next
-            rtf.Append("\f0\fs20\par")
-        End Sub
 
 
         ' Shared helper for any CodeBlock-like structure
@@ -17236,114 +17707,6 @@ Namespace MarkdownToRtf
         End Sub
 
 
-
-        ''' <summary>
-        ''' Rekursiv Inlines verarbeiten, inkl. Hyperlinks.
-        ''' </summary>
-        Private Sub xxxxConvertInline(rtf As System.Text.StringBuilder, container As Markdig.Syntax.Inlines.ContainerInline, Optional fnDefs As Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote) = Nothing, Optional visitedFootnotes As HashSet(Of String) = Nothing)
-
-            If visitedFootnotes Is Nothing Then
-                visitedFootnotes = New HashSet(Of String)()
-            End If
-
-            For Each inline In container
-                'Select Case inline.GetType().Name
-                Select Case True
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.EmphasisInline
-                        HandleEmphasis(rtf, CType(inline, Markdig.Syntax.Inlines.EmphasisInline))
-
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.LineBreakInline
-                        rtf.Append("\line ")
-
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.CodeInline
-                        rtf.Append("\f1 ")
-                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.CodeInline).Content))
-                        rtf.Append("\f0 ")
-
-                        'Case NameOf(Markdig.Syntax.Inlines.HtmlInline)
-                     '   rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag))
-
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.LinkInline
-                        Dim link = CType(inline, Markdig.Syntax.Inlines.LinkInline)
-                        ' Sonderfall: kein sichtbarer Text => URL anzeigen
-                        If link.FirstChild Is Nothing Then
-                            rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt " & EscapeRtf(link.Url) & "}}")
-                        Else
-                            ' Link mit Text: Text als unsichtbare Feldergebnis anzeigen
-                            rtf.Append("{\field{\*\fldinst HYPERLINK """ & link.Url & """}{\fldrslt ")
-                            ConvertInline(rtf, link, fnDefs, visitedFootnotes)
-                            rtf.Append("}}")
-                        End If
-
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.HtmlInline
-                        Dim html = CType(inline, Markdig.Syntax.Inlines.HtmlInline).Tag.Trim()
-                        Select Case True
-                            Case html.StartsWith("<u", StringComparison.OrdinalIgnoreCase)
-                                rtf.Append("\ul ")
-                            Case html.StartsWith("</u", StringComparison.OrdinalIgnoreCase)
-                                rtf.Append(" \ulnone ")
-                            Case html.StartsWith("<sup", StringComparison.OrdinalIgnoreCase)
-                                ' öffnendes <sup>
-                                rtf.Append("{\super ")
-                            Case html.StartsWith("</sup", StringComparison.OrdinalIgnoreCase)
-                                ' schließendes </sup>
-                                rtf.Append("\nosupersub}")
-                            Case html.StartsWith("<sub", StringComparison.OrdinalIgnoreCase)
-                                ' öffnendes <sub>
-                                rtf.Append("{\sub ")
-                            Case html.StartsWith("</sub", StringComparison.OrdinalIgnoreCase)
-                                ' schließendes </sub>
-                                rtf.Append("\nosupersub}")
-                            Case Else
-                                ' alle anderen HTML‑Tags wie gehabt escapen
-                                rtf.Append(EscapeRtf(html))
-                        End Select
-
-                    Case TypeOf inline Is EmojiInline
-                        Dim emo = CType(inline, EmojiInline)
-                        ' Entweder direkt das Unicode-Zeichen …
-                        rtf.Append(EscapeRtf(emo.Content.ToString()))
-                          ' … oder über emo.Match / emo.Emoji je nach Version
-
-                  ' → Alle Extra‑Emphasis‑Fälle in einer Methode
-                    Case TypeOf inline Is EmphasisInline
-                        Dim e = CType(inline, EmphasisInline)
-                        Select Case True
-                            Case e.DelimiterChar = "~"c AndAlso e.DelimiterCount = 2
-                                ' ~~text~~ → \strike … \strike0
-                                rtf.Append("\strike ")
-                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
-                                rtf.Append(" \strike0")
-
-                            Case e.DelimiterChar = "~"c AndAlso e.DelimiterCount = 1
-                                ' ~text~ → {\sub …\nosupersub}
-                                rtf.Append("{\sub ")
-                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
-                                rtf.Append("\nosupersub}")
-
-                            Case e.DelimiterChar = "^"c AndAlso e.DelimiterCount = 1
-                                ' ^text^ → {\super …\nosupersub}
-                                rtf.Append("{\super ")
-                                ConvertInline(rtf, e, fnDefs, visitedFootnotes)
-                                rtf.Append("\nosupersub}")
-
-                            Case Else
-                                HandleEmphasis(rtf, e)
-                        End Select
-
-                    Case TypeOf inline Is FootnoteLink
-                        Dim fl = CType(inline, FootnoteLink)
-                        HandleFootnoteLink(rtf, fl, fnDefs, visitedFootnotes)
-
-
-                    Case TypeOf inline Is Markdig.Syntax.Inlines.LiteralInline
-
-                        rtf.Append(EscapeRtf(CType(inline, Markdig.Syntax.Inlines.LiteralInline).Content.ToString()))
-
-                End Select
-            Next
-        End Sub
-
         Private Function EscapeRtf(text As String) As String
             If String.IsNullOrEmpty(text) Then Return String.Empty
             Dim sb As New System.Text.StringBuilder()
@@ -17417,6 +17780,3440 @@ Namespace MarkdownToRtf
         End Sub
 
     End Module
+
+
+
+    ' ===========================================================
+    ' File: WebAgentInterpreter.vb
+    ' Purpose: Execute JSON-defined web automation flows (HTTP + HAP)
+    ' Output: Returns final Markdown string
+    ' NOTE: Standardized: replaced all "Is Not" with "IsNot"
+    '       Fully qualified System.IO / System.* members where previously implicit.
+    ' ===========================================================
+
+    Public NotInheritable Class WebAgentInterpreter
+        Implements System.IDisposable
+
+        Private ReadOnly _http As System.Net.Http.HttpClient
+        Private ReadOnly _cookieContainer As System.Net.CookieContainer
+        Private ReadOnly _handler As System.Net.Http.HttpClientHandler
+
+        Private _headersDefault As New System.Collections.Generic.Dictionary(Of System.String, System.String)(System.StringComparer.OrdinalIgnoreCase)
+        Private _vars As New System.Collections.Generic.Dictionary(Of System.String, System.Object)(System.StringComparer.OrdinalIgnoreCase)
+        Private _secrets As New System.Collections.Generic.Dictionary(Of System.String, System.String)(System.StringComparer.OrdinalIgnoreCase)
+        Private _baseUrl As System.String = System.String.Empty
+        Private _userAgent As System.String = "WebAgentInterpreter/1.0"
+        Private _lastResponseBody As System.String = System.String.Empty
+        Private _lastResponseUrl As System.String = System.String.Empty
+        Private _lastDoc As HtmlAgilityPack.HtmlDocument = Nothing
+        Private _defaultTimeoutMs As System.Int32 = 30000
+
+        Private _log As New System.Text.StringBuilder()
+        Private _finalMarkdown As System.String = System.String.Empty
+
+        Private _context As ISharedContext = Nothing
+        Private _useSecondAPI As Boolean = False
+        Private _autoselectModel As Boolean = False
+
+        Private _dynamicExpand As Boolean = False
+        Private Const MAX_DYNAMIC_FETCH As Integer = 10
+
+
+        Private ReadOnly _failHard As Boolean = False   ' set True to stop on first non‑handled http failure
+        Public ReadOnly Property LogText As String
+            Get
+                Return _log.ToString()
+            End Get
+        End Property
+
+        Private _currentStepId As System.String = System.String.Empty
+        Shared Sub New()
+            Try
+                System.Net.ServicePointManager.SecurityProtocol =
+                    System.Net.SecurityProtocolType.Tls12 Or
+                    System.Net.SecurityProtocolType.Tls11 Or
+                    System.Net.SecurityProtocolType.Tls
+            Catch
+            End Try
+        End Sub
+
+        Public Sub New()
+            _cookieContainer = New System.Net.CookieContainer()
+            _handler = New System.Net.Http.HttpClientHandler() With {
+                .AllowAutoRedirect = True,
+                .AutomaticDecompression = System.Net.DecompressionMethods.GZip Or System.Net.DecompressionMethods.Deflate,
+                .UseCookies = True,
+                .CookieContainer = _cookieContainer
+            }
+
+            Try
+#If NET6_0_OR_GREATER Or NET7_0_OR_GREATER Or NET8_0_OR_GREATER Then
+                _handler.SslProtocols = System.Security.Authentication.SslProtocols.Tls12 Or System.Security.Authentication.SslProtocols.Tls13
+#Else
+                _handler.SslProtocols = System.Security.Authentication.SslProtocols.Tls12
+#End If
+            Catch
+                Try
+                    _handler.SslProtocols = System.Security.Authentication.SslProtocols.Tls12
+                Catch
+                End Try
+            End Try
+
+            _handler.ServerCertificateCustomValidationCallback =
+                Function(req As System.Net.Http.HttpRequestMessage,
+                         cert As System.Security.Cryptography.X509Certificates.X509Certificate2,
+                         chain As System.Security.Cryptography.X509Certificates.X509Chain,
+                         errors As System.Net.Security.SslPolicyErrors)
+
+                    If errors <> System.Net.Security.SslPolicyErrors.None Then
+                        Log($"[TLS] Host={req?.RequestUri?.Host} Errors={errors} Subject={cert?.Subject}")
+                        If chain IsNot Nothing Then
+                            For Each st In chain.ChainStatus
+                                Log($"[TLS] ChainStatus: {st.Status} {st.StatusInformation}")
+                            Next
+                        End If
+                    End If
+
+                    Return errors = System.Net.Security.SslPolicyErrors.None
+                End Function
+
+            _http = New System.Net.Http.HttpClient(_handler)
+        End Sub
+
+        Public Sub Dispose() Implements System.IDisposable.Dispose
+            _http.Dispose()
+            _handler.Dispose()
+        End Sub
+
+        Private Function _FormatVarValue(value As Object) As String
+            If value Is Nothing Then Return "(null)"
+            Try
+                If TypeOf value Is String Then
+                    Dim s = DirectCast(value, String)
+                    If s.Length > 400 Then Return s.Substring(0, 400) & "…"
+                    Return s
+                End If
+                If TypeOf value Is Newtonsoft.Json.Linq.JToken Then
+                    Dim t = DirectCast(value, Newtonsoft.Json.Linq.JToken)
+                    Dim txt = t.ToString(Newtonsoft.Json.Formatting.None)
+                    If txt.Length > 400 Then txt = txt.Substring(0, 400) & "…"
+                    Return txt
+                End If
+                Dim json = Newtonsoft.Json.JsonConvert.SerializeObject(value)
+                If json.Length > 400 Then json = json.Substring(0, 400) & "…"
+                Return json
+            Catch
+                Return value.ToString()
+            End Try
+        End Function
+
+
+        Private Function GetDebugFlag(name As String, Optional defaultValue As Boolean = False) As Boolean
+            Try
+                Dim o As Object = Nothing
+                If _vars IsNot Nothing AndAlso _vars.TryGetValue(name, o) AndAlso o IsNot Nothing Then
+                    Dim b As Boolean
+                    If Boolean.TryParse(o.ToString(), b) Then Return b
+                End If
+            Catch
+            End Try
+            Return defaultValue
+        End Function
+
+        Private _debugLogPath As String = Nothing
+        Private _debugInitialized As Boolean = False
+
+        Private Sub InitDebugLogIfNeeded()
+            If _debugInitialized Then Return
+            If Not GetDebugFlag("debug") AndAlso Not GetDebugFlag("debug_allAttempts") Then Return
+            Try
+                ' Prefer the current user's Desktop for the debug log
+                Dim desktopPath As String = ""
+                Try
+                    desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                Catch
+                End Try
+
+                If String.IsNullOrWhiteSpace(desktopPath) OrElse Not System.IO.Directory.Exists(desktopPath) Then
+                    ' Fallback: application base directory if Desktop is unavailable
+                    desktopPath = AppDomain.CurrentDomain.BaseDirectory
+                End If
+
+                _debugLogPath = System.IO.Path.Combine(desktopPath, "RI_Debug_Webagent.txt")
+
+                System.IO.File.WriteAllText(_debugLogPath,
+                                     $"# WebAgent Debug Log {DateTime.Now:O}{Environment.NewLine}" &
+                                     $"# Machine: {Environment.MachineName}{Environment.NewLine}" &
+                                     $"# User   : {Environment.UserName}{Environment.NewLine}" &
+                                     $"# Desktop: {desktopPath}{Environment.NewLine}{Environment.NewLine}")
+
+                _debugInitialized = True
+            Catch ex As Exception
+                ' Silently ignore any issues initializing the log
+            End Try
+        End Sub
+
+
+
+
+        Private Function DebugEnabled() As Boolean
+            Return GetDebugFlag("debug") OrElse GetDebugFlag("debug_allAttempts") _
+            OrElse GetDebugFlag("debug_substeps") OrElse GetDebugFlag("debug_var_changes") _
+            OrElse GetDebugFlag("debug_include_script") OrElse GetDebugFlag("debug_summary")
+        End Function
+
+
+        Private Sub DebugLogScriptOverview(root As Newtonsoft.Json.Linq.JObject)
+            If Not GetDebugFlag("debug_include_script") Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            Try
+                Dim scrub = CType(root.DeepClone(), Newtonsoft.Json.Linq.JObject)
+
+                ' Mask secrets inside env.secrets
+                Dim env = TryCast(scrub("env"), JObject)
+                Dim secrets = TryCast(env?("secrets"), JObject)
+                If secrets IsNot Nothing Then
+                    For Each p In secrets.Properties()
+                        p.Value = "***"
+                    Next
+                End If
+
+                ' Build step table
+                Dim steps = TryCast(scrub("steps"), JArray)
+                Dim sb As New StringBuilder()
+                sb.AppendLine("=== SCRIPT OVERVIEW ===")
+                If steps IsNot Nothing Then
+                    Dim i As Integer = 0
+                    For Each st As JObject In steps
+                        Dim sid = st.Value(Of String)("id")
+                        Dim cmd = st.Value(Of String)("command")
+                        sb.AppendLine($"{i,3}: id='{sid}' cmd='{cmd}'")
+                        i += 1
+                    Next
+                End If
+                sb.AppendLine("=== RAW (MASKED) SCRIPT JSON ===")
+                Dim jsonText = scrub.ToString(Newtonsoft.Json.Formatting.Indented)
+                If jsonText.Length > 120000 Then
+                    jsonText = jsonText.Substring(0, 120000) & vbCrLf & "...(truncated for debug)..."
+                End If
+                WriteDebug(sb.ToString())
+                WriteDebug(jsonText)
+            Catch ex As Exception
+                WriteDebug("[debug_include_script] error: " & ex.Message)
+            End Try
+        End Sub
+
+        ' -------------------- NEW: Variable Change Logging --------------------
+        Private Sub DebugLogVarChange(name As String, oldVal As Object, newVal As Object)
+            If Not GetDebugFlag("debug_var_changes") Then Return
+            If Not DebugEnabled() Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            Try
+                Dim oldTxt = If(oldVal Is Nothing, "(null)", _FormatVarValue(oldVal))
+                Dim newTxt = If(newVal Is Nothing, "(null)", _FormatVarValue(newVal))
+                If oldTxt.Length > 300 Then oldTxt = oldTxt.Substring(0, 300) & "…"
+                If newTxt.Length > 300 Then newTxt = newTxt.Substring(0, 300) & "…"
+                WriteDebug($"[var_change] {name} :: {MaskSecrets(oldTxt)}  ==>  {MaskSecrets(newTxt)}")
+            Catch
+            End Try
+        End Sub
+
+
+        Private Sub SafeStoreVar_DebugPatch(varName As String, value As Object)
+            If String.IsNullOrWhiteSpace(varName) Then Exit Sub
+            Dim hadOld As Boolean = _vars.ContainsKey(varName)
+            Dim oldVal As Object = If(hadOld, _vars(varName), Nothing)
+
+            ' (Reuse original SafeStoreVar logic)
+            If value Is Nothing Then
+                If hadOld Then
+                    DebugLogVarChange(varName, oldVal, Nothing)
+                    _vars.Remove(varName)
+                End If
+                Exit Sub
+            End If
+            Try
+                Select Case True
+                    Case TypeOf value Is JToken
+                        _vars(varName) = DirectCast(value, JToken).DeepClone()
+                    Case TypeOf value Is String, TypeOf value Is Integer, TypeOf value Is Boolean, TypeOf value Is Long, TypeOf value Is Double, TypeOf value Is Decimal
+                        _vars(varName) = value
+                    Case Else
+                        Dim jt = JToken.FromObject(value)
+                        _vars(varName) = jt.DeepClone().ToObject(Of Object)()
+                End Select
+            Catch
+                _vars(varName) = value
+            End Try
+            DebugLogVarChange(varName, oldVal, _vars(varName))
+        End Sub
+
+        Private Sub DebugLogSubStepStart(sid As String, cmd As String, attempt As Integer, maxRetry As Integer, parms As JObject)
+            If Not GetDebugFlag("debug_substeps") Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            Try
+                Dim pTxt As String = ""
+                If parms IsNot Nothing Then
+                    pTxt = parms.ToString(Newtonsoft.Json.Formatting.None)
+                    If pTxt.Length > 800 Then pTxt = pTxt.Substring(0, 800) & "…"
+                End If
+                WriteDebug($"[substep:start] id={sid} cmd={cmd} attempt={attempt + 1}/{Math.Max(1, maxRetry + 1)} parms={MaskSecrets(pTxt)}")
+            Catch
+            End Try
+        End Sub
+
+        Private Sub DebugLogSubStepResult(sid As String, cmd As String, durationMs As Long, success As Boolean, ex As Exception, result As Object)
+            If Not GetDebugFlag("debug_substeps") Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            Try
+                Dim resTxt = ""
+                If result IsNot Nothing Then
+                    Try
+                        If TypeOf result Is JToken Then
+                            resTxt = DirectCast(result, JToken).ToString(Newtonsoft.Json.Formatting.None)
+                        Else
+                            resTxt = Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                        End If
+                    Catch
+                        resTxt = result.ToString()
+                    End Try
+                    If resTxt.Length > 800 Then resTxt = resTxt.Substring(0, 800) & "…"
+                End If
+                If ex IsNot Nothing Then
+                    Dim exTxt = ex.ToString()
+                    If exTxt.Length > 1200 Then exTxt = exTxt.Substring(0, 1200) & "…"
+                    WriteDebug($"[substep:end] id={sid} cmd={cmd} success={success} dur_ms={durationMs} ERROR={MaskSecrets(ex.Message)} STACK={MaskSecrets(exTxt)}")
+                Else
+                    WriteDebug($"[substep:end] id={sid} cmd={cmd} success={success} dur_ms={durationMs} result={MaskSecrets(resTxt)}")
+                End If
+            Catch
+            End Try
+        End Sub
+
+
+        Private Sub DebugLogStepStart(sid As String, cmd As String, index As Integer, total As Integer)
+            If Not DebugEnabled() Then Return
+            If Not (GetDebugFlag("debug") OrElse GetDebugFlag("debug_allAttempts") OrElse GetDebugFlag("debug_substeps")) Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            WriteDebug($"[step:start] {index + 1}/{total} id={sid} cmd={cmd}")
+        End Sub
+
+        Private Sub DebugLogStepEnd(sid As String, cmd As String, success As Boolean, durationMs As Long, ex As Exception)
+            If Not DebugEnabled() Then Return
+            If Not (GetDebugFlag("debug") OrElse GetDebugFlag("debug_allAttempts") OrElse GetDebugFlag("debug_substeps")) Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            If ex IsNot Nothing Then
+                Dim exMsg = ex.Message
+                WriteDebug($"[step:end] id={sid} cmd={cmd} success={success} dur_ms={durationMs} error={MaskSecrets(exMsg)}")
+            Else
+                WriteDebug($"[step:end] id={sid} cmd={cmd} success={success} dur_ms={durationMs}")
+            End If
+        End Sub
+
+
+        Private Sub DebugFinalSummary(totalSteps As Integer,
+                                executedSteps As Integer,
+                                abortedStepId As String,
+                                elapsedMs As Long)
+            If Not GetDebugFlag("debug_summary") Then Return
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Return
+            Try
+                WriteDebug("=== EXECUTION SUMMARY ===")
+                WriteDebug($"total_steps        = {totalSteps}")
+                WriteDebug($"executed_steps     = {executedSteps}")
+                WriteDebug($"aborted_step_id    = {If(String.IsNullOrWhiteSpace(abortedStepId), "(none)", abortedStepId)}")
+                WriteDebug($"total_elapsed_ms   = {elapsedMs}")
+                ' Optionally list last known variables (masked & truncated)
+                Dim listVars As New List(Of String)
+                For Each kv In _vars
+                    Dim vTxt = _FormatVarValue(kv.Value)
+                    If vTxt.Length > 180 Then vTxt = vTxt.Substring(0, 180) & "…"
+                    listVars.Add($"{kv.Key}={MaskSecrets(vTxt)}")
+                Next
+                WriteDebug("vars_snapshot: " & String.Join("; ", listVars))
+                WriteDebug("=== END SUMMARY ===")
+            Catch
+            End Try
+        End Sub
+
+
+
+
+        Private Function GetFlag(name As String, defaultVal As Boolean) As Boolean
+            Return GetDebugFlag(name, defaultVal)
+        End Function
+
+        Private Sub WriteDebug(lines As String)
+            If Not _debugInitialized Then Return
+            Try
+                System.IO.File.AppendAllText(_debugLogPath, lines & Environment.NewLine)
+            Catch
+            End Try
+        End Sub
+
+        ' === Replace existing DebugSnapshot implementation with this file-writing version ===
+        Private Sub DebugSnapshot(stepId As String,
+                          command As String,
+                          attemptNumber As Integer,
+                          maxRetry As Integer,
+                          success As Boolean,
+                          willRetry As Boolean,
+                          lastEx As Exception)
+
+            ' Activate only if flags set
+            If Not GetDebugFlag("debug") AndAlso Not GetDebugFlag("debug_allAttempts") Then Exit Sub
+
+            ' If not all attempts requested, only log final outcome
+            If Not GetDebugFlag("debug_allAttempts") Then
+                If Not success AndAlso willRetry Then Exit Sub
+            End If
+
+            InitDebugLogIfNeeded()
+            If Not _debugInitialized Then Exit Sub
+
+            Try
+                Dim sb As New System.Text.StringBuilder()
+                sb.AppendLine(New String("-"c, 70))
+                sb.AppendLine($"Timestamp : {DateTime.Now:O}")
+                sb.AppendLine($"Step      : {stepId}")
+                sb.AppendLine($"Command   : {command}")
+                sb.AppendLine($"Attempt   : {attemptNumber}/{maxRetry + 1}")
+                sb.AppendLine($"Success   : {success}")
+                sb.AppendLine($"WillRetry : {willRetry}")
+
+                If Not String.IsNullOrWhiteSpace(_lastResponseUrl) Then
+                    sb.AppendLine($"LastURL   : {MaskSecrets(_lastResponseUrl)}")
+                End If
+
+                If Not String.IsNullOrEmpty(_lastResponseBody) Then
+                    Dim bodyPreview = System.Text.RegularExpressions.Regex.Replace(_lastResponseBody, "\s+", " ").Trim()
+                    If bodyPreview.Length > 800 Then bodyPreview = bodyPreview.Substring(0, 800) & "…"
+                    sb.AppendLine("LastBody  : " & MaskSecrets(bodyPreview))
+                End If
+
+                ' LLM raw (if relevant) – stored by CmdLlmAnalyzeAsync as lastLlm_raw
+                If command IsNot Nothing AndAlso command.IndexOf("llm", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    Dim rawObj As Object = Nothing
+                    If _vars.TryGetValue("lastLlm_raw", rawObj) AndAlso rawObj IsNot Nothing Then
+                        Dim rawTxt = rawObj.ToString()
+                        Dim preview = rawTxt
+                        If preview.Length > 5000 Then preview = preview.Substring(0, 5000) & "…"
+                        sb.AppendLine($"LLM Raw Len: {rawTxt.Length}")
+                        sb.AppendLine("LLM Raw:")
+                        sb.AppendLine(preview)
+                    End If
+                End If
+
+                If lastEx IsNot Nothing Then
+                    Dim exText = lastEx.ToString()
+                    If exText.Length > 2000 Then exText = exText.Substring(0, 2000) & "…"
+                    sb.AppendLine("Exception : " & lastEx.GetType().Name)
+                    sb.AppendLine("ExMessage : " & lastEx.Message)
+                    sb.AppendLine("ExDetail  : " & exText)
+                End If
+
+                Dim hideLlmVars As Boolean = (command Is Nothing) OrElse (command.IndexOf("llm", StringComparison.OrdinalIgnoreCase) < 0)
+
+                sb.AppendLine("Variables:")
+                For Each kv In _vars
+                    If hideLlmVars AndAlso (String.Equals(kv.Key, "lastLlm", StringComparison.OrdinalIgnoreCase) _
+                                      OrElse String.Equals(kv.Key, "lastLlm_page_url", StringComparison.OrdinalIgnoreCase)) Then
+                        Continue For
+                    End If
+                    Dim valText = _FormatVarValue(kv.Value)
+                    If valText.Length > 600 Then valText = valText.Substring(0, 600) & "…"
+                    sb.AppendLine($"  {kv.Key} = {MaskSecrets(valText)}")
+                Next
+
+                WriteDebug(sb.ToString())
+            Catch
+                ' Ignore logging failures
+            End Try
+        End Sub
+
+        Public Async Function RunAsync(scriptJson As System.String,
+                                       context As ISharedContext,
+                                       Optional useSecondAPI As Boolean = False,
+                                       Optional autoselectModel As Boolean = False,
+                                       Optional cancel As System.Threading.CancellationToken = Nothing) As System.Threading.Tasks.Task(Of System.String)
+            _context = context
+            _useSecondAPI = useSecondAPI
+            _autoselectModel = autoselectModel
+            Return Await RunAsync(scriptJson, cancel)
+        End Function
+
+        Public Async Function RunAsync(scriptJson As System.String,
+                                       context As ISharedContext,
+                                       Optional useSecondAPI As Boolean = False,
+                                       Optional cancel As System.Threading.CancellationToken = Nothing,
+                                       Optional silent As Boolean = False) As System.Threading.Tasks.Task(Of System.String)
+            _context = context
+            _useSecondAPI = useSecondAPI
+            Return Await RunAsync(scriptJson, cancel, silent)
+        End Function
+
+
+        Public Async Function RunAsync(scriptJson As System.String,
+                                       Optional cancel As System.Threading.CancellationToken = Nothing,
+                                       Optional silent As Boolean = False) As System.Threading.Tasks.Task(Of System.String)
+
+            Dim root As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(scriptJson)
+
+            Dim meta = TryCast(root("meta"), Newtonsoft.Json.Linq.JObject)
+            If meta IsNot Nothing Then
+                Dim dflt = meta.Value(Of System.Nullable(Of System.Int32))("default_timeout_ms")
+                If dflt.HasValue Then _defaultTimeoutMs = dflt.Value
+                Dim ua = meta.Value(Of System.String)("user_agent")
+                If ua IsNot Nothing Then _userAgent = ua
+            End If
+
+            Dim env = TryCast(root("env"), Newtonsoft.Json.Linq.JObject)
+            If env IsNot Nothing Then
+                Dim bu = env.Value(Of System.String)("base_url")
+                If bu IsNot Nothing Then
+                    _baseUrl = bu
+                    _vars("base_url") = bu
+                End If
+                Dim headers = TryCast(env("headers"), Newtonsoft.Json.Linq.JObject)
+                If headers IsNot Nothing Then
+                    For Each prop In headers.Properties()
+                        _headersDefault(prop.Name) = prop.Value.ToString()
+                    Next
+                End If
+                Dim secrets = TryCast(env("secrets"), JObject)
+                If secrets IsNot Nothing Then
+                    For Each prop In secrets.Properties()
+                        Dim raw = prop.Value.ToString()
+                        Dim resolved = ResolveSecret(raw)
+                        _secrets(prop.Name) = resolved
+                        _vars(prop.Name) = resolved
+                    Next
+                End If
+                Dim variables = TryCast(env("variables"), JObject)
+                If variables IsNot Nothing Then
+                    For Each prop In variables.Properties()
+                        _vars(prop.Name) = prop.Value.ToObject(Of System.Object)()
+                    Next
+                End If
+            End If
+
+            _http.DefaultRequestHeaders.UserAgent.Clear()
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd(_userAgent)
+            For Each kv In _headersDefault
+                SafeSetHeader(_http.DefaultRequestHeaders, kv.Key, kv.Value)
+            Next
+
+            Dim steps = TryCast(root("steps"), Newtonsoft.Json.Linq.JArray)
+            If steps Is Nothing OrElse steps.Count = 0 Then
+                Throw New System.Exception("No 'steps' array found in script.")
+            End If
+
+            InitDebugLogIfNeeded()
+            DebugLogScriptOverview(root)
+            Dim totalStepsCount = steps.Count    ' (NEW) total step count
+            Dim executedSteps = 0
+            Dim globalSw = System.Diagnostics.Stopwatch.StartNew()
+
+            Dim idToIndex As New System.Collections.Generic.Dictionary(Of System.String, System.Int32)(System.StringComparer.OrdinalIgnoreCase)
+            For i As System.Int32 = 0 To steps.Count - 1
+                Dim sidMap = steps(i).Value(Of System.String)("id")
+                If Not System.String.IsNullOrWhiteSpace(sidMap) Then idToIndex(sidMap) = i
+            Next
+
+            Dim stepIndex As System.Int32 = 0
+
+            Try
+                While stepIndex < steps.Count
+                    cancel.ThrowIfCancellationRequested()
+
+                    Dim stepObj = TryCast(steps(stepIndex), Newtonsoft.Json.Linq.JObject)
+                    Dim sid As System.String = stepObj.Value(Of System.String)("id")
+                    Dim command As System.String = stepObj.Value(Of System.String)("command")
+                    Dim timeoutMs As System.Int32 = stepObj.Value(Of System.Nullable(Of System.Int32))("timeout_ms").GetValueOrDefault(_defaultTimeoutMs)
+
+                    _currentStepId = sid
+
+                    ' Step timing + start log (NEW)
+                    Dim stepSw = System.Diagnostics.Stopwatch.StartNew()
+                    DebugLogStepStart(sid, command, stepIndex, totalStepsCount)
+                    Dim stepSucceeded As Boolean = False
+
+                    Try
+                        If command IsNot Nothing AndAlso command.IndexOf("llm", StringComparison.OrdinalIgnoreCase) < 0 Then
+                            If _vars.ContainsKey("lastLlm_raw") Then _vars.Remove("lastLlm_raw")
+                            If GetFlag("debug_clear_llm_state", False) Then
+                                If _vars.ContainsKey("lastLlm") Then _vars.Remove("lastLlm")
+                                If _vars.ContainsKey("lastLlm_page_url") Then _vars.Remove("lastLlm_page_url")
+                            End If
+                        End If
+
+                        Dim retry = TryCast(stepObj("retry"), Newtonsoft.Json.Linq.JObject)
+                        Dim maxRetry As System.Int32 = If(retry IsNot Nothing, retry.Value(Of System.Nullable(Of System.Int32))("max").GetValueOrDefault(0), 0)
+                        Dim retryDelay As System.Int32 = If(retry IsNot Nothing, retry.Value(Of System.Nullable(Of System.Int32))("delay_ms").GetValueOrDefault(1000), 1000)
+                        Dim backoff As System.Double = If(retry IsNot Nothing, retry.Value(Of System.Nullable(Of System.Double))("backoff").GetValueOrDefault(2.0R), 2.0R)
+
+                        Dim onError = TryCast(stepObj("on_error"), Newtonsoft.Json.Linq.JObject)
+                        Dim onErrAction As System.String = If(onError IsNot Nothing, onError.Value(Of System.String)("action"), Nothing)
+                        Dim onErrGoto As System.String = If(onError IsNot Nothing, onError.Value(Of System.String)("goto"), Nothing)
+
+                        Dim guardObj = TryCast(stepObj("guard"), Newtonsoft.Json.Linq.JObject)
+                        If guardObj IsNot Nothing Then
+                            Dim condition = guardObj.Value(Of System.String)("if")
+                            If Not System.String.IsNullOrWhiteSpace(condition) Then
+                                Dim eval = EvalCondition(condition)
+                                If Not eval Then
+                                    Dim elseId = guardObj.Value(Of System.String)("else_goto")
+                                    Log($"[{sid}] Guard false -> skip. else_goto={elseId}")
+                                    stepSw.Stop()
+                                    DebugLogStepEnd(sid, command, True, stepSw.ElapsedMilliseconds, Nothing) ' Skipped counts as successful skip
+                                    executedSteps += 1
+                                    If Not System.String.IsNullOrWhiteSpace(elseId) AndAlso idToIndex.ContainsKey(elseId) Then
+                                        stepIndex = idToIndex(elseId)
+                                        Continue While
+                                    Else
+                                        stepIndex += 1
+                                        Continue While
+                                    End If
+                                End If
+                            End If
+                        End If
+
+                        Dim waitFor = TryCast(stepObj("wait_for"), Newtonsoft.Json.Linq.JObject)
+                        If waitFor IsNot Nothing AndAlso waitFor.Value(Of System.String)("type") = "time" Then
+                            Dim msDelay = waitFor.Value(Of System.Nullable(Of System.Int32))("timeout_ms").GetValueOrDefault(0)
+                            If msDelay > 0 Then
+                                Await System.Threading.Tasks.Task.Delay(msDelay, cancel)
+                            End If
+                        End If
+
+                        If Not silent Then
+                            Try
+                                Dim parmsPreview = TryCast(stepObj("params"), Newtonsoft.Json.Linq.JObject)
+                                Dim progressMsg As String = Nothing
+                                Select Case command.ToLowerInvariant()
+                                    Case "open_url", "http_request"
+                                        Dim u = ""
+                                        If parmsPreview IsNot Nothing Then u = ExpandTemplates(parmsPreview.Value(Of System.String)("url"))
+                                        progressMsg = If(System.String.IsNullOrWhiteSpace(u), "Loading the library ...", "Loading the library from " & u)
+                                    Case "download_url"
+                                        Dim u = ""
+                                        If parmsPreview IsNot Nothing Then u = ExpandTemplates(parmsPreview.Value(Of System.String)("url"))
+                                        progressMsg = If(System.String.IsNullOrWhiteSpace(u), "Downloading resource ...", "Downloading resource from " & u)
+                                    Case "extract_text", "extract_html", "extract_attribute", "find"
+                                        progressMsg = "Extracting data (" & command & ") ..."
+                                    Case "llm_analyze", "llm", "llmanalyze"
+                                        Dim urlDisplay As System.String = System.String.Empty
+                                        If Not System.String.IsNullOrWhiteSpace(_lastResponseUrl) Then
+                                            Dim shortUrl As System.String = _lastResponseUrl
+                                            If shortUrl.Length > 120 Then shortUrl = shortUrl.Substring(0, 117) & "..."
+                                            urlDisplay = " [" & shortUrl & "]"
+                                        End If
+                                        progressMsg = "Analyzing content (LLM) ..." & urlDisplay
+                                    Case "render_report"
+                                        progressMsg = "Rendering report ..."
+                                    Case Else
+                                        progressMsg = "Executing step '" & command & "' ..."
+                                End Select
+                                If Not System.String.IsNullOrWhiteSpace(sid) Then progressMsg = "[" & sid & "] " & progressMsg
+                                InfoBox.ShowInfoBox(progressMsg)
+                            Catch
+                            End Try
+                        End If
+
+                        Dim attempt As Integer = 0
+                        Dim success As Boolean = False
+                        Dim resultValue As Object = Nothing
+                        Dim lastEx As Exception = Nothing
+
+                        Do
+                            Dim plannedDelay As Integer = 0
+                            lastEx = Nothing
+                            Try
+                                Log($"[{sid}] {command}")
+                                Dim parms = TryCast(stepObj("params"), Newtonsoft.Json.Linq.JObject)
+                                Dim sw = System.Diagnostics.Stopwatch.StartNew()
+
+                                Select Case command.ToLowerInvariant()
+                                    Case "set_user_agent" : resultValue = CmdSetUserAgent(parms)
+                                    Case "set_headers" : resultValue = CmdSetHeaders(parms)
+                                    Case "set_cookies" : resultValue = CmdSetCookies(parms)
+                                    Case "open_url" : resultValue = Await CmdOpenUrlAsync(parms, timeoutMs, cancel)
+                                    Case "navigate" : Throw New System.Exception("navigate is not available in HTTP mode. Use open_url.")
+                                    Case "wait" : resultValue = Await CmdWaitAsync(parms, cancel)
+                                    Case "find" : resultValue = CmdFind(parms)
+                                    Case "extract_text" : resultValue = CmdExtractText(parms)
+                                    Case "extract_html" : resultValue = CmdExtractHtml(parms)
+                                    Case "extract_attribute" : resultValue = CmdExtractAttribute(parms)
+                                    Case "download_url" : resultValue = Await CmdDownloadUrlAsync(parms, cancel)
+                                    Case "save_file" : resultValue = CmdSaveFile(parms)
+                                    Case "read_file" : resultValue = CmdReadFile(parms)
+                                    Case "http_request" : resultValue = Await CmdHttpRequestAsync(parms, timeoutMs, cancel)
+                                    Case "set_var" : resultValue = CmdSetVar(parms)
+                                    Case "template" : resultValue = CmdTemplate(parms)
+                                    Case "if" : resultValue = Await CmdIfAsync(parms, cancel)
+                                    Case "foreach" : resultValue = Await CmdForEachAsync(parms, cancel)
+                                    Case "render_report" : resultValue = CmdRenderReport(parms)
+                                    Case "delete_file" : resultValue = CmdDeleteFile(parms)
+                                    Case "send_email_report" : resultValue = CmdSendEmailReport(parms)
+                                    Case "log" : resultValue = CmdLog(parms)
+                                    Case "enable_dynamic" : CmdEnableDynamic(DirectCast(stepObj, JObject))
+                                    Case "array_push" : resultValue = CmdArrayPush(parms)
+                                    Case "llm_analyze", "llm", "llmanalyze" : resultValue = Await CmdLlmAnalyzeAsync(parms, timeoutMs, cancel)
+                                    Case Else
+                                        Throw New System.Exception($"Unknown command: {command}")
+                                End Select
+
+                                sw.Stop()
+                                Log($"[{sid}] OK in {sw.ElapsedMilliseconds} ms")
+
+                                Dim assign = TryCast(stepObj("assign"), Newtonsoft.Json.Linq.JObject)
+                                If assign IsNot Nothing Then
+                                    Dim varName = assign.Value(Of String)("var")
+                                    Dim path = assign.Value(Of String)("path")
+                                    If Not String.IsNullOrWhiteSpace(varName) Then
+                                        Dim toStore As Object = resultValue
+                                        If Not String.IsNullOrWhiteSpace(path) AndAlso resultValue IsNot Nothing Then
+                                            Dim tokenObj = Newtonsoft.Json.Linq.JToken.FromObject(resultValue)
+                                            Dim sel = tokenObj.SelectToken(path)
+                                            If sel IsNot Nothing Then
+                                                toStore = sel.ToObject(Of Object)()
+                                            Else
+                                                toStore = Nothing
+                                            End If
+                                        End If
+                                        SafeStoreVar(varName, toStore)
+                                    End If
+                                End If
+
+                                success = True
+
+                            Catch exInner As Exception
+                                lastEx = exInner
+                                Dim detail = exInner.ToString()
+                                Log($"[{sid}] Error (attempt {attempt + 1}/{maxRetry + 1}): {detail}")
+                                Dim httpEx = TryCast(exInner, System.Net.Http.HttpRequestException)
+                                If httpEx IsNot Nothing AndAlso httpEx.InnerException IsNot Nothing Then
+                                    Log($"[{sid}] Inner: {httpEx.InnerException.GetType().Name}: {httpEx.InnerException.Message}")
+                                End If
+
+                                If attempt < maxRetry Then
+                                    plannedDelay = CInt(retryDelay * Math.Pow(backoff, attempt))
+                                    Log($"[{sid}] Will retry in {plannedDelay} ms …")
+                                Else
+                                    If onErrAction IsNot Nothing Then
+                                        Select Case onErrAction
+                                            Case "continue"
+                                                success = True
+                                            Case "goto"
+                                                If Not String.IsNullOrWhiteSpace(onErrGoto) AndAlso idToIndex.ContainsKey(onErrGoto) Then
+                                                    stepIndex = idToIndex(onErrGoto)
+                                                    success = True
+                                                Else
+                                                    Throw New System.Exception($"on_error.goto target '{onErrGoto}' not found.", exInner)
+                                                End If
+                                            Case "abort"
+                                                Throw
+                                            Case "retry"
+                                                Throw
+                                            Case Else
+                                                Throw
+                                        End Select
+                                    Else
+                                        If _failHard Then Throw
+                                    End If
+                                End If
+                            Finally
+                                Dim willRetry As Boolean = (Not success AndAlso attempt < maxRetry)
+                                DebugSnapshot(sid, command, attempt + 1, maxRetry, success, willRetry, lastEx)
+                            End Try
+
+                            attempt += 1
+                            If Not success AndAlso attempt <= maxRetry AndAlso plannedDelay > 0 Then
+                                Await System.Threading.Tasks.Task.Delay(plannedDelay, cancel)
+                            End If
+                        Loop While Not success AndAlso attempt <= maxRetry
+
+                        Dim wf = TryCast(stepObj("wait_for"), Newtonsoft.Json.Linq.JObject)
+                        If wf IsNot Nothing Then
+                            Dim tType = wf.Value(Of System.String)("type")
+                            If tType = "url" Then
+                                Dim expected = wf.Value(Of System.String)("value")
+                                If Not System.String.IsNullOrEmpty(expected) AndAlso _lastResponseUrl IsNot Nothing Then
+                                    If _lastResponseUrl.IndexOf(expected, System.StringComparison.OrdinalIgnoreCase) = -1 Then
+                                        Log($"[wait_for:url] Expected partial URL '{expected}' not found in '{_lastResponseUrl}'.")
+                                    End If
+                                End If
+                            ElseIf tType = "selector" Then
+                                Dim selObj = TryCast(wf("selector"), Newtonsoft.Json.Linq.JObject)
+                                If selObj IsNot Nothing Then
+                                    Dim nodes = ResolveSelector(selObj)
+                                    If nodes Is Nothing OrElse nodes.Count = 0 Then
+                                        Log("[wait_for:selector] Selector returned no matches.")
+                                    End If
+                                End If
+                            End If
+                        End If
+
+                        stepSucceeded = True
+                        executedSteps += 1
+                        stepSw.Stop()
+                        DebugLogStepEnd(sid, command, True, stepSw.ElapsedMilliseconds, Nothing)
+
+                        stepIndex += 1
+
+                    Catch exStep As Exception
+                        stepSw.Stop()
+                        DebugLogStepEnd(sid, command, False, stepSw.ElapsedMilliseconds, exStep)
+                        Throw
+                    End Try
+                End While
+
+                globalSw.Stop()
+                DebugFinalSummary(totalStepsCount, executedSteps, Nothing, globalSw.ElapsedMilliseconds)
+
+            Catch
+                globalSw.Stop()
+                DebugFinalSummary(totalStepsCount, executedSteps, _currentStepId, globalSw.ElapsedMilliseconds)
+                Throw
+            End Try
+
+            If Not silent Then
+                Try
+                    InfoBox.ShowInfoBox("", 1)
+                Catch
+                End Try
+            End If
+
+            If Not System.String.IsNullOrWhiteSpace(_finalMarkdown) Then
+                Return _finalMarkdown
+            Else
+                Return "# Execution finished" & System.Environment.NewLine & System.Environment.NewLine &
+                       "````log" & System.Environment.NewLine & _log.ToString() & System.Environment.NewLine & "````"
+            End If
+        End Function
+
+#Region "Command Implementations"
+
+        Private Function CmdSetUserAgent(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim ua = ExpandTemplates(parms.Value(Of System.String)("user_agent"))
+            If System.String.IsNullOrWhiteSpace(ua) Then Throw New System.Exception("user_agent missing.")
+            _userAgent = ua
+            _http.DefaultRequestHeaders.UserAgent.Clear()
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd(ua)
+            Return New With {.user_agent = ua}
+        End Function
+
+        Private Function CmdSetHeaders(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim mode = parms.Value(Of System.String)("mode")
+            Dim headers = TryCast(parms("headers"), Newtonsoft.Json.Linq.JObject)
+            If headers Is Nothing Then Throw New System.Exception("headers missing.")
+            If System.String.Equals(mode, "replace", System.StringComparison.OrdinalIgnoreCase) Then
+                _headersDefault.Clear()
+                _http.DefaultRequestHeaders.Clear()
+                _http.DefaultRequestHeaders.UserAgent.ParseAdd(_userAgent)
+            End If
+            For Each p In headers.Properties()
+                Dim val = ExpandTemplates(p.Value.ToString())
+                _headersDefault(p.Name) = val
+                SafeSetHeader(_http.DefaultRequestHeaders, p.Name, val)
+            Next
+            Return New With {.headers = _headersDefault}
+        End Function
+
+        Private Function CmdSetCookies(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim arr = TryCast(parms("cookies"), Newtonsoft.Json.Linq.JArray)
+            If arr Is Nothing Then Throw New System.Exception("cookies missing.")
+            For Each c As Newtonsoft.Json.Linq.JObject In arr
+                Dim name = c.Value(Of System.String)("name")
+                Dim value = ExpandTemplates(c.Value(Of System.String)("value"))
+                Dim domain = c.Value(Of System.String)("domain")
+                Dim path = c.Value(Of System.String)("path")
+                If System.String.IsNullOrWhiteSpace(name) OrElse domain Is Nothing Then
+                    Throw New System.Exception("Cookie name/domain required.")
+                End If
+                Dim ck As New System.Net.Cookie(name, value, If(path, "/"), domain) With {
+                    .Secure = c.Value(Of System.Nullable(Of System.Boolean))("secure").GetValueOrDefault(False),
+                    .HttpOnly = c.Value(Of System.Nullable(Of System.Boolean))("httpOnly").GetValueOrDefault(False)
+                }
+                _cookieContainer.Add(ck)
+            Next
+            Return New With {.count = arr.Count}
+        End Function
+
+        Private Function IsTransientStatus(code As Integer) As Boolean
+            Select Case code
+                Case 408, 425, 429, 500, 502, 503, 504
+                    Return True
+                Case Else
+                    Return False
+            End Select
+        End Function
+
+        Private Sub DebugDumpRequest(req As System.Net.Http.HttpRequestMessage)
+            If Not GetDebugFlag("debug") AndAlso Not GetDebugFlag("debug_allAttempts") Then Return
+            Try
+                Dim sb As New System.Text.StringBuilder()
+                sb.AppendLine("[open_url][request] " & req.Method.Method & " " & req.RequestUri.ToString())
+                For Each h In req.Headers
+                    sb.AppendLine("  H: " & h.Key & ": " & String.Join(",", h.Value))
+                Next
+                If req.Content IsNot Nothing Then
+                    For Each h In req.Content.Headers
+                        sb.AppendLine("  HC: " & h.Key & ": " & String.Join(",", h.Value))
+                    Next
+                End If
+                WriteDebug(sb.ToString())
+            Catch
+            End Try
+        End Sub
+
+
+        Private Async Function CmdOpenUrlAsync(parms As Newtonsoft.Json.Linq.JObject,
+                                               timeoutMs As System.Int32,
+                                               cancel As System.Threading.CancellationToken) As System.Threading.Tasks.Task(Of System.Object)
+
+            If parms Is Nothing Then Throw New System.Exception("open_url: params missing.")
+
+            Dim rawUrl = parms.Value(Of System.String)("url")
+            If String.IsNullOrWhiteSpace(rawUrl) Then Throw New System.Exception("open_url: 'url' missing.")
+
+            Dim expandedRaw = ExpandTemplates(rawUrl)
+            If String.IsNullOrWhiteSpace(expandedRaw) Then
+                Throw New System.Exception($"open_url: URL expansion produced empty string (original='{rawUrl}').")
+            End If
+            If expandedRaw.Contains("{{") Then
+                Throw New System.Exception($"open_url: URL contains unresolved template tokens after expansion: '{expandedRaw}'")
+            End If
+
+            Dim method = parms.Value(Of String)("method")
+            If String.IsNullOrWhiteSpace(method) Then method = "GET"
+
+            Dim stepTimeout = parms.Value(Of Integer?)("timeout_ms")
+            If stepTimeout.HasValue AndAlso stepTimeout.Value > 0 Then
+                timeoutMs = stepTimeout.Value
+            ElseIf timeoutMs <= 0 Then
+                timeoutMs = _defaultTimeoutMs
+            End If
+
+            Dim fullUrl = ResolveUrl(expandedRaw)
+            If String.IsNullOrWhiteSpace(fullUrl) Then
+                Throw New System.Exception($"open_url: ResolveUrl failed for '{expandedRaw}'.")
+            End If
+            fullUrl = SanitizePotentialMarkdownUrl(fullUrl)
+
+            Dim uri As System.Uri = Nothing
+            If Not System.Uri.TryCreate(fullUrl, System.UriKind.Absolute, uri) Then
+                Throw New System.Exception("open_url: Not an absolute URL: " & fullUrl)
+            End If
+
+            Dim returnBody = parms.Value(Of Boolean?)("return_body").GetValueOrDefault(False)
+
+            Dim hdrObj = TryCast(parms("headers"), Newtonsoft.Json.Linq.JObject)
+            Dim bodyToken = parms("body")
+            Dim bodyType = parms.Value(Of String)("body_type")
+
+            Dim retryObj = TryCast(parms("retry"), Newtonsoft.Json.Linq.JObject)
+            Dim maxRetry = If(retryObj IsNot Nothing, retryObj.Value(Of Integer?)("max").GetValueOrDefault(0), 0)
+            Dim retryDelay = If(retryObj IsNot Nothing, retryObj.Value(Of Integer?)("delay_ms").GetValueOrDefault(1200), 1200)
+            Dim backoff = If(retryObj IsNot Nothing, retryObj.Value(Of Double?)("backoff").GetValueOrDefault(2.0R), 2.0R)
+
+            Dim attempt As Integer = 0
+            Dim lastEx As Exception = Nothing
+            Dim lastStatus As Integer = 0
+            Dim usedHeadFallback As Boolean = False
+
+            Dim swTotal = System.Diagnostics.Stopwatch.StartNew()
+
+            Do
+                cancel.ThrowIfCancellationRequested()
+                lastEx = Nothing
+                lastStatus = 0
+                Dim plannedDelay As Integer = 0
+                Dim success As Boolean = False
+                Dim doHeadFallback As Boolean = False
+
+                Using cts As New System.Threading.CancellationTokenSource(timeoutMs)
+                    Using cancel.Register(Sub() cts.Cancel())
+                        Try
+                            Dim req = New System.Net.Http.HttpRequestMessage(New System.Net.Http.HttpMethod(method), uri)
+
+                            For Each kv In _headersDefault
+                                If Not req.Headers.Contains(kv.Key) Then
+                                    req.Headers.TryAddWithoutValidation(kv.Key, kv.Value)
+                                End If
+                            Next
+                            If hdrObj IsNot Nothing Then
+                                For Each p In hdrObj.Properties()
+                                    Dim hv = ExpandTemplates(p.Value.ToString())
+                                    req.Headers.Remove(p.Name)
+                                    req.Headers.TryAddWithoutValidation(p.Name, hv)
+                                Next
+                            End If
+
+                            If bodyToken IsNot Nothing Then
+                                Dim bodyStr = ExpandTemplates(bodyToken.ToString())
+                                Select Case bodyType?.ToLowerInvariant()
+                                    Case "json"
+                                        req.Content = New System.Net.Http.StringContent(bodyStr, System.Text.Encoding.UTF8, "application/json")
+                                    Case "form"
+                                        Dim formPairs As New List(Of KeyValuePair(Of String, String))
+                                        Dim jo = TryCast(bodyToken, Newtonsoft.Json.Linq.JObject)
+                                        If jo IsNot Nothing Then
+                                            For Each prop In jo.Properties()
+                                                formPairs.Add(New KeyValuePair(Of String, String)(prop.Name, ExpandTemplates(prop.Value.ToString())))
+                                            Next
+                                        End If
+                                        req.Content = New System.Net.Http.FormUrlEncodedContent(formPairs)
+                                    Case Else
+                                        req.Content = New System.Net.Http.StringContent(bodyStr, System.Text.Encoding.UTF8)
+                                End Select
+                            End If
+
+                            DebugDumpRequest(req)
+
+                            Dim swReq = System.Diagnostics.Stopwatch.StartNew()
+                            Dim resp = Await _http.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                            swReq.Stop()
+
+                            lastStatus = CInt(resp.StatusCode)
+                            _vars("last_http_status") = lastStatus
+                            _vars("last_http_elapsed_ms") = swReq.ElapsedMilliseconds
+
+                            Dim bytes = Await resp.Content.ReadAsByteArrayAsync()
+                            Dim bodyText = DecodeBody(bytes, resp.Content.Headers.ContentType)
+                            _lastResponseUrl = resp.RequestMessage.RequestUri.ToString()
+                            _lastResponseBody = bodyText
+                            'LoadDocument(bodyText)
+                            Await LoadDocumentAsync(bodyText, _lastResponseUrl, cancel).ConfigureAwait(False)
+
+                            AutoExtractLinks()
+
+                            If bodyText IsNot Nothing AndAlso bodyText.Length < 300 AndAlso
+                               (bodyText.IndexOf("Incapsula", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                                bodyText.IndexOf("Access Denied", StringComparison.OrdinalIgnoreCase) >= 0) Then
+                                Log("[open_url][warn] Possible WAF placeholder page detected (very short body).")
+                            End If
+
+                            If Not resp.IsSuccessStatusCode AndAlso IsTransientStatus(lastStatus) AndAlso attempt < maxRetry Then
+                                plannedDelay = CInt(retryDelay * Math.Pow(backoff, attempt))
+                                Log($"[open_url] Transient HTTP {lastStatus} → retry in {plannedDelay} ms (attempt {attempt + 1}/{maxRetry + 1}).")
+                            Else
+                                success = resp.IsSuccessStatusCode OrElse Not _failHard
+                            End If
+
+                            If success Then
+                                swTotal.Stop()
+                                If returnBody Then
+                                    Return New With {.status = lastStatus, .url = _lastResponseUrl, .body = _lastResponseBody, .elapsed_ms = swReq.ElapsedMilliseconds}
+                                Else
+                                    Return New With {.status = lastStatus, .url = _lastResponseUrl, .elapsed_ms = swReq.ElapsedMilliseconds}
+                                End If
+                            End If
+
+                        Catch tex As TaskCanceledException
+                            lastEx = tex
+
+                            Dim externalCancel = cancel.IsCancellationRequested
+                            ' If outer token not cancelled we treat this as an internal timeout (cts or HTTP pipeline)
+                            If Not externalCancel Then
+                                Log($"[open_url] Timeout after {timeoutMs} ms (attempt {attempt + 1}/{maxRetry + 1}).")
+                                If method.Equals("GET", StringComparison.OrdinalIgnoreCase) AndAlso Not usedHeadFallback AndAlso attempt = maxRetry Then
+                                    usedHeadFallback = True
+                                    doHeadFallback = True
+                                End If
+                                If attempt < maxRetry Then
+                                    plannedDelay = CInt(retryDelay * Math.Pow(backoff, attempt))
+                                    Log($"[open_url] Will retry after timeout in {plannedDelay} ms.")
+                                ElseIf _failHard Then
+                                    Throw
+                                End If
+                            Else
+                                Log("[open_url] External cancellation signal received – aborting.")
+                                Throw
+                            End If
+
+                        Catch ex As Exception
+                            lastEx = ex
+                            Log("[open_url] Error: " & ex.GetType().Name & ": " & ex.Message)
+                            If attempt < maxRetry Then
+                                plannedDelay = CInt(retryDelay * Math.Pow(backoff, attempt))
+                                Log($"[open_url] Retry in {plannedDelay} ms (attempt {attempt + 1}/{maxRetry + 1}).")
+                            ElseIf _failHard Then
+                                Throw
+                            End If
+                        End Try
+
+                        ' Perform deferred HEAD fallback (allowed to Await here, outside Catch)
+                        If doHeadFallback Then
+                            Try
+                                Log("[open_url] Trying HEAD fallback to test reachability …")
+                                Using headCts As New System.Threading.CancellationTokenSource(Math.Min(5000, timeoutMs))
+                                    Dim headReq = New System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, uri)
+                                    Dim respHead = Await _http.SendAsync(headReq, headCts.Token)
+                                    Log("[open_url] HEAD fallback status: " & CInt(respHead.StatusCode))
+                                End Using
+                            Catch ex2 As Exception
+                                Log("[open_url] HEAD fallback failed: " & ex2.Message)
+                            End Try
+                        End If
+                    End Using
+                End Using
+
+                attempt += 1
+                If attempt <= maxRetry AndAlso plannedDelay > 0 Then
+                    Await System.Threading.Tasks.Task.Delay(plannedDelay, cancel)
+                End If
+            Loop While attempt <= maxRetry
+
+            swTotal.Stop()
+            _vars("last_http_status") = lastStatus
+            _vars("last_http_elapsed_ms") = swTotal.ElapsedMilliseconds
+
+            Dim detail = If(lastEx IsNot Nothing, lastEx.Message, "Unknown failure")
+            Throw New System.Exception($"open_url failed after {attempt} attempt(s). Status={lastStatus}. Detail={detail}")
+        End Function
+
+        Private Sub AutoExtractLinks()
+            Try
+                Dim enabled As Boolean = True
+                If _vars.ContainsKey("auto_link_enable") Then
+                    Dim o = _vars("auto_link_enable")
+                    If TypeOf o Is Boolean Then enabled = DirectCast(o, Boolean)
+                End If
+                If Not enabled Then Exit Sub
+
+                If _lastDoc Is Nothing OrElse String.IsNullOrEmpty(_lastResponseBody) Then Exit Sub
+
+                Dim patterns As New List(Of String)
+                If _vars.ContainsKey("auto_link_patterns") Then
+                    Dim raw = _vars("auto_link_patterns")
+                    If TypeOf raw Is IEnumerable(Of String) Then
+                        patterns.AddRange(DirectCast(raw, IEnumerable(Of String)))
+                    ElseIf TypeOf raw Is String Then
+                        patterns.Add(DirectCast(raw, String))
+                    End If
+                End If
+                ' Provide a sensible default if none specified
+                If patterns.Count = 0 Then
+                    patterns.Add("(?i)\b(show|detail|decision|case|id=|doc|file|download)\b")
+                End If
+
+                Dim minLen As Integer = 15
+                If _vars.ContainsKey("auto_link_min") Then
+                    Dim mObj = _vars("auto_link_min")
+                    If TypeOf mObj Is Integer Then minLen = DirectCast(mObj, Integer)
+                End If
+
+                Dim anchors = _lastDoc.DocumentNode.SelectNodes("//a[@href]")
+                Dim collected As New List(Of String)
+                If anchors IsNot Nothing Then
+                    For Each a In anchors
+                        Dim href = a.GetAttributeValue("href", "")
+                        If String.IsNullOrWhiteSpace(href) Then Continue For
+                        If href.Length < minLen Then Continue For
+
+                        Dim abs = ResolveUrl(href)
+                        If String.IsNullOrEmpty(abs) Then Continue For
+
+                        Dim score = 0
+                        For Each p In patterns
+                            If Regex.IsMatch(href, p) OrElse Regex.IsMatch(abs, p) Then
+                                score += 1
+                            End If
+                        Next
+                        ' Keep if matched at least one pattern OR caller allows a passive collection via flag
+                        If score > 0 Then
+                            If Not collected.Contains(abs) Then collected.Add(abs)
+                        End If
+                    Next
+                End If
+
+                _vars("auto_links") = collected
+                Log($"[auto_extract_generic] Collected {collected.Count} link(s).")
+            Catch ex As Exception
+                Log("[auto_extract_generic][error] " & ex.Message)
+            End Try
+        End Sub
+
+        Public Sub AddAutoLinkPattern(pattern As String)
+            If String.IsNullOrWhiteSpace(pattern) Then Exit Sub
+            If Not _vars.ContainsKey("auto_link_patterns") Then
+                _vars("auto_link_patterns") = New List(Of String)
+            End If
+            Dim lst = TryCast(_vars("auto_link_patterns"), List(Of String))
+            If lst Is Nothing Then
+                lst = New List(Of String)
+                _vars("auto_link_patterns") = lst
+            End If
+            If Not lst.Contains(pattern) Then lst.Add(pattern)
+        End Sub
+
+        Private Async Function CmdWaitAsync(parms As Newtonsoft.Json.Linq.JObject, cancel As System.Threading.CancellationToken) As System.Threading.Tasks.Task(Of System.Object)
+            Dim ms = parms.Value(Of System.Nullable(Of System.Int32))("ms").GetValueOrDefault(0)
+            If ms > 0 Then Await System.Threading.Tasks.Task.Delay(ms, cancel)
+            Return New With {.slept = ms}
+        End Function
+
+        Private Function CmdFind(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            ' Expected params: { "in": "<varName>", "text": "needle", "assign": {"var":"found"} }
+            If parms Is Nothing Then Return Nothing
+
+            Dim varName = parms.Value(Of String)("in")
+            Dim needle = parms.Value(Of String)("text")
+            If String.IsNullOrEmpty(varName) OrElse String.IsNullOrEmpty(needle) Then
+                Return New With {.count = 0}
+            End If
+
+            Dim hayObj As Object = Nothing
+            If _vars.TryGetValue(varName, hayObj) Then
+                ' Normalize to string
+                Dim hay As String
+                If TypeOf hayObj Is String Then
+                    hay = DirectCast(hayObj, String)
+                ElseIf TypeOf hayObj Is Newtonsoft.Json.Linq.JToken Then
+                    hay = DirectCast(hayObj, Newtonsoft.Json.Linq.JToken).ToString()
+                ElseIf TypeOf hayObj Is Newtonsoft.Json.Linq.JObject Then
+                    hay = DirectCast(hayObj, Newtonsoft.Json.Linq.JObject).ToString(Newtonsoft.Json.Formatting.None)
+                ElseIf TypeOf hayObj Is Newtonsoft.Json.Linq.JArray Then
+                    hay = DirectCast(hayObj, Newtonsoft.Json.Linq.JArray).ToString(Newtonsoft.Json.Formatting.None)
+                Else
+                    hay = hayObj.ToString()
+                End If
+
+                Dim idx = hay.IndexOf(needle, StringComparison.OrdinalIgnoreCase)
+                Dim found = idx >= 0
+                Dim assignObj = TryCast(parms("assign"), Newtonsoft.Json.Linq.JObject)
+                If assignObj IsNot Nothing Then
+                    Dim targetVar = assignObj.Value(Of String)("var")
+                    If Not String.IsNullOrEmpty(targetVar) Then
+                        _vars(targetVar) = found
+                    End If
+                End If
+                Return New With {.found = found, .index = idx}
+            End If
+
+            Return New With {.found = False, .index = -1}
+        End Function
+        Private Function CmdExtractText(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim sel = TryCast(parms("selector"), Newtonsoft.Json.Linq.JObject)
+            Dim all = parms.Value(Of System.Nullable(Of System.Boolean))("all").GetValueOrDefault(False)
+            Dim normalize = parms.Value(Of System.Nullable(Of System.Boolean))("normalize_whitespace").GetValueOrDefault(True)
+            Dim pattern = parms.Value(Of System.String)("regex")
+            Dim groupIdx = parms.Value(Of System.Nullable(Of System.Int32))("group").GetValueOrDefault(0)
+            Dim nodes = ResolveSelector(sel)
+            If nodes Is Nothing Then Return If(all, New System.Collections.Generic.List(Of System.String)(), Nothing)
+            Dim texts As New System.Collections.Generic.List(Of System.String)
+            For Each n In nodes
+                Dim t = GetInnerText(n, normalize)
+                If Not System.String.IsNullOrWhiteSpace(pattern) Then
+                    Dim m = System.Text.RegularExpressions.Regex.Match(t, pattern, System.Text.RegularExpressions.RegexOptions.Singleline)
+                    If m.Success AndAlso groupIdx <= m.Groups.Count - 1 Then
+                        t = m.Groups(groupIdx).Value
+                    Else
+                        t = System.String.Empty
+                    End If
+                End If
+                If Not all Then Return t
+                texts.Add(t)
+            Next
+            Return texts
+        End Function
+
+        Private Function CmdExtractHtml(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim sel = TryCast(parms("selector"), Newtonsoft.Json.Linq.JObject)
+            Dim outer = parms.Value(Of System.Nullable(Of System.Boolean))("outer").GetValueOrDefault(False)
+            Dim nodes = ResolveSelector(sel)
+            If nodes Is Nothing OrElse nodes.Count = 0 Then Return System.String.Empty
+            Return If(outer, nodes(0).OuterHtml, nodes(0).InnerHtml)
+        End Function
+
+        Private Function CmdExtractAttribute(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim nodesVar = parms.Value(Of String)("nodes_var")
+            Dim attrName = parms.Value(Of String)("attribute")
+            Dim targetVar = parms.Value(Of String)("var")
+            If String.IsNullOrEmpty(nodesVar) OrElse String.IsNullOrEmpty(attrName) OrElse String.IsNullOrEmpty(targetVar) Then
+                Throw New Exception("extract_attribute: missing parameters")
+            End If
+
+            If Not _vars.ContainsKey(nodesVar) Then
+                _vars(targetVar) = New List(Of String)
+                Return Nothing
+            End If
+
+            Dim raw = _vars(nodesVar)
+            Dim nodeList As New List(Of Object)
+
+            ' Normalize raw into a list of node objects
+            If TypeOf raw Is IEnumerable(Of Object) Then
+                nodeList.AddRange(DirectCast(raw, IEnumerable(Of Object)))
+            ElseIf TypeOf raw Is IEnumerable Then
+                For Each it In DirectCast(raw, IEnumerable)
+                    nodeList.Add(it)
+                Next
+            Else
+                nodeList.Add(raw) ' single object fallback
+            End If
+
+            Dim hrefs As New List(Of String)
+            For Each n In nodeList
+                Try
+                    Dim jo = Newtonsoft.Json.Linq.JObject.FromObject(n)
+                    Dim attrs = jo("attributes")
+                    If attrs IsNot Nothing AndAlso attrs(attrName) IsNot Nothing Then
+                        Dim v = attrs.Value(Of String)(attrName)
+                        If Not String.IsNullOrWhiteSpace(v) Then hrefs.Add(v)
+                    End If
+                Catch
+                    ' ignore serialization issues
+                End Try
+            Next
+
+            _vars(targetVar) = hrefs
+            Return Nothing
+        End Function
+
+        Private Async Function CmdDownloadUrlAsync(parms As Newtonsoft.Json.Linq.JObject, cancel As System.Threading.CancellationToken) As System.Threading.Tasks.Task(Of System.Object)
+            Dim url = ResolveUrl(ExpandTemplates(parms.Value(Of System.String)("url")))
+            Dim targetDir = ExpandTemplates(parms.Value(Of System.String)("target_dir"))
+            Dim filename = ExpandTemplates(parms.Value(Of System.String)("filename"))
+            If System.String.IsNullOrWhiteSpace(targetDir) Then Throw New System.Exception("target_dir missing.")
+            If System.String.IsNullOrWhiteSpace(filename) Then filename = "download.bin"
+            If Not System.IO.Directory.Exists(targetDir) Then System.IO.Directory.CreateDirectory(targetDir)
+            Dim path = System.IO.Path.Combine(targetDir, filename)
+
+            Dim method = parms.Value(Of System.String)("method")
+            If System.String.IsNullOrWhiteSpace(method) Then method = "GET"
+
+            Dim headers = TryCast(parms("headers"), Newtonsoft.Json.Linq.JObject)
+            Dim req As New System.Net.Http.HttpRequestMessage(New System.Net.Http.HttpMethod(method), url)
+            If headers IsNot Nothing Then
+                For Each h In headers.Properties()
+                    req.Headers.TryAddWithoutValidation(h.Name, ExpandTemplates(h.Value.ToString()))
+                Next
+            End If
+
+            Dim body = parms("body")
+            Dim bodyType = parms.Value(Of System.String)("body_type")
+            If body IsNot Nothing Then
+                Select Case bodyType
+                    Case "json"
+                        req.Content = New System.Net.Http.StringContent(ExpandTemplates(body.ToString()), System.Text.Encoding.UTF8, "application/json")
+                    Case "form"
+                        Dim kv As New System.Collections.Generic.List(Of System.Collections.Generic.KeyValuePair(Of System.String, System.String))
+                        For Each p In TryCast(body, Newtonsoft.Json.Linq.JObject).Properties()
+                            kv.Add(New System.Collections.Generic.KeyValuePair(Of System.String, System.String)(p.Name, ExpandTemplates(p.Value.ToString())))
+                        Next
+                        req.Content = New System.Net.Http.FormUrlEncodedContent(kv)
+                    Case Else
+                        req.Content = New System.Net.Http.StringContent(ExpandTemplates(body.ToString()), System.Text.Encoding.UTF8)
+                End Select
+            End If
+
+            Dim resp = Await _http.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancel)
+            Using fs As New System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None)
+                Await resp.Content.CopyToAsync(fs)
+            End Using
+            Return New With {.path = path, .status = CInt(resp.StatusCode)}
+        End Function
+
+        Private Function CmdSaveFile(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim content = ExpandTemplates(parms.Value(Of System.String)("content"))
+            Dim filePath = ExpandTemplates(parms.Value(Of System.String)("path"))
+            Dim encoding = parms.Value(Of System.String)("encoding")
+            If System.String.IsNullOrWhiteSpace(filePath) Then Throw New System.Exception("path missing.")
+            Dim dir = System.IO.Path.GetDirectoryName(filePath)
+            If Not System.IO.Directory.Exists(dir) Then System.IO.Directory.CreateDirectory(dir)
+            If System.String.Equals(encoding, "binary", System.StringComparison.OrdinalIgnoreCase) Then
+                Dim bytes = System.Convert.FromBase64String(content)
+                System.IO.File.WriteAllBytes(filePath, bytes)
+            Else
+                System.IO.File.WriteAllText(filePath, If(content, System.String.Empty), System.Text.Encoding.UTF8)
+            End If
+            Return New With {.path = filePath}
+        End Function
+
+        Private Function CmdReadFile(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim filePath = ExpandTemplates(parms.Value(Of System.String)("path"))
+            Dim encoding = parms.Value(Of System.String)("encoding")
+            If System.String.IsNullOrWhiteSpace(filePath) Then Throw New System.Exception("path missing.")
+            Dim txt As System.String
+            If System.String.Equals(encoding, "binary", System.StringComparison.OrdinalIgnoreCase) Then
+                Dim bytes = System.IO.File.ReadAllBytes(filePath)
+                txt = System.Convert.ToBase64String(bytes)
+            Else
+                txt = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8)
+            End If
+            Return txt
+        End Function
+
+        Private Async Function CmdHttpRequestAsync(parms As Newtonsoft.Json.Linq.JObject, timeoutMs As System.Int32, cancel As System.Threading.CancellationToken) As System.Threading.Tasks.Task(Of System.Object)
+            Dim url = ResolveUrl(ExpandTemplates(parms.Value(Of System.String)("url")))
+            Dim absolute As System.Uri
+            If Not System.Uri.TryCreate(url, System.UriKind.Absolute, absolute) Then
+                Throw New System.Exception("URL must be absolute (include scheme). Got: " & url)
+            End If
+            Dim method = parms.Value(Of System.String)("method")
+            If System.String.IsNullOrWhiteSpace(method) Then method = "GET"
+            Dim req As New System.Net.Http.HttpRequestMessage(New System.Net.Http.HttpMethod(method), url)
+
+            Dim headers = TryCast(parms("headers"), Newtonsoft.Json.Linq.JObject)
+            If headers IsNot Nothing Then
+                For Each h In headers.Properties()
+                    req.Headers.TryAddWithoutValidation(h.Name, ExpandTemplates(h.Value.ToString()))
+                Next
+            End If
+
+            Dim query = TryCast(parms("query"), Newtonsoft.Json.Linq.JObject)
+            If query IsNot Nothing Then
+                Dim ub As New System.UriBuilder(url)
+                Dim qParts As New System.Collections.Generic.List(Of System.String)
+                For Each p In query.Properties()
+                    qParts.Add(System.Uri.EscapeDataString(p.Name) & "=" & System.Uri.EscapeDataString(ExpandTemplates(p.Value.ToString())))
+                Next
+                If qParts.Count > 0 Then
+                    ub.Query = System.String.Join("&", qParts)
+                    req.RequestUri = ub.Uri
+                End If
+            End If
+
+            Dim body = parms("body")
+            Dim bodyType = parms.Value(Of System.String)("body_type")
+            If body IsNot Nothing Then
+                Select Case bodyType
+                    Case "json"
+                        req.Content = New System.Net.Http.StringContent(ExpandTemplates(body.ToString()), System.Text.Encoding.UTF8, "application/json")
+                    Case "form"
+                        Dim kv As New System.Collections.Generic.List(Of System.Collections.Generic.KeyValuePair(Of System.String, System.String))
+                        For Each p In TryCast(body, Newtonsoft.Json.Linq.JObject).Properties()
+                            kv.Add(New System.Collections.Generic.KeyValuePair(Of System.String, System.String)(p.Name, ExpandTemplates(p.Value.ToString())))
+                        Next
+                        req.Content = New System.Net.Http.FormUrlEncodedContent(kv)
+                    Case Else
+                        req.Content = New System.Net.Http.StringContent(ExpandTemplates(body.ToString()), System.Text.Encoding.UTF8)
+                End Select
+            End If
+
+            Using cts As New System.Threading.CancellationTokenSource(timeoutMs)
+                Using cancel.Register(Sub() cts.Cancel())
+                    Dim resp = Await _http.SendAsync(req, cts.Token)
+                    Dim bytes = Await resp.Content.ReadAsByteArrayAsync()
+                    Dim bodyText = DecodeBody(bytes, resp.Content.Headers.ContentType)
+                    _lastResponseUrl = resp.RequestMessage.RequestUri.ToString()
+                    _lastResponseBody = bodyText
+                    'LoadDocument(bodyText)
+                    Await LoadDocumentAsync(bodyText, _lastResponseUrl, cancel).ConfigureAwait(False)
+                    Return New With {
+                        .status = CInt(resp.StatusCode),
+                        .headers = resp.Headers.ToString(),
+                        .body = bodyText,
+                        .url = _lastResponseUrl
+                    }
+                End Using
+            End Using
+        End Function
+
+        Private Function CmdSetVar(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim name = parms.Value(Of System.String)("name")
+            Dim valueToken = parms("value")
+            If System.String.IsNullOrWhiteSpace(name) Then Throw New System.Exception("variable name missing.")
+            Dim valueObj As System.Object
+            If valueToken Is Nothing Then
+                valueObj = Nothing
+            ElseIf valueToken.Type = Newtonsoft.Json.Linq.JTokenType.String Then
+                valueObj = ExpandTemplates(valueToken.ToString())
+            Else
+                valueObj = valueToken.ToObject(Of System.Object)()
+            End If
+            SafeStoreVar(name, valueObj)
+            Return New With {.name = name, .value = valueObj}
+        End Function
+
+        Private Function CmdTemplate(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim tpl = parms.Value(Of System.String)("template")
+            Dim ctxToken = parms("context")
+            Dim ctxObj As System.Object = Nothing
+            If ctxToken IsNot Nothing Then
+                Dim mt = TryCast(ctxToken, JObject)
+                If mt IsNot Nothing Then
+                    For Each p In mt.Properties().ToList()
+                        If p.Value.Type = JTokenType.String Then
+                            Dim raw = p.Value.ToString()
+                            Dim expanded = ExpandTemplates(raw)
+                            Dim parsed As JToken = Nothing
+                            Try
+                                parsed = JToken.Parse(expanded)
+                            Catch
+                            End Try
+                            If parsed IsNot Nothing Then
+                                p.Value = parsed
+                            Else
+                                p.Value = expanded
+                            End If
+                        End If
+                    Next
+                End If
+                ' Kontext an Renderer weitergeben
+                ctxObj = ctxToken
+            End If
+
+            ' Mustache render (nur Sections & bekannte Variablen aus context)
+            Dim rendered = SimpleMustacheRender(tpl, ctxObj)
+
+            ' Zweiter Pass: globale Variablen (_vars) expandieren
+            rendered = ExpandTemplates(rendered)
+
+            Return rendered
+        End Function
+
+        Private Function CmdDeleteFile(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            If parms Is Nothing Then Return False
+            Dim rawPath = parms.Value(Of String)("path")
+            If String.IsNullOrWhiteSpace(rawPath) Then Return False
+            Dim expanded = ExpandTemplates(rawPath)
+            Try
+                If System.IO.File.Exists(expanded) Then
+                    System.IO.File.Delete(expanded)
+                    Log($"[delete_file] Deleted {expanded}")
+                    Return True
+                Else
+                    Log($"[delete_file] Not found: {expanded}")
+                    Return False
+                End If
+            Catch ex As Exception
+                Log($"[delete_file] Error deleting {expanded}: {ex.Message}")
+                Return False
+            End Try
+        End Function
+
+
+        Private Function CmdSendEmailReport(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            If parms Is Nothing Then Return False
+            Try
+                Dim ExpandSafe As Func(Of String, String) =
+                    Function(s As String)
+                        If String.IsNullOrWhiteSpace(s) Then Return s
+                        Try
+                            Return ExpandTemplates(s)
+                        Catch
+                            Return s
+                        End Try
+                    End Function
+
+                ' Raw parameters
+                Dim rawTo = parms.Value(Of String)("to")
+                Dim rawSubject = parms.Value(Of String)("subject")
+                Dim rawSmtpHost = parms.Value(Of String)("smtp_host")
+                Dim rawPort = parms.Value(Of String)("smtp_port")
+                Dim rawFromEmail = parms.Value(Of String)("from_email")
+                Dim rawFromName = parms.Value(Of String)("from_name")
+                Dim rawBodyMd = parms.Value(Of String)("body_markdown")
+                Dim rawIpOverride = If(parms.Value(Of String)("ip_override"), parms.Value(Of String)("ip"))
+                Dim rawHeloDomain = parms.Value(Of String)("helo_domain")
+                Dim rawNet = parms.Value(Of String)("net")
+
+                ' Expand templates
+                Dim toAddr = ExpandSafe(rawTo)
+                Dim subject = ExpandSafe(rawSubject)
+                Dim smtpHost = ExpandSafe(rawSmtpHost)
+                Dim fromEmail = ExpandSafe(rawFromEmail)
+                Dim fromName = ExpandSafe(rawFromName)
+                Dim bodyMarkdownTemplate = ExpandSafe(rawBodyMd)
+                Dim ipOverride = ExpandSafe(rawIpOverride)
+                Dim heloDomain = ExpandSafe(rawHeloDomain)
+                Dim netOverride = ExpandSafe(rawNet)
+
+                Dim smtpPort As Integer = 25
+                If Not String.IsNullOrWhiteSpace(rawPort) Then
+                    Integer.TryParse(ExpandSafe(rawPort), smtpPort)
+                End If
+
+                Dim smtpSsl = String.Equals(parms.Value(Of String)("smtp_ssl"), "true", StringComparison.OrdinalIgnoreCase)
+                Dim smtpAuth = String.Equals(parms.Value(Of String)("smtp_auth"), "true", StringComparison.OrdinalIgnoreCase)
+                Dim smtpUser = ExpandSafe(parms.Value(Of String)("smtp_user"))
+                Dim smtpPass = ExpandSafe(parms.Value(Of String)("smtp_pass"))
+
+                If String.IsNullOrWhiteSpace(toAddr) OrElse String.IsNullOrWhiteSpace(smtpHost) Then
+                    Log("[send_email_report] Missing required fields (to / smtp_host).")
+                    Return False
+                End If
+
+                If String.IsNullOrWhiteSpace(fromEmail) Then fromEmail = SharedMethods.WebAgent_DefaultFromEMail
+                If String.IsNullOrWhiteSpace(fromName) Then fromName = SharedMethods.WebAgent_DefaultFromName
+                If String.IsNullOrWhiteSpace(subject) Then subject = "Report"
+
+                ' Prepare plain source text (after template expansion)
+                Dim plainBody As String = If(String.IsNullOrWhiteSpace(bodyMarkdownTemplate), "(leer)", bodyMarkdownTemplate)
+
+                ' Decide if we should treat input as Markdown or already HTML
+                Dim looksLikeHtml = plainBody.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                                    plainBody.IndexOf("<body", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                                    plainBody.IndexOf("<!DOCTYPE", StringComparison.OrdinalIgnoreCase) >= 0
+
+                Dim htmlBodyCore As String
+                If looksLikeHtml Then
+                    ' Use as-is (still append footer later)
+                    htmlBodyCore = plainBody
+                Else
+                    ' Convert Markdown -> HTML
+                    Try
+                        Dim pipeline = New MarkdownPipelineBuilder().UseAdvancedExtensions().Build()
+                        htmlBodyCore = Markdig.Markdown.ToHtml(plainBody, pipeline)
+                    Catch
+                        htmlBodyCore = System.Net.WebUtility.HtmlEncode(plainBody).Replace(vbCrLf, "<br/>")
+                    End Try
+                End If
+
+                ' Footer
+                Dim ip = If(Not String.IsNullOrWhiteSpace(ipOverride), ipOverride, GetFirstLocalIPv4())
+                Dim netDomain = If(Not String.IsNullOrWhiteSpace(netOverride), netOverride, GetCurrentNetworkDomain())
+                Dim agentName = SharedMethods.AN
+                Dim footerHtml = $"<p style=""font-size:11px;color:#666;margin-top:16px"">(created using {agentName} WebAgent at {ip} from {netDomain})</p>"
+                Dim footerPlain = Environment.NewLine & "(created using " & agentName & " WebAgent at " & ip & " from " & netDomain & ")"
+
+                ' If input already had full HTML document, inject footer before closing body/html if possible
+                Dim fullHtml As String
+                If looksLikeHtml Then
+                    Dim injected = False
+                    Dim sb = New System.Text.StringBuilder(htmlBodyCore)
+                    ' Try typical insertion points
+                    Dim bodyCloseIdx = sb.ToString().IndexOf("</body>", StringComparison.OrdinalIgnoreCase)
+                    If bodyCloseIdx >= 0 Then
+                        sb.Insert(bodyCloseIdx, footerHtml)
+                        injected = True
+                    End If
+                    If Not injected Then
+                        Dim htmlCloseIdx = sb.ToString().IndexOf("</html>", StringComparison.OrdinalIgnoreCase)
+                        If htmlCloseIdx >= 0 Then
+                            sb.Insert(htmlCloseIdx, footerHtml)
+                            injected = True
+                        End If
+                    End If
+                    If Not injected Then
+                        sb.Append(footerHtml)
+                    End If
+                    fullHtml = sb.ToString()
+                Else
+                    ' Build minimal standards-compliant HTML doc
+                    fullHtml =
+                                $"<!DOCTYPE html>
+                                <html>
+                                <head>
+                                <meta http-equiv=""Content-Type"" content=""text/html; charset=UTF-8"" />
+                                <title>{System.Net.WebUtility.HtmlEncode(subject)}</title>
+                                </head>
+                                <body>
+                                {htmlBodyCore}
+                                {footerHtml}
+                                </body>
+                                </html>"
+                    plainBody &= footerPlain
+                End If
+
+                Dim msg = New System.Net.Mail.MailMessage()
+                msg.From = New System.Net.Mail.MailAddress(fromEmail, fromName, System.Text.Encoding.UTF8)
+                For Each addr In toAddr.Split({";", ","}, StringSplitOptions.RemoveEmptyEntries)
+                    msg.To.Add(addr.Trim())
+                Next
+                msg.Subject = subject
+                msg.SubjectEncoding = Encoding.UTF8
+                msg.BodyEncoding = Encoding.UTF8
+
+                ' Build proper multipart/alternative
+                Dim plainView = System.Net.Mail.AlternateView.CreateAlternateViewFromString(plainBody, Encoding.UTF8, "text/plain")
+                plainView.TransferEncoding = System.Net.Mime.TransferEncoding.QuotedPrintable
+
+                Dim htmlView = System.Net.Mail.AlternateView.CreateAlternateViewFromString(fullHtml, Encoding.UTF8, "text/html")
+                htmlView.TransferEncoding = System.Net.Mime.TransferEncoding.QuotedPrintable
+
+                ' Order: plain first, then html
+                msg.AlternateViews.Add(plainView)
+                msg.AlternateViews.Add(htmlView)
+
+                ' Do NOT also set msg.Body / IsBodyHtml when using AlternateViews (avoids some relays forcing text/plain)
+                ' SMTP client
+                Dim client = New System.Net.Mail.SmtpClient(smtpHost, smtpPort) With {
+                    .EnableSsl = smtpSsl,
+                    .DeliveryMethod = System.Net.Mail.SmtpDeliveryMethod.Network,
+                    .Timeout = 20000
+                }
+
+                If smtpAuth AndAlso Not String.IsNullOrWhiteSpace(smtpUser) Then
+                    client.Credentials = New System.Net.NetworkCredential(smtpUser, smtpPass)
+                Else
+                    client.UseDefaultCredentials = False
+                End If
+
+                ' HELO / EHLO domain generation
+                If String.IsNullOrWhiteSpace(heloDomain) Then
+                    Dim hostLocal = System.Net.Dns.GetHostName()
+                    If Not hostLocal.Contains(".") AndAlso Not String.IsNullOrWhiteSpace(netDomain) AndAlso netDomain.Contains(".") Then
+                        heloDomain = hostLocal & "." & netDomain
+                    Else
+                        heloDomain = hostLocal
+                    End If
+                End If
+                If Not heloDomain.Contains(".") Then heloDomain &= ".localdomain"
+
+                ' Try overriding internal clientDomain field (best effort)
+                Try
+                    Dim f = GetType(System.Net.Mail.SmtpClient).GetField("clientDomain", Reflection.BindingFlags.Instance Or Reflection.BindingFlags.NonPublic)
+                    If f IsNot Nothing Then
+                        f.SetValue(client, heloDomain)
+                        Log($"[send_email_report] Using HELO domain: {heloDomain}")
+                    End If
+                Catch ex As Exception
+                    Log($"[send_email_report] HELO override failed: {ex.Message}")
+                End Try
+
+                client.Send(msg)
+                Log("[send_email_report] Mail sent (multipart/alternative).")
+                Return True
+
+            Catch ex As System.Net.Mail.SmtpException
+                Log("[send_email_report] SMTP error: " & ex.Message)
+                Return False
+            Catch ex As Exception
+                Log("[send_email_report] General error: " & ex.Message)
+                Return False
+            End Try
+        End Function
+
+
+        Private Function GetSetting(parms As Newtonsoft.Json.Linq.JObject, key As System.String, defaultValue As System.String) As System.String
+            ' 1) params
+            If parms IsNot Nothing Then
+                Dim tok = parms(key)
+                If tok IsNot Nothing Then
+                    Dim val As System.String = ExpandTemplates(tok.ToString())
+                    If Not System.String.IsNullOrWhiteSpace(val) Then Return val
+                End If
+            End If
+            ' 2) _vars
+            Dim v As System.Object = Nothing
+            If _vars IsNot Nothing AndAlso _vars.TryGetValue(key, v) AndAlso v IsNot Nothing Then
+                Dim s As System.String = v.ToString()
+                If Not System.String.IsNullOrWhiteSpace(s) Then Return s
+            End If
+            ' 3) _secrets
+            Dim s2 As System.String = Nothing
+            If _secrets IsNot Nothing AndAlso _secrets.TryGetValue(key, s2) AndAlso Not System.String.IsNullOrWhiteSpace(s2) Then
+                Return s2
+            End If
+            Return defaultValue
+        End Function
+
+        Private Function GetFirstLocalIPv4() As System.String
+            Try
+                Dim host As System.Net.IPHostEntry = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName())
+                For Each ip As System.Net.IPAddress In host.AddressList
+                    If ip IsNot Nothing AndAlso ip.AddressFamily = System.Net.Sockets.AddressFamily.InterNetwork Then
+                        If Not System.Net.IPAddress.IsLoopback(ip) Then
+                            Return ip.ToString()
+                        End If
+                    End If
+                Next
+            Catch ex As System.Exception
+                Try : Log("[ip] " & ex.Message) : Catch : End Try
+            End Try
+            Return "0.0.0.0"
+        End Function
+
+        Private Function GetCurrentNetworkDomain() As System.String
+            Try
+                Dim ipgp As System.Net.NetworkInformation.IPGlobalProperties =
+            System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties()
+                If ipgp IsNot Nothing Then
+                    Dim dnsDom As System.String = ipgp.DomainName
+                    If Not System.String.IsNullOrWhiteSpace(dnsDom) Then
+                        Return dnsDom
+                    End If
+                End If
+
+                Dim envDom As System.String = System.Environment.UserDomainName
+                If Not System.String.IsNullOrWhiteSpace(envDom) Then
+                    Return envDom
+                End If
+            Catch ex As System.Exception
+                Try : Log("[net] " & ex.Message) : Catch : End Try
+            End Try
+            Return "UNKNOWN"
+        End Function
+
+
+
+        Private Async Function CmdIfAsync(parms As JObject,
+                                  cancel As CancellationToken) As Task(Of Object)
+            ' Expected params JSON:
+            ' {
+            '   "condition": "<expression understood by EvalCondition>",
+            '   "steps": [ ... ],
+            '   "else_steps": [ ... ]   (optional)
+            ' }
+            Dim conditionExpr As String = If(parms?.Value(Of String)("condition"), "")
+            Dim thenSteps As JArray = parms?.Value(Of JArray)("steps")
+            Dim elseSteps As JArray = parms?.Value(Of JArray)("else_steps")
+
+            Dim condResult As Boolean = False
+            If conditionExpr <> "" Then
+                Try
+                    condResult = EvalCondition(conditionExpr)
+                Catch ex As Exception
+                    WriteDebug("[if] Condition error: " & ex.Message)
+                    condResult = False
+                End Try
+            Else
+                WriteDebug("[if] Missing condition – treated as False.")
+            End If
+
+            Dim branch As JArray = If(condResult, thenSteps, elseSteps)
+            If branch Is Nothing OrElse branch.Count = 0 Then
+                WriteDebug("[if] No steps in selected branch.")
+                Return Nothing
+            End If
+
+            Await RunSubStepsAsync(branch, cancel)
+            Return Nothing
+        End Function
+
+
+        Private Function DeepCloneObject(obj As Object) As Object
+            If obj Is Nothing Then Return Nothing
+            Try
+                Dim jt = JToken.FromObject(obj)
+                Return jt.DeepClone().ToObject(Of Object)()
+            Catch
+                Return obj
+            End Try
+        End Function
+
+
+        Private Sub SafeStoreVar(varName As String, value As Object)
+            ' Wrapper now delegates to debug-aware variant
+            SafeStoreVar_DebugPatch(varName, value)
+        End Sub
+
+
+        Private Async Function CmdForEachAsync(parms As JObject,
+                                           cancel As CancellationToken) As Task(Of Object)
+            If parms Is Nothing Then Return Nothing
+
+            Dim listVar = parms.Value(Of String)("list")
+            Dim itemVar = parms.Value(Of String)("item_var")
+            Dim steps = TryCast(parms("steps"), JArray)
+            If String.IsNullOrWhiteSpace(listVar) OrElse String.IsNullOrWhiteSpace(itemVar) OrElse steps Is Nothing Then
+                Throw New Exception("foreach: missing list / item_var / steps")
+            End If
+
+            Dim continueOnError As Boolean = True
+            Dim stopOnError As Boolean = False
+            Dim maxItems = parms.Value(Of Integer?)("max_items")
+            Dim softBreakVar = parms.Value(Of String)("break_if_var_true") ' optional runtime break flag
+
+            If parms("continue_on_error") IsNot Nothing Then
+                Boolean.TryParse(parms("continue_on_error").ToString(), continueOnError)
+            End If
+            If parms("stop_on_error") IsNot Nothing Then
+                Boolean.TryParse(parms("stop_on_error").ToString(), stopOnError)
+            End If
+            ' stop_on_error overrides continue_on_error explicitly
+            If stopOnError Then continueOnError = False
+
+            Dim src As Object = Nothing
+            If Not _vars.TryGetValue(listVar, src) OrElse src Is Nothing Then
+                Log($"[foreach] list '{listVar}' not found or null → skipping.")
+                Return New With {.count = 0, .executed = 0}
+            End If
+
+            Dim enumerable As IEnumerable(Of Object)
+            If TypeOf src Is JArray Then
+                enumerable = DirectCast(src, JArray).Select(Function(t) CType(t, JToken))
+            ElseIf TypeOf src Is IEnumerable(Of Object) Then
+                enumerable = DirectCast(src, IEnumerable(Of Object))
+            ElseIf TypeOf src Is IEnumerable Then
+                enumerable = DirectCast(src, IEnumerable).Cast(Of Object)()
+            Else
+                enumerable = {src}
+            End If
+
+            Dim idx As Integer = 0
+            Dim executed As Integer = 0
+            For Each item In enumerable
+                cancel.ThrowIfCancellationRequested()
+
+                If maxItems.HasValue AndAlso idx >= maxItems.Value Then
+                    Log($"[foreach] max_items {maxItems.Value} reached.")
+                    Exit For
+                End If
+
+                _vars(itemVar) = item
+                _vars(itemVar & "_index") = idx
+
+                Dim localToken = cancel ' (kept for clarity – could create linked CTS here if needed)
+
+                Try
+                    Await RunSubStepsAsync(steps, localToken)
+                    executed += 1
+
+                Catch ex As OperationCanceledException
+                    Dim treatAsExternal = cancel.IsCancellationRequested
+                    Dim tolerate = False
+                    If _vars.ContainsKey("continue_on_llm_timeout") AndAlso _IsTruthy(_vars("continue_on_llm_timeout")) Then
+                        tolerate = True
+                    End If
+
+                    If treatAsExternal AndAlso Not tolerate Then
+                        Log("[foreach] External cancellation requested → abort loop.")
+                        Throw
+                    Else
+                        Log($"[foreach] Internal or tolerated cancellation at index={idx}: {ex.Message}")
+                        If stopOnError Then
+                            Log("[foreach] stop_on_error=True → aborting.")
+                            Exit For
+                        End If
+                        If Not continueOnError Then
+                            Log("[foreach] continue_on_error=False → breaking.")
+                            Exit For
+                        End If
+                        ' continue with next item
+                    End If
+
+                Catch ex As Exception
+                    Log($"[foreach] Exception at index={idx}: {ex.GetType().Name} {ex.Message}")
+                    If stopOnError Then
+                        Log("[foreach] stop_on_error=True → aborting.")
+                        Exit For
+                    End If
+                    If Not continueOnError Then
+                        Log("[foreach] continue_on_error=False → breaking.")
+                        Exit For
+                    End If
+                End Try
+
+                ' Soft runtime break variable
+                If Not String.IsNullOrWhiteSpace(softBreakVar) Then
+                    If _vars.ContainsKey(softBreakVar) AndAlso _IsTruthy(_vars(softBreakVar)) Then
+                        Log($"[foreach] break_if_var_true '{softBreakVar}' = true → exiting loop.")
+                        Exit For
+                    End If
+                End If
+
+                idx += 1
+            Next
+
+            Return New With {.count = idx, .executed = executed}
+        End Function
+
+        Private Async Function RunSubStepsAsync(steps As JArray,
+                                                cancel As CancellationToken) As System.Threading.Tasks.Task
+            For Each st In steps
+                cancel.ThrowIfCancellationRequested()
+
+                Dim stepObj = TryCast(st, JObject)
+                If stepObj Is Nothing Then Continue For
+
+                Dim sid = stepObj.Value(Of String)("id")
+                Dim cmd = stepObj.Value(Of String)("command")
+
+                Try
+                    Dim timeoutMs = stepObj.Value(Of Integer?)("timeout_ms").GetValueOrDefault(_defaultTimeoutMs)
+                    Dim retry = TryCast(stepObj("retry"), JObject)
+                    Dim maxRetry = If(retry IsNot Nothing, retry.Value(Of Integer?)("max").GetValueOrDefault(0), 0)
+                    Dim retryDelay = If(retry IsNot Nothing, retry.Value(Of Integer?)("delay_ms").GetValueOrDefault(1000), 1000)
+                    Dim backoff = If(retry IsNot Nothing, retry.Value(Of Double?)("backoff").GetValueOrDefault(2.0), 2.0)
+
+                    Dim attempt As Integer = 0
+                    Dim success As Boolean = False
+                    Dim lastEx As Exception = Nothing
+                    Dim resultValue As Object = Nothing   ' kept (result of sub-step)
+
+                    Do
+                        lastEx = Nothing
+                        Dim delayMs As Integer = 0
+                        success = False
+                        resultValue = Nothing
+
+                        Dim parms = TryCast(stepObj("params"), JObject)
+
+                        DebugLogSubStepStart(sid, cmd, attempt, maxRetry, parms)
+                        Dim subSw = Diagnostics.Stopwatch.StartNew()
+
+                        Try
+                            _currentStepId = sid
+                            Dim swExec = Diagnostics.Stopwatch.StartNew()
+
+                            Select Case cmd.ToLowerInvariant()
+                                Case "llm_analyze", "llm", "llmanalyze"
+                                    resultValue = Await CmdLlmAnalyzeAsync(parms, timeoutMs, cancel)
+                                Case "open_url"
+                                    resultValue = Await CmdOpenUrlAsync(parms, timeoutMs, cancel)
+                                Case "http_request"
+                                    resultValue = Await CmdHttpRequestAsync(parms, timeoutMs, cancel)
+                                Case "download_url"
+                                    resultValue = Await CmdDownloadUrlAsync(parms, cancel)
+                                Case "wait"
+                                    resultValue = Await CmdWaitAsync(parms, cancel)
+                                Case "foreach"
+                                    resultValue = Await CmdForEachAsync(parms, cancel)
+                                Case "if"
+                                    resultValue = Await CmdIfAsync(parms, cancel)
+                                Case "template"
+                                    resultValue = CmdTemplate(parms)
+                                Case "set_var"
+                                    resultValue = CmdSetVar(parms)
+                                Case "array_push"
+                                    resultValue = CmdArrayPush(parms)
+                                Case "extract_text"
+                                    resultValue = CmdExtractText(parms)
+                                Case "extract_html"
+                                    resultValue = CmdExtractHtml(parms)
+                                Case "extract_attribute"
+                                    resultValue = CmdExtractAttribute(parms)
+                                Case "render_report"
+                                    resultValue = CmdRenderReport(parms)
+                                Case "log"
+                                    resultValue = CmdLog(parms)
+                                Case Else
+                                    Throw New Exception($"RunSubStepsAsync: unknown command '{cmd}'")
+                            End Select
+
+                            swExec.Stop()
+                            success = True
+
+
+                            Dim assign = TryCast(stepObj("assign"), JObject)
+                            If assign IsNot Nothing Then
+                                Dim varName = assign.Value(Of String)("var")
+                                Dim path = assign.Value(Of String)("path")
+                                If Not String.IsNullOrWhiteSpace(varName) Then
+                                    Dim toStore As Object = resultValue
+                                    If Not String.IsNullOrWhiteSpace(path) AndAlso resultValue IsNot Nothing Then
+                                        Try
+                                            Dim tokenObj = JToken.FromObject(resultValue)
+                                            Dim sel = tokenObj.SelectToken(path)
+                                            If sel IsNot Nothing Then
+                                                toStore = sel.ToObject(Of Object)()
+                                            Else
+                                                toStore = Nothing
+                                            End If
+                                        Catch
+                                            toStore = Nothing
+                                        End Try
+                                    End If
+                                    SafeStoreVar(varName, toStore)
+                                End If
+                            End If
+
+                        Catch ex As Exception
+                            lastEx = ex
+                            If TypeOf ex Is OperationCanceledException AndAlso cancel.IsCancellationRequested Then
+                                subSw.Stop()
+                                DebugLogSubStepResult(sid, cmd, subSw.ElapsedMilliseconds, False, lastEx, Nothing)
+                                Throw
+                            End If
+                            If attempt < maxRetry Then
+                                delayMs = CInt(retryDelay * Math.Pow(backoff, attempt))
+                                Log($"[substep:{sid}] attempt={attempt + 1} error={ex.Message} retry in {delayMs}ms")
+                            Else
+                                delayMs = 0
+                            End If
+                        Finally
+                            subSw.Stop()
+
+                            DebugLogSubStepResult(sid, cmd, subSw.ElapsedMilliseconds, success, lastEx, resultValue)
+                        End Try
+
+                        attempt += 1
+                        If Not success AndAlso attempt <= maxRetry AndAlso delayMs > 0 Then
+                            Await System.Threading.Tasks.Task.Delay(delayMs, cancel)
+                        End If
+
+                    Loop While Not success AndAlso attempt <= maxRetry
+
+                    If Not success Then
+                        Throw New Exception($"Substep '{sid}' failed after {attempt} attempt(s).", lastEx)
+                    End If
+
+                    AccumulateDecisionLinksIfNeeded(sid)
+
+                Catch oce As OperationCanceledException
+                    If cancel.IsCancellationRequested Then
+                        Throw
+                    End If
+                    Throw New Exception($"Internal cancellation in substep '{_currentStepId}'", oce)
+                End Try
+            Next
+        End Function
+
+
+        Private Function CmdRenderReport(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim engine = parms.Value(Of System.String)("engine")
+            Dim tpl = parms.Value(Of System.String)("template")
+            Dim ctxToken = parms("context")
+            Dim outputPathRaw = parms.Value(Of System.String)("output_path")
+
+            Dim ctx As System.Object = Nothing
+            If ctxToken IsNot Nothing Then
+                ctx = MaterializeContextPlaceholders(ctxToken)
+            End If
+
+            Dim md As System.String
+            md = SimpleMustacheRender(tpl, ctx)
+            md = ExpandTemplates(md)
+
+            Dim outputPath As String = Nothing
+            If Not String.IsNullOrWhiteSpace(outputPathRaw) Then
+                outputPath = ExpandTemplates(outputPathRaw)
+                ' If still contains "{{" warn & skip writing
+                If outputPath?.Contains("{{") = True Then
+                    Log("[render_report] Unresolved template tokens in output_path; skipping file write: " & outputPath)
+                    outputPath = Nothing
+                End If
+            End If
+
+            If Not String.IsNullOrWhiteSpace(outputPath) Then
+                Try
+                    Dim dir = System.IO.Path.GetDirectoryName(outputPath)
+                    If Not System.String.IsNullOrEmpty(dir) AndAlso Not System.IO.Directory.Exists(dir) Then
+                        System.IO.Directory.CreateDirectory(dir)
+                    End If
+                    System.IO.File.WriteAllText(outputPath, md, System.Text.Encoding.UTF8)
+                Catch ex As Exception
+                    Log("[render_report] Failed to write file: " & ex.Message)
+                End Try
+            End If
+
+            _finalMarkdown = md
+            Return New With {.output = If(outputPath, "(memory)")}
+        End Function
+
+        Private Function CmdLog(parms As Newtonsoft.Json.Linq.JObject) As System.Object
+            Dim level = parms.Value(Of System.String)("level")
+            Dim message = ExpandTemplates(parms.Value(Of System.String)("message"))
+            Log($"[{level}] {message}")
+            Return Nothing
+        End Function
+
+
+
+        '   retry_on_invalid: Bool          -> Throw when output invalid (so outer step retry triggers)
+        '   require_key: "key1,key2"        -> Comma list of required top-level JSON keys
+        '   require_array_key: "decisions"  -> Single array key that must exist (or comma list)
+        '   require_min_items: Integer      -> If require_array_key set, array must have at least this many items
+        '   reject_if_empty: Bool           -> Treat empty (post-sanitize) output as invalid
+        '   reject_if_plaintext: Bool       -> Treat non-JSON (parsed = Nothing) as invalid (default True)
+        '   allow_non_json: Bool            -> Override reject_if_plaintext (forces accept even if not JSON)
+        '   max_preview: Int                -> UI preview length (default 250)
+        '   log_raw: Bool                   -> If True, write raw (trimmed) to debug log
+        '   require_key_all: Bool           -> If True, ALL listed keys must exist; otherwise any missing => invalid
+        '   timeoutMs (already supported)
+        '
+        ' OUTER RETRY:
+        ' Add to step:
+        '   "retry": { "max": 2, "delay_ms": 2000, "backoff": 1.5 }
+        ' plus params { "retry_on_invalid": true }
+        '
+        Private Async Function CmdLlmAnalyzeAsync(parms As Newtonsoft.Json.Linq.JObject,
+                                                  timeoutMs As Int32,
+                                                  cancel As Threading.CancellationToken) As Task(Of Object)
+            ' Hardened + retry-aware + quick inner attempts.
+            If _context Is Nothing Then Return ""
+
+            Dim statusVar = parms?.Value(Of String)("status_var")
+            If Not String.IsNullOrEmpty(statusVar) AndAlso _vars.ContainsKey(statusVar) Then
+                Dim st = _vars(statusVar)?.ToString()
+                If st = "404" AndAlso Not GetDebugFlag("allow_llm_on_404") Then
+                    WriteDebug("[INFO llm_analyze] Skipped due to 404 status (allow_llm_on_404=true to override).")
+                    Return Nothing
+                End If
+            End If
+
+            ' Helpers
+            Dim GetBool =
+                Function(name As String, def As Boolean) As Boolean
+                    Dim tok = parms(name)
+                    If tok Is Nothing Then Return def
+                    If tok.Type = JTokenType.Boolean Then Return tok.Value(Of Boolean)()
+                    Dim s = tok.ToString().Trim()
+                    Dim b As Boolean
+                    If Boolean.TryParse(s, b) Then Return b
+                    If s = "1" Then Return True
+                    If s = "0" Then Return False
+                    Return def
+                End Function
+
+            Dim GetInt =
+                Function(name As String, def As Integer) As Integer
+                    Dim tok = parms(name)
+                    If tok Is Nothing Then Return def
+                    Dim i As Integer
+                    If Integer.TryParse(tok.ToString().Trim(), i) Then Return i
+                    Return def
+                End Function
+
+            Dim retryOnInvalid = GetBool("retry_on_invalid", False)
+            Dim rejectIfEmpty = GetBool("reject_if_empty", False)
+            Dim rejectIfPlain = GetBool("reject_if_plaintext", True)
+            Dim allowNonJson = GetBool("allow_non_json", False)
+            If allowNonJson Then rejectIfPlain = False
+            Dim logRaw = GetBool("log_raw", False)
+            Dim requireAll = GetBool("require_key_all", True)
+            Dim maxPreview = GetInt("max_preview", 250)
+            Dim requireMinItems = GetInt("require_min_items", 0)
+
+            Dim requiredKeysRaw = parms.Value(Of String)("require_key")
+            Dim requiredArrayKeysRaw = parms.Value(Of String)("require_array_key")
+
+            Dim requiredKeys As New List(Of String)
+            If Not String.IsNullOrWhiteSpace(requiredKeysRaw) Then
+                requiredKeys.AddRange(requiredKeysRaw.Split(","c).Select(Function(s) s.Trim()).Where(Function(s) s.Length > 0))
+            End If
+
+            Dim requiredArrayKeys As New List(Of String)
+            If Not String.IsNullOrWhiteSpace(requiredArrayKeysRaw) Then
+                requiredArrayKeys.AddRange(requiredArrayKeysRaw.Split(","c).Select(Function(s) s.Trim()).Where(Function(s) s.Length > 0))
+            End If
+
+            Try
+                ' Prompts
+                Dim systemPrompt As String =
+                    If(parms("system")?.ToString(),
+                       If(parms("systemPrompt")?.ToString(), ""))
+
+                Dim userPrompt As String =
+                    If(parms("user")?.ToString(),
+                       If(parms("prompt")?.ToString(),
+                          If(parms("input")?.ToString(),
+                             If(parms("arguments")?.ToString(), ""))))
+
+                systemPrompt = ExpandTemplates(systemPrompt)
+                userPrompt = ExpandTemplates(userPrompt)
+
+                Dim currentUrl As String = If(_lastResponseUrl, String.Empty)
+                Log($"[llm-meta] step={_currentStepId} url={currentUrl}")
+                Log($"[llm] system length={systemPrompt.Length} user length={userPrompt.Length}")
+
+                ' Temperature
+                Dim tempStr As String =
+                    If(parms("temperature") IsNot Nothing,
+                       System.Convert.ToString(parms("temperature"), System.Globalization.CultureInfo.InvariantCulture),
+                       If(_useSecondAPI, _context.INI_Temperature_2, _context.INI_Temperature))
+
+                ' Timeout
+                Dim timeoutLong As Long
+                If parms("timeoutMs") IsNot Nothing Then
+                    timeoutLong = CLng(parms("timeoutMs"))
+                ElseIf timeoutMs > 0 Then
+                    timeoutLong = timeoutMs
+                Else
+                    timeoutLong = If(_useSecondAPI, _context.INI_Timeout_2, _context.INI_Timeout)
+                End If
+
+                ' Dynamic model 
+                If _useSecondAPI AndAlso _autoselectModel Then
+                    If Not String.IsNullOrWhiteSpace(_context.INI_AlternateModelPath) Then
+                        If Not GetSpecialTaskModel(_context, _context.INI_AlternateModelPath, "WebAgent") Then
+                            originalConfigLoaded = False
+                            _useSecondAPI = False
+                        Else
+                            _useSecondAPI = True
+                        End If
+                    End If
+                End If
+
+                Dim innerAttempts = GetInt("inner_attempts", 1)
+                If innerAttempts < 1 Then innerAttempts = 1
+                Dim innerDelayMs = GetInt("inner_delay_ms", 800)
+
+                Dim rawResult As String = Nothing
+                Dim inner As Integer = 0
+                Dim overallSw = Diagnostics.Stopwatch.StartNew()
+
+                Do
+                    Dim attemptSw = Diagnostics.Stopwatch.StartNew()
+                    Try
+
+                        If userPrompt?.Contains("{{") Then
+                            Log($"[llm warn] unresolved placeholders in user prompt (step={_currentStepId}).")
+                        End If
+
+                        Using perCallCts As New CancellationTokenSource(timeoutLong)
+                            Using linked = CancellationTokenSource.CreateLinkedTokenSource(cancel, perCallCts.Token)
+                                rawResult = Await SharedMethods.LLM(
+                                        _context,
+                                        systemPrompt,
+                                        userPrompt,
+                                        "",
+                                        tempStr,
+                                        timeoutLong,
+                                        _useSecondAPI,
+                                        True,
+                                        "",
+                                        "",
+                                        linked.Token)
+                            End Using
+                        End Using
+
+
+                    Catch tce As TaskCanceledException
+                        Log("[llm timeout] " & tce.Message)
+                        Throw
+                    Catch oce As OperationCanceledException
+                        Log("[llm canceled] " & oce.Message)
+                        Throw
+                    Catch exHttp As Http.HttpRequestException
+                        Log("[llm http] " & exHttp.Message)
+                        Throw
+                    End Try
+                    attemptSw.Stop()
+
+                    If rawResult Is Nothing Then rawResult = ""
+                    Dim probeSanitized = SanitizeLlmResult(rawResult)
+                    Dim probeParsed = TryParseJson(probeSanitized)
+
+                    ' Stop if JSON parsed OK OR we exhausted attempts
+                    If probeParsed IsNot Nothing OrElse inner + 1 >= innerAttempts Then
+                        Exit Do
+                    End If
+
+                    inner += 1
+                    Log($"[llm inner retry] invalid/plain attempt={inner}/{innerAttempts} waiting {innerDelayMs}ms")
+                    If innerDelayMs > 0 Then
+                        Await System.Threading.Tasks.Task.Delay(innerDelayMs, cancel)
+                    End If
+                Loop While inner < innerAttempts
+
+                overallSw.Stop()
+                _vars("lastLlm_latency_ms") = overallSw.ElapsedMilliseconds
+                _vars("lastLlm_raw") = If(rawResult, "")
+
+
+                ' Restore model if temporarily switched
+                If _autoselectModel AndAlso _useSecondAPI AndAlso originalConfigLoaded Then
+                    RestoreDefaults(_context, originalConfig)
+                    originalConfigLoaded = False
+                End If
+
+                If rawResult Is Nothing Then rawResult = ""
+
+                Dim sanitized = SanitizeLlmResult(rawResult)
+                Dim parsed As JToken = TryParseJson(sanitized)
+
+                Dim invalid As Boolean = False
+                Dim invalidReasons As New List(Of String)
+
+                If rejectIfEmpty AndAlso String.IsNullOrWhiteSpace(sanitized) Then
+                    invalid = True
+                    invalidReasons.Add("empty_output")
+                End If
+
+                If parsed Is Nothing AndAlso rejectIfPlain Then
+                    invalid = True
+                    invalidReasons.Add("non_json")
+                End If
+
+                Dim rootObj As JObject = Nothing
+                If parsed IsNot Nothing Then
+                    rootObj = TryCast(parsed, JObject)
+                End If
+
+                If requiredKeys.Count > 0 AndAlso rootObj IsNot Nothing Then
+                    Dim missing = requiredKeys.Where(Function(k) rootObj(k) Is Nothing).ToList()
+                    If requireAll AndAlso missing.Count > 0 Then
+                        invalid = True
+                        invalidReasons.Add("missing_keys:" & String.Join(",", missing))
+                    ElseIf Not requireAll AndAlso missing.Count = requiredKeys.Count Then
+                        invalid = True
+                        invalidReasons.Add("no_required_keys_present")
+                    End If
+                ElseIf requiredKeys.Count > 0 AndAlso parsed Is Nothing Then
+                    invalid = True
+                    invalidReasons.Add("missing_required_keys_non_object")
+                End If
+
+                If requiredArrayKeys.Count > 0 AndAlso rootObj IsNot Nothing Then
+                    For Each arrKey In requiredArrayKeys
+                        Dim tk = rootObj(arrKey)
+                        If tk Is Nothing OrElse tk.Type <> JTokenType.Array Then
+                            invalid = True
+                            invalidReasons.Add($"array_key_missing_or_not_array:{arrKey}")
+                        ElseIf requireMinItems > 0 AndAlso tk.Count() < requireMinItems Then
+                            invalid = True
+                            invalidReasons.Add($"array_key_min_items_not_met:{arrKey}(<{requireMinItems})")
+                        End If
+                    Next
+                End If
+
+                Dim finalObj As Object
+                If parsed Is Nothing Then
+                    finalObj = New JObject(
+                        New JProperty("_invalid", True),
+                        New JProperty("_reason", If(String.Join(";", invalidReasons), "parse_failed")),
+                        New JProperty("raw_length", sanitized.Length),
+                        New JProperty("step_id", _currentStepId),
+                        New JProperty("page_url", currentUrl)
+                    )
+                ElseIf TypeOf parsed Is JObject Then
+                    Dim jobj = DirectCast(parsed.DeepClone(), JObject)
+                    jobj("step_id") = _currentStepId
+                    jobj("page_url") = currentUrl
+                    If invalid Then
+                        jobj("_invalid") = True
+                        jobj("_reason") = String.Join(";", invalidReasons)
+                    End If
+                    finalObj = jobj
+                Else
+                    Dim wrap = New JObject(
+                        New JProperty("value", parsed.ToString()),
+                        New JProperty("step_id", _currentStepId),
+                        New JProperty("page_url", currentUrl)
+                    )
+                    If invalid Then
+                        wrap("_invalid") = True
+                        wrap("_reason") = String.Join(";", invalidReasons)
+                    End If
+                    finalObj = wrap
+                End If
+
+                SafeStoreVar("lastLlm", finalObj)
+                SafeStoreVar("lastLlm_page_url", currentUrl)
+                SafeStoreVar("last_step_id", _currentStepId)
+
+                If Not String.IsNullOrWhiteSpace(sanitized) Then
+                    Dim preview = "[step:" & _currentStepId & "] [url:" & currentUrl & "] " &
+                                  If(sanitized.Length > maxPreview, sanitized.Substring(0, maxPreview) & "...", sanitized)
+                    Try : InfoBox.ShowInfoBox(preview, 1) : Catch : End Try
+                End If
+
+                If logRaw AndAlso (GetDebugFlag("debug") OrElse GetDebugFlag("debug_allAttempts")) Then
+                    Try
+                        InitDebugLogIfNeeded()
+                        If _debugInitialized Then
+                            Dim trimmed = rawResult
+                            If trimmed Is Nothing Then trimmed = ""
+                            If trimmed.Length > 8000 Then trimmed = trimmed.Substring(0, 8000) & "…"
+                            WriteDebug(New String("-"c, 50))
+                            WriteDebug($"[llm raw] step={_currentStepId} url={currentUrl} len={rawResult.Length}")
+                            WriteDebug(trimmed)
+                        End If
+                    Catch
+                    End Try
+                End If
+
+                Dim forceThrowInvalid = retryOnInvalid
+                If _vars.ContainsKey("allow_llm_invalid") AndAlso _IsTruthy(_vars("allow_llm_invalid")) Then
+                    forceThrowInvalid = False
+                End If
+
+                If invalid AndAlso forceThrowInvalid Then
+                    Log($"[llm invalid] step={_currentStepId} reasons={String.Join(";", invalidReasons)} retry_on_invalid=True")
+                    Throw New Exception("llm_analyze invalid: " & String.Join(";", invalidReasons))
+                End If
+
+                Return finalObj
+
+            Catch ex As TaskCanceledException
+                Try : Log("[llm exception] TaskCanceled: " & ex.Message) : Catch : End Try
+                Throw
+            Catch ex As OperationCanceledException
+                Try : Log("[llm exception] OpCanceled: " & ex.Message) : Catch : End Try
+                Throw
+            Catch ex As Exception
+                Dim forceThrow = GetDebugFlag("llm_rethrow_all")
+                Try : Log("[llm error] " & ex.Message) : Catch : End Try
+                If forceThrow Then Throw
+                Return New JObject(
+                    New JProperty("_invalid", True),
+                    New JProperty("_exception", ex.GetType().Name),
+                    New JProperty("_message", ex.Message),
+                    New JProperty("step_id", _currentStepId)
+                )
+            End Try
+        End Function
+
+        Public Shared Function SanitizeLlmResult(raw As System.String) As System.String
+            If System.String.IsNullOrWhiteSpace(raw) Then Return ""
+            Dim codeBlocks As New System.Collections.Generic.List(Of System.String)
+            Try
+                Dim reFences As New System.Text.RegularExpressions.Regex("(?s)```(?:[A-Za-z0-9_+-]*)\s*(.*?)```")
+                Dim matches = reFences.Matches(raw)
+                For Each m As System.Text.RegularExpressions.Match In matches
+                    If m.Groups.Count > 1 Then
+                        codeBlocks.Add(m.Groups(1).Value.Trim())
+                    End If
+                Next
+            Catch
+            End Try
+            For Each blk In codeBlocks
+                Dim j = TryParseJson(blk)
+                If j IsNot Nothing Then
+                    Return blk.Trim()
+                End If
+            Next
+            If codeBlocks.Count > 0 Then
+                raw = System.Text.RegularExpressions.Regex.Replace(raw,
+                    "(?s)```(?:[A-Za-z0-9_+-]*)\s*(.*?)```",
+                    Function(m) m.Groups(1).Value.Trim() & System.Environment.NewLine)
+            End If
+            Dim candidate = raw.Trim()
+            If TryParseJson(candidate) IsNot Nothing Then
+                Return candidate
+            End If
+            Dim extracted = ExtractFirstJsonStructure(candidate)
+            If Not System.String.IsNullOrWhiteSpace(extracted) AndAlso TryParseJson(extracted) IsNot Nothing Then
+                Return extracted.Trim()
+            End If
+            candidate = candidate.Trim("`"c, Chr(10), Chr(13)).Trim()
+            Return candidate
+        End Function
+
+        Private Shared Function TryParseJson(text As System.String) As Newtonsoft.Json.Linq.JToken
+            If System.String.IsNullOrWhiteSpace(text) Then Return Nothing
+            Try
+                Return Newtonsoft.Json.Linq.JToken.Parse(text)
+            Catch
+                Return Nothing
+            End Try
+        End Function
+
+        Private Shared Function ExtractFirstJsonStructure(text As System.String) As System.String
+            If System.String.IsNullOrWhiteSpace(text) Then Return Nothing
+            Dim functionExtract =
+                Function(openChar As Char, closeChar As Char) As System.String
+                    Dim depth As System.Int32 = 0
+                    Dim startIdx As System.Int32 = -1
+                    For i = 0 To text.Length - 1
+                        Dim c = text(i)
+                        If c = openChar Then
+                            If depth = 0 Then startIdx = i
+                            depth += 1
+                        ElseIf c = closeChar Then
+                            If depth > 0 Then
+                                depth -= 1
+                                If depth = 0 AndAlso startIdx >= 0 Then
+                                    Dim seg = text.Substring(startIdx, i - startIdx + 1)
+                                    Return seg
+                                End If
+                            End If
+                        End If
+                    Next
+                    Return Nothing
+                End Function
+            Dim best = functionExtract("{"c, "}"c)
+            If Not System.String.IsNullOrWhiteSpace(best) Then Return best
+            best = functionExtract("["c, "]"c)
+            Return best
+        End Function
+
+#End Region
+
+#Region "Selector Resolution"
+
+        Private Function ResolveSelector(sel As Newtonsoft.Json.Linq.JObject) As System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)
+            If _lastDoc Is Nothing Then Throw New System.Exception("No document loaded. Call open_url or http_request first.")
+            Dim strategy = sel.Value(Of System.String)("strategy")
+            Dim value = ExpandTemplates(sel.Value(Of System.String)("value"))
+            Dim container As System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode) = Nothing
+            Dim within = TryCast(sel("within"), Newtonsoft.Json.Linq.JObject)
+            If within IsNot Nothing Then
+                container = ResolveSelector(within)
+            End If
+
+            Dim baseNodes As System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode) =
+                If(container, New System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)({_lastDoc.DocumentNode}))
+
+            Dim matches As New System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)()
+
+            Select Case strategy
+                Case "xpath"
+                    For Each root In baseNodes
+                        Dim ns = root.SelectNodes(value)
+                        If ns IsNot Nothing Then matches.AddRange(ns)
+                    Next
+                Case "css"
+                    Dim xp = CssToXPath(value)
+                    For Each root In baseNodes
+                        Dim ns = root.SelectNodes(xp)
+                        If ns IsNot Nothing Then matches.AddRange(ns)
+                    Next
+                Case "text"
+                    Dim exact As System.Boolean = False
+                    If value.StartsWith("exact:", System.StringComparison.OrdinalIgnoreCase) Then
+                        exact = True
+                        value = value.Substring(6)
+                    End If
+                    For Each root In baseNodes
+                        Dim ns = root.SelectNodes(".//*")
+                        If ns Is Nothing Then Continue For
+                        For Each n In ns
+                            Dim t = GetInnerText(n, True)
+                            If exact Then
+                                If System.String.Equals(t, value, System.StringComparison.OrdinalIgnoreCase) Then matches.Add(n)
+                            Else
+                                If Not System.String.IsNullOrEmpty(t) AndAlso t.IndexOf(value, System.StringComparison.OrdinalIgnoreCase) >= 0 Then matches.Add(n)
+                            End If
+                        Next
+                    Next
+                Case "regex"
+                    Dim re As New System.Text.RegularExpressions.Regex(value, System.Text.RegularExpressions.RegexOptions.IgnoreCase Or System.Text.RegularExpressions.RegexOptions.Singleline)
+                    For Each root In baseNodes
+                        Dim ns = root.SelectNodes(".//*")
+                        If ns Is Nothing Then Continue For
+                        For Each n In ns
+                            Dim t = GetInnerText(n, True)
+                            If re.IsMatch(t) Then matches.Add(n)
+                        Next
+                    Next
+                Case Else
+                    Throw New System.Exception($"Unknown strategy: {strategy}")
+            End Select
+
+            Dim relative = TryCast(sel("relative"), Newtonsoft.Json.Linq.JObject)
+            If relative IsNot Nothing AndAlso matches.Count > 0 Then
+                Dim position = relative.Value(Of System.String)("position")
+                If System.String.Equals(position, "first", System.StringComparison.OrdinalIgnoreCase) Then
+                    matches = New System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)({matches(0)})
+                ElseIf System.String.Equals(position, "last", System.StringComparison.OrdinalIgnoreCase) Then
+                    matches = New System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)({matches(matches.Count - 1)})
+                ElseIf System.String.Equals(position, "nth", System.StringComparison.OrdinalIgnoreCase) Then
+                    Dim nth = relative.Value(Of System.Nullable(Of System.Int32))("nth").GetValueOrDefault(1)
+                    Dim idx = System.Math.Max(1, nth) - 1
+                    If idx >= 0 AndAlso idx < matches.Count Then
+                        matches = New System.Collections.Generic.List(Of HtmlAgilityPack.HtmlNode)({matches(idx)})
+                    Else
+                        matches.Clear()
+                    End If
+                End If
+            End If
+
+            Return matches
+        End Function
+
+        Private Function CssToXPath(css As System.String) As System.String
+            Dim parts = css.Split({" "c}, System.StringSplitOptions.RemoveEmptyEntries)
+            Dim xpath As New System.Text.StringBuilder()
+            xpath.Append("//*")
+            Dim directChild As System.Boolean = False
+
+            For Each raw In parts
+                Dim token = raw.Trim()
+                If token = ">" Then
+                    directChild = True
+                    Continue For
+                End If
+                Dim segment = CssSimpleSelectorToXPath(token)
+                If directChild Then
+                    xpath.Append("/").Append(segment)
+                Else
+                    xpath.Append("//").Append(segment)
+                End If
+                directChild = False
+            Next
+
+            Return xpath.ToString()
+        End Function
+
+        Private Function CssSimpleSelectorToXPath(token As System.String) As System.String
+            Dim mTag = System.Text.RegularExpressions.Regex.Match(token, "^[a-zA-Z][a-zA-Z0-9_-]*")
+            Dim tag = If(mTag.Success, mTag.Value, "*")
+            Dim rest = token.Substring(tag.Length)
+            Dim xp As New System.Text.StringBuilder(tag)
+
+            For Each m In System.Text.RegularExpressions.Regex.Matches(rest, "#([a-zA-Z0-9_-]+)")
+                xp.AppendFormat("[@id='{0}']", m.Groups(1).Value)
+            Next
+            For Each m In System.Text.RegularExpressions.Regex.Matches(rest, "\.([a-zA-Z0-9_-]+)")
+                xp.AppendFormat("[contains(concat(' ', normalize-space(@class), ' '), ' {0} ')]", m.Groups(1).Value)
+            Next
+            For Each m In System.Text.RegularExpressions.Regex.Matches(rest, "\[([a-zA-Z0-9_-]+)(?:=(?:'([^']*)'|""([^""]*)""|([^\]]+)))?\]")
+                Dim attr = m.Groups(1).Value
+                Dim val = If(m.Groups(2).Success, m.Groups(2).Value,
+                             If(m.Groups(3).Success, m.Groups(3).Value,
+                                If(m.Groups(4).Success, m.Groups(4).Value, Nothing)))
+                If val Is Nothing Then
+                    xp.AppendFormat("[@{0}]", attr)
+                Else
+                    xp.AppendFormat("[@{0}='{1}']", attr, val)
+                End If
+            Next
+            Dim nth = System.Text.RegularExpressions.Regex.Match(rest, ":(?:nth-child)\((\d+)\)")
+            If nth.Success Then
+                xp.AppendFormat("[position()={0}]", nth.Groups(1).Value)
+            End If
+            Return xp.ToString()
+        End Function
+
+        Private Function GetInnerText(node As HtmlAgilityPack.HtmlNode, normalize As System.Boolean) As System.String
+            Dim t = node.InnerText
+            If normalize Then
+                t = System.Text.RegularExpressions.Regex.Replace(t, "\s+", " ").Trim()
+            End If
+            Return t
+        End Function
+
+        Private Function SerializeNode(n As HtmlAgilityPack.HtmlNode) As System.Object
+            Dim dict As New System.Collections.Generic.Dictionary(Of System.String, System.Object)()
+            dict("name") = n.Name
+            dict("innerText") = GetInnerText(n, True)
+            Dim atts As New System.Collections.Generic.Dictionary(Of System.String, System.String)(System.StringComparer.OrdinalIgnoreCase)
+            For Each a In n.Attributes
+                atts(a.Name) = a.Value
+            Next
+            dict("attributes") = atts
+            dict("outerHtml") = n.OuterHtml
+            Return dict
+        End Function
+
+        Private Sub LoadDocument(html As String)
+            ' Fallback (avoid using on UI thread if dynamic enabled)
+            LoadDocumentAsync(html, _lastResponseUrl, CancellationToken.None).GetAwaiter().GetResult()
+        End Sub
+
+        Private Async Function LoadDocumentAsync(html As String,
+                                         sourceUrl As String,
+                                         cancel As CancellationToken) As System.Threading.Tasks.Task
+            _lastResponseBody = html
+            _lastResponseUrl = sourceUrl
+            _lastDoc = New HtmlAgilityPack.HtmlDocument()
+            _lastDoc.LoadHtml(_lastResponseBody)
+
+            If _dynamicExpand Then
+                Log("[dynamic] starting expansion")
+                Using cts As New CancellationTokenSource(_defaultTimeoutMs)
+                    Using linked As CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancel, cts.Token)
+                        Try
+                            Dim expanded = Await ExpandDynamicContentAsync(sourceUrl, _lastResponseBody, linked.Token).ConfigureAwait(False)
+                            If Not String.IsNullOrEmpty(expanded) AndAlso Not ReferenceEquals(expanded, _lastResponseBody) Then
+                                _lastResponseBody = expanded
+                                _lastDoc = New HtmlAgilityPack.HtmlDocument()
+                                _lastDoc.LoadHtml(_lastResponseBody)
+                                Log("[dynamic] expansion complete & re-parsed")
+                            Else
+                                Log("[dynamic] expansion produced no changes")
+                            End If
+                        Catch ex As OperationCanceledException
+                            Log("[dynamic] expansion cancelled/timeout: " & ex.Message)
+                        Catch ex As Exception
+                            Log("[dynamic] expansion error: " & ex.Message)
+                        End Try
+                    End Using
+                End Using
+            End If
+        End Function
+
+
+        ' Params:
+        '   {
+        '     "array": "summary_array",          ' Ziel-Variablenname (wird JArray)
+        '     "item_var": "decision_summary_obj" ' (ODER) item_var: Name einer bestehenden Variable
+        '     "item": { ... }                    ' (ODER) inline JSON Objekt / Wert
+        '   }
+        '   item_var hat Vorrang; fallback auf inline "item".
+        ' Rückgabe: { pushed = True, count = <Anzahl>, array = "<name>" }
+        Private Function CmdArrayPush(parms As JObject) As Object
+            If parms Is Nothing Then Throw New Exception("array_push: params missing")
+            Dim arrayName = parms.Value(Of String)("array")
+            Dim itemVar = parms.Value(Of String)("item_var")
+
+            If String.IsNullOrWhiteSpace(arrayName) Then
+                Throw New Exception("array_push: 'array' missing")
+            End If
+
+            ' 1) Item bestimmen
+            Dim itemObj As Object = Nothing
+            If Not String.IsNullOrWhiteSpace(itemVar) Then
+                If Not _vars.TryGetValue(itemVar, itemObj) OrElse itemObj Is Nothing Then
+                    ' Nichts zu pushen – kein Fehler, nur noop
+                    Return New With {.pushed = False, .count = GetExistingArrayCount(arrayName), .array = arrayName}
+                End If
+            Else
+                Dim inlineToken = parms("item")
+                If inlineToken Is Nothing Then
+                    Throw New Exception("array_push: neither 'item_var' nor inline 'item' present")
+                End If
+                itemObj = inlineToken.ToObject(Of Object)()
+            End If
+
+            ' 2) Existierendes Array holen / herstellen (immer auf JArray normalisieren)
+            Dim arr As JArray = Nothing
+            If _vars.ContainsKey(arrayName) Then
+                Select Case True
+                    Case TypeOf _vars(arrayName) Is JArray
+                        arr = DirectCast(_vars(arrayName), JArray)
+                    Case TypeOf _vars(arrayName) Is String
+                        ' Versuchen zu parsen falls String wie "[]"
+                        Dim s = DirectCast(_vars(arrayName), String).Trim()
+                        If s.StartsWith("[") AndAlso s.EndsWith("]") Then
+                            Try : arr = JArray.Parse(s) : Catch : End Try
+                        End If
+                    Case Else
+                        ' Versuch generisch zu konvertieren
+                        Try
+                            arr = JArray.FromObject(_vars(arrayName))
+                        Catch
+                        End Try
+                End Select
+            End If
+            If arr Is Nothing Then arr = New JArray()
+
+            ' 3) Item als JToken klonen und anhängen
+            Dim jt As JToken
+            If TypeOf itemObj Is JToken Then
+                jt = DirectCast(itemObj, JToken).DeepClone()
+            Else
+                jt = JToken.FromObject(itemObj)
+            End If
+            arr.Add(jt)
+
+            ' 4) Zurückspeichern (direkt als JArray, kein Doppelkonvert via SafeStoreVar nötig)
+            _vars(arrayName) = arr
+
+            Return New With {
+        .pushed = True,
+        .count = arr.Count,
+        .array = arrayName
+    }
+        End Function
+
+        Private Sub AccumulateDecisionLinksIfNeeded(stepId As String)
+            If Not String.Equals(stepId, "extract_decision_links", StringComparison.OrdinalIgnoreCase) Then Exit Sub
+            Dim pageObj As Object = Nothing
+            If Not _vars.TryGetValue("decision_links", pageObj) OrElse Not TypeOf pageObj Is JArray Then Exit Sub
+            Dim allObj As Object = Nothing
+            If Not _vars.TryGetValue("all_decisions", allObj) OrElse Not TypeOf allObj Is JArray Then
+                allObj = New JArray()
+                _vars("all_decisions") = allObj
+            End If
+            For Each d In CType(pageObj, JArray)
+                CType(allObj, JArray).Add(d.DeepClone())
+            Next
+        End Sub
+
+        ' Hilfsfunktion für frühen Rückgabewert
+        Private Function GetExistingArrayCount(name As String) As Integer
+            If Not _vars.ContainsKey(name) Then Return 0
+            If TypeOf _vars(name) Is JArray Then Return DirectCast(_vars(name), JArray).Count
+            Return 0
+        End Function
+
+        Private Function CmdEnableDynamic(parms As JObject) As Object
+                        EnableDynamicExpansion()
+                        Return New JObject(
+                            New JProperty("status", "ok"),
+                            New JProperty("dynamic", True)
+                        )
+                    End Function
+
+        Private Shared ReadOnly DynamicUrlRegexes As Regex() = {
+                New Regex("(https?://[^\s'""<>]+index_aza\.php[^\s'""<>]*)", RegexOptions.IgnoreCase),
+                New Regex("url\s*:\s*['""]([^'""]*index_aza\.php[^'""]*)['""]", RegexOptions.IgnoreCase),
+                New Regex("\$\.(?:get|post)\s*\(\s*['""]([^'""]*index_aza\.php[^'""]*)['""]", RegexOptions.IgnoreCase),
+                New Regex("fetch\s*\(\s*['""]([^'""]*index_aza\.php[^'""]*)['""]", RegexOptions.IgnoreCase)
+            }
+
+        Private Sub EnableDynamicExpansion()
+            _dynamicExpand = True
+            Log("Dynamic expansion ENABLED")
+        End Sub
+
+        Private Function CmdDisableDynamic(parms As JObject) As Object
+            _dynamicExpand = False
+            Log("Dynamic expansion DISABLED")
+            Return New JObject(New JProperty("status", "ok"), New JProperty("dynamic", False))
+        End Function
+
+        ' Core dynamic expansion after initial HTML load
+        Private Async Function ExpandDynamicContentAsync(baseUrl As String,
+                                                 originalHtml As String,
+                                                 cancel As CancellationToken) As Task(Of String)
+            Dim composite As New StringBuilder(originalHtml)
+            Dim discovered As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+            Dim queue As New Queue(Of String)()
+            Dim fetchCount As Integer = 0
+
+            If originalHtml.Length > 1_500_000 Then
+                Log("[dynamic] skipping expansion (page too large)")
+                Return originalHtml
+            End If
+
+            Try
+                If _lastDoc IsNot Nothing Then
+                    Dim scriptNodes = _lastDoc.DocumentNode.SelectNodes("//script[@src]")
+                    If scriptNodes IsNot Nothing Then
+                        For Each s In scriptNodes
+                            Dim src As String = s.GetAttributeValue("src", "")
+                            If Not String.IsNullOrWhiteSpace(src) Then
+                                Dim abs = ResolveUrl(src)
+                                If ShouldFetchDynamic(abs, discovered, queue) Then queue.Enqueue(abs)
+                            End If
+                        Next
+                    End If
+                End If
+            Catch ex As Exception
+                Log("[dynamic] script src scan error: " & ex.Message)
+            End Try
+
+            Try
+                If _lastDoc IsNot Nothing Then
+                    Dim inlineScripts = _lastDoc.DocumentNode.SelectNodes("//script[not(@src)]")
+                    If inlineScripts IsNot Nothing Then
+                        For Each s In inlineScripts
+                            Dim code = s.InnerText
+                            If String.IsNullOrWhiteSpace(code) Then Continue For
+                            For Each rx In DynamicUrlRegexes
+                                Dim matches = rx.Matches(code)
+                                For Each m As Match In matches
+                                    Dim cand = m.Groups(m.Groups.Count - 1).Value
+                                    If String.IsNullOrWhiteSpace(cand) Then Continue For
+                                    Dim abs = ResolveUrl(cand.Trim())
+                                    If ShouldFetchDynamic(abs, discovered, queue) Then queue.Enqueue(abs)
+                                Next
+                            Next
+                        Next
+                    End If
+                End If
+            Catch ex As Exception
+                Log("[dynamic] inline script scan error: " & ex.Message)
+            End Try
+
+            While queue.Count > 0 AndAlso fetchCount < MAX_DYNAMIC_FETCH AndAlso Not cancel.IsCancellationRequested
+                Dim u = queue.Dequeue()
+                fetchCount += 1
+                Try
+                    Log($"[dynamic] fetching {u}")
+                    Using ctsSingle As New CancellationTokenSource(_defaultTimeoutMs)
+                        Using linked = CancellationTokenSource.CreateLinkedTokenSource(cancel, ctsSingle.Token)
+                            Dim resp = Await _http.GetAsync(u, linked.Token).ConfigureAwait(False)
+                            Dim body = Await resp.Content.ReadAsStringAsync().ConfigureAwait(False)
+                            composite.AppendLine().AppendLine($"<!-- DYNAMIC_FETCH: {u} -->").AppendLine(body)
+                        End Using
+                    End Using
+                Catch ex As OperationCanceledException
+                    Log("[dynamic] fetch timeout/cancel: " & u)
+                Catch ex As Exception
+                    Log("[dynamic] fetch error " & u & ": " & ex.Message)
+                End Try
+            End While
+
+            Log($"[dynamic] fetched={fetchCount} (queue left={queue.Count})")
+            Return composite.ToString()
+        End Function
+
+        Private Function ShouldFetchDynamic(url As String,
+                                    discovered As HashSet(Of String),
+                                    queue As Queue(Of String)) As Boolean
+    If String.IsNullOrWhiteSpace(url) Then Return False
+    If discovered.Contains(url) Then Return False
+    ' Domain constraint (basic)
+    Try
+        Dim u = New Uri(url)
+        ' Optionally enforce alloweddomains if configured
+        ' If Not String.IsNullOrEmpty(SharedMethods.alloweddomains) Then ...
+    Catch
+        Return False
+    End Try
+    discovered.Add(url)
+    Return True
+End Function
+
+
+#End Region
+
+#Region "Templating / Helpers"
+
+        ' Replace existing ResolveSecret with:
+        Private Function ResolveSecret(reference As String) As String
+            If String.IsNullOrEmpty(reference) Then Return reference
+            If reference.StartsWith("secret://", StringComparison.OrdinalIgnoreCase) Then
+                Dim key = reference.Substring(9)
+                Dim val As String = Nothing
+                If _secrets.TryGetValue(key, val) Then
+                    Return val
+                End If
+                Return ""
+            End If
+            Return reference
+        End Function
+        Private Function ResolveUrl(url As System.String) As System.String
+            If System.String.IsNullOrWhiteSpace(url) Then Return url
+
+            url = SanitizePotentialMarkdownUrl(url)
+
+            If url.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase) OrElse
+               url.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase) Then
+                Return url
+            End If
+
+            If Not System.String.IsNullOrWhiteSpace(_lastResponseUrl) Then
+                Try
+                    Dim baseUri As New System.Uri(_lastResponseUrl)
+                    Return New System.Uri(baseUri, url).ToString()
+                Catch ex As System.Exception
+                    Log("[ResolveUrl] Failed combining with lastResponseUrl: " & ex.Message)
+                End Try
+            End If
+
+            If Not System.String.IsNullOrWhiteSpace(_baseUrl) Then
+                Try
+                    Dim baseUri As New System.Uri(_baseUrl)
+                    Return New System.Uri(baseUri, url).ToString()
+                Catch ex As System.Exception
+                    Log("[ResolveUrl] Failed combining with base_url: " & ex.Message)
+                End Try
+            End If
+
+            Return url
+        End Function
+
+        Private Function SanitizePotentialMarkdownUrl(raw As System.String) As System.String
+            Dim s = raw.Trim()
+            ' Pattern: [visible](actual) – prefer the target inside parentheses if valid
+            Dim mdMatch = System.Text.RegularExpressions.Regex.Match(s, "^\[(?<vis>[^\]]+)\]\((?<url>https?://[^)]+)\)$",
+                                                                     System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            If mdMatch.Success Then
+                Dim realUrl = mdMatch.Groups("url").Value
+                If realUrl.StartsWith("http", System.StringComparison.OrdinalIgnoreCase) Then
+                    Return realUrl
+                End If
+            End If
+            ' Case where only [https://...](https://...) was pasted but expansion removed brackets wrongly:
+            ' remove stray leading '[' or trailing ')' if both present
+            If s.Contains("](") AndAlso s.EndsWith(")") Then
+                ' Try to pick substring after "]("
+                Dim idx = s.IndexOf("](")
+                If idx >= 0 Then
+                    Dim candidate = s.Substring(idx + 2, s.Length - idx - 3)
+                    If candidate.StartsWith("http", System.StringComparison.OrdinalIgnoreCase) Then
+                        Return candidate
+                    End If
+                End If
+            End If
+            ' Strip surrounding angle brackets <...>
+            If s.StartsWith("<") AndAlso s.EndsWith(">") Then
+                s = s.Substring(1, s.Length - 2)
+            End If
+            Return s
+        End Function
+
+        Private Function DecodeBody(bytes As System.Byte(), contentType As System.Net.Http.Headers.MediaTypeHeaderValue) As System.String
+            Dim charset As System.String = Nothing
+            If contentType IsNot Nothing AndAlso Not System.String.IsNullOrEmpty(contentType.CharSet) Then
+                charset = contentType.CharSet
+            End If
+            Dim enc As System.Text.Encoding
+            Try
+                enc = If(Not System.String.IsNullOrWhiteSpace(charset), System.Text.Encoding.GetEncoding(charset), System.Text.Encoding.UTF8)
+            Catch
+                enc = System.Text.Encoding.UTF8
+            End Try
+            Return enc.GetString(bytes)
+        End Function
+
+        Private Sub SafeSetHeader(col As System.Net.Http.Headers.HttpRequestHeaders, name As System.String, value As System.String)
+            If System.String.Equals(name, "User-Agent", System.StringComparison.OrdinalIgnoreCase) Then
+                col.UserAgent.Clear()
+                col.UserAgent.ParseAdd(value)
+                Return
+            End If
+            col.Remove(name)
+            col.TryAddWithoutValidation(name, value)
+        End Sub
+
+        Private Function MaskSecrets(line As String) As String
+            If _secrets Is Nothing OrElse _secrets.Count = 0 Then Return line
+            Dim masked = line
+            For Each kv In _secrets
+                If Not String.IsNullOrEmpty(kv.Value) Then
+                    masked = masked.Replace(kv.Value, "***")
+                End If
+            Next
+            Return masked
+        End Function
+
+        Private Sub Log(msg As String)
+            Dim safe = MaskSecrets(msg)
+            Dim line = $"[{System.DateTime.Now:O}] {safe}"
+            _log.AppendLine(line)
+            Try : System.Diagnostics.Debug.WriteLine(line) : Catch : End Try
+        End Sub
+
+        Private Function ExpandTemplates(input As System.String) As System.String
+            If input Is Nothing Then Return Nothing
+            Dim unresolved As New System.Collections.Generic.List(Of System.String)
+
+            Dim result = System.Text.RegularExpressions.Regex.Replace(
+        input,
+        "{{\s*([^}]+)\s*}}",
+        Function(m)
+            Dim expr = m.Groups(1).Value
+            Dim v = ResolveValue("{{" & expr & "}}")
+            If v Is Nothing Then
+                unresolved.Add(expr)
+                ' Keep the original marker so downstream code can detect unresolved tokens
+                Return "{{" & expr & "}}"
+            End If
+            Return v.ToString()
+        End Function)
+
+            If unresolved.Count > 0 Then
+                For Each u In unresolved
+                    Log($"[template] Unresolved placeholder '{u}'")
+                Next
+            End If
+            Return result
+        End Function
+
+        Private Function ResolveValue(exprOrLiteral As System.Object) As System.Object
+            If exprOrLiteral Is Nothing Then Return Nothing
+            Dim s = TryCast(exprOrLiteral, System.String)
+            If s Is Nothing Then Return exprOrLiteral
+
+            If s.StartsWith("{{") AndAlso s.EndsWith("}}") Then
+                Dim keyPath = s.Substring(2, s.Length - 4).Trim()
+
+                If keyPath.StartsWith("env.", StringComparison.OrdinalIgnoreCase) Then
+                    Dim envName = keyPath.Substring(4)
+                    If String.Equals(envName, "DESKTOP", StringComparison.OrdinalIgnoreCase) Then
+                        Return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                    End If
+                    Dim ev = Environment.GetEnvironmentVariable(envName)
+                    If Not String.IsNullOrEmpty(ev) Then Return ev
+                    Return Nothing
+                End If
+
+                If keyPath.Equals("base_url", System.StringComparison.OrdinalIgnoreCase) AndAlso Not System.String.IsNullOrEmpty(_baseUrl) Then
+                    Return _baseUrl
+                End If
+                Dim parts = keyPath.Split("."c)
+                If parts.Length = 0 Then Return Nothing
+                Dim startIndex As System.Int32 = 0
+                If parts(0).Equals("variables", System.StringComparison.OrdinalIgnoreCase) Then
+                    startIndex = 1
+                End If
+                If startIndex >= parts.Length Then
+                    Return Nothing
+                End If
+                Dim current As System.Object = Nothing
+                Dim rootName = parts(startIndex)
+                If Not _vars.TryGetValue(rootName, current) Then
+                    If _vars.TryGetValue(keyPath, current) Then
+                        Return current
+                    End If
+                    Return Nothing
+                End If
+                For i = startIndex + 1 To parts.Length - 1
+                    If current Is Nothing Then Return Nothing
+                    Dim segment = parts(i)
+
+                    Dim jt = TryCast(current, Newtonsoft.Json.Linq.JToken)
+                    If jt IsNot Nothing Then
+                        Dim sel = jt(segment)
+                        If sel Is Nothing Then Return Nothing
+                        If TypeOf sel Is Newtonsoft.Json.Linq.JValue Then
+                            current = DirectCast(sel, Newtonsoft.Json.Linq.JValue).Value
+                        Else
+                            current = sel
+                        End If
+                        Continue For
+                    End If
+
+                    Dim dict = TryCast(current, System.Collections.Generic.IDictionary(Of System.String, System.Object))
+                    If dict IsNot Nothing Then
+                        If Not dict.TryGetValue(segment, current) Then Return Nothing
+                        Continue For
+                    End If
+
+                    Dim t = current.GetType()
+                    Dim pi = t.GetProperty(segment,
+                                           System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Instance Or System.Reflection.BindingFlags.IgnoreCase)
+                    If pi IsNot Nothing Then
+                        current = pi.GetValue(current)
+                        Continue For
+                    End If
+
+                    Return Nothing
+                Next
+                Return current
+            Else
+                Return ExpandTemplates(s)
+            End If
+        End Function
+
+        Private Function _IsTruthy(val As Object) As Boolean
+            If val Is Nothing Then Return False
+            If TypeOf val Is Boolean Then Return DirectCast(val, Boolean)
+
+            If TypeOf val Is String Then
+                Dim s = DirectCast(val, String).Trim()
+                If s.Length = 0 Then Return False
+                Select Case s.ToLowerInvariant()
+                    Case "false", "0", "null", "none", "nil" : Return False
+                End Select
+                Return True
+            End If
+
+            If TypeOf val Is IEnumerable AndAlso Not TypeOf val Is String Then
+                Dim en = DirectCast(val, IEnumerable).GetEnumerator()
+                Try
+                    Return en.MoveNext()
+                Finally
+                    Dim disp = TryCast(en, IDisposable)
+                    If disp IsNot Nothing Then disp.Dispose()
+                End Try
+            End If
+            Return True
+        End Function
+
+        Private Function SimpleMustacheRender(template As String, context As Object) As String
+            If String.IsNullOrEmpty(template) Then Return String.Empty
+
+            Dim ctxToken As JToken = Nothing
+            If TypeOf context Is JToken Then
+                ctxToken = DirectCast(context, JToken)
+            ElseIf context IsNot Nothing Then
+                Try : ctxToken = JToken.FromObject(context) : Catch : End Try
+            End If
+
+            Dim ResolveVar As Func(Of String, Object) =
+        Function(path As String) As Object
+            Dim key = path.Trim()
+            If ctxToken IsNot Nothing Then
+                Try
+                    Dim t = ctxToken.SelectToken(key)
+                    If t IsNot Nothing Then
+                        Select Case t.Type
+                            Case JTokenType.Array, JTokenType.Object
+                                Return t
+                            Case Else
+                                Return t.ToString()
+                        End Select
+                    End If
+                Catch
+                End Try
+            End If
+
+            If context IsNot Nothing Then
+                Try
+                    Dim pi = context.GetType().GetProperty(key, BindingFlags.Instance Or BindingFlags.Public Or BindingFlags.IgnoreCase)
+                    If pi IsNot Nothing Then Return pi.GetValue(context)
+                Catch
+                End Try
+            End If
+            Return Nothing
+        End Function
+
+            ' Process simple (# / ^) sections iteratively (limited depth)
+            Dim sectionRegex As New Regex("\{\{(?<sig>[#^])\s*(?<name>[^\}]+?)\s*\}\}(?<body>.*?)\{\{/\s*\k<name>\s*\}\}",
+                                  RegexOptions.Singleline)
+            Dim loopGuard = 0
+            Dim output = template
+            While loopGuard < 50
+                loopGuard += 1
+                Dim m = sectionRegex.Match(output)
+                If Not m.Success Then Exit While
+
+                Dim kind = m.Groups("sig").Value
+                Dim name = m.Groups("name").Value
+                Dim body = m.Groups("body").Value
+                Dim val = ResolveVar(name)
+                Dim truthy = _IsTruthy(val)
+                Dim repl As String = String.Empty
+
+                If kind = "#" Then
+                    If truthy Then
+                        If TypeOf val Is JArray Then
+                            Dim sb As New StringBuilder()
+                            For Each item As JToken In DirectCast(val, JArray)
+                                sb.Append(SimpleMustacheRender(body, item))
+                            Next
+                            repl = sb.ToString()
+                        ElseIf TypeOf val Is IEnumerable AndAlso Not TypeOf val Is String Then
+                            Dim sb As New StringBuilder()
+                            For Each item In DirectCast(val, IEnumerable)
+                                Dim tok As JToken = TryCast(item, JToken)
+                                If tok Is Nothing AndAlso item IsNot Nothing Then
+                                    Try : tok = JToken.FromObject(item) : Catch : End Try
+                                End If
+                                sb.Append(SimpleMustacheRender(body, If(tok, item)))
+                            Next
+                            repl = sb.ToString()
+                        Else
+                            repl = SimpleMustacheRender(body, context)
+                        End If
+                    End If
+                Else
+                    ' inverted ^
+                    If Not truthy Then
+                        repl = SimpleMustacheRender(body, context)
+                    End If
+                End If
+
+                output = output.Substring(0, m.Index) & repl & output.Substring(m.Index + m.Length)
+            End While
+
+            ' Triple mustache {{{var}}} (raw – wenn nicht im lokalen Kontext, Placeholder stehen lassen)
+            output = Regex.Replace(
+                    output,
+                    "\{\{\{\s*([^\}]+?)\s*\}\}\}",
+                    Function(mt As Match) As String
+                        Dim name = mt.Groups(1).Value.Trim()
+                        Dim v = ResolveVar(name)
+                        If v Is Nothing Then
+                            ' Für den zweiten Pass in normale Form überführen:
+                            Return "{{" & name & "}}"
+                        End If
+                        Return v.ToString()
+                    End Function)
+
+            ' Normale Variablen {{var}} – bei Nichtauflösung Platzhalter erhalten
+            output = Regex.Replace(
+                    output,
+                    "\{\{\s*([^\}#/\^][^\}]*)\s*\}\}",
+                    Function(mt As Match) As String
+                        Dim rawName = mt.Groups(1).Value
+                        Dim name = rawName.Trim()
+                        Dim v = ResolveVar(name)
+                        If v Is Nothing Then
+                            ' Unverändert (bereinigt) stehen lassen
+                            Return "{{" & name & "}}"
+                        End If
+                        Return v.ToString()
+                    End Function)
+
+            Return output
+        End Function
+
+        Private Function MaterializeContextPlaceholders(ctxToken As Newtonsoft.Json.Linq.JToken) As System.Object
+            If ctxToken Is Nothing Then Return Nothing
+            If ctxToken.Type <> Newtonsoft.Json.Linq.JTokenType.Object Then
+                Return ctxToken.ToObject(Of System.Object)()
+            End If
+            Dim jobj = DirectCast(ctxToken, Newtonsoft.Json.Linq.JObject)
+            For Each prop In jobj.Properties().ToList()
+                If prop.Value.Type = Newtonsoft.Json.Linq.JTokenType.String Then
+                    Dim s = prop.Value.ToString().Trim()
+                    If s.StartsWith("{{") AndAlso s.EndsWith("}}") Then
+                        Dim resolved = ResolveValue(s)
+                        If resolved IsNot Nothing Then
+                            Dim jt = TryCast(resolved, Newtonsoft.Json.Linq.JToken)
+                            If jt IsNot Nothing Then
+                                prop.Value = jt
+                            Else
+                                prop.Value = Newtonsoft.Json.Linq.JToken.FromObject(resolved)
+                            End If
+                        End If
+                    End If
+                End If
+            Next
+            Return jobj.ToObject(Of System.Object)()
+        End Function
+
+        Private Function ResolveContextValue(ctx As System.Object, path As System.String) As System.Object
+            If ctx Is Nothing Then Return Nothing
+            Dim jt = TryCast(ctx, Newtonsoft.Json.Linq.JToken)
+            If jt IsNot Nothing Then
+                Dim sel = jt.SelectToken(path)
+                If sel Is Nothing Then Return Nothing
+                If TypeOf sel Is Newtonsoft.Json.Linq.JValue Then
+                    Return DirectCast(sel, Newtonsoft.Json.Linq.JValue).Value
+                ElseIf sel.Type = Newtonsoft.Json.Linq.JTokenType.String Then
+                    Return sel.ToString()
+                Else
+                    Return sel.ToObject(Of System.Object)()
+                End If
+            End If
+            Dim dict = TryCast(ctx, System.Collections.Generic.IDictionary(Of System.String, System.Object))
+            If dict IsNot Nothing Then
+                If dict.ContainsKey(path) Then Return dict(path)
+                Dim parts = path.Split("."c)
+                Dim cur As System.Object = dict
+                For Each p In parts
+                    Dim d = TryCast(cur, System.Collections.Generic.IDictionary(Of System.String, System.Object))
+                    If d IsNot Nothing AndAlso d.ContainsKey(p) Then
+                        cur = d(p)
+                    Else
+                        Return Nothing
+                    End If
+                Next
+                Return cur
+            End If
+            Dim t = ctx.GetType()
+            Dim prop = t.GetProperty(path)
+            If prop IsNot Nothing Then
+                Return prop.GetValue(ctx)
+            End If
+            Return Nothing
+        End Function
+
+        Private Function EvalCondition(condition As System.String) As System.Boolean
+            If System.String.IsNullOrWhiteSpace(condition) Then Return False
+            Dim c = condition.Trim()
+
+            ' OR support
+            If c.Contains("||") Then
+                For Each part In c.Split(New String() {"||"}, StringSplitOptions.RemoveEmptyEntries)
+                    If EvalCondition(part.Trim()) Then Return True
+                Next
+                Return False
+            End If
+
+            ' Empty array equality: {{var}} == []
+            Dim emptyArr = Regex.Match(c, "^\s*({{.*}})\s*==\s*\[\s*\]\s*$")
+            If emptyArr.Success Then
+                Dim left = ResolveValue(emptyArr.Groups(1).Value)
+                If left Is Nothing Then Return True
+                If TypeOf left Is IEnumerable AndAlso Not TypeOf left Is String Then
+                    Dim en = DirectCast(left, IEnumerable).GetEnumerator()
+                    Dim any As Boolean = en.MoveNext()
+                    Dim disp = TryCast(en, IDisposable) : If disp IsNot Nothing Then disp.Dispose()
+                    Return Not any
+                End If
+                If TypeOf left Is String Then Return String.IsNullOrWhiteSpace(DirectCast(left, String))
+                Return False
+            End If
+
+            Dim ex = System.Text.RegularExpressions.Regex.Match(c, "^\s*exists\s+({{.*}})\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            If ex.Success Then
+                Dim v = ResolveValue(ex.Groups(1).Value)
+                Return v IsNot Nothing AndAlso Not System.String.IsNullOrEmpty(v.ToString())
+            End If
+
+            Dim eq = System.Text.RegularExpressions.Regex.Match(c, "^\s*({{.*}})\s*==\s*""?(.*?)""?\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            If eq.Success Then
+                Dim left = ResolveValue(eq.Groups(1).Value)
+                Dim right = eq.Groups(2).Value
+                Return System.String.Equals(If(left?.ToString(), System.String.Empty), right, System.StringComparison.OrdinalIgnoreCase)
+            End If
+
+            Dim co = System.Text.RegularExpressions.Regex.Match(c, "^\s*({{.*}})\s*contains\s*""(.*?)""\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            If co.Success Then
+                Dim left = ResolveValue(co.Groups(1).Value)?.ToString()
+                Dim subStr = co.Groups(2).Value
+                If left Is Nothing Then Return False
+                Return left.IndexOf(subStr, System.StringComparison.OrdinalIgnoreCase) >= 0
+            End If
+
+            Dim rx = System.Text.RegularExpressions.Regex.Match(c, "^\s*({{.*}})\s*~=\s*""(.*?)""\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase Or System.Text.RegularExpressions.RegexOptions.Singleline)
+            If rx.Success Then
+                Dim left = ResolveValue(rx.Groups(1).Value)?.ToString()
+                Dim pat = rx.Groups(2).Value
+                If left Is Nothing Then Return False
+                Return System.Text.RegularExpressions.Regex.IsMatch(left, pat, System.Text.RegularExpressions.RegexOptions.IgnoreCase Or System.Text.RegularExpressions.RegexOptions.Singleline)
+            End If
+
+            Return False
+        End Function
+
+#End Region
+
+    End Class
+
 End Namespace
 
 
