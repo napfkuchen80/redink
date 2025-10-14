@@ -124,6 +124,111 @@ Namespace My
                 Me("PromptLog") = value
             End Set
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute()>  _
+        Public Property UpdateRetryDateWord() As Date
+            Get
+                Return CType(Me("UpdateRetryDateWord"),Date)
+            End Get
+            Set
+                Me("UpdateRetryDateWord") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property UpdateRetryCountWord() As Integer
+            Get
+                Return CType(Me("UpdateRetryCountWord"),Integer)
+            End Get
+            Set
+                Me("UpdateRetryCountWord") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property UpdateRetryPromptShownWord() As Boolean
+            Get
+                Return CType(Me("UpdateRetryPromptShownWord"),Boolean)
+            End Get
+            Set
+                Me("UpdateRetryPromptShownWord") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute()>  _
+        Public Property UpdateRetryDateExcel() As Date
+            Get
+                Return CType(Me("UpdateRetryDateExcel"),Date)
+            End Get
+            Set
+                Me("UpdateRetryDateExcel") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property UpdateRetryCountExcel() As Integer
+            Get
+                Return CType(Me("UpdateRetryCountExcel"),Integer)
+            End Get
+            Set
+                Me("UpdateRetryCountExcel") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property UpdateRetryPromptShownExcel() As Boolean
+            Get
+                Return CType(Me("UpdateRetryPromptShownExcel"),Boolean)
+            End Get
+            Set
+                Me("UpdateRetryPromptShownExcel") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute()>  _
+        Public Property UpdateRetryDateOutlook() As Date
+            Get
+                Return CType(Me("UpdateRetryDateOutlook"),Date)
+            End Get
+            Set
+                Me("UpdateRetryDateOutlook") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("0")>  _
+        Public Property UpdateRetryCountOutlook() As Integer
+            Get
+                Return CType(Me("UpdateRetryCountOutlook"),Integer)
+            End Get
+            Set
+                Me("UpdateRetryCountOutlook") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("False")>  _
+        Public Property UpdateRetryPromptShownOutlook() As Boolean
+            Get
+                Return CType(Me("UpdateRetryPromptShownOutlook"),Boolean)
+            End Get
+            Set
+                Me("UpdateRetryPromptShownOutlook") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

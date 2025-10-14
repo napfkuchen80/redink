@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 12.10.2025
+' 14.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1287,7 +1287,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.121025 Gen2 Beta Test"
+    Public Const Version As String = "V.141025 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -18172,7 +18172,453 @@ Public Class ThisAddIn
 
     ' Liest die bestehende Präsentation aus
 
+
     Public Function GetPresentationJson(pptxPath As String) As String
+        ' 0) Path check
+        If Not System.IO.File.Exists(pptxPath) Then
+            ShowCustomMessageBox($"File not found: {pptxPath}")
+            Return String.Empty
+        End If
+
+        If Not IsValidPptxPackage(pptxPath) Then
+            ShowCustomMessageBox("PowerPoint file is corrupt or unreadable.")
+            Return String.Empty
+        End If
+
+        Try
+            Using presDoc As DocumentFormat.OpenXml.Packaging.PresentationDocument =
+            DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxPath, False)
+
+                Dim presPart As DocumentFormat.OpenXml.Packaging.PresentationPart = presDoc.PresentationPart
+                If presPart Is Nothing OrElse presPart.Presentation Is Nothing Then
+                    ShowCustomMessageBox("Invalid or corrupted presentation.")
+                    Return String.Empty
+                End If
+
+                Dim result As New PresentationJson With {
+                .Title = presDoc.PackageProperties.Title,
+                .Slides = New List(Of SlideJson)(),
+                .Layouts = New List(Of LayoutJson)()
+            }
+
+                ' Slide size
+                If presPart.Presentation.SlideSize IsNot Nothing AndAlso
+               presPart.Presentation.SlideSize.Cx IsNot Nothing AndAlso
+               presPart.Presentation.SlideSize.Cy IsNot Nothing Then
+                    result.SlideSize = New SlideSizeJson With {
+                    .Width = presPart.Presentation.SlideSize.Cx.Value,
+                    .Height = presPart.Presentation.SlideSize.Cy.Value
+                }
+                End If
+
+                ' Detect slides
+                Dim slideIdList = presPart.Presentation.SlideIdList
+                Dim hasSlides As Boolean =
+                (slideIdList IsNot Nothing AndAlso slideIdList.ChildElements _
+                    .OfType(Of DocumentFormat.OpenXml.Presentation.SlideId)().Any())
+
+                If Not hasSlides Then
+                    ' still gather layouts from masters even if there are no slides
+                    Try
+                        For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+                            If sm Is Nothing Then Continue For
+                            Dim masterName As System.String = GetMasterName(sm)
+                            For Each layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                                If layoutPart Is Nothing OrElse layoutPart.Uri Is Nothing Then Continue For
+                                Dim name As System.String = GetLayoutName(layoutPart)
+                                Dim layoutUri As System.String = layoutPart.Uri.ToString()
+                                Dim relId As System.String = System.String.Empty
+                                Try
+                                    relId = sm.GetIdOfPart(layoutPart)
+                                Catch
+                                End Try
+
+                                Dim info = AnalyzeLayoutPlaceholders(layoutPart)  ' see helper below
+
+                                result.Layouts.Add(New LayoutJson With {
+                    .Name = name,
+                    .LayoutId = layoutUri,
+                    .LayoutRelId = relId
+                })
+                            Next
+                        Next
+                    Catch
+                    End Try
+
+                    Return System.Text.Json.JsonSerializer.Serialize(
+        result,
+        New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+    )
+                End If
+
+                ' Enumerate slides safely
+                Try
+                    Dim idx As Integer = 0
+                    For Each sid As DocumentFormat.OpenXml.Presentation.SlideId In
+                    slideIdList.ChildElements.OfType(Of DocumentFormat.OpenXml.Presentation.SlideId)()
+
+                        If sid.RelationshipId Is Nothing Then Continue For
+                        Dim sp As DocumentFormat.OpenXml.Packaging.SlidePart = Nothing
+                        Try
+                            sp = TryCast(presPart.GetPartById(sid.RelationshipId),
+                                     DocumentFormat.OpenXml.Packaging.SlidePart)
+                        Catch
+                            Continue For
+                        End Try
+                        If sp Is Nothing Then Continue For
+
+                        Dim title As String = GetSlideTitle(sp)
+                        Dim key As String = If(
+                        String.IsNullOrWhiteSpace(title),
+                        $"SID-{sid.Id.Value}",
+                        $"{SanitizeKey(title)}-{sid.Id.Value}"
+                    )
+
+                        Dim layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart = sp.SlideLayoutPart
+                        Dim layoutName As String = GetLayoutName(layoutPart)
+                        Dim masterName As String = If(
+                        layoutPart IsNot Nothing,
+                        GetMasterName(layoutPart.SlideMasterPart),
+                        String.Empty
+                    )
+
+                        Dim placeholders As New List(Of String)
+                        Dim content As New List(Of String)
+
+                        If sp.Slide IsNot Nothing AndAlso
+                               sp.Slide.CommonSlideData IsNot Nothing AndAlso
+                               sp.Slide.CommonSlideData.ShapeTree IsNot Nothing Then
+
+                            CollectPlaceholdersFromShapeTree(sp.Slide.CommonSlideData.ShapeTree, placeholders)
+                            CollectTextsFromShapeTree(sp.Slide.CommonSlideData.ShapeTree, content)
+                        End If
+
+
+
+                        result.Slides.Add(New SlideJson With {
+                        .SlideKey = key,
+                        .SlideId = sid.Id.Value,
+                        .Index = idx,
+                        .Title = title,
+                        .Layout = layoutName,
+                        .Master = masterName,
+                        .Placeholders = placeholders,
+                        .Content = content
+                    })
+                        idx += 1
+                    Next
+                Catch
+                    ' If anything goes wrong, just return what we have
+                    Return System.Text.Json.JsonSerializer.Serialize(
+                    result,
+                    New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+                )
+                End Try
+
+                ' Enumerate layouts only if slides were processed
+                Try
+                    For Each sm As DocumentFormat.OpenXml.Packaging.SlideMasterPart In presPart.SlideMasterParts
+                        If sm Is Nothing Then Continue For
+                        For Each layoutPart As DocumentFormat.OpenXml.Packaging.SlideLayoutPart In sm.SlideLayoutParts
+                            If layoutPart Is Nothing OrElse layoutPart.Uri Is Nothing Then Continue For
+                            Dim name As String = GetLayoutName(layoutPart)
+                            Dim layoutUri As String = layoutPart.Uri.ToString()
+                            Dim relId As String = String.Empty
+                            Try
+                                relId = sm.GetIdOfPart(layoutPart)
+                            Catch
+                            End Try
+                            result.Layouts.Add(New LayoutJson With {
+                            .Name = name,
+                            .LayoutId = layoutUri,
+                            .LayoutRelId = relId
+                        })
+                        Next
+                    Next
+                Catch
+                End Try
+
+                Return System.Text.Json.JsonSerializer.Serialize(
+                result,
+                New System.Text.Json.JsonSerializerOptions With {.WriteIndented = True}
+            )
+            End Using
+
+        Catch ex As System.IO.IOException
+            ShowCustomMessageBox($"Error opening presentation (I/O): {ex.Message}")
+            Return String.Empty
+        Catch ex As DocumentFormat.OpenXml.Packaging.OpenXmlPackageException
+            ShowCustomMessageBox($"Error processing presentation (OpenXML): {ex.Message}")
+            Return String.Empty
+        Catch ex As System.Exception
+            ShowCustomMessageBox($"Unexpected error: {ex.Message}")
+            Return String.Empty
+        End Try
+    End Function
+
+
+
+    Private Shared Sub CollectPlaceholdersFromShapeTree(
+    ByVal tree As DocumentFormat.OpenXml.Presentation.ShapeTree,
+    ByVal placeholders As System.Collections.Generic.List(Of System.String))
+
+        If tree Is Nothing Then Return
+
+        For Each child As DocumentFormat.OpenXml.OpenXmlElement In tree.ChildElements
+
+            If TypeOf child Is DocumentFormat.OpenXml.Presentation.Shape Then
+                Dim shp As DocumentFormat.OpenXml.Presentation.Shape =
+                CType(child, DocumentFormat.OpenXml.Presentation.Shape)
+
+                Dim nv As DocumentFormat.OpenXml.Presentation.NonVisualShapeProperties =
+                shp.NonVisualShapeProperties
+
+                If nv IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties.PlaceholderShape IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties.PlaceholderShape.Type IsNot Nothing Then
+
+                    placeholders.Add(
+                    nv.ApplicationNonVisualDrawingProperties.PlaceholderShape.Type.Value.ToString())
+                End If
+
+            ElseIf TypeOf child Is DocumentFormat.OpenXml.Presentation.GroupShape Then
+                ' In Gruppen rekursiv in deren Kinder laufen:
+                Dim grp As DocumentFormat.OpenXml.Presentation.GroupShape =
+                CType(child, DocumentFormat.OpenXml.Presentation.GroupShape)
+
+                If grp.ChildElements.Count > 0 Then
+                    CollectPlaceholdersFromGroup(grp, placeholders)
+                End If
+            End If
+            ' Hinweis: GraphicFrame (Tabellen/Charts) haben keine Placeholder
+        Next
+    End Sub
+
+    Private Shared Sub CollectPlaceholdersFromGroup(
+    ByVal group As DocumentFormat.OpenXml.Presentation.GroupShape,
+    ByVal placeholders As System.Collections.Generic.List(Of System.String))
+
+        For Each inner As DocumentFormat.OpenXml.OpenXmlElement In group.ChildElements
+            If TypeOf inner Is DocumentFormat.OpenXml.Presentation.Shape Then
+                Dim shp As DocumentFormat.OpenXml.Presentation.Shape =
+                CType(inner, DocumentFormat.OpenXml.Presentation.Shape)
+
+                Dim nv As DocumentFormat.OpenXml.Presentation.NonVisualShapeProperties =
+                shp.NonVisualShapeProperties
+
+                If nv IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties.PlaceholderShape IsNot Nothing AndAlso
+               nv.ApplicationNonVisualDrawingProperties.PlaceholderShape.Type IsNot Nothing Then
+
+                    placeholders.Add(
+                    nv.ApplicationNonVisualDrawingProperties.PlaceholderShape.Type.Value.ToString())
+                End If
+
+            ElseIf TypeOf inner Is DocumentFormat.OpenXml.Presentation.GroupShape Then
+                CollectPlaceholdersFromGroup(
+                CType(inner, DocumentFormat.OpenXml.Presentation.GroupShape), placeholders)
+            End If
+        Next
+    End Sub
+
+    Private Shared Sub CollectTextsFromShapeTree(
+    ByVal tree As DocumentFormat.OpenXml.Presentation.ShapeTree,
+    ByVal content As System.Collections.Generic.List(Of System.String))
+
+        If tree Is Nothing Then Return
+
+        For Each child As DocumentFormat.OpenXml.OpenXmlElement In tree.ChildElements
+
+            If TypeOf child Is DocumentFormat.OpenXml.Presentation.Shape Then
+                Dim shp As DocumentFormat.OpenXml.Presentation.Shape =
+                CType(child, DocumentFormat.OpenXml.Presentation.Shape)
+
+                If shp.TextBody IsNot Nothing Then
+                    Dim txt As System.String = ExtractTextFromTextContainer(shp.TextBody)
+                    If Not System.String.IsNullOrWhiteSpace(txt) Then content.Add(txt)
+                End If
+
+            ElseIf TypeOf child Is DocumentFormat.OpenXml.Presentation.GroupShape Then
+                CollectTextsFromGroup(
+                CType(child, DocumentFormat.OpenXml.Presentation.GroupShape), content)
+
+            ElseIf TypeOf child Is DocumentFormat.OpenXml.Presentation.GraphicFrame Then
+                Dim gf As DocumentFormat.OpenXml.Presentation.GraphicFrame =
+                CType(child, DocumentFormat.OpenXml.Presentation.GraphicFrame)
+
+                Dim g As DocumentFormat.OpenXml.Drawing.Graphic = gf.Graphic
+                If g IsNot Nothing AndAlso g.GraphicData IsNot Nothing Then
+                    Dim gd As DocumentFormat.OpenXml.Drawing.GraphicData = g.GraphicData
+
+                    ' Tabelle?
+                    Dim tbl As DocumentFormat.OpenXml.Drawing.Table =
+                    gd.GetFirstChild(Of DocumentFormat.OpenXml.Drawing.Table)()
+                    If tbl IsNot Nothing Then
+                        ExtractTextFromTable(tbl, content)
+                    End If
+
+                    ' (Optional) Charts/SmartArt könntest du hier zusätzlich behandeln.
+                End If
+            End If
+        Next
+    End Sub
+
+    Private Shared Function ExtractTextFromTextContainer(
+    ByVal container As DocumentFormat.OpenXml.OpenXmlElement) As System.String
+
+        If container Is Nothing Then Return System.String.Empty
+
+        Dim parts As New System.Collections.Generic.List(Of System.String)()
+
+        ' Walk all A:Paragraph descendants regardless of the exact TextBody type
+        For Each p As DocumentFormat.OpenXml.Drawing.Paragraph In
+        container.Descendants(Of DocumentFormat.OpenXml.Drawing.Paragraph)()
+
+            Dim runs As New System.Collections.Generic.List(Of System.String)()
+
+            For Each r As DocumentFormat.OpenXml.Drawing.Run In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Run)()
+                If r IsNot Nothing AndAlso r.Text IsNot Nothing Then
+                    runs.Add(r.Text.Text)
+                End If
+            Next
+
+            For Each br As DocumentFormat.OpenXml.Drawing.Break In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Break)()
+                runs.Add(vbLf)
+            Next
+
+            For Each fld As DocumentFormat.OpenXml.Drawing.Field In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Field)()
+                If fld IsNot Nothing AndAlso fld.Text IsNot Nothing Then
+                    runs.Add(fld.Text.Text)
+                End If
+            Next
+
+            parts.Add(System.String.Join(System.String.Empty, runs))
+        Next
+
+        Return System.String.Join(vbCrLf, parts).Trim()
+    End Function
+
+
+    Private Shared Sub CollectTextsFromGroup(
+    ByVal group As DocumentFormat.OpenXml.Presentation.GroupShape,
+    ByVal content As System.Collections.Generic.List(Of System.String))
+
+        ' Kein IsNot-Vergleich auf OpenXmlElementList – nur Count prüfen
+        If group.ChildElements.Count = 0 Then Return
+
+        For Each inner As DocumentFormat.OpenXml.OpenXmlElement In group.ChildElements
+
+            If TypeOf inner Is DocumentFormat.OpenXml.Presentation.Shape Then
+                Dim shp As DocumentFormat.OpenXml.Presentation.Shape =
+                CType(inner, DocumentFormat.OpenXml.Presentation.Shape)
+
+                ' Shape text
+                If shp.TextBody IsNot Nothing Then
+                    Dim txt As System.String = ExtractTextFromTextContainer(shp.TextBody)
+                    If Not System.String.IsNullOrWhiteSpace(txt) Then content.Add(txt)
+                End If
+
+
+            ElseIf TypeOf inner Is DocumentFormat.OpenXml.Presentation.GroupShape Then
+                CollectTextsFromGroup(
+                CType(inner, DocumentFormat.OpenXml.Presentation.GroupShape), content)
+
+            ElseIf TypeOf inner Is DocumentFormat.OpenXml.Presentation.GraphicFrame Then
+                Dim gf As DocumentFormat.OpenXml.Presentation.GraphicFrame =
+                CType(inner, DocumentFormat.OpenXml.Presentation.GraphicFrame)
+
+                Dim g As DocumentFormat.OpenXml.Drawing.Graphic = gf.Graphic
+                If g IsNot Nothing AndAlso g.GraphicData IsNot Nothing Then
+                    Dim gd As DocumentFormat.OpenXml.Drawing.GraphicData = g.GraphicData
+
+                    Dim tbl As DocumentFormat.OpenXml.Drawing.Table =
+                    gd.GetFirstChild(Of DocumentFormat.OpenXml.Drawing.Table)()
+                    If tbl IsNot Nothing Then
+                        ExtractTextFromTable(tbl, content)
+                    End If
+                End If
+            End If
+        Next
+    End Sub
+
+    Private Shared Sub ExtractTextFromTable(
+    ByVal table As DocumentFormat.OpenXml.Drawing.Table,
+    ByVal content As System.Collections.Generic.List(Of System.String))
+
+        If table Is Nothing Then Return
+
+        For Each row As DocumentFormat.OpenXml.Drawing.TableRow In
+        table.Elements(Of DocumentFormat.OpenXml.Drawing.TableRow)()
+
+            Dim rowTexts As New System.Collections.Generic.List(Of System.String)()
+
+            For Each cell As DocumentFormat.OpenXml.Drawing.TableCell In
+            row.Elements(Of DocumentFormat.OpenXml.Drawing.TableCell)()
+
+                'Dim cellText As System.String = System.String.Empty
+                'If cell IsNot Nothing AndAlso cell.TextBody IsNot Nothing Then
+                '    cellText = ExtractTextFromTextBody(
+                '    CType(cell.TextBody, DocumentFormat.OpenXml.Drawing.TextBody))
+                'End If
+                'rowTexts.Add(cellText)
+
+                ' Table cell text
+                If cell IsNot Nothing AndAlso cell.TextBody IsNot Nothing Then
+                    Dim cellText As System.String = ExtractTextFromTextContainer(cell.TextBody)
+                    rowTexts.Add(cellText)
+                End If
+
+            Next
+
+            Dim line As System.String = System.String.Join(vbTab, rowTexts)
+            If Not System.String.IsNullOrWhiteSpace(line) Then content.Add(line)
+        Next
+    End Sub
+
+    Private Shared Function ExtractTextFromTextBody(
+    ByVal tb As DocumentFormat.OpenXml.Drawing.TextBody) As System.String
+
+        If tb Is Nothing Then Return System.String.Empty
+
+        Dim parts As New System.Collections.Generic.List(Of System.String)()
+
+        For Each p As DocumentFormat.OpenXml.Drawing.Paragraph In
+        tb.Elements(Of DocumentFormat.OpenXml.Drawing.Paragraph)()
+
+            Dim runs As New System.Collections.Generic.List(Of System.String)()
+
+            For Each r As DocumentFormat.OpenXml.Drawing.Run In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Run)()
+                If r IsNot Nothing AndAlso r.Text IsNot Nothing Then
+                    runs.Add(r.Text.Text)
+                End If
+            Next
+
+            For Each br As DocumentFormat.OpenXml.Drawing.Break In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Break)()
+                runs.Add(vbLf)
+            Next
+
+            For Each fld As DocumentFormat.OpenXml.Drawing.Field In
+            p.Elements(Of DocumentFormat.OpenXml.Drawing.Field)()
+                If fld IsNot Nothing AndAlso fld.Text IsNot Nothing Then
+                    runs.Add(fld.Text.Text)
+                End If
+            Next
+
+            parts.Add(System.String.Join(System.String.Empty, runs))
+        Next
+
+        Return System.String.Join(vbCrLf, parts).Trim()
+    End Function
+
+
+    Public Function OldGetPresentationJson(pptxPath As String) As String
         ' 0) Path check
         If Not System.IO.File.Exists(pptxPath) Then
             ShowCustomMessageBox($"File not found: {pptxPath}")

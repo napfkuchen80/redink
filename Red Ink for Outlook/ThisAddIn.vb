@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 12.10.2025
+' 14.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -177,7 +177,7 @@ Public Class ThisAddIn
     Public Const AN2 As String = "red_ink"
     Public Const AN6 As String = "Inky"
 
-    Public Const Version As String = "V.121025 Gen2 Beta Test"
+    Public Const Version As String = "V.141025 Gen2 Beta Test"
 
     ' Hardcoded configuration
 
@@ -3130,7 +3130,135 @@ Public Class ThisAddIn
     End Sub
 
 
+    ' Helper: robustly set clipboard with retries to avoid "clipboard locked" errors.
+    Private Sub SafeSetClipboard(dataObj As System.Windows.Forms.DataObject)
+        Const maxAttempts As Integer = 8
+        For attempt As Integer = 1 To maxAttempts
+            Try
+                System.Windows.Forms.Clipboard.SetDataObject(dataObj, True)
+                Return
+            Catch ex As System.Runtime.InteropServices.ExternalException
+                ' Clipboard likely locked by another process, retry
+                System.Threading.Thread.Sleep(40 * attempt)
+            Catch ex As System.Exception
+                ' Non‑transient; bail out
+                SLib.ShowCustomMessageBox($"Clipboard copy failed: {ex.Message}")
+                Return
+            End Try
+        Next
+        SLib.ShowCustomMessageBox("Could not access the clipboard after several retries (another application may be holding it).")
+    End Sub
+
     Private Async Function InsertClipboard() As System.Threading.Tasks.Task
+        Try
+            ' 1) Configuration check (original behavior)
+            If System.String.IsNullOrWhiteSpace(INI_APICall_Object) Then
+                SLib.ShowCustomMessageBox($"Your model ({INI_Model}) is not configured to process clipboard data (binary/object).")
+                Return
+            End If
+
+            ' 2) Call LLM (may attempt to read the current clipboard object internally)
+            Dim result As String = Await LLM(
+                InterpolateAtRuntime(SP_InsertClipboard),
+                "", "", "", 0, False, False, "", "clipboard"
+            ).ConfigureAwait(False)
+
+            If String.IsNullOrWhiteSpace(result) Then Return
+
+            ' 3) Determine whether we have an open mail inspector + mail item
+            Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application
+            Dim inspector As Microsoft.Office.Interop.Outlook.Inspector = ComRetry(Function() outlookApp.ActiveInspector())
+            Dim curr As Object = Nothing
+            If inspector IsNot Nothing Then
+                Try
+                    curr = ComRetry(Function() inspector.CurrentItem)
+                Catch
+                    curr = Nothing
+                End Try
+            End If
+
+            Dim haveMail As Boolean =
+                inspector IsNot Nothing AndAlso
+                curr IsNot Nothing AndAlso
+                TypeOf curr Is Microsoft.Office.Interop.Outlook.MailItem
+
+            If Not haveMail Then
+                ' 4a) No mail open (Explorer context): put result onto clipboard
+                Dim displayText As String = If(result.Length > 11000, result.Substring(0, 11000) & "…", result)
+
+                Await SwitchToUi(
+                    Sub()
+                        Dim rtfText As String = Nothing
+                        Dim dataObj As New System.Windows.Forms.DataObject()
+
+                        ' RTF conversion guarded
+                        Try
+                            rtfText = MarkdownToRtfConverter.Convert(result)
+                        Catch ex As System.Exception
+                            ' Ignore; fallback to plain text only
+                            rtfText = Nothing
+                        End Try
+
+                        If Not String.IsNullOrEmpty(rtfText) Then
+                            dataObj.SetData(System.Windows.Forms.DataFormats.Rtf, rtfText)
+                        End If
+                        dataObj.SetData(System.Windows.Forms.DataFormats.Text, result)
+
+                        SafeSetClipboard(dataObj)
+                        SLib.ShowCustomMessageBox(
+                            $"The content has been copied to the clipboard:{Environment.NewLine}{Environment.NewLine}{displayText}"
+                        )
+                    End Sub
+                ).ConfigureAwait(False)
+
+                Return
+            End If
+
+            ' 4b) Mail is open – insert at cursor
+            Dim wordEditor As Microsoft.Office.Interop.Word.Document =
+                ComRetry(Function() CType(inspector.WordEditor, Microsoft.Office.Interop.Word.Document))
+            If wordEditor Is Nothing Then
+                ' Fallback to clipboard if Word editor not available
+                Await SwitchToUi(
+                    Sub()
+                        Dim dobj As New System.Windows.Forms.DataObject()
+                        dobj.SetData(System.Windows.Forms.DataFormats.Text, result)
+                        SafeSetClipboard(dobj)
+                        SLib.ShowCustomMessageBox("Could not access the mail editor; result copied to clipboard instead.")
+                    End Sub
+                )
+                Return
+            End If
+
+            Dim selection As Microsoft.Office.Interop.Word.Selection = wordEditor.Application.Selection
+            If selection IsNot Nothing Then
+                If selection.Start <> selection.End Then
+                    selection.Collapse(Microsoft.Office.Interop.Word.WdCollapseDirection.wdCollapseEnd)
+                End If
+                selection.TypeParagraph()
+                InsertTextWithMarkdown(selection, result, True)
+            End If
+
+            ' Release COM objects explicitly (only those we created here)
+            If selection IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(selection) : selection = Nothing
+            End If
+            If wordEditor IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(wordEditor) : wordEditor = Nothing
+            End If
+            If inspector IsNot Nothing Then
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(inspector) : inspector = Nothing
+            End If
+
+        Catch ex As System.Runtime.InteropServices.ExternalException
+            ' Likely a clipboard contention scenario
+            SLib.ShowCustomMessageBox($"InsertClipboard clipboard error (probably locked): {ex.Message}")
+        Catch ex As System.Exception
+            SLib.ShowCustomMessageBox($"InsertClipboard failed: {ex.GetType().FullName}: {ex.Message}")
+        End Try
+    End Function
+
+    Private Async Function OldInsertClipboard() As System.Threading.Tasks.Task
         Try
             ' 1) Configure check
             If System.String.IsNullOrWhiteSpace(INI_APICall_Object) Then
@@ -7630,6 +7758,8 @@ Public Class ThisAddIn
                     Return ""                                   ' user cancelled
                 End If
 
+                TranslateLanguage = targetLang.Trim()
+
                 ' ─── 2  call the LLM on the UI thread, get Task(Of String) ─────
                 Dim llmOut As String = Await RunLlmAsync(
                         InterpolateAtRuntime(SP_Translate),
@@ -7870,10 +8000,8 @@ Public Class ThisAddIn
         End Try
     End Function
 
-    ' Provide model list for the browser dropdown (default, second, alternates)
 
-    ' Provide model list for the browser dropdown (default, second, alternates)
-    ' --------- FIXED: selection reconciliation moved to the top ---------
+    ' Provide model list for the browser dropdown (default, second, alternates)   
     Private Async Function GetModelListForBrowserAsync(ByVal st As InkyState) _
         As System.Threading.Tasks.Task(Of System.Collections.Generic.List(Of Object))
 

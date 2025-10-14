@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 12.10.2025
+' 14.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -6856,7 +6856,7 @@ Namespace SharedLibrary
             Dim spacerExtra As System.Int32 = 20    ' NEW: extra space between text and buttons
             Dim minContentWidth As System.Int32 = 360
             Dim startContentWidth As System.Int32 = 500
-            Dim maxWindowWidth As System.Int32 = CInt(System.Math.Floor(wa.Width * 0.9))
+            Dim maxWindowWidth As System.Int32 = CInt(System.Math.Floor(wa.Width * 0.5))
             Dim maxWindowHeight As System.Int32 = CInt(System.Math.Floor(wa.Height * 0.9))
 
             Dim okButton As New System.Windows.Forms.Button() With {.Text = "OK", .AutoSize = True, .Font = standardFont, .Margin = New System.Windows.Forms.Padding(0)}
@@ -9652,6 +9652,403 @@ Namespace SharedLibrary
         End Function
 
         Public Shared Sub ShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String), ByRef context As ISharedContext)
+
+            InitializeConfig(context, False, False)
+            If context.INIloaded = False Then Return
+
+            Dim settingsForm As New System.Windows.Forms.Form()
+            settingsForm.Text = $"{AN} Settings"
+            settingsForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+            settingsForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+            settingsForm.MaximizeBox = False
+            settingsForm.MinimizeBox = False
+            settingsForm.ShowInTaskbar = False
+            settingsForm.TopMost = True
+
+            Dim bmp As New System.Drawing.Bitmap(My.Resources.Red_Ink_Logo)
+            settingsForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon())
+
+            Dim standardFont As New System.Drawing.Font("Segoe UI", 9.0F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point)
+            settingsForm.Font = standardFont
+
+            Dim descriptionLabel As New System.Windows.Forms.Label()
+            descriptionLabel.Text = "You can temporarily change the following values (save to keep them):"
+            descriptionLabel.AutoSize = True
+            descriptionLabel.Location = New System.Drawing.Point(10, 20)
+            settingsForm.Controls.Add(descriptionLabel)
+
+            Dim labelControls As New Dictionary(Of String, System.Windows.Forms.Label)
+            Dim settingControls As New Dictionary(Of String, System.Windows.Forms.Control)
+
+            Dim maxLabelWidth As Integer = 0
+            For Each setting In Settings
+                Dim textSize As System.Drawing.Size
+                If context.INI_SecondAPI Then
+                    textSize = TextRenderer.MeasureText(setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", context.INI_Model_2) & ":", standardFont)
+                Else
+                    textSize = TextRenderer.MeasureText(setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", "2nd model (none)") & ":", standardFont)
+                End If
+                maxLabelWidth = Math.Max(maxLabelWidth, textSize.Width)
+            Next
+
+            ' --- sizes / layout core ---
+            Dim controlXOffset As Integer = maxLabelWidth + 20
+
+            ' (1) Widen input fields a bit more
+            Dim defaultControlWidth As Integer = 400   ' CHANGED (was 380 / earlier 350)
+
+            Dim lineSpacing As Integer = CInt(TextRenderer.MeasureText("Sample", standardFont).Height * 1.5)
+
+            ' (2) Scrollable panel with extra width padding to prevent horizontal scrollbar
+            Dim scrollPanel As New Panel() With {
+                .AutoScroll = True,
+                .Location = New System.Drawing.Point(10, descriptionLabel.Bottom + 20),
+                .Width = controlXOffset + defaultControlWidth + 10 + SystemInformation.VerticalScrollBarWidth + 8 ' CHANGED (+ scrollbar allowance)
+            }
+            settingsForm.Controls.Add(scrollPanel)
+
+            Dim yPos As Integer = 0
+
+            For Each setting In Settings
+                Dim label As New System.Windows.Forms.Label()
+                Dim ToolTip As New System.Windows.Forms.ToolTip()
+                If context.INI_SecondAPI Then
+                    label.Text = setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", context.INI_Model_2) & ":"
+                Else
+                    label.Text = setting.Value.Replace("{model}", context.INI_Model).Replace("{model2}", "2nd model (none)") & ":"
+                End If
+                label.AutoSize = True
+                label.Font = standardFont
+                label.Location = New System.Drawing.Point(0, yPos)
+                scrollPanel.Controls.Add(label)
+                labelControls.Add(setting.Key, label)
+                Dim ToolTipText As String = SettingsTips(setting.Key)
+                ToolTip.SetToolTip(label, ToolTipText)
+
+                If IsBooleanSetting(setting.Key) Then
+                    Dim checkBox As New System.Windows.Forms.CheckBox()
+                    checkBox.Checked = Boolean.Parse(GetSettingValue(setting.Key, context))
+                    checkBox.Location = New System.Drawing.Point(controlXOffset, yPos - 2)
+                    checkBox.Enabled = Not (setting.Key.Contains("_2") AndAlso Not context.INI_SecondAPI)
+                    scrollPanel.Controls.Add(checkBox)
+                    settingControls.Add(setting.Key, checkBox)
+                    ToolTip.SetToolTip(checkBox, ToolTipText)
+                Else
+                    Dim textBox As New System.Windows.Forms.TextBox()
+                    textBox.Text = GetSettingValue(setting.Key, context)
+                    textBox.Size = New System.Drawing.Size(defaultControlWidth, 20)
+                    textBox.Location = New System.Drawing.Point(controlXOffset, yPos)
+                    textBox.Enabled = Not (setting.Key.Contains("_2") AndAlso Not context.INI_SecondAPI)
+                    scrollPanel.Controls.Add(textBox)
+                    settingControls.Add(setting.Key, textBox)
+                    ToolTip.SetToolTip(textBox, ToolTipText)
+                End If
+
+                yPos += lineSpacing
+            Next
+
+            ' After populating:
+            Dim contentHeight As Integer = yPos
+
+            ' (3) Dynamic max height (up to 70% of working area minus space for buttons), fallback to previous if smaller)
+            Dim workArea = Screen.FromPoint(Cursor.Position).WorkingArea
+            Dim reservedBelow As Integer = 180   ' space for buttons + margins
+            Dim dynamicCap As Integer = Math.Max(450, CInt(workArea.Height * 0.7) - reservedBelow) ' ensure at least a bit taller than old 400
+            Dim maxPanelHeight As Integer = dynamicCap   ' CHANGED (replaces fixed 400)
+
+            scrollPanel.Height = If(contentHeight > maxPanelHeight, maxPanelHeight, contentHeight)
+
+            ' (4) Buttons below panel (unchanged logic, but buttonYPos now reflects possibly taller panel)
+            Dim buttonYPos As Integer = scrollPanel.Bottom + 20
+            Dim buttonSpacing As Integer = 10
+
+            Dim switchButton As New System.Windows.Forms.Button()
+            switchButton.Text = "Switch Model"
+            Dim switchButtonSize As System.Drawing.Size = TextRenderer.MeasureText(switchButton.Text, standardFont)
+            switchButton.Size = New System.Drawing.Size(switchButtonSize.Width + 20, switchButtonSize.Height + 10)
+            switchButton.Location = New System.Drawing.Point(10, buttonYPos)
+            switchButton.Enabled = context.INI_SecondAPI
+            settingsForm.Controls.Add(switchButton)
+
+            Dim SwitchButtonToolTip As New System.Windows.Forms.ToolTip()
+            SwitchButtonToolTip.SetToolTip(switchButton, "Will accept the current settings and switch the primary model with the secondary model.")
+
+            Dim expertConfigButton As New System.Windows.Forms.Button()
+            expertConfigButton.Text = "Expert Config"
+            Dim expertButtonSize As System.Drawing.Size = TextRenderer.MeasureText(expertConfigButton.Text, standardFont)
+            expertConfigButton.Size = New System.Drawing.Size(expertButtonSize.Width + 20, expertButtonSize.Height + 10)
+            expertConfigButton.Location = New System.Drawing.Point(switchButton.Right + buttonSpacing, buttonYPos)
+            settingsForm.Controls.Add(expertConfigButton)
+
+            Dim expertConfigButtonToolTip As New System.Windows.Forms.ToolTip()
+            expertConfigButtonToolTip.SetToolTip(expertConfigButton, $"Will accept the current settings and in a separate window let you amend all configuration variables from '{AN2}.ini'.")
+
+            Dim saveConfigButton As New System.Windows.Forms.Button()
+            saveConfigButton.Text = "Save Config"
+            Dim saveButtonSize As System.Drawing.Size = TextRenderer.MeasureText(saveConfigButton.Text, standardFont)
+            saveConfigButton.Size = New System.Drawing.Size(saveButtonSize.Width + 20, saveButtonSize.Height + 10)
+            saveConfigButton.Location = New System.Drawing.Point(expertConfigButton.Right + buttonSpacing, buttonYPos)
+            settingsForm.Controls.Add(saveConfigButton)
+
+            Dim saveConfigToolTip As New System.Windows.Forms.ToolTip()
+            saveConfigToolTip.SetToolTip(saveConfigButton, $"Will save the current configuration to a local copy of '{AN2}.ini' (overwriting any existing such file).")
+
+            Dim CentralConfigAvailable As Boolean = System.IO.File.Exists(System.IO.Path.Combine(ExpandEnvironmentVariables(GetFromRegistry(RegPath_Base, RegPath_IniPath, True)), $"{AN2}.ini"))
+            Dim delLocalConfigButton As New System.Windows.Forms.Button()
+            If CentralConfigAvailable Then
+                delLocalConfigButton.Text = "Give Up Local Config"
+            Else
+                delLocalConfigButton.Text = "Reset Optional Values"
+            End If
+            Dim delLocalButtonSize As System.Drawing.Size = TextRenderer.MeasureText(delLocalConfigButton.Text, standardFont)
+            delLocalConfigButton.Size = New System.Drawing.Size(delLocalButtonSize.Width + 20, delLocalButtonSize.Height + 10)
+            delLocalConfigButton.Location = New System.Drawing.Point(saveConfigButton.Right + buttonSpacing, buttonYPos)
+            settingsForm.Controls.Add(delLocalConfigButton)
+
+            Dim delLocalConfigToolTip As New System.Windows.Forms.ToolTip()
+            If CentralConfigAvailable Then
+                If Left(context.RDV, 4) = "Word" Then
+                    delLocalConfigToolTip.SetToolTip(delLocalConfigButton, $"This will deactivate the local configuration in '{AN2}.ini' (by renaming it to '.bak', overwriting any existing such file) and have the central configuration file applied going forward.")
+                Else
+                    delLocalConfigToolTip.SetToolTip(delLocalConfigButton, $"This will deactivate the local configuration in '{AN2}.ini' (by renaming it to '.bak', overwriting any existing such file), and have the configuration file of your 'Word' add-in (if available) and otherwise the central one applied going forward.")
+                End If
+            Else
+                delLocalConfigToolTip.SetToolTip(delLocalConfigButton, $"This will reset all parameters that are not mandatory by removing them from your local configuration file '{AN2}.ini'. A copy will be saved beforhand to '.bak', overwriting any existing such file.")
+            End If
+
+            Dim okButton As New System.Windows.Forms.Button()
+            okButton.Text = "OK"
+            Dim okButtonSize As System.Drawing.Size = TextRenderer.MeasureText(okButton.Text, standardFont)
+            okButton.Size = New System.Drawing.Size(okButtonSize.Width + 20, okButtonSize.Height + 10)
+            okButton.Location = New System.Drawing.Point(10, buttonYPos + 50)
+            settingsForm.Controls.Add(okButton)
+
+            Dim cancelButton As New System.Windows.Forms.Button()
+            cancelButton.Text = "Cancel"
+            Dim cancelButtonSize As System.Drawing.Size = TextRenderer.MeasureText(cancelButton.Text, standardFont)
+            cancelButton.Size = New System.Drawing.Size(cancelButtonSize.Width + 20, cancelButtonSize.Height + 10)
+            cancelButton.Location = New System.Drawing.Point(okButton.Right + buttonSpacing, buttonYPos + 50)
+            settingsForm.Controls.Add(cancelButton)
+
+            Dim aboutButton As New System.Windows.Forms.Button()
+            aboutButton.Text = $"About {AN}"
+            Dim aboutButtonSize As System.Drawing.Size = TextRenderer.MeasureText(aboutButton.Text, standardFont)
+            aboutButton.Size = New System.Drawing.Size(aboutButtonSize.Width + 20, aboutButtonSize.Height + 10)
+            aboutButton.Location = New System.Drawing.Point(cancelButton.Right + buttonSpacing, cancelButton.Top)
+            settingsForm.Controls.Add(aboutButton)
+
+            Dim RightSide As Integer = aboutButton.Right
+
+            Dim updateButton As New System.Windows.Forms.Button()
+            updateButton.Text = "Check for Updates"
+            If Not String.IsNullOrWhiteSpace(context.INI_UpdatePath) Then
+                updateButton.Text = "Do local update"
+            End If
+            Dim updateButtonSize As System.Drawing.Size = TextRenderer.MeasureText(updateButton.Text, standardFont)
+            updateButton.Size = New System.Drawing.Size(updateButtonSize.Width + 20, updateButtonSize.Height + 10)
+            updateButton.Location = New System.Drawing.Point(aboutButton.Right + buttonSpacing, cancelButton.Top)
+            If ApplicationDeployment.IsNetworkDeployed OrElse Not String.IsNullOrWhiteSpace(context.INI_UpdatePath) Then
+                settingsForm.Controls.Add(updateButton)
+                RightSide = updateButton.Right
+            End If
+
+            Dim FilePath As String = ""
+            Dim IsExcel As Boolean = True
+            If context.RDV.Contains("Word") Then
+                FilePath = ExpandEnvironmentVariables(HelperPaths("Word"))
+                IsExcel = False
+            ElseIf context.RDV.Contains("Excel") Then
+                FilePath = ExpandEnvironmentVariables(HelperPaths("Excel"))
+            End If
+            Debug.WriteLine("Filepath=" & FilePath)
+
+            Dim helperButton As New System.Windows.Forms.Button()
+            If Not String.IsNullOrEmpty(FilePath) Then
+                If File.Exists(FilePath) Then
+                    helperButton.Text = "Remove Helper"
+                Else
+                    helperButton.Text = "Install Helper"
+                End If
+                Dim HelperButtonSize As System.Drawing.Size = TextRenderer.MeasureText(helperButton.Text, standardFont)
+                helperButton.Size = New System.Drawing.Size(HelperButtonSize.Width + 20, HelperButtonSize.Height + 10)
+                helperButton.Location = New System.Drawing.Point(RightSide + buttonSpacing, cancelButton.Top)
+                settingsForm.Controls.Add(helperButton)
+            End If
+            Dim CapturedContext As ISharedContext = context
+
+            ' (All existing handlers remain unchanged below) --------------------------------
+            AddHandler switchButton.Click, Sub(sender, e)
+                                               If CapturedContext.INI_SecondAPI Then
+                                                   For Each settingKey In settingControls.Keys
+                                                       Dim control = settingControls(settingKey)
+                                                       If TypeOf control Is System.Windows.Forms.TextBox Then
+                                                           Dim textValue As String = DirectCast(control, System.Windows.Forms.TextBox).Text
+                                                           SetSettingValue(settingKey, textValue, CapturedContext)
+                                                       ElseIf TypeOf control Is System.Windows.Forms.CheckBox Then
+                                                           Dim boolValue As Boolean = DirectCast(control, System.Windows.Forms.CheckBox).Checked
+                                                           SetSettingValue(settingKey, boolValue.ToString(), CapturedContext)
+                                                       Else
+                                                           MessageBox.Show($"Error in ShowSettingsWindow - unsupported control type for setting '{settingKey}' in ShowSettingsWindow (Switch).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                                       End If
+                                                   Next
+                                                   SwitchModels(CapturedContext)
+                                                   RefreshFormValues(settingControls, labelControls, CapturedContext, Settings)
+                                                   switchButton.Enabled = CapturedContext.INI_SecondAPI
+                                               End If
+                                               CapturedContext.MenusAdded = False
+                                           End Sub
+
+            AddHandler expertConfigButton.Click, Sub(sender, e)
+                                                     For Each settingKey In settingControls.Keys
+                                                         Dim control = settingControls(settingKey)
+                                                         If TypeOf control Is System.Windows.Forms.TextBox Then
+                                                             Dim textValue As String = DirectCast(control, System.Windows.Forms.TextBox).Text
+                                                             SetSettingValue(settingKey, textValue, CapturedContext)
+                                                         ElseIf TypeOf control Is System.Windows.Forms.CheckBox Then
+                                                             Dim boolValue As Boolean = DirectCast(control, System.Windows.Forms.CheckBox).Checked
+                                                             SetSettingValue(settingKey, boolValue.ToString(), CapturedContext)
+                                                         Else
+                                                             MessageBox.Show($"Error in ShowSettingsWindow - unsupported control type for setting '{settingKey}' in ShowSettingsWindow (ExpertConfig).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                                         End If
+                                                     Next
+                                                     ShowExpertConfiguration(CapturedContext, settingsForm)
+                                                     RefreshFormValues(settingControls, labelControls, CapturedContext, Settings)
+                                                     switchButton.Enabled = CapturedContext.INI_SecondAPI
+                                                     CapturedContext.MenusAdded = False
+                                                 End Sub
+
+            AddHandler saveConfigButton.Click, Sub(sender, e)
+                                                   For Each settingKey In settingControls.Keys
+                                                       Dim control = settingControls(settingKey)
+                                                       If TypeOf control Is System.Windows.Forms.TextBox Then
+                                                           Dim textValue As String = DirectCast(control, System.Windows.Forms.TextBox).Text
+                                                           SetSettingValue(settingKey, textValue, CapturedContext)
+                                                       ElseIf TypeOf control Is System.Windows.Forms.CheckBox Then
+                                                           Dim boolValue As Boolean = DirectCast(control, System.Windows.Forms.CheckBox).Checked
+                                                           SetSettingValue(settingKey, boolValue.ToString(), CapturedContext)
+                                                       Else
+                                                           MessageBox.Show($"Error in ShowSettingsWindow - unsupported control type for setting '{settingKey}' in ShowSettingsWindow (Save).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                                       End If
+                                                   Next
+                                                   UpdateAppConfig(CapturedContext)
+                                                   CapturedContext.MenusAdded = False
+                                               End Sub
+
+            AddHandler delLocalConfigButton.Click, Sub(sender, e)
+                                                       If CentralConfigAvailable Then
+                                                           If ShowCustomYesNoBox($"Do you really want to deactivate your local configuration file? The file '{AN2}.ini' will be renamed to '.bak' overwriting any existing such file", "Yes", "No") = 1 Then
+                                                               If RenameFileToBak(GetDefaultINIPath(CapturedContext.RDV)) Then
+                                                                   ShowCustomMessageBox("Local configuration deactivated. The central configuration will be applied going forward.", "OK")
+                                                                   InitializeConfig(CapturedContext, False, True)
+                                                               End If
+                                                           End If
+                                                       Else
+                                                           If ShowCustomYesNoBox($"Do you really want to reset your local configuration file by removing non-mandatory entries? The current configuration file '{AN2}.ini' will beforehand be saved to a '.bak' file overwriting any existing such file.", "Yes", "No") = 1 Then
+                                                               If RenameFileToBak(GetDefaultINIPath(CapturedContext.RDV)) Then
+                                                                   ResetLocalAppConfig(CapturedContext)
+                                                               End If
+                                                           End If
+                                                       End If
+                                                       RefreshFormValues(settingControls, labelControls, CapturedContext, Settings)
+                                                       switchButton.Enabled = CapturedContext.INI_SecondAPI
+                                                       CapturedContext.MenusAdded = False
+                                                   End Sub
+
+            AddHandler helperButton.Click, Async Sub(sender, e)
+                                               If helperButton.Text = "Remove Helper" Then
+                                                   If ShowCustomYesNoBox($"Do you really want to remove the helper file '{FilePath}' from your system? It will be unloaded and deleted. You can re-install it later.", "Yes", "No") = 1 Then
+                                                       If IsExcel Then UnloadExcelAddin(ExcelHelper) Else UnloadWordAddin(WordHelper)
+                                                       Try
+                                                           System.IO.File.Delete(FilePath)
+                                                       Catch ex As System.Exception
+                                                       End Try
+                                                       If System.IO.File.Exists(FilePath) Then
+                                                           ShowCustomMessageBox($"The helper file could not be deleted. Try to manually delete the file '{FilePath}' after having closed the application.")
+                                                       Else
+                                                           ShowCustomMessageBox("The helper file was successfully deleted.")
+                                                           helperButton.Text = "Install Helper"
+                                                           CapturedContext.MenusAdded = False
+                                                           RemoveMenu = True
+                                                       End If
+                                                   End If
+                                               Else
+                                                   If ShowCustomYesNoBox($"Do you really want to download the helper file from https://apps.vischer.com and have it installed to '{FilePath}'? Next time you start the application, it will be automatically loaded.", "Yes", "No") = 1 Then
+                                                       Dim DownloadUrl As String = ""
+                                                       If IsExcel Then DownloadUrl = ExcelHelperUrl Else DownloadUrl = WordHelperUrl
+                                                       Try
+                                                           Using client As New HttpClient()
+                                                               client.Timeout = TimeSpan.FromMinutes(10)
+                                                               client.DefaultRequestHeaders.AcceptEncoding.Clear()
+                                                               Using response As HttpResponseMessage = Await client.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead)
+                                                                   response.EnsureSuccessStatusCode()
+                                                                   Using fileStream As FileStream = New FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.None)
+                                                                       Using httpStream As Stream = Await response.Content.ReadAsStreamAsync()
+                                                                           Dim buffer(8192) As Byte
+                                                                           Dim bytesRead As Integer
+                                                                           Do
+                                                                               bytesRead = Await httpStream.ReadAsync(buffer, 0, buffer.Length)
+                                                                               If bytesRead = 0 Then Exit Do
+                                                                               Await fileStream.WriteAsync(buffer, 0, bytesRead)
+                                                                           Loop
+                                                                       End Using
+                                                                   End Using
+                                                               End Using
+                                                           End Using
+                                                           ShowCustomMessageBox($"Download to '{FilePath}' completed. You must restart the application for it to be loaded.")
+                                                           helperButton.Text = "Remove Helper"
+                                                       Catch ex As System.Exception
+                                                           ShowCustomMessageBox($"Error when downloading from '{DownloadUrl}' to '{FilePath}'. You may have to download and install the helper file manually.")
+                                                       End Try
+                                                   End If
+                                               End If
+                                               RefreshFormValues(settingControls, labelControls, CapturedContext, Settings)
+                                               switchButton.Enabled = CapturedContext.INI_SecondAPI
+                                               CapturedContext.MenusAdded = False
+                                           End Sub
+
+            AddHandler aboutButton.Click, Sub(sender, e)
+                                              ShowAboutWindow(settingsForm, CapturedContext)
+                                          End Sub
+
+            If ApplicationDeployment.IsNetworkDeployed OrElse Not String.IsNullOrWhiteSpace(CapturedContext.INI_UpdatePath) Then
+                AddHandler updateButton.Click, Sub(sender, e)
+                                                   Dim updater As New UpdateHandler()
+                                                   updater.CheckAndInstallUpdates(CapturedContext.RDV, CapturedContext.INI_UpdatePath)
+                                               End Sub
+            End If
+
+            AddHandler okButton.Click, Sub(sender, e)
+                                           For Each settingKey In settingControls.Keys
+                                               Dim control = settingControls(settingKey)
+                                               If TypeOf control Is System.Windows.Forms.TextBox Then
+                                                   Dim textValue As String = DirectCast(control, System.Windows.Forms.TextBox).Text
+                                                   SetSettingValue(settingKey, textValue, CapturedContext)
+                                               ElseIf TypeOf control Is System.Windows.Forms.CheckBox Then
+                                                   Dim boolValue As Boolean = DirectCast(control, System.Windows.Forms.CheckBox).Checked
+                                                   SetSettingValue(settingKey, boolValue.ToString(), CapturedContext)
+                                               Else
+                                                   MessageBox.Show($"Error in ShowSettingsWindow - unsupported control type for setting '{settingKey}' in ShowSettingsWindow (OK).", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                               End If
+                                           Next
+                                           CapturedContext.MenusAdded = False
+                                           settingsForm.Close()
+                                       End Sub
+
+            AddHandler cancelButton.Click, Sub(sender, e)
+                                               settingsForm.Close()
+                                           End Sub
+
+
+            ' (5) Recalculate final form size AFTER buttons are placed
+            settingsForm.ClientSize = New System.Drawing.Size(
+                scrollPanel.Left + scrollPanel.Width + 20,
+                cancelButton.Bottom + 20
+            )
+
+            settingsForm.ShowDialog()
+        End Sub
+
+        Public Shared Sub oldShowSettingsWindow(Settings As Dictionary(Of String, String), SettingsTips As Dictionary(Of String, String), ByRef context As ISharedContext)
 
             InitializeConfig(context, False, False)
 
@@ -14687,15 +15084,21 @@ Namespace SharedLibrary
     End Class
 
 
+
     Public Class UpdateHandler
+
+        Private Const ShowCheckingSplash As Boolean = True
+        Private Const MaxDailyUpdateRetries As Integer = 5
+
+        ' NEW log size limits
+        Private Const LogMaxBytes As Integer = 120000      ' ~120 KB
+        Private Const LogMaxLines As Integer = 2000
+        Private Const LogKeepLines As Integer = 1500       ' retain last 1.5k lines when trimming
 
         Public Shared MainControl As System.Windows.Forms.Control
         Public Shared HostHandle As IntPtr
-
-        ' Keep a single splash instance across async callbacks
         Private Shared _splash As SplashScreen
 
-        ' Win32 helpers (kept local to avoid touching existing NativeMethods)
         <Runtime.InteropServices.DllImport("user32.dll")>
         Private Shared Function SetWindowPos(hWnd As IntPtr, hWndInsertAfter As IntPtr,
                                          X As Integer, Y As Integer, cx As Integer, cy As Integer,
@@ -14716,7 +15119,6 @@ Namespace SharedLibrary
                     ShowUpdatingSplashCore(message)
                 End If
             Catch
-                ' ignore splash errors
             End Try
         End Sub
 
@@ -14730,13 +15132,10 @@ Namespace SharedLibrary
                     Catch
                     End Try
                 End If
-
                 _splash.UpdateMessage(message)
                 _splash.Show()
                 _splash.BringToFront()
                 _splash.Activate()
-
-                ' Ensure it is on top of all windows
                 Try
                     NativeMethods.SetForegroundWindow(_splash.Handle)
                 Catch
@@ -14753,23 +15152,21 @@ Namespace SharedLibrary
             Try
                 If _splash Is Nothing Then Return
                 Dim closer As Action =
-                Sub()
-                    Try
-                        ' Drop topmost before closing to avoid sticking
+                    Sub()
                         Try
-                            SetWindowPos(_splash.Handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
-                        Catch
+                            Try
+                                SetWindowPos(_splash.Handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
+                            Catch
+                            End Try
+                            Try
+                                _splash.TopMost = False
+                            Catch
+                            End Try
+                            _splash.Close()
+                        Finally
+                            _splash = Nothing
                         End Try
-                        Try
-                            _splash.TopMost = False
-                        Catch
-                        End Try
-                        _splash.Close()
-                    Finally
-                        _splash = Nothing
-                    End Try
-                End Sub
-
+                    End Sub
                 If _splash.InvokeRequired Then
                     _splash.Invoke(closer)
                 Else
@@ -14780,19 +15177,30 @@ Namespace SharedLibrary
             End Try
         End Sub
 
-
         Private Class NativeMethods
             <Runtime.InteropServices.DllImport("user32.dll")>
             Public Shared Function SetForegroundWindow(hWnd As IntPtr) As Boolean
             End Function
         End Class
 
-        ' --- small helper: resilient logging to %AppData%\{AN2}\updater.log
+        ' LOGGING with trimming
         Private Shared Sub WriteUpdateLog(message As String, Optional ex As Exception = Nothing)
             Try
                 Dim logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), SharedMethods.AN2)
                 If Not Directory.Exists(logDir) Then Directory.CreateDirectory(logDir)
                 Dim logPath = Path.Combine(logDir, "updater.log")
+
+                ' Trim before writing if too large
+                Try
+                    If File.Exists(logPath) Then
+                        Dim fi = New FileInfo(logPath)
+                        If fi.Length > LogMaxBytes Then
+                            TrimLogFile(logPath)
+                        End If
+                    End If
+                Catch
+                End Try
+
                 Dim sb As New StringBuilder()
                 sb.AppendFormat("[{0:yyyy-MM-dd HH:mm:ss}] {1}", Date.Now, message)
                 If ex IsNot Nothing Then
@@ -14810,8 +15218,30 @@ Namespace SharedLibrary
                     End If
                 End If
                 File.AppendAllText(logPath, sb.ToString() & Environment.NewLine, Encoding.UTF8)
+
+                ' Secondary safeguard by line count (after append)
+                Try
+                    Dim fi2 = New FileInfo(logPath)
+                    If fi2.Length > LogMaxBytes * 1.2 Then
+                        TrimLogFile(logPath)
+                    End If
+                Catch
+                End Try
             Catch
-                ' never let logging break updater flow
+            End Try
+        End Sub
+
+        Private Shared Sub TrimLogFile(path As String)
+            Try
+                Dim lines = File.ReadAllLines(path, Encoding.UTF8)
+                If lines.Length > LogMaxLines Then
+                    lines = lines.Skip(Math.Max(0, lines.Length - LogKeepLines)).ToArray()
+                ElseIf New FileInfo(path).Length > LogMaxBytes Then
+                    ' Fallback if line count small but file large (e.g., huge lines) – trim by tail chars
+                    lines = lines.Skip(Math.Max(0, lines.Length - LogKeepLines)).ToArray()
+                End If
+                File.WriteAllLines(path, lines, Encoding.UTF8)
+            Catch
             End Try
         End Sub
 
@@ -14850,44 +15280,50 @@ Namespace SharedLibrary
 
         Private Shared Function IsTrustNotGranted(ex As Exception) As Boolean
             If ex Is Nothing Then Return False
-            ' TrustNotGrantedException is a DeploymentException subtype
             If ex.[GetType]().FullName.EndsWith("TrustNotGrantedException", StringComparison.OrdinalIgnoreCase) Then Return True
             If ex.Message IsNot Nothing AndAlso ex.Message.IndexOf("User has refused to grant required permissions", StringComparison.OrdinalIgnoreCase) >= 0 Then Return True
-            ' Walk inner exceptions
             Return IsTrustNotGranted(ex.InnerException)
         End Function
 
+
         Public Sub CheckAndInstallUpdates(appname As String, LocalPath As String)
             Try
+                Dim currentDate As Date = Date.Now
                 If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
                     Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
-                    Dim currentDate As Date = Date.Now
+                    WriteUpdateLog($"[CheckAndInstallUpdates] network-deployed app='{appname}' url='{deployment.UpdateLocation}' zone='{GetUrlZoneName(deployment.UpdateLocation.AbsoluteUri)}'")
 
-                    WriteUpdateLog($"[CheckAndInstallUpdates] network-deployed={True} app='{appname}' url='{deployment.UpdateLocation}' zone='{GetUrlZoneName(deployment.UpdateLocation.AbsoluteUri)}'")
+                    Dim updateAvailable As Boolean = False
+                    Dim hasUpdateInfo As Boolean = False
+                    Try
+                        updateAvailable = deployment.CheckForUpdate()
+                        hasUpdateInfo = True
+                    Catch ex As Exception
+                        WriteUpdateLog("[CheckAndInstallUpdates] CheckForUpdate failed", ex)
+                        UIInvokeMessage(
+                            "The update check could not complete (network or permission issue). Try again later or use a manual reinstall if problems persist.",
+                            $"{SharedMethods.AN} Updater")
+                    End Try
 
-                    If deployment.CheckForUpdate() Then
+                    If hasUpdateInfo AndAlso updateAvailable Then
+                        Dim vstoUrl = deployment.UpdateLocation.AbsoluteUri.Replace(".application", ".vsto")
                         Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox(
-                        $"An update is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want to install it now? Your Edge browser should open and ask you for confirmation. If you run this within a corporate environment, your firewall may block this.",
-                        "Yes", "No")
+                            $"An update is available. Install now?",
+                            "Yes", "No", $"{SharedMethods.AN} Updater")
 
                         If dialogResult = 1 Then
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Word"))
-                                    My.Settings.LastUpdateCheckWord = currentDate
-                                Case "Exce"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Excel"))
-                                    My.Settings.LastUpdateCheckExcel = currentDate
-                                Case "Outl"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
-                                    My.Settings.LastUpdateCheckOutlook = currentDate
-                            End Select
-                            My.Settings.Save()
-
-                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application to see whether it was successful.", $"{SharedMethods.AN} Updater")
+                            WriteUpdateLog($"[CheckAndInstallUpdates] user accepted update vsto='{vstoUrl}'")
+                            ShowUpdatingSplash("Updating …")
+                            Try
+                                RunVstoInstaller(vstoUrl)
+                            Finally
+                                CloseUpdatingSplash()
+                            End Try
+                        Else
+                            WriteUpdateLog("[CheckAndInstallUpdates] user declined update")
                         End If
-                    Else
-                        SharedMethods.ShowCustomMessageBox($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
+                    ElseIf hasUpdateInfo Then
+                        UIInvokeMessage($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
                     End If
 
                     Select Case Left(appname, 4)
@@ -14898,43 +15334,173 @@ Namespace SharedLibrary
                     My.Settings.Save()
                 Else
                     If LocalPath = "" Then
-                        SharedMethods.ShowCustomMessageBox(
-                        $"This version of {SharedMethods.AN} has not been configured with an update path ('UpdatedPath = '). The configuration should refer to the main directory where the installation sources 'word', 'excel' and 'outlook' are stored. You may have to discuss this with your administrator.",
-                        $"{SharedMethods.AN} Updater")
+                        UIInvokeMessage(
+                            $"This version of {SharedMethods.AN} has not been configured with an update path ('UpdatePath ='). Ask your administrator.",
+                            $"{SharedMethods.AN} Updater")
                     Else
                         LocalPath = SharedMethods.ExpandEnvironmentVariables(LocalPath)
                         Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox(
-                        $"This will initiate the installer for this add-in. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?",
-                        "Yes", "No")
+                            $"This will start the local installer. If a newer version exists under '{LocalPath}', it will be installed. Proceed?",
+                            "Yes", "No", $"{SharedMethods.AN} Updater")
                         If dialogResult = 1 Then
                             Dim vstoFilePath As String = ""
                             Select Case Left(appname, 4)
-                                Case "Word" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
-                                Case "Exce" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"excel\{SharedMethods.AN3} for Excel.vsto")
-                                Case "Outl" : vstoFilePath = System.IO.Path.Combine(LocalPath, $"outlook\{SharedMethods.AN3} for Outlook.vsto")
+                                Case "Word" : vstoFilePath = Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
+                                Case "Exce" : vstoFilePath = Path.Combine(LocalPath, $"excel\{SharedMethods.AN3} for Excel.vsto")
+                                Case "Outl" : vstoFilePath = Path.Combine(LocalPath, $"outlook\{SharedMethods.AN3} for Outlook.vsto")
                             End Select
-
-                            If System.IO.File.Exists(vstoFilePath) Then
-                                RunVstoInstaller(vstoFilePath)
+                            If File.Exists(vstoFilePath) Then
+                                ShowUpdatingSplash("Updating …")
+                                Try
+                                    RunVstoInstaller(vstoFilePath)
+                                Finally
+                                    CloseUpdatingSplash()
+                                End Try
                             Else
-                                SharedMethods.ShowCustomMessageBox(
-                                $"Installer '{vstoFilePath}' not found. Check 'UpdatePath =' in the '{SharedMethods.AN2}.ini''.",
-                                $"{SharedMethods.AN} Updater")
+                                UIInvokeMessage(
+                                    $"Installer not found: '{vstoFilePath}'. Check 'UpdatePath =' in '{SharedMethods.AN2}.ini'.",
+                                    $"{SharedMethods.AN} Updater")
                             End If
                         End If
                     End If
                 End If
             Catch ex As DeploymentException
                 WriteUpdateLog("[CheckAndInstallUpdates] DeploymentException", ex)
-                SharedMethods.ShowCustomMessageBox(
-                $"An error occurred while checking for or installing updates (try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button): " & ex.Message,
-                $"{SharedMethods.AN} Updater")
+                UIInvokeMessage(
+                    $"Error during update (you may try a manual install via {AppsUrl}): {ex.Message}",
+                    $"{SharedMethods.AN} Updater")
+            Catch ex As Exception
+                WriteUpdateLog("[CheckAndInstallUpdates] Unexpected Exception", ex)
+                UIInvokeMessage(
+                    $"Unexpected error during update: {ex.Message}",
+                    $"{SharedMethods.AN} Updater")
             End Try
         End Sub
 
         Private Shared _appname As String
         Private Shared _localPath As String
         Private Shared _checkIntervalInDays As Integer
+
+        ' (Other retry-state methods unchanged)...
+
+        Private Shared Sub GetRetryStateFromSettings(ByRef day As Date, ByRef count As Integer, ByRef shownToday As Boolean)
+            day = Date.MinValue : count = 0 : shownToday = False
+            Select Case Left(_appname, 4)
+                Case "Word"
+                    day = My.Settings.UpdateRetryDateWord
+                    count = My.Settings.UpdateRetryCountWord
+                    shownToday = My.Settings.UpdateRetryPromptShownWord
+                Case "Exce"
+                    day = My.Settings.UpdateRetryDateExcel
+                    count = My.Settings.UpdateRetryCountExcel
+                    shownToday = My.Settings.UpdateRetryPromptShownExcel
+                Case "Outl"
+                    day = My.Settings.UpdateRetryDateOutlook
+                    count = My.Settings.UpdateRetryCountOutlook
+                    shownToday = My.Settings.UpdateRetryPromptShownOutlook
+            End Select
+        End Sub
+
+        Private Shared Sub SetRetryStateToSettings(day As Date, count As Integer, shownToday As Boolean)
+            Select Case Left(_appname, 4)
+                Case "Word"
+                    My.Settings.UpdateRetryDateWord = day
+                    My.Settings.UpdateRetryCountWord = count
+                    My.Settings.UpdateRetryPromptShownWord = shownToday
+                Case "Exce"
+                    My.Settings.UpdateRetryDateExcel = day
+                    My.Settings.UpdateRetryCountExcel = count
+                    My.Settings.UpdateRetryPromptShownExcel = shownToday
+                Case "Outl"
+                    My.Settings.UpdateRetryDateOutlook = day
+                    My.Settings.UpdateRetryCountOutlook = count
+                    My.Settings.UpdateRetryPromptShownOutlook = shownToday
+            End Select
+            Try : My.Settings.Save() : Catch : End Try
+        End Sub
+
+        Private Shared Sub ResetRetryIfNewDay(ByRef day As Date, ByRef count As Integer, ByRef shownToday As Boolean)
+            If day.Date <> Date.Today Then
+                day = Date.Today : count = 0 : shownToday = False
+                SetRetryStateToSettings(day, count, shownToday)
+            End If
+        End Sub
+
+        ' Version if multiple prompts per day (every 3 failures)
+
+        Private Shared Function _RecordCheckFailureAndMaybePrompt(optionalReason As String) As Boolean
+            If _checkIntervalInDays = -1 Then
+                Return False ' infinite retry mode
+            End If
+
+            Dim day As Date, count As Integer, shown As Boolean
+            GetRetryStateFromSettings(day, count, shown)
+            ResetRetryIfNewDay(day, count, shown)
+
+            count += 1
+            SetRetryStateToSettings(day, count, shown)
+            WriteUpdateLog($"[Retry] update check failed (reason='{optionalReason}'), todayCount={count}/{MaxDailyUpdateRetries}")
+
+            ' Still within the silent window
+            If count < MaxDailyUpdateRetries Then Return False
+
+            ' We reached the threshold: ask user
+            Dim msg = $"No update check was possible at least {MaxDailyUpdateRetries} times today (e.g., network issues). Continue trying or pause for {_checkIntervalInDays} day(s)?"
+            Dim choice = UIInvokeYesNo(msg, "Continue trying", "Pause", $"{SharedMethods.AN} Updater")
+
+            If choice = 1 Then
+                ' Continue: restart cycle (3 more silent tries)
+                count = 0
+                shown = False    ' allow prompting again if another 3 fail
+                SetRetryStateToSettings(day, count, shown)
+                Return False      ' do not pause
+            Else
+                ' Pause: mark shown to avoid re-prompting; caller will pause via returned True
+                shown = True
+                SetRetryStateToSettings(day, count, shown)
+                Return True
+            End If
+        End Function
+
+
+        ' Version if only one prompt per day
+
+        Private Shared Function RecordCheckFailureAndMaybePrompt(optionalReason As String) As Boolean
+            If _checkIntervalInDays = -1 Then
+                ' Infinite retry mode: never pause, never prompt
+                Return False
+            End If
+
+            Dim day As Date, count As Integer, shown As Boolean
+            GetRetryStateFromSettings(day, count, shown)
+            ResetRetryIfNewDay(day, count, shown)
+            count += 1
+            SetRetryStateToSettings(day, count, shown)
+            WriteUpdateLog($"[Retry] update check failed (reason='{optionalReason}'), todayCount={count}/{MaxDailyUpdateRetries}")
+
+            If count < MaxDailyUpdateRetries Then Return False
+            If Not shown Then
+                Dim msg = $"No update check was possible at least {MaxDailyUpdateRetries} times today (e.g., because of network issues). Continue trying today or pause for {_checkIntervalInDays} day(s)?"
+                Dim choice = UIInvokeYesNo(msg, "Continue trying", "Pause", $"{SharedMethods.AN} Updater")
+                shown = True
+                SetRetryStateToSettings(day, count, shown)
+                Return (choice <> 1) ' True means pause
+            End If
+            Return False
+        End Function
+
+        Private Shared Function UIInvokeYesNo(bodyText As String, button1Text As String, button2Text As String, caption As String) As Integer
+            Try
+                If MainControl IsNot Nothing AndAlso MainControl.IsHandleCreated AndAlso MainControl.InvokeRequired Then
+                    Return CInt(MainControl.Invoke(New Func(Of Integer)(
+                        Function() SharedMethods.ShowCustomYesNoBox(bodyText, button1Text, button2Text, caption))))
+                Else
+                    Return SharedMethods.ShowCustomYesNoBox(bodyText, button1Text, button2Text, caption)
+                End If
+            Catch
+                Return SharedMethods.ShowCustomYesNoBox(bodyText, button1Text, button2Text, caption)
+            End Try
+        End Function
 
         Public Shared Sub PeriodicCheckForUpdates(
         checkIntervalInDays As Integer,
@@ -14952,13 +15518,19 @@ Namespace SharedLibrary
                 Dim lastCheck As Date = If(
                 Left(_appname, 4) = "Word", My.Settings.LastUpdateCheckWord,
                 If(Left(_appname, 4) = "Exce", My.Settings.LastUpdateCheckExcel,
-                If(Left(_appname, 4) = "Outl", My.Settings.LastUpdateCheckOutlook, Date.MinValue)))
+                   If(Left(_appname, 4) = "Outl", My.Settings.LastUpdateCheckOutlook, Date.MinValue)))
                 Dim nowDate As Date = Date.Now
                 Dim days As Double = (nowDate - lastCheck).TotalDays
 
-                WriteUpdateLog($"[PeriodicCheck] app='{_appname}' localPath='{_localPath}' interval={_checkIntervalInDays} lastCheck='{lastCheck:yyyy-MM-dd HH:mm:ss}' ageDays={days:0.0}")
+                ' Allow retries within the same day even if interval not reached (if we had failures today but below threshold)
+                Dim rDay As Date, rCount As Integer, rShown As Boolean
+                GetRetryStateFromSettings(rDay, rCount, rShown)
+                ResetRetryIfNewDay(rDay, rCount, rShown)
+                Dim allowRetryToday As Boolean = (rCount > 0 AndAlso rCount < MaxDailyUpdateRetries)
 
-                If days < _checkIntervalInDays AndAlso _checkIntervalInDays > 0 Then
+                WriteUpdateLog($"[PeriodicCheck] app='{_appname}' localPath='{_localPath}' interval={_checkIntervalInDays} lastCheck='{lastCheck:yyyy-MM-dd HH:mm:ss}' ageDays={days:0.0} retryToday={rCount}")
+
+                If days < _checkIntervalInDays AndAlso _checkIntervalInDays > 0 AndAlso Not allowRetryToday Then
                     WriteUpdateLog("[PeriodicCheck] skipped - interval not reached")
                     Return
                 End If
@@ -14967,9 +15539,12 @@ Namespace SharedLibrary
                     Dim dep = ApplicationDeployment.CurrentDeployment
                     WriteUpdateLog($"[PeriodicCheck] network-deployed url='{dep.UpdateLocation}' zone='{GetUrlZoneName(dep.UpdateLocation.AbsoluteUri)}'")
 
-                    ' Show "Checking for updates …" only while the async check is running.
-                    ShowUpdatingSplash("Checking for updates …")
-                    splashManagedByOnCheck = True
+                    If ShowCheckingSplash Then
+                        ShowUpdatingSplash("Checking updates …")
+                        splashManagedByOnCheck = True
+                    Else
+                        splashManagedByOnCheck = False
+                    End If
 
                     RemoveHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
                     AddHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
@@ -14982,7 +15557,6 @@ Namespace SharedLibrary
                     WriteUpdateLog($"[PeriodicCheck] local-deployed vsto='{vstoFile}'")
 
                     If File.Exists(vstoFile) Then
-                        ' Only show "Updating …" while actually installing locally
                         ShowUpdatingSplash("Updating …")
                         Try
                             RunVstoInstaller(vstoFile)
@@ -14995,25 +15569,24 @@ Namespace SharedLibrary
                         $"{SharedMethods.AN} Updater")
                     End If
 
+                    ' Local path execution = a successful check happened; record timestamp
                     SaveTimestamp(nowDate)
+                    ' Also reset daily retries on success
+                    Dim day As Date = Date.Today : Dim cnt As Integer = 0 : Dim shown As Boolean = False
+                    SetRetryStateToSettings(day, cnt, shown)
                 End If
 
             Catch dex As DeploymentException
                 WriteUpdateLog("[PeriodicCheck] DeploymentException", dex)
-                UIInvokeMessage(
-                "The check for new updates could not be completed due to an access right restriction. " &
-                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-                $"{SharedMethods.AN} Updater")
-                If _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
+                Dim pause As Boolean = RecordCheckFailureAndMaybePrompt("DeploymentException")
+                If pause AndAlso _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
 
             Catch ex As Exception
                 WriteUpdateLog("[PeriodicCheck] Unexpected Exception", ex)
-                UIInvokeMessage(
-                $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
-                $"{SharedMethods.AN} Updater")
+                Dim pause As Boolean = RecordCheckFailureAndMaybePrompt(ex.Message)
+                If pause AndAlso _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
 
             Finally
-                ' For network-deployed async checks, OnCheck will close the "Checking …" splash.
                 If Not splashManagedByOnCheck Then
                     CloseUpdatingSplash()
                 End If
@@ -15026,7 +15599,6 @@ Namespace SharedLibrary
             Dim saved As Boolean = False
 
             Try
-                ' The async "Checking …" phase is over; hide that splash first.
                 CloseUpdatingSplash()
 
                 If e.Error IsNot Nothing Then
@@ -15045,14 +15617,15 @@ Namespace SharedLibrary
                         End Try
 
                         If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+                        ' Reset retries on success path (we attempted install)
+                        Dim d As Date = Date.Today : Dim c As Integer = 0 : Dim s As Boolean = False
+                        SetRetryStateToSettings(d, c, s)
                         Return
                     End If
 
-                    UIInvokeMessage(
-                "The check for new updates could not be completed due to an access right restriction. " &
-                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-                $"{SharedMethods.AN} Updater")
-                    If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+                    ' Silent failure handling with daily retries
+                    Dim pause As Boolean = RecordCheckFailureAndMaybePrompt(If(e.Error Is Nothing, "Unknown", e.Error.Message))
+                    If pause AndAlso _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
                     Return
                 End If
 
@@ -15078,7 +15651,6 @@ Namespace SharedLibrary
 
                         SaveTimestamp(nowDate) : saved = True
                     Else
-                        ' Keep semantics: still allow “pause”, but ensure a last-check is recorded anyway later.
                         If _checkIntervalInDays = -1 Then
                             SaveTimestamp(nowDate) : saved = True
                         ElseIf _checkIntervalInDays > 0 Then
@@ -15091,37 +15663,280 @@ Namespace SharedLibrary
                     End If
                 Else
                     WriteUpdateLog("[OnCheck] no update available")
-                    ' NEW: always record that we checked successfully
                     If _checkIntervalInDays > 0 Then
                         SaveTimestamp(nowDate) : saved = True
                     End If
                 End If
 
+                ' On any successful network check outcome, reset the daily retry state
+                Dim day As Date = Date.Today : Dim cnt As Integer = 0 : Dim shown As Boolean = False
+                SetRetryStateToSettings(day, cnt, shown)
+
             Catch dex As DeploymentException
                 WriteUpdateLog("[OnCheck] DeploymentException", dex)
-                UIInvokeMessage(
-            "The check for new updates could not be completed due to an access right restriction. " &
-            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-                If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
+                Dim pause As Boolean = RecordCheckFailureAndMaybePrompt("DeploymentException")
+                If pause AndAlso _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
 
             Catch ex As Exception
                 WriteUpdateLog("[OnCheck] Unexpected Exception", ex)
-                UIInvokeMessage(
-            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
+                Dim pause As Boolean = RecordCheckFailureAndMaybePrompt(ex.Message)
+                If pause AndAlso _checkIntervalInDays > 0 Then SaveTimestamp(nowDate) : saved = True
 
             Finally
-                ' Ensure we never leave a splash hanging
                 CloseUpdatingSplash()
-                ' Safety net: if nothing saved yet and interval-based checking is active, persist the last-check timestamp
                 If _checkIntervalInDays > 0 AndAlso Not saved Then
-                    SaveTimestamp(nowDate)
+                    ' Do not force-save a timestamp here unless user chose pause.
                 End If
             End Try
         End Sub
 
+
+        <DllImport("user32.dll")>
+        Private Shared Function AllowSetForegroundWindow(dwProcessId As Integer) As Boolean
+        End Function
+
+        <DllImport("user32.dll")>
+        Private Shared Function ShowWindow(hWnd As IntPtr, nCmdShow As Integer) As Boolean
+        End Function
+        Private Const SW_SHOW As Integer = 5
+
+        <DllImport("user32.dll")>
+        Private Shared Function GetForegroundWindow() As IntPtr
+        End Function
+
+        <DllImport("user32.dll")>
+        Private Shared Function GetWindowThreadProcessId(hWnd As IntPtr, ByRef lpdwProcessId As Integer) As Integer
+        End Function
+
+        <DllImport("user32.dll")>
+        Private Shared Function AttachThreadInput(idAttach As Integer, idAttachTo As Integer, fAttach As Boolean) As Boolean
+        End Function
+
+        <DllImport("user32.dll")>
+        Private Shared Function EnumWindows(lpEnumFunc As EnumWindowsProc, lParam As IntPtr) As Boolean
+        End Function
+        Private Delegate Function EnumWindowsProc(hWnd As IntPtr, lParam As IntPtr) As Boolean
+
+        <DllImport("user32.dll")>
+        Private Shared Function IsWindowVisible(hWnd As IntPtr) As Boolean
+        End Function
+
+        <DllImport("user32.dll", CharSet:=CharSet.Unicode)>
+        Private Shared Function GetWindowText(hWnd As IntPtr, sb As StringBuilder, cch As Integer) As Integer
+        End Function
+
+        <DllImport("kernel32.dll")>
+        Private Shared Function GetCurrentThreadId() As Integer
+        End Function
+
+        ' === Helper: enumerate top-level windows for a process ===
+        Private Shared Function EnumProcessTopLevelWindows(procId As Integer) As List(Of IntPtr)
+            Dim list As New List(Of IntPtr)
+            EnumWindows(Function(h, p)
+                            Dim pid As Integer = 0
+                            GetWindowThreadProcessId(h, pid)
+                            If pid = procId AndAlso IsWindowVisible(h) Then
+                                list.Add(h)
+                            End If
+                            Return True
+                        End Function,
+                IntPtr.Zero)
+            Return list
+        End Function
+
+        ' === Helper: bring process window to foreground with retries ===
+        Private Shared Function BringProcessWindowToFront(p As Process, logPrefix As String) As Boolean
+            Const totalWaitMs As Integer = 5000
+            Const stepMs As Integer = 300
+            Dim waited As Integer = 0
+            Dim brought As Boolean = False
+
+            Try
+                ' Permit the new process to steal foreground
+                Try : AllowSetForegroundWindow(p.Id) : Catch : End Try
+
+                While waited <= totalWaitMs AndAlso Not p.HasExited AndAlso Not brought
+                    p.Refresh()
+                    Dim targetH As IntPtr = IntPtr.Zero
+
+                    ' 1. Prefer Process.MainWindowHandle if valid
+                    If p.MainWindowHandle <> IntPtr.Zero Then
+                        targetH = p.MainWindowHandle
+                    Else
+                        ' 2. Enumerate windows (bootstrap scenarios)
+                        Dim wins = EnumProcessTopLevelWindows(p.Id)
+                        If wins.Count > 0 Then
+                            targetH = wins(0)
+                        End If
+                    End If
+
+                    If targetH <> IntPtr.Zero Then
+                        Dim thisThread = GetCurrentThreadId()
+                        Dim winThread = GetWindowThreadProcessId(targetH, Nothing)
+
+                        ' Attach input queues to overcome foreground lock
+                        AttachThreadInput(winThread, thisThread, True)
+                        Try
+                            ShowWindow(targetH, SW_SHOW)
+                            NativeMethods.SetForegroundWindow(targetH)
+                            SetWindowPos(targetH, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
+                            brought = True
+                        Finally
+                            AttachThreadInput(winThread, thisThread, False)
+                        End Try
+
+                        ' Drop TOPMOST shortly after (async)
+                        System.Threading.Tasks.Task.Run(Async Sub()
+                                                            Await System.Threading.Tasks.Task.Delay(600)
+                                                            Try
+                                                                SetWindowPos(targetH, HWND_NOTOPMOST, 0, 0, 0, 0,
+                                              SWP_NOMOVE Or SWP_NOSIZE Or SWP_SHOWWINDOW)
+                                                            Catch
+                                                            End Try
+                                                        End Sub)
+                    End If
+
+                    If Not brought Then
+                        Thread.Sleep(stepMs)
+                        waited += stepMs
+                    End If
+                End While
+
+                WriteUpdateLog($"{logPrefix} bring-to-front result=" & If(brought, "Success", "Failed/TimedOut"))
+                Return brought
+            Catch ex As Exception
+                WriteUpdateLog($"{logPrefix} bring-to-front exception", ex)
+                Return False
+            End Try
+        End Function
+
+
         Private Shared Sub RunVstoInstaller(pathOrUrl As String)
+            ' Try to locate VSTOInstaller in both x64 and x86 common locations
+            Dim candidates As New List(Of String)
+            Try
+                Dim base1 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), "Microsoft Shared", "VSTO")
+                Dim base2 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86), "Microsoft Shared", "VSTO")
+                If Directory.Exists(base1) Then candidates.AddRange(Directory.GetFiles(base1, "VSTOInstaller.exe", SearchOption.AllDirectories))
+                If Directory.Exists(base2) Then candidates.AddRange(Directory.GetFiles(base2, "VSTOInstaller.exe", SearchOption.AllDirectories))
+            Catch
+            End Try
+            Dim installer = candidates.FirstOrDefault()
+
+            If installer Is Nothing Then
+                WriteUpdateLog("[RunVstoInstaller] VSTOInstaller.exe not found")
+                UIInvokeMessage(
+                    "The update could not be completed (VSTOInstaller.exe not found). Please inform your administrator.",
+                    $"{SharedMethods.AN} Updater")
+                Return
+            End If
+
+            WriteUpdateLog($"[RunVstoInstaller] using='{installer}' target='{pathOrUrl}'")
+
+            ' Ensure splash is visible (caller normally showed it, but be defensive)
+            If _splash Is Nothing OrElse _splash.IsDisposed Then
+                ShowUpdatingSplash("Updating …")
+            Else
+                Try : _splash.UpdateMessage("Updating …") : Catch : End Try
+            End If
+
+            ' 1) Silent attempt (fast, no UI)
+            Dim silentOk As Boolean = False
+            Try
+                Dim psiSilent = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}"" /S") With {
+                    .UseShellExecute = False,
+                    .CreateNoWindow = True
+                }
+                Using p = Process.Start(psiSilent)
+                    p.WaitForExit()
+                    WriteUpdateLog($"[RunVstoInstaller] silent exitCode={p.ExitCode}")
+                    silentOk = (p.ExitCode = 0)
+                End Using
+            Catch ex As Exception
+                WriteUpdateLog("[RunVstoInstaller] silent failed", ex)
+                silentOk = False
+            End Try
+
+            If silentOk Then
+                ' Success: close splash, inform user
+                CloseUpdatingSplash()
+                UIInvokeMessage(
+                       "Update completed. It will be active the next time you restart your application.",
+                      $"{SharedMethods.AN} Updater")
+                Return
+            End If
+
+            ' 2) Interactive fallback (needs trust consent)
+            Try
+                ' Update splash text to indicate fallback; keep it till just before showing installer UI
+                If _splash IsNot Nothing AndAlso Not _splash.IsDisposed Then
+                    Try : _splash.UpdateMessage("Opening installer …") : Catch : End Try
+                End If
+
+                Dim psiUi = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}""") With {
+                    .UseShellExecute = False,
+                    .CreateNoWindow = False
+                }
+
+                ' Close splash so installer window can gain foreground cleanly
+                CloseUpdatingSplash()
+
+                Using p = Process.Start(psiUi)
+                    Dim settingsForm As Form = Nothing
+                    Dim restoreTopMost As Boolean = False
+                    Dim restoreVisible As Boolean = False
+
+                    ' Hide any Settings window to avoid z-order conflicts
+                    Try
+                        settingsForm = System.Windows.Forms.Application.OpenForms.Cast(Of Form)().
+                            FirstOrDefault(Function(f) f.Visible AndAlso
+                                                   (f.Name.IndexOf("Setting", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                                                    f.Text.IndexOf("Setting", StringComparison.OrdinalIgnoreCase) >= 0))
+                        If settingsForm IsNot Nothing Then
+                            restoreTopMost = settingsForm.TopMost
+                            restoreVisible = settingsForm.Visible
+                            settingsForm.TopMost = False
+                            settingsForm.Hide()
+                            WriteUpdateLog("[RunVstoInstaller] temporarily hid Settings window")
+                        End If
+                    Catch
+                    End Try
+
+                    Try : p.WaitForInputIdle(4000) : Catch : End Try
+                    BringProcessWindowToFront(p, "[RunVstoInstaller]")
+
+                    p.WaitForExit()
+                    WriteUpdateLog($"[RunVstoInstaller] interactive exitCode={p.ExitCode}")
+
+                    ' Restore Settings window
+                    If settingsForm IsNot Nothing Then
+                        Try
+                            If restoreVisible Then settingsForm.Show()
+                            settingsForm.TopMost = restoreTopMost
+                        Catch
+                        End Try
+                    End If
+
+                    If p.ExitCode = 0 Then
+                        UIInvokeMessage(
+                            "Update completed. It will be active the next time you restart your application.",
+                            $"{SharedMethods.AN} Updater")
+                    Else
+                        UIInvokeMessage(
+                            "The update could not be completed. A required trust confirmation may have been refused or blocked by policy. You can always try a manual install by visiting " & AppsUrl & ".",
+                            $"{SharedMethods.AN} Updater")
+                    End If
+                End Using
+
+            Catch ex As Exception
+                WriteUpdateLog("[RunVstoInstaller] interactive failed", ex)
+                UIInvokeMessage(
+                    $"The update could not be completed: {ex.Message}. Please inform your administrator. You can always try a manual install by visiting {AppsUrl}.",
+                    $"{SharedMethods.AN} Updater")
+            End Try
+        End Sub
+
+        Private Shared Sub oldRunVstoInstaller(pathOrUrl As String)
             ' Try to locate VSTOInstaller in both x64 and x86 common locations
             Dim candidates As New List(Of String)
             Try
@@ -15146,6 +15961,7 @@ Namespace SharedLibrary
             ' 1) Silent attempt (fast, no UI)
             Dim silentOk As Boolean = False
             Try
+                CloseUpdatingSplash()
                 Dim psiSilent = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}"" /S") With {
                 .UseShellExecute = False,
                 .CreateNoWindow = True
@@ -15160,32 +15976,73 @@ Namespace SharedLibrary
                 silentOk = False
             End Try
 
+
             If silentOk Then
                 UIInvokeMessage(
-                "Update completed. It will be active the next time you restart your application.",
-                $"{SharedMethods.AN} Updater")
+                    "Update completed. It will be active the next time you restart your application.",
+                    $"{SharedMethods.AN} Updater")
                 Return
             End If
 
-            ' 2) Interactive fallback (to show trust consent if policy allows)
+            '2) Interactive fallback (to show trust consent if policy allows)
             Try
+
                 Dim psiUi = New ProcessStartInfo(installer, $"/I ""{pathOrUrl}""") With {
-                .UseShellExecute = False,
-                .CreateNoWindow = False
-            }
+                            .UseShellExecute = False,
+                            .CreateNoWindow = False
+                        }
+
                 Using p = Process.Start(psiUi)
+                    Dim settingsForm As Form = Nothing
+                    Dim restoreTopMost As Boolean = False
+                    Dim restoreVisible As Boolean = False
+
+                    ' Capture & hide Settings window (any form containing "Settings" in Name or Text)
+                    Try
+                        settingsForm = System.Windows.Forms.Application.OpenForms.Cast(Of Form)().
+            FirstOrDefault(Function(f) f.Visible AndAlso
+                                      (f.Name.IndexOf("Setting", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                                       f.Text.IndexOf("Setting", StringComparison.OrdinalIgnoreCase) >= 0))
+                        If settingsForm IsNot Nothing Then
+                            restoreTopMost = settingsForm.TopMost
+                            restoreVisible = settingsForm.Visible
+                            settingsForm.TopMost = False
+                            settingsForm.Hide()
+                            WriteUpdateLog("[RunVstoInstaller] temporarily hid Settings window")
+                        End If
+                    Catch
+                    End Try
+
+                    Try
+                        p.WaitForInputIdle(4000)
+                    Catch
+                    End Try
+
+                    BringProcessWindowToFront(p, "[RunVstoInstaller]")
+
                     p.WaitForExit()
                     WriteUpdateLog($"[RunVstoInstaller] interactive exitCode={p.ExitCode}")
+
+                    ' Restore Settings window
+                    If settingsForm IsNot Nothing Then
+                        Try
+                            If restoreVisible Then settingsForm.Show()
+                            settingsForm.TopMost = restoreTopMost
+                        Catch
+                        End Try
+                    End If
+
                     If p.ExitCode = 0 Then
                         UIInvokeMessage(
-                        "Update completed. It will be active the next time you restart your application.",
-                        $"{SharedMethods.AN} Updater")
+                                "Update completed. It will be active the next time you restart your application.",
+                                $"{SharedMethods.AN} Updater")
                     Else
                         UIInvokeMessage(
-                        "The update could not be completed. A required trust confirmation may have been refused or blocked by policy. You can always try a manual install by opening the Edge browser and visiting " & AppsUrl & ".",
-                        $"{SharedMethods.AN} Updater")
+                                "The update could not be completed. A required trust confirmation may have been refused or blocked by policy. You can always try a manual install by visiting " & AppsUrl & ".",
+                                $"{SharedMethods.AN} Updater")
                     End If
                 End Using
+
             Catch ex As Exception
                 WriteUpdateLog("[RunVstoInstaller] interactive failed", ex)
                 UIInvokeMessage(
@@ -15206,302 +16063,6 @@ Namespace SharedLibrary
 
     End Class
 
-    Public Class oldUpdateHandler
-
-        Public Shared MainControl As System.Windows.Forms.Control
-        Public Shared HostHandle As IntPtr
-
-        Private Class NativeMethods
-            <Runtime.InteropServices.DllImport("user32.dll")>
-            Public Shared Function SetForegroundWindow(hWnd As IntPtr) As Boolean
-            End Function
-        End Class
-
-
-        Private Shared Function UIInvokePrompt(prompt As String, caption As String) As Integer
-            ' 1) Bring the host to the front
-            NativeMethods.SetForegroundWindow(HostHandle)
-
-            ' 2) Use MainControl.Invoke to run on the real UI thread
-            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
-                Dim result As Integer = 0
-                MainControl.Invoke(Sub()
-                                       result = SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption)
-                                   End Sub)
-                Return result
-            Else
-                Return SharedMethods.ShowCustomYesNoBox(prompt, "Yes", "No", caption)
-            End If
-        End Function
-
-        Private Shared Sub UIInvokeMessage(msg As String, caption As String)
-            NativeMethods.SetForegroundWindow(HostHandle)
-
-            If MainControl IsNot Nothing AndAlso MainControl.InvokeRequired Then
-                MainControl.Invoke(Sub()
-                                       SharedMethods.ShowCustomMessageBox(msg, caption)
-                                   End Sub)
-            Else
-                SharedMethods.ShowCustomMessageBox(msg, caption)
-            End If
-        End Sub
-
-
-
-        Public Sub CheckAndInstallUpdates(appname As String, LocalPath As String)
-            Try
-                ' Ensure the application is ClickOnce deployed
-
-                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(LocalPath) Then
-                    Dim deployment As ApplicationDeployment = ApplicationDeployment.CurrentDeployment
-                    Dim currentDate As Date = Date.Now
-
-                    ' Check for updates
-
-                    If deployment.CheckForUpdate() Then
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"An update Is available online ({deployment.UpdateLocation.AbsoluteUri}). Do you want To install it now? Your Edge browser should open And ask you For confirmation. If you run this within a corporate environment, your firewall may block this.", "Yes", "No")
-
-                        If dialogResult = 1 Then
-                            ' Download and apply the update -- removed for the time being due to lack of reliability
-                            ' deployment.Update()
-
-                            ' Launch installer on website and update the last check time
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Word"))
-                                    My.Settings.LastUpdateCheckWord = currentDate
-                                Case "Exce"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Excel"))
-                                    My.Settings.LastUpdateCheckExcel = currentDate
-                                Case "Outl"
-                                    System.Diagnostics.Process.Start(UpdatePaths("Outlook"))
-                                    My.Settings.LastUpdateCheckOutlook = currentDate
-                            End Select
-                            My.Settings.Save()
-
-                            ' Notify the user
-                            SharedMethods.ShowCustomMessageBox("The update process has been initiated. Restart the application To see whether it was successul.", $"{SharedMethods.AN} Updater")
-                        End If
-                    Else
-                        SharedMethods.ShowCustomMessageBox($"No updates are currently available ({deployment.UpdateLocation.AbsoluteUri}).", $"{SharedMethods.AN} Updater")
-                    End If
-
-                    Select Case Left(appname, 4)
-                        Case "Word"
-                            My.Settings.LastUpdateCheckWord = currentDate
-                        Case "Exce"
-                            My.Settings.LastUpdateCheckExcel = currentDate
-                        Case "Outl"
-                            My.Settings.LastUpdateCheckOutlook = currentDate
-                    End Select
-                    My.Settings.Save()
-                Else
-                    If LocalPath = "" Then
-                        SharedMethods.ShowCustomMessageBox($"This version Of {SharedMethods.AN} has Not been configured With an update path ('UpdatedPath = '). The configuration should refer to the main directory where the installation sources 'word', 'excel' and 'outlook' are stored. You may have to discuss this with your administrator.", $"{SharedMethods.AN} Updater")
-                    Else
-                        LocalPath = SharedMethods.ExpandEnvironmentVariables(LocalPath)
-                        Dim dialogResult As Integer = SharedMethods.ShowCustomYesNoBox($"This will initiate the installer for this add-in. If there is a new version at '{LocalPath}', it will be installed. Do you want to proceed?", "Yes", "No")
-                        If dialogResult = 1 Then
-                            Dim vstoFilePath As String = ""
-                            Select Case Left(appname, 4)
-                                Case "Word"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"word\{SharedMethods.AN3} for Word.vsto")
-                                Case "Exce"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"excel\{SharedMethods.AN3} for Excel.vsto")
-                                Case "Outl"
-                                    vstoFilePath = System.IO.Path.Combine(LocalPath, $"outlook\{SharedMethods.AN3} for Outlook.vsto")
-                            End Select
-
-                            If System.IO.File.Exists(vstoFilePath) Then
-                                Process.Start(vstoFilePath)
-                                SharedMethods.ShowCustomMessageBox("The update process has been performed. Restart the application to see whether it was successul.", $"{SharedMethods.AN} Updater")
-                            Else
-                                SharedMethods.ShowCustomMessageBox($"Installer '{vstoFilePath}' not found. Check 'UpdatePath =' in the '{SharedMethods.AN2}.ini''.", $"{SharedMethods.AN} Updater")
-                            End If
-                        End If
-                    End If
-                End If
-            Catch ex As DeploymentException
-                ' Handle exceptions related to update checking and applying
-                SharedMethods.ShowCustomMessageBox($"An error occurred while checking for or installing updates (try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button): " & ex.Message, $"{SharedMethods.AN} Updater")
-            End Try
-        End Sub
-
-        Private Shared _appname As String
-        Private Shared _localPath As String
-        Private Shared _checkIntervalInDays As Integer
-
-
-        Public Shared Sub PeriodicCheckForUpdates(
-        checkIntervalInDays As Integer,
-        appname As String,
-        LocalPath As String)
-
-            Try
-
-                If checkIntervalInDays = 0 Then Return
-                _appname = appname
-                _localPath = LocalPath
-                _checkIntervalInDays = checkIntervalInDays
-
-                ' 1) Last check timestamp
-                Dim lastCheck As Date = If(
-            Left(_appname, 4) = "Word", My.Settings.LastUpdateCheckWord,
-            If(Left(_appname, 4) = "Exce", My.Settings.LastUpdateCheckExcel,
-            If(Left(_appname, 4) = "Outl", My.Settings.LastUpdateCheckOutlook, Date.MinValue)))
-                Dim nowDate As Date = Date.Now
-                Dim days As Double = (nowDate - lastCheck).TotalDays
-
-                ' 2) Skip if interval not reached
-                If days < _checkIntervalInDays AndAlso _checkIntervalInDays > 0 Then
-                    Return
-                End If
-
-                ' 3) Network-deployed? Silent async check if so
-                If ApplicationDeployment.IsNetworkDeployed AndAlso String.IsNullOrWhiteSpace(_localPath) Then
-                    Dim dep = ApplicationDeployment.CurrentDeployment
-                    ' subscribe once
-                    RemoveHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
-                    AddHandler dep.CheckForUpdateCompleted, AddressOf OnCheck
-                    dep.CheckForUpdateAsync()
-                Else
-                    ' Local .vsto installer
-                    Dim vstoFile = Path.Combine(
-                Environment.ExpandEnvironmentVariables(_localPath),
-                $"{_appname.ToLowerInvariant()}\{SharedMethods.AN3} for {_appname}.vsto")
-                    If File.Exists(vstoFile) Then
-                        RunVstoInstaller(vstoFile)
-                    Else
-
-                        UIInvokeMessage(
-                                    $"The configuration asks me to check for local updates of {SharedMethods.AN}, " &
-                                    $"but I have not found '{vstoFile}'. Please inform your administrator.",
-                                    $"{SharedMethods.AN} Updater")
-
-                    End If
-                    ' always save timestamp for local installs
-                    SaveTimestamp(nowDate)
-                End If
-
-            Catch dex As DeploymentException
-                UIInvokeMessage(
-            "The check for new updates could not be completed due to an access right restriction. " &
-            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-                If _checkIntervalInDays > 0 Then SaveTimestamp(Date.Now)
-
-            Catch ex As Exception
-                UIInvokeMessage(
-            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-            End Try
-        End Sub
-
-        Private Shared Sub OnCheck(sender As Object, e As CheckForUpdateCompletedEventArgs)
-            Dim dep = CType(sender, ApplicationDeployment)
-            Dim nowDate As Date = Date.Now
-
-            Try
-                If e.Error IsNot Nothing Then
-                    ' access-rights/elevation error
-                    UIInvokeMessage(
-                "The check for new updates could not be completed due to an access right restriction. " &
-                $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-                $"{SharedMethods.AN} Updater")
-                    If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
-                    Return
-                End If
-
-                If e.UpdateAvailable Then
-                    ' prompt user with versions
-                    Dim localV = dep.CurrentVersion.ToString()
-                    Dim remoteV = e.AvailableVersion.ToString()
-                    Dim prompt =
-                $"A new version is available (current: {localV}, new: {remoteV}). " &
-                "Do you want to install it now?"
-                    Dim choice = UIInvokePrompt(
-                prompt, $"{SharedMethods.AN} Updater")
-
-                    If choice = 1 Then
-                        ' install now
-                        Dim appUrl = dep.UpdateLocation.AbsoluteUri
-                        Dim vstoUrl = appUrl.Replace(".application", ".vsto")
-                        RunVstoInstaller(vstoUrl)
-                        SaveTimestamp(nowDate)
-
-                    Else
-                        ' user postponed
-                        If _checkIntervalInDays = -1 Then
-                            SaveTimestamp(nowDate)
-                        ElseIf _checkIntervalInDays > 0 Then
-                            Dim postPrompt =
-                        $"Do you want to pause update checks for {_checkIntervalInDays} days?"
-                            Dim postChoice = UIInvokePrompt(
-                        postPrompt, $"{SharedMethods.AN} Updater")
-                            If postChoice = 1 Then
-                                SaveTimestamp(nowDate)
-                            End If
-                        End If
-                    End If
-                End If
-
-            Catch dex As DeploymentException
-                UIInvokeMessage(
-            "The check for new updates could not be completed due to an access right restriction. " &
-            $"Your installation may have to be freshly installed (uninstall {AN} and try a manual install by calling up {AppsUrl} using the Edge browser and click on the relevant red button). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-                If _checkIntervalInDays > 0 Then SaveTimestamp(nowDate)
-
-            Catch ex As Exception
-                UIInvokeMessage(
-            $"There has been an unexpected error ('{ex.Message}'). Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-            End Try
-        End Sub
-
-        Private Shared Sub RunVstoInstaller(pathOrUrl As String)
-            Dim common = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)
-            Dim base = Path.Combine(common, "Microsoft Shared", "VSTO")
-            Dim installer = Directory.GetFiles(base, "VSTOInstaller.exe", SearchOption.AllDirectories).FirstOrDefault()
-            If installer Is Nothing Then
-                UIInvokeMessage(
-            "The update could not be completed (VSTOInstaller.exe not found). " &
-            "Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-                Return
-            End If
-
-            Try
-                Dim args = $"/S /I ""{pathOrUrl}"""
-                Dim psi = New ProcessStartInfo(installer, args) With {
-            .UseShellExecute = False,
-            .CreateNoWindow = True
-        }
-                Using p = Process.Start(psi)
-                    p.WaitForExit()
-                End Using
-                UIInvokeMessage(
-            "Update completed. It will be active the next time you restart your application.",
-            $"{SharedMethods.AN} Updater")
-
-            Catch ex As Exception
-                UIInvokeMessage(
-            $"The update could not be completed: {ex.Message}. Please inform your administrator.",
-            $"{SharedMethods.AN} Updater")
-            End Try
-        End Sub
-
-        Private Shared Sub SaveTimestamp(timeStamp As Date)
-            Select Case Left(_appname, 4)
-                Case "Word" : My.Settings.LastUpdateCheckWord = timeStamp
-                Case "Exce" : My.Settings.LastUpdateCheckExcel = timeStamp
-                Case "Outl" : My.Settings.LastUpdateCheckOutlook = timeStamp
-            End Select
-            My.Settings.Save()
-        End Sub
-
-
-    End Class
 
     Public Class ImageDecoder
 
