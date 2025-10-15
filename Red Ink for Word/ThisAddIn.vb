@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.10.2025
+' 15.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -1287,7 +1287,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.141025 Gen2 Beta Test"
+    Public Const Version As String = "V.151025 Gen2 Beta Test"
 
 
     Public Const AN As String = "Red Ink"
@@ -5326,6 +5326,11 @@ Public Class ThisAddIn
 
             My.Settings.LastPrompt = OtherPrompt
             My.Settings.Save()
+
+            If Not ProcessParameterPlaceholders(OtherPrompt) Then
+                ShowCustomMessageBox("Freestyle canceled.", $"{AN} Freestyle")
+                Exit Sub
+            End If
 
             If OtherPrompt.IndexOf(AllTrigger, StringComparison.OrdinalIgnoreCase) >= 0 Then
                 OtherPrompt = OtherPrompt.Replace(AllTrigger, "").Trim()
@@ -23200,7 +23205,7 @@ Public Class ThisAddIn
 
     '   {parameter1 = Description; type; default; range-or-options; options}
     '   {parameter1}  (reference/reuse)
-    Private Function ProcessWebAgentParameterPlaceholders(ByRef script As String) As Boolean
+    Private Function ProcessParameterPlaceholders(ByRef script As String) As Boolean
         Dim defRx As New System.Text.RegularExpressions.Regex("\{\s*parameter(\d+)\s*=\s*(.*?)\}", RegexOptions.IgnoreCase Or RegexOptions.Singleline)
         Dim refRx As New System.Text.RegularExpressions.Regex("\{\s*parameter(\d+)\s*\}", RegexOptions.IgnoreCase)
 
@@ -23313,7 +23318,7 @@ Public Class ThisAddIn
         If parameterDefs.Count = 0 Then Return True
 
         Dim prmArray = parameterDefs.ToArray()
-        If Not ShowCustomVariableInputForm("Please configure your WebAgent parameters:", $"{AN} WebAgent Parameters", prmArray) Then
+        If Not ShowCustomVariableInputForm("Please configure your parameters:", $"{AN} Parameters", prmArray) Then
             Return False
         End If
 
@@ -23560,7 +23565,7 @@ Public Class ThisAddIn
         End If
 
         ' 2) Detect and process parameter placeholders {{parameterN = ...}}
-        If Not ProcessWebAgentParameterPlaceholders(script) Then
+        If Not ProcessParameterPlaceholders(script) Then
             ShowCustomMessageBox("WebAgent canceled (no parameters applied).", $"{AN} WebAgent")
             Exit Sub
         End If

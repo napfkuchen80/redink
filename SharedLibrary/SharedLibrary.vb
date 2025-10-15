@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.10.2025
+' 15.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -8144,7 +8144,8 @@ Namespace SharedLibrary
             Optional Getfocus As Boolean = False,
             Optional InsertMarkdown As Boolean = False,
             Optional TransferToPane As Boolean = False,
-            Optional parentWindowHwnd As IntPtr = Nothing
+            Optional parentWindowHwnd As IntPtr = Nothing,
+            Optional PreserveLiterals As Boolean = False
         ) As String
 
             ' Ursprünglichen Text merken
@@ -8435,7 +8436,7 @@ Namespace SharedLibrary
             ' --- Content assignment (match CustomPaneControl) ---
             Dim rtf As String = Nothing
             If Not NoRTF Then
-                rtf = MarkdownToRtfConverter.Convert(bodyText)
+                rtf = MarkdownToRtfConverter.Convert(bodyText, PreserveLiterals)
             End If
 
             Try
@@ -8959,7 +8960,8 @@ Namespace SharedLibrary
         header As String,
         Optional noRTF As Boolean = False,
         Optional insertMarkdown As Boolean = False,
-        Optional mergeCallback As IntelligentMergeCallback = Nothing
+        Optional mergeCallback As IntelligentMergeCallback = Nothing,
+        Optional PreserveLiterals As Boolean = False
     ) As Task(Of String)
 
                 If TaskPanes Is Nothing Then
@@ -8974,7 +8976,8 @@ Namespace SharedLibrary
             header,
             noRTF,
             insertMarkdown,
-            mergeCallback
+            mergeCallback,
+            PreserveLiterals
         )
 
                 Return result
@@ -8988,7 +8991,8 @@ Namespace SharedLibrary
         header As String,
         Optional noRTF As Boolean = False,
         Optional insertMarkdown As Boolean = False,
-        Optional mergeCallback As IntelligentMergeCallback = Nothing
+        Optional mergeCallback As IntelligentMergeCallback = Nothing,
+        Optional PreserveLiterals As Boolean = False
     ) As Task(Of String)
 
                 If CurrentCustomTaskPane IsNot Nothing Then
@@ -9009,7 +9013,7 @@ Namespace SharedLibrary
                 ctrl.ParentPane = pane
                 CurrentCustomTaskPane = pane
 
-                Return ctrl.ShowPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown)
+                Return ctrl.ShowPane(introLine, bodyText, finalRemark, header, noRTF, insertMarkdown, PreserveLiterals)
             End Function
 
         End Class
@@ -9217,7 +9221,8 @@ Namespace SharedLibrary
                                  finalRemark As String,
                                  header As String,
                                  Optional noRTF As Boolean = False,
-                                 Optional insertMarkdown As Boolean = False) As System.Threading.Tasks.Task(Of String)
+                                 Optional insertMarkdown As Boolean = False,
+                                 Optional PreserveLiterals As Boolean = False) As System.Threading.Tasks.Task(Of String)
 
                 tcs = New System.Threading.Tasks.TaskCompletionSource(Of String)()
                 Me.NoRTF = noRTF
@@ -9246,7 +9251,7 @@ Namespace SharedLibrary
                     If noRTF Then
                         bodyTextBox.Text = bodyText
                     Else
-                        Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText)
+                        Dim rtf As String = MarkdownToRtfConverter.Convert(bodyText, PreserveLiterals)
                         bodyTextBox.Rtf = If(rtf, String.Empty)
 
                         ' append non-breaking spaces equal to total length of hyperlinks found in the RTF
@@ -11261,7 +11266,7 @@ Namespace SharedLibrary
                     {"SP_SwitchParty", Default_SP_SwitchParty},
                     {"SP_Anonymize", Default_SP_Anonymize},
                     {"SP_ContextSearch", Default_SP_ContextSearch},
-                    {"SP_ContextSearchMultiple", Default_SP_ContextSearchMulti},
+                    {"SP_ContextSearchMulti", Default_SP_ContextSearchMulti},
                     {"SP_RangeOfCells", Default_SP_RangeOfCells},
                     {"SP_ParseFile", Default_SP_ParseFile},
                     {"SP_WriteNeatly", Default_SP_WriteNeatly},
@@ -18254,12 +18259,6 @@ Namespace SharedLibrary
     End Module
 
 
-
-End Namespace
-
-
-
-Namespace MarkdownToRtf
     ''' <summary>
     ''' Main entry point: converts Markdown text to RTF.
     ''' </summary>
@@ -18270,26 +18269,32 @@ Namespace MarkdownToRtf
         ''' </summary>
         ''' <param name="markdownText">Eine Zeichenfolge mit Markdown-Markup.</param>
         ''' <returns>RTF-formatierte Zeichenfolge.</returns>
-        Public Function Convert(markdownText As String) As String
+        Public Function Convert(markdownText As String,
+                            Optional preserveSquareBracketLiterals As Boolean = False) As String
+
+            ' Optionally prevent markdown emphasis inside [...] (e.g., formulas like [1*2*3])
+            If preserveSquareBracketLiterals AndAlso Not String.IsNullOrEmpty(markdownText) Then
+                markdownText = EscapeAsterisksInsideSquareBrackets(markdownText)
+            End If
 
             'markdownText = System.Text.RegularExpressions.Regex.Unescape(markdownText)
             markdownText = System.Text.RegularExpressions.Regex.Replace(
-                        markdownText,
-                        "^[ \t]+(?=>)",       ' „jede Folge von Leerzeichen/Tabs direkt vor einem >“
-                        String.Empty,
-                        System.Text.RegularExpressions.RegexOptions.Multiline)
+                    markdownText,
+                    "^[ \t]+(?=>)",       ' „jede Folge von Leerzeichen/Tabs direkt vor einem >“
+                    String.Empty,
+                    System.Text.RegularExpressions.RegexOptions.Multiline)
 
             Debug.WriteLine("MarkdownToRtfConverter.Convert: " & markdownText)
 
             ' 1) Markdown parsen
             'Dim pipeline = New Markdig.MarkdownPipelineBuilder().Build()
             Dim pipeline = New Markdig.MarkdownPipelineBuilder() _
-                        .UseAdvancedExtensions() _
-                        .UsePipeTables() _
-                        .UseGridTables() _
-                        .UseFootnotes() _
-                        .UseEmojiAndSmiley() _
-                        .Build()
+                    .UseAdvancedExtensions() _
+                    .UsePipeTables() _
+                    .UseGridTables() _
+                    .UseFootnotes() _
+                    .UseEmojiAndSmiley() _
+                    .Build()
             Dim document = Markdig.Markdown.Parse(markdownText, pipeline)
 
             Dim fnDefs As New Dictionary(Of String, Markdig.Extensions.Footnotes.Footnote)()
@@ -18338,6 +18343,107 @@ Namespace MarkdownToRtf
             rtfBuilder.AppendLine("}")
             Return rtfBuilder.ToString()
         End Function
+
+        ' Escapes asterisks inside square-bracket ranges so Markdown won't turn *x* into italics.
+        ' Example: "[1*2*3]" -> "[1\*2\*3]" (the backslashes are consumed by the Markdown parser;
+        ' final rendered text remains "[1*2*3]").
+        Private Function EscapeAsterisksInsideSquareBrackets(input As String) As String
+            If String.IsNullOrEmpty(input) Then Return input
+
+            Dim sb As New System.Text.StringBuilder(input.Length)
+            Dim bracketDepth As Integer = 0
+
+            Dim inInlineCode As Boolean = False
+            Dim inlineTicks As Integer = 0
+
+            Dim inFencedCode As Boolean = False
+            Dim fencedTicks As Integer = 0
+
+            Dim atLineStart As Boolean = True
+            Dim i As Integer = 0
+
+            While i < input.Length
+                Dim ch As Char = input(i)
+
+                ' Handle runs of backticks (inline spans and fenced blocks)
+                If ch = "`"c Then
+                    Dim start As Integer = i
+                    While i < input.Length AndAlso input(i) = "`"c
+                        i += 1
+                    End While
+                    Dim count As Integer = i - start
+                    sb.Append(New String("`"c, count))
+
+                    If inInlineCode Then
+                        If count = inlineTicks Then
+                            inInlineCode = False
+                            inlineTicks = 0
+                        End If
+                    ElseIf inFencedCode Then
+                        ' Close fence only at line start and with >= opening length
+                        If atLineStart AndAlso count >= fencedTicks Then
+                            inFencedCode = False
+                            fencedTicks = 0
+                        End If
+                    Else
+                        If atLineStart AndAlso count >= 3 Then
+                            inFencedCode = True
+                            fencedTicks = count
+                        Else
+                            inInlineCode = True
+                            inlineTicks = count
+                        End If
+                    End If
+
+                    atLineStart = False
+                    Continue While
+                End If
+
+                ' Track newlines for "line start" detection (for fenced blocks)
+                If ch = vbCr OrElse ch = vbLf Then
+                    sb.Append(ch)
+                    atLineStart = True
+                    i += 1
+                    Continue While
+                End If
+
+                ' Inside code: pass through verbatim and do not touch bracketDepth
+                If inInlineCode OrElse inFencedCode Then
+                    sb.Append(ch)
+                    atLineStart = False
+                    i += 1
+                    Continue While
+                End If
+
+                ' Outside code: manage bracket depth and escape '*' inside [...]
+                Select Case ch
+                    Case "["c
+                        bracketDepth += 1
+                        sb.Append(ch)
+                    Case "]"c
+                        If bracketDepth > 0 Then bracketDepth -= 1
+                        sb.Append(ch)
+                    Case "*"c
+                        If bracketDepth > 0 Then
+                            ' Idempotent: avoid double-escaping if previous is already '\'
+                            If sb.Length = 0 OrElse sb(sb.Length - 1) <> "\"c Then
+                                sb.Append("\"c)
+                            End If
+                            sb.Append("*"c)
+                        Else
+                            sb.Append("*"c)
+                        End If
+                    Case Else
+                        sb.Append(ch)
+                End Select
+
+                atLineStart = False
+                i += 1
+            End While
+
+            Return sb.ToString()
+        End Function
+
 
 
         Private Sub ConvertThematicBreakBlock(rtf As System.Text.StringBuilder)

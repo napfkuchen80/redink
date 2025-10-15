@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 14.10.2025
+' 15.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -206,7 +206,7 @@ Public Class ThisAddIn
 
     ' Hardcoded config values
 
-    Public Const Version As String = "V.141025 Gen2 Beta Test"
+    Public Const Version As String = "V.151025 Gen2 Beta Test"
 
     Public Const AN As String = "Red Ink"
     Public Const AN2 As String = "redink"
@@ -2953,14 +2953,14 @@ Public Class ThisAddIn
 
                         If DoPane Then
                             SP_MergePrompt_Cached = ""
-                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                            ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True, True)
                         Else
-                            Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} insert the square backets into your worksheet, where possible?", AN, True, False, False, True)
+                            Dim FinalText = ShowCustomWindow("The LLM has provided the following result (you can edit it):", LLMResult, $"Shall {AN} insert the square backets into your worksheet, where possible?", AN, False, False, False, True, Nothing, True)
 
                             ' Handle the user's response
                             If FinalText = "Pane" Then
                                 SP_MergePrompt_Cached = ""
-                                ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True)
+                                ShowPaneAsync("The LLM has provided the following result (you can edit it):", LLMResult, $"You can let {AN} insert the square brackets into your worksheet, where possible", AN, False, True, True)
                             ElseIf Not String.IsNullOrWhiteSpace(FinalText) Then
                                 instructions = ParseLLMResponse(FinalText)
                                 ApplyLLMInstructions(instructions, DoBubbles)
@@ -3119,13 +3119,14 @@ Public Class ThisAddIn
                               finalRemark As String,
                               header As String,
                               Optional NoRtf As Boolean = False,
-                              Optional insertMarkdown As Boolean = False
+                              Optional insertMarkdown As Boolean = False,
+                              Optional PreserveLiterals As Boolean = False
                             )
         Try
 
             Dim OriginalText As String = bodyText
 
-            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, NoRtf, insertMarkdown, New IntelligentMergeCallback(AddressOf HandleIntelligentMerge))
+            Dim result As String = Await PaneManager.ShowMyPane(introLine, bodyText, finalRemark, header, NoRtf, insertMarkdown, New IntelligentMergeCallback(AddressOf HandleIntelligentMerge), PreserveLiterals)
 
         Catch ex As Exception
             MessageBox.Show("Error in ShowPaneAsync: " & ex.Message)
@@ -3686,6 +3687,47 @@ Public Class ThisAddIn
         cellPattern = "[Cell:"
 
         ' Start parsing the response
+        startPos = Response.IndexOf(cellPattern, StringComparison.OrdinalIgnoreCase)
+
+        Do While startPos >= 0
+            ' Find next cell occurrence to extract the block between this and next [Cell:]
+            instructionEnd = Response.IndexOf(cellPattern, startPos + cellPattern.Length, StringComparison.OrdinalIgnoreCase)
+
+            ' If there's no further [Cell:], capture till the end of the string
+            If instructionEnd = -1 Then instructionEnd = Response.Length
+
+            ' Extract the instruction block between the current and next [Cell:]
+            tempInstruction = Response.Substring(startPos, instructionEnd - startPos)
+
+            ' Only keep blocks that contain a top-level action (ignore nested brackets inside other brackets)
+            Dim extracted As String = GetFormulaOrValueFromInstruction(tempInstruction)
+            Dim hasAction As Boolean = Not String.IsNullOrWhiteSpace(extracted) OrElse
+                                       tempInstruction.IndexOf(AN5 & ":", StringComparison.OrdinalIgnoreCase) >= 0
+
+            If hasAction Then
+                instructions.Add(tempInstruction)
+            End If
+
+            ' Move to the next instruction start, exit if at the end
+            startPos = Response.IndexOf(cellPattern, instructionEnd, StringComparison.OrdinalIgnoreCase)
+        Loop
+
+        Return instructions
+    End Function
+
+    Public Function oldParseLLMResponse(ByVal Response As String) As List(Of String)
+        Dim instructions As New List(Of String)()
+        Dim startPos As Integer, instructionEnd As Integer
+        Dim tempInstruction As String
+        Dim cellPattern As String
+
+        ' Ensure we remove any newlines that might affect parsing
+        Response = Response.Replace(vbCrLf, " ").Replace(vbLf, " ")
+
+        ' Pattern for finding Cell
+        cellPattern = "[Cell:"
+
+        ' Start parsing the response
         startPos = Response.IndexOf(cellPattern)
 
         Do While startPos >= 0
@@ -3785,8 +3827,8 @@ Public Class ThisAddIn
                                         targetRange = targetRange.MergeArea.Cells(1, 1)
                                     End If
 
-
-                                    If DoAlsoBubbles And formulaOrValue.StartsWith($"{AN5}: ") Then
+                                    If formulaOrValue.StartsWith($"{AN5}: ") Then
+                                        'If DoAlsoBubbles And formulaOrValue.StartsWith($"{AN5}: ") Then
 
                                         ' Add a comment to the cell
                                         Dim commentText As String = formulaOrValue.Trim()
@@ -4002,7 +4044,73 @@ Public Class ThisAddIn
         Return String.Empty
     End Function
 
+
     Public Function GetFormulaOrValueFromInstruction(ByVal instruction As String) As String
+        If String.IsNullOrEmpty(instruction) Then Return String.Empty
+
+        Dim i As Integer = 0
+        While i < instruction.Length
+            If instruction(i) = "["c Then
+                ' Only consider directives that start at top-level
+                If StartsWithAt(instruction, "[Formula: ", i) Then
+                    Dim content As String = ExtractBracketContent(instruction, i, "[Formula: ".Length)
+                    Return content
+                ElseIf StartsWithAt(instruction, "[Value: ", i) Then
+                    Dim content As String = ExtractBracketContent(instruction, i, "[Value: ".Length)
+                    Return content
+                ElseIf StartsWithAt(instruction, "[Comment: ", i) Then
+                    Dim content As String = ExtractBracketContent(instruction, i, "[Comment: ".Length)
+                    If content IsNot Nothing Then
+                        Return $"{AN5}: " & content
+                    End If
+                    Return String.Empty
+                Else
+                    ' Some other bracketed segment at top-level: skip it entirely (including nested), then continue
+                    Dim closing As Integer = FindMatchingBracket(instruction, i)
+                    If closing = -1 Then Exit While
+                    i = closing + 1
+                    Continue While
+                End If
+            End If
+            i += 1
+        End While
+
+        Return String.Empty
+    End Function
+
+    ' Helpers used by GetFormulaOrValueFromInstruction
+    Private Function StartsWithAt(s As String, prefix As String, index As Integer) As Boolean
+        If index + prefix.Length > s.Length Then Return False
+        Return s.IndexOf(prefix, index, StringComparison.OrdinalIgnoreCase) = index
+    End Function
+
+    Private Function ExtractBracketContent(s As String, openBracketIndex As Integer, tagLen As Integer) As String
+        Dim closeIndex As Integer = FindMatchingBracket(s, openBracketIndex)
+        If closeIndex = -1 Then Return String.Empty
+        Dim contentStart As Integer = openBracketIndex + tagLen
+        Dim len As Integer = closeIndex - contentStart
+        If len <= 0 Then Return String.Empty
+        Return s.Substring(contentStart, len).Trim()
+    End Function
+
+    Private Function FindMatchingBracket(s As String, openBracketIndex As Integer) As Integer
+        Dim depth As Integer = 0
+        For j As Integer = openBracketIndex To s.Length - 1
+            Dim c As Char = s(j)
+            If c = "["c Then
+                depth += 1
+            ElseIf c = "]"c Then
+                depth -= 1
+                If depth = 0 Then
+                    Return j
+                End If
+            End If
+        Next
+        Return -1
+    End Function
+
+
+    Public Function oldGetFormulaOrValueFromInstruction(ByVal instruction As String) As String
         Dim pattern As String = ""
         ' Determine which marker is present
         If instruction.Contains("[Formula: ") Then
