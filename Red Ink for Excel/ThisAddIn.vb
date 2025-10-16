@@ -3856,6 +3856,7 @@ Public Class ThisAddIn
                                         Else
                                             ' Remove unwanted apostrophes
                                             cleanedValue = CStr(formulaOrValue).Trim("'"c)
+                                            cleanedValue = DecodeTextLiterals(cleanedValue)
                                             targetRange.NumberFormat = "@"
                                             targetRange.Value = cleanedValue
                                         End If
@@ -3894,6 +3895,8 @@ Public Class ThisAddIn
         splash.Close()
 
     End Sub
+
+
 
 
     Public Sub SetFormulaSafe(cell As Excel.Range, formulaOrValue As String, excelApp As Excel.Application)

@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See License.txt or https://vischer.com/redink for more information.
 '
-' 15.10.2025
+' 16.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -4804,98 +4804,206 @@ Namespace SharedLibrary
 
 
 
-        Public Shared Function OldCleanString(ByVal input As String) As String
-            ' If empty or whitespace, return empty
-            If String.IsNullOrWhiteSpace(input) Then
-                Return ""
+        ' Decode JSON/HTML escapes and normalize RTF hyperlink fields to "URL (display)".
+        Public Shared Function DecodeTextLiterals(ByVal text As String) As String
+            If String.IsNullOrEmpty(text) Then Return text
+
+            Dim result As String = text
+
+            ' 1) Fix malformed decimal escape pattern: \u228?  (228 decimal => ä)
+            Dim decFix As MatchEvaluator = Function(m As Match)
+                                               Dim dec As Integer = Integer.Parse(m.Groups(1).Value)
+                                               Return ChrW(dec).ToString()
+                                           End Function
+            result = Regex.Replace(result, "\\u(\d{1,3})\?", decFix)
+
+            ' 2) Try to JSON-unescape if it contains backslashes (covers \uXXXX, \n, \t, \", etc.)
+            If result.IndexOf("\"c) >= 0 Then
+                Try
+                    Dim quoted As String = ChrW(34) & result.Replace(ChrW(34), "\" & ChrW(34)) & ChrW(34)
+                    result = Newtonsoft.Json.JsonConvert.DeserializeObject(Of String)(quoted)
+                Catch
+                End Try
             End If
 
-            ' 1) First pass: escape everything into sbEscaped
-            Dim sbEscaped As New System.Text.StringBuilder(input.Length * 2)
+            ' 3) HTML-decode entities (e.g., &auml;, &#228;)
+            Try
+                result = System.Net.WebUtility.HtmlDecode(result)
+            Catch
+            End Try
 
-            For Each c As Char In input
-                Select Case AscW(c)
-                    Case 8      ' backspace
-                        sbEscaped.Append("\b")
-                    Case 9      ' tab
-                        sbEscaped.Append("\t")
-                    Case 10     ' line feed
-                        sbEscaped.Append("\n")
-                    Case 12     ' form feed
-                        sbEscaped.Append("\f")
-                    Case 13     ' carriage return → normalized to \n
-                        sbEscaped.Append("\n")
-                    Case 34     ' double-quote → must become \" 
-                        ' Append a backslash, then a quote
-                        sbEscaped.Append("\").Append("""")
-                    Case 92     ' backslash → \\ 
-                        sbEscaped.Append("\\")
-                    Case 0 To 31  ' other control codes → \uXXXX
-                        sbEscaped.Append("\u").Append(AscW(c).ToString("X4"))
-                    Case Else
-                        sbEscaped.Append(c)
-                End Select
-            Next
+            ' 4) Convert RTF \line to newline
+            result = Regex.Replace(result, "\\line\b\s*", Environment.NewLine, RegexOptions.IgnoreCase)
 
-            ' 2) Second pass: collapse multiple spaces to one, exactly like your While-Replace loop
-            Dim sbResult As New System.Text.StringBuilder(sbEscaped.Length)
-            Dim lastWasSpace As Boolean = False
+            ' 5) Normalize RTF hyperlink fields (robust, brace-aware)
+            result = NormalizeRtfHyperlinks(result)
 
-            For Each c As Char In sbEscaped.ToString()
-                If c = " "c Then
-                    If Not lastWasSpace Then
-                        sbResult.Append(" "c)
-                        lastWasSpace = True
+            ' 6) Final cleanup for leftover RTF remnants ({{...}} and font/format switches like \f0 \fs20)
+            result = CleanupRtfRemnants(result)
+
+            Return result
+        End Function
+
+        ' Convert {\field ...{\*\fldinst ... HYPERLINK "url"...}{\fldrslt ...display...}} to "url (display)"
+        Private Shared Function NormalizeRtfHyperlinks(ByVal s As String) As String
+            If String.IsNullOrEmpty(s) Then Return s
+
+            Dim i As Integer = 0
+            Dim sb As New StringBuilder(s.Length)
+
+            While i < s.Length
+                Dim j As Integer = s.IndexOf("\field", i, StringComparison.OrdinalIgnoreCase)
+                If j = -1 Then
+                    sb.Append(s, i, s.Length - i)
+                    Exit While
+                End If
+
+                ' Append text before the field
+                sb.Append(s, i, j - i)
+
+                ' Include all consecutive opening braces before \field (handles "{{\field ...}}")
+                Dim fieldStart As Integer = j
+                While fieldStart > 0 AndAlso s.Chars(fieldStart - 1) = "{"c
+                    fieldStart -= 1
+                End While
+
+                Dim fieldEnd As Integer = FindMatchingBrace(s, fieldStart)
+                If fieldEnd = -1 Then
+                    ' Fallback: not a full RTF block; copy as-is and stop
+                    sb.Append(s, fieldStart, s.Length - fieldStart)
+                    Exit While
+                End If
+
+                Dim fieldBlock As String = s.Substring(fieldStart, fieldEnd - fieldStart + 1)
+
+                ' Extract URL after HYPERLINK "..."
+                Dim url As String = ExtractQuotedAfter(fieldBlock, "HYPERLINK")
+                ' Extract fldrslt content block
+                Dim displayRaw As String = ExtractFldrsltBlock(fieldBlock)
+                Dim display As String = StripRtfInline(displayRaw)
+
+                If Not String.IsNullOrWhiteSpace(url) Then
+                    If String.IsNullOrWhiteSpace(display) Then
+                        sb.Append(url)
+                    Else
+                        sb.Append(url).Append(" (").Append(display).Append(")")
                     End If
                 Else
-                    sbResult.Append(c)
-                    lastWasSpace = False
+                    ' If no URL found, keep original block
+                    sb.Append(fieldBlock)
                 End If
-            Next
 
-            Return sbResult.ToString()
-        End Function
-
-
-        Public Shared Function xxCleanString(ByVal input As String) As String
-            Dim cleanedString As String = ""
-
-            If Not IsEmptyOrBlank(input) Then
-
-                For Each currentChar As Char In input
-                    Dim charCode As Integer = AscW(currentChar)
-
-                    Select Case charCode
-                        Case 8
-                            cleanedString &= "\b"
-                        Case 9
-                            cleanedString &= "\t"
-                        Case 10
-                            cleanedString &= "\n"
-                        Case 12
-                            cleanedString &= "\f"
-                        Case 13
-                            cleanedString &= "\n"  '\r
-                        Case 34
-                            cleanedString &= "\"""
-                        Case 92
-                            cleanedString &= "\\"
-                        Case 0 To 31
-                            cleanedString &= "\u" & charCode.ToString("X4")
-                        Case Else
-                            cleanedString &= currentChar
-                    End Select
-                Next
-
-            End If
-
-            ' Condense multiple spaces to a single space
-            While cleanedString.Contains("  ")
-                cleanedString = cleanedString.Replace("  ", " ")
+                i = fieldEnd + 1
             End While
 
-            Return cleanedString
+            Return sb.ToString()
         End Function
+
+        ' Strip simple inline RTF (e.g., \ul, \cf1, \fs20, \b) and decode hex escapes like \'e4; drop braces.
+        Private Shared Function StripRtfInline(ByVal s As String) As String
+            If String.IsNullOrEmpty(s) Then Return s
+
+            ' Decode hex escapes \'xx to Unicode
+            Dim hexDecoder As MatchEvaluator = Function(m As Match)
+                                                   Dim hex = m.Value.Substring(2)
+                                                   Dim b As Byte = System.Convert.ToByte(hex, 16)
+                                                   Return Encoding.GetEncoding(1252).GetString(New Byte() {b})
+                                               End Function
+            s = Regex.Replace(s, "\\'[0-9a-fA-F]{2}", hexDecoder)
+
+            ' Remove control words (e.g., \ul, \ul0, \cf1, \fs20, \b, \f0, etc.)
+            s = Regex.Replace(s, "\\[a-zA-Z]+-?\d*", "")
+
+            ' Remove remaining braces
+            s = s.Replace("{", "").Replace("}", "")
+
+            ' Collapse whitespace
+            s = Regex.Replace(s, "\s+", " ").Trim()
+
+            Return s
+        End Function
+
+        ' Remove leftover RTF tokens and braces around normalized hyperlinks, e.g. "{{URL (title)}}" and "\f0\fs20".
+        Private Shared Function CleanupRtfRemnants(ByVal s As String) As String
+            If String.IsNullOrEmpty(s) Then Return s
+
+            ' Remove paired {{ ... }} around normalized URL (and optional " (title)")
+            s = Regex.Replace(s, "\{\{\s*(https?://[^\s}]+(?:\s*\([^)]+\))?)\s*\}\}", "$1", RegexOptions.IgnoreCase)
+
+            ' If a stray closing brace directly precedes an RTF control word, drop the brace
+            s = Regex.Replace(s, "\}\s*(\\[a-zA-Z])", "$1")
+
+            ' Remove common stray inline RTF formatting outside fields
+            s = Regex.Replace(s, "\\(?:fs\d+|f\d+|cf\d+|ul0?|b0?)\b", "", RegexOptions.IgnoreCase)
+
+            ' Normalize spaces around parentheses and cleanup duplicate spaces
+            s = Regex.Replace(s, "\s+\)", ")", RegexOptions.None)
+            s = Regex.Replace(s, "\(\s+", "(", RegexOptions.None)
+            s = Regex.Replace(s, " +", " ").Trim()
+
+            Return s
+        End Function
+
+        ' Find the matching closing brace for the brace at startIdx (or at the next char if not at a brace).
+        Private Shared Function FindMatchingBrace(ByVal s As String, ByVal startIdx As Integer) As Integer
+            Dim idx As Integer = startIdx
+            If idx >= s.Length Then Return -1
+            ' Ensure we start at an opening brace if possible
+            If s.Chars(idx) <> "{"c Then
+                Dim prevOpen As Integer = s.LastIndexOf("{"c, idx)
+                If prevOpen >= 0 Then idx = prevOpen
+                If idx >= s.Length OrElse s.Chars(idx) <> "{"c Then Return -1
+            End If
+
+            Dim depth As Integer = 0
+            For k As Integer = idx To s.Length - 1
+                Dim ch As Char = s.Chars(k)
+                If ch = "{"c Then
+                    depth += 1
+                ElseIf ch = "}"c Then
+                    depth -= 1
+                    If depth = 0 Then
+                        Return k
+                    End If
+                End If
+            Next
+            Return -1
+        End Function
+
+        ' Extract the first "...", occurring after a token, case-insensitive.
+        Private Shared Function ExtractQuotedAfter(ByVal s As String, ByVal token As String) As String
+            Dim p As Integer = s.IndexOf(token, StringComparison.OrdinalIgnoreCase)
+            If p = -1 Then Return Nothing
+            Dim q1 As Integer = s.IndexOf(""""c, p)
+            If q1 = -1 Then Return Nothing
+            Dim q2 As Integer = s.IndexOf(""""c, q1 + 1)
+            If q2 = -1 OrElse q2 <= q1 Then Return Nothing
+            Return s.Substring(q1 + 1, q2 - (q1 + 1))
+        End Function
+
+        ' Extract content inside {\fldrslt ...} (handles both {\fldrslt text} and {\fldrslt{...}}).
+        Private Shared Function ExtractFldrsltBlock(ByVal s As String) As String
+            Dim p As Integer = s.IndexOf("{\fldrslt", StringComparison.OrdinalIgnoreCase)
+            If p = -1 Then Return Nothing
+
+            ' The fldrslt block itself should be brace-balanced
+            Dim startBrace As Integer = s.IndexOf("{"c, p)
+            If startBrace = -1 Then Return Nothing
+
+            Dim endBrace As Integer = FindMatchingBrace(s, startBrace)
+            If endBrace = -1 Then Return Nothing
+
+            ' Remove the leading {\fldrslt and surrounding braces
+            Dim inner As String = s.Substring(startBrace + 1, endBrace - (startBrace + 1))
+            ' Strip the control word \fldrslt
+            If inner.StartsWith("\fldrslt", StringComparison.OrdinalIgnoreCase) Then
+                inner = inner.Substring("\fldrslt".Length)
+            End If
+            Return inner
+        End Function
+
+
+
 
         Public Shared Function ConvertEscapeCharacters(ByVal inputText As String) As String
 
@@ -15092,7 +15200,7 @@ Namespace SharedLibrary
 
     Public Class UpdateHandler
 
-        Private Const ShowCheckingSplash As Boolean = True
+        Private Const ShowCheckingSplash As Boolean = False
         Private Const MaxDailyUpdateRetries As Integer = 5
 
         ' NEW log size limits
