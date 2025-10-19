@@ -3919,7 +3919,7 @@ Public Class ThisAddIn
                 AddOnInstruct = AddOnInstruct.Substring(0, lastCommaIndex) & ", and" & AddOnInstruct.Substring(lastCommaIndex + 1)
             End If
             If Not String.IsNullOrWhiteSpace(INI_MyStylePath) Then
-                AddOnInstruct += MyStyleInstruct.Replace("; add", ", ")
+                AddOnInstruct += MyStyleInstruct.Replace("; add ", ", ")
             End If
 
             Dim outlookApp As Microsoft.Office.Interop.Outlook.Application = Globals.ThisAddIn.Application

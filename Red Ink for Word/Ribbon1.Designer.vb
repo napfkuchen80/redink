@@ -87,6 +87,7 @@ Partial Class Ribbon1
         Me.RI_CreateAudio = Me.Factory.CreateRibbonButton
         Me.RI_DefineMyStyle = Me.Factory.CreateRibbonButton
         Me.RI_WebAgent = Me.Factory.CreateRibbonButton
+        Me.RI_EditWebAgent = Me.Factory.CreateRibbonButton
         Me.RI_Anonymization = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleNM = Me.Factory.CreateRibbonButton
         Me.RI_FreestyleAM = Me.Factory.CreateRibbonButton
@@ -98,6 +99,7 @@ Partial Class Ribbon1
         Me.RI_TimeSpan = Me.Factory.CreateRibbonButton
         Me.RI_Regex = Me.Factory.CreateRibbonButton
         Me.RI_Import = Me.Factory.CreateRibbonButton
+        Me.RI_Markdown = Me.Factory.CreateRibbonButton
         Me.RI_InsertClipboard = Me.Factory.CreateRibbonButton
         Me.RI_Chat2 = Me.Factory.CreateRibbonButton
         Me.RI_Transcriptor = Me.Factory.CreateRibbonButton
@@ -106,7 +108,6 @@ Partial Class Ribbon1
         Me.RI_PrimLang2 = Me.Factory.CreateRibbonButton
         Me.RI_Correct2 = Me.Factory.CreateRibbonButton
         Me.RI_Chat = Me.Factory.CreateRibbonButton
-        Me.RI_EditWebAgent = Me.Factory.CreateRibbonButton
         Me.Tab1.SuspendLayout()
         Me.Group1.SuspendLayout()
         Me.Group2.SuspendLayout()
@@ -416,6 +417,14 @@ Partial Class Ribbon1
         Me.RI_WebAgent.ScreenTip = "Will run the integrated WebAgent with the script selected"
         Me.RI_WebAgent.ShowImage = True
         '
+        'RI_EditWebAgent
+        '
+        Me.RI_EditWebAgent.Label = "Edit WebAgent"
+        Me.RI_EditWebAgent.Name = "RI_EditWebAgent"
+        Me.RI_EditWebAgent.OfficeImageId = "CreateCodeSnippet"
+        Me.RI_EditWebAgent.ScreenTip = "Allows you to create or edit a WebAgent script using your LLM"
+        Me.RI_EditWebAgent.ShowImage = True
+        '
         'RI_Anonymization
         '
         Me.RI_Anonymization.Label = "Anonymization"
@@ -465,6 +474,7 @@ Partial Class Ribbon1
         Me.Menu2.Items.Add(Me.RI_TimeSpan)
         Me.Menu2.Items.Add(Me.RI_Regex)
         Me.Menu2.Items.Add(Me.RI_Import)
+        Me.Menu2.Items.Add(Me.RI_Markdown)
         Me.Menu2.Items.Add(Me.RI_InsertClipboard)
         Me.Menu2.Label = "Word Helpers"
         Me.Menu2.Name = "Menu2"
@@ -512,6 +522,14 @@ Partial Class Ribbon1
         Me.RI_Import.ScreenTip = "Will insert at the current position the text of a PDF, Word document or text file" &
     ""
         Me.RI_Import.ShowImage = True
+        '
+        'RI_Markdown
+        '
+        Me.RI_Markdown.Label = "Convert Markdown"
+        Me.RI_Markdown.Name = "RI_Markdown"
+        Me.RI_Markdown.OfficeImageId = "ApplyCssStyles"
+        Me.RI_Markdown.ScreenTip = "Converts selected text from Markdown to Word formatted text"
+        Me.RI_Markdown.ShowImage = True
         '
         'RI_InsertClipboard
         '
@@ -582,14 +600,6 @@ Partial Class Ribbon1
         Me.RI_Chat.OfficeImageId = "ContactUs"
         Me.RI_Chat.ScreenTip = "Will open a window where you can chat with the LLM"
         Me.RI_Chat.ShowImage = True
-        '
-        'RI_EditWebAgent
-        '
-        Me.RI_EditWebAgent.Label = "Edit WebAgent"
-        Me.RI_EditWebAgent.Name = "RI_EditWebAgent"
-        Me.RI_EditWebAgent.OfficeImageId = "CreateCodeSnippet"
-        Me.RI_EditWebAgent.ScreenTip = "Allows you to create or edit a WebAgent script using your LLM"
-        Me.RI_EditWebAgent.ShowImage = True
         '
         'Ribbon1
         '
@@ -825,6 +835,7 @@ Partial Class Ribbon1
     Friend WithEvents RI_AddClause As RibbonButton
     Friend WithEvents RI_WebAgent As RibbonButton
     Friend WithEvents RI_EditWebAgent As RibbonButton
+    Friend WithEvents RI_Markdown As RibbonButton
 End Class
 
 Partial Class ThisRibbonCollection

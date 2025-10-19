@@ -187,4 +187,8 @@ Public Class Ribbon1
     Private Sub RI_EditWebAgent_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_EditWebAgent.Click
         Globals.ThisAddIn.CreateModifyWebAgentScript()
     End Sub
+
+    Private Sub RI_Markdown_Click(sender As Object, e As RibbonControlEventArgs) Handles RI_Markdown.Click
+        Globals.ThisAddIn.ConvertMarkdownToWord()
+    End Sub
 End Class

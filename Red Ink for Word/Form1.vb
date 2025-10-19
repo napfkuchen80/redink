@@ -2,7 +2,7 @@
 ' Copyright by David Rosenthal, david.rosenthal@vischer.com
 ' May only be used under the Red Ink License. See https://vischer.com/redink for more information.
 '
-' 7.10.2025
+' 19.10.2025
 '
 ' The compiled version of Red Ink also ...
 '
@@ -62,7 +62,8 @@ Public Class frmAIChat
     Private WithEvents chkIncludeDocText As New System.Windows.Forms.CheckBox() With {.Text = "Include document", .AutoSize = True, .Checked = My.Settings.IncludeDocument}
     Private WithEvents chkIncludeselection As New System.Windows.Forms.CheckBox() With {.Text = "Include selection", .AutoSize = True, .Checked = If(My.Settings.IncludeDocument, False, My.Settings.IncludeSelection)}
     Private WithEvents chkPermitCommands As New System.Windows.Forms.CheckBox() With {.Text = "Grant write access", .AutoSize = True, .Checked = My.Settings.DoCommands}
-    Private WithEvents chkStayOnTop As New System.Windows.Forms.CheckBox() With {.Text = "Do not stay on top", .AutoSize = True, .Checked = My.Settings.NotAlwaysOnTop}
+    Private WithEvents chkStayOnTop As New System.Windows.Forms.CheckBox() With {.Text = "Not always on top", .AutoSize = True, .Checked = My.Settings.NotAlwaysOnTop}
+    Private WithEvents chkConvertMarkdown As New System.Windows.Forms.CheckBox() With {.Text = "Do format", .AutoSize = True, .Checked = My.Settings.ConvertMarkdownInChat}
 
 
     Dim pnlButtons As New FlowLayoutPanel() With {
@@ -198,6 +199,7 @@ Public Class frmAIChat
         pnlCheckboxes.Controls.Add(chkIncludeDocText)
         pnlCheckboxes.Controls.Add(chkPermitCommands)
         pnlCheckboxes.Controls.Add(chkStayOnTop)
+        pnlCheckboxes.Controls.Add(chkConvertMarkdown)
 
 
         AddHandler btnCopy.Click, AddressOf btnCopy_Click
@@ -210,6 +212,7 @@ Public Class frmAIChat
         AddHandler chkIncludeDocText.Click, AddressOf chkIncludeDocText_Click
         AddHandler chkPermitCommands.Click, AddressOf chkPermitCommands_Click
         AddHandler chkStayOnTop.Click, AddressOf chkStayontop_Click
+        AddHandler chkConvertMarkdown.Click, AddressOf chkConvertMarkdown_Click
 
         If String.IsNullOrWhiteSpace(txtChatHistory.Text) Then
             Dim result = Await WelcomeMessage()
@@ -391,6 +394,12 @@ Public Class frmAIChat
         My.Settings.NotAlwaysOnTop = Me.TopMost
         My.Settings.Save()
     End Sub
+
+    Private Sub chkConvertMarkdown_Click(sender As Object, e As EventArgs)
+        My.Settings.ConvertMarkdownInChat = chkConvertMarkdown.Checked
+        My.Settings.Save()
+    End Sub
+
 
     Private Sub chkPermitCommands_Click(sender As Object, e As EventArgs)
         My.Settings.DoCommands = Not My.Settings.DoCommands
@@ -1072,6 +1081,7 @@ Public Class frmAIChat
                     selectionEnd = selectionEnd + Len(newTextWithMarker)
                     ' Replace the found text
                     doc.Application.Selection.Text = newTextWithMarker
+                    If chkConvertMarkdown.Checked Then Globals.ThisAddIn.ConvertMarkdownToWord()
                 End If
 
                 ' Check if the collapsed selection has reached the end of the document or the selection
@@ -1163,6 +1173,7 @@ Public Class frmAIChat
                     doc.Application.Selection.Collapse(Word.WdCollapseDirection.wdCollapseEnd)
                     doc.Application.Selection.Text = newText & doc.Application.Selection.Text
                 End If
+                If chkConvertMarkdown.Checked Then Globals.ThisAddIn.ConvertMarkdownToWord()
 
                 ' Check if the collapsed selection has reached the end of the document or the selection
                 If OnlySelection Then
@@ -1208,49 +1219,11 @@ Public Class frmAIChat
             Dim selection = doc.Application.Selection
             selection.Collapse(Word.WdCollapseDirection.wdCollapseStart)
             selection.Text = newText
+            If chkConvertMarkdown.Checked Then Globals.ThisAddIn.ConvertMarkdownToWord()
         Catch ex As Exception
             MsgBox("Error in ExecuteInsertCommand: " & ex.Message, MsgBoxStyle.Critical)
         Finally
             doc.TrackRevisions = trackChangesEnabled
-        End Try
-    End Sub
-
-    Private Sub oldExecuteInsertCommand(newText As String)
-
-        Dim doc As Word.Document = Globals.ThisAddIn.Application.ActiveDocument
-
-        ' Save the current state of Track Changes and Author
-        Dim trackChangesEnabled As Boolean = doc.TrackRevisions
-        Dim originalAuthor As String = doc.Application.UserName
-
-        Try
-
-            newText = DecodeParagraphMarks(newText)
-
-            doc.Application.Activate()
-            doc.Activate()
-
-            ' Enable Track Changes and set the author to 
-            doc.TrackRevisions = True
-            'doc.Application.UserName = AN
-
-            Dim selection As Word.Selection = doc.Application.Selection
-
-            ' Collapse the selection to the insertion point (start of selection)
-            selection.Collapse(Word.WdCollapseDirection.wdCollapseStart)
-
-            newText = newText.Replace("\r\n", vbCrLf).Replace("\n", vbCrLf).Replace("\r", vbCrLf)
-
-            ' Insert the new text at the current cursor position
-            selection.Text = newText
-
-        Catch ex As System.Exception
-            MsgBox("Error in ExecuteInsertCommand: " & ex.Message, MsgBoxStyle.Critical)
-
-        Finally
-            ' Restore the original state of Track Changes and Author
-            doc.TrackRevisions = trackChangesEnabled
-            'doc.Application.UserName = originalAuthor
         End Try
     End Sub
 

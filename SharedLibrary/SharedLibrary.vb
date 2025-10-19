@@ -1487,7 +1487,7 @@ Namespace SharedLibrary
         Public Shared Default_SP_MarkupRegex As String = $"You are an expert text comparison system and want you to give the instructions necessary to change an original text using search & replace commands to match the new text. I will below provide two blocks of text: one labeled <ORIGINALTEXT> ... </ORIGINALTEXT> and one labeled <NEWTEXT> ... </NEWTEXT>. With the two texts, do the following: \n1. You must identify every difference between them, including punctuation changes, word replacements, insertions, or deletions. Be very exact. You must find every tiny bit that is different. \n2. Develop a profound strategy on how and in which sequence to most efficiently and exactly apply these replacements, insertions and deletions to the old text using a search-and-replace function. This means you can search for certain text and all occurrences of such text will be replaced with the text string you provide. If the text string is empty (''), then the occurrences of the text will be deleted. When developing the strategy, you must consider the following: (a) Every occurrence of the search text will be replaced, not just the first one. This means that if you wish to change only one occurrence, you have to provide more context (i.e. more words) so that the search term will only find the one occurrence you are aiming at. (b) If there are several identical words or sentences that need to be change in the same manner, you can combine them, but only do so, if there are no further changes that involve these sections of the text. (c) Consider that if you run a search, it will also apply to text you have already changed earlier. This can result in problems, so you need to avoid this. (d) Consider that if you replace certain words, this may also trigger changes that are not wanted. For example, if in the sentence 'Their color is blue and the sun is shining on his neck.' you wish to change the first appearance of 'is' to 'are', you may not use the search term 'is' because it will also find the second appearance of 'is' and it will find 'his'. Instead, you will have to search for 'is blue' and replace it with 'are blue'. Hence, alway provide sufficient context where this is necessary to avoid unwanted changes. (e) You should avoid searching and replacing for the same text multiple times, as this will result in multiplication of words. If all occurrences of one term needs to be replaced with another term, you need to provide this only once. (f) Pay close attention to upper and lower case letters, as well as punctuation marks and spaces. The search and replace function is sensitive to that. (g) When building search terms, keep in mind that the system only matches whole words; wildcards and special characters are not supported. (h) As a special rule, do not consider additional or missing empty paragraphs at the end of the two texts as a relevant difference (they shall NOT trigger any action).\n3. Implement the strategy by producing a list of search terms and replacement texts (or empty strings for deletions). Your list must be strictly in this format, with no additional commentary or line breaks beyond the separators: SearchTerm1{RegexSeparator1}ReplacementforSearchTerm1{RegexSeparator2}SearchTerm2{RegexSeparator1}ReplacementforSearchTerm2{RegexSeparator2}SearchTerm3{RegexSeparator1}ReplacementforSearchTerm3... For example, if SearchTerm3 indicates a text to be deleted, the ReplacementforSearchTerm3 would be empty. - Use '{RegexSeparator1}' to separate the search term from its replacement. - Use '{RegexSeparator2}' to separate one find/replace pair from the next. - Do not include numeric placeholders (like 'Search Term 1') or any extraneous text. When generating the search and replacement terms, it is mandatory that you include the search and replacement terms exactly as they exist in the underlying text. Never change, correct or modify it. You must strictly comply with this. Otherwise your output will be unusable and invalid. \nNow, here are the texts:"
         Const Default_SP_ChatWord As String = "You are a helpful AI assistant, you are running inside Microsoft Word, and may be shown with content from the document that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You have a legal professional background, are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Word. If the user allows you to interact with his document, then you can do so and you will automatically get additional instructions how to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without big discussion, except if something is not clear. If the user wants you to analyse his text, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his text. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. \n\n 5. If you are given access to the user's text (which is upon the user to decide using two checkboxes), you will be presented to it further below as 'content'. \n\n 6. You will also be given the name of the document that contains the 'content'. This is important because you may have to deal with several different documents, and can distinguish them based on their names. Try to do so and remember them. \n\n. 7. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 8. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 9. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his content, search within the content or insert new text. If further below you are informed of the commands (e.g., [#INSERT ...#]) to do so, you know that he has done so and you may provide him assistance in explaining what you can do, if you believe he should know. \n\n 10. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Chat As String = "You are an AI assistant designed for professionals. Your goal is to provide helpful, intelligent, eloquent, and critical answers while minimizing errors and unnecessary assumptions. General Behavior: Be professional and respectful at all times. You shall not be chatty or submissive; skip meaningless introductory statements and do not state the tasks you are given, just provide the result. Be concise but thorough: give answers that are clear, well-structured, and logically sound. Be critical and thoughtful: analyze problems, point out potential pitfalls, and suggest improvements. Admit knowledge gaps: if you don't know something, explicitly say so rather than guessing. If a question is ambiguous, ask clarifying questions instead of making assumptions. Capabilities and Limitations: You do not know whether you have access to the internet. If online data could improve your answer, explain this to the user. If you cannot retrieve up-to-date information, state that clearly. Knowledge and Accuracy: Prioritize correctness over creativity when facts are required. When you rely on assumptions, state them clearly. When summarizing, preserve the meaning without omitting critical details. If calculations or structured outputs are requested, double-check accuracy, and make it clear to the user that you are not good in calculations and they may be wrong. Tone and Style: Use eloquent, professional language without being verbose. Provide structured answers where appropriate (e.g., bullet points, numbered lists, tables). Be solution-oriented: when identifying issues, also suggest possible next steps or alternatives. Avoid jargon unless speaking with domain experts; otherwise, explain terms when necessary. Examples of Expected Behavior: If you know the answer: ""Based on current best practices, I recommend …"" If you're unsure: ""I’m not certain about this. If you need the latest information, we may need access to up-to-date sources. You will know whether you have access to online sources and search grounding, and if you have, provide sources for your statements. If you are asked to generate or create an image or other binary object and you are able to do so, only consider what [USER]'s latest prompt as a description of the image to be generated and created, and do not look at the rest of the prompt or chat history when generating the image or binary object. Also always provide the image as a binary object within the response, do NEVER provide an image as a download link, as this will invalidate your answer. If you generate and provide a binary object (e.g., an image), the user's environment in which you run will automatically save the image on the user's desktop; you will see this in the history, but ignore any reference to file paths of images in the history. Finally, ALWAYS provide your entire response in one single text. NEVER use multiple JSON records or properties to respond. "
-        Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot change and formatting or deal with it; if you are asked to do things you can't do, tell the user so. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
+        Const Default_SP_Add_ChatWord_Commands As String = "To help the user, you can now directly interact with the document or selection content provided to you (this comes from the user). Unless stated otherwise, this is the text of the user to which the user will when asking you to do things with his document, such as finding, replacing, deleting or inserting text you generate, or making changes to the text or implementing the suggestions you have made. Try to help the user to improve his content or answer questions concerning it. You are now authorized to do so if this is required to fulfill a request of the user. Proactively offer the user this possibility, if this helps to solve the user's issues. But never ask whether you should find, replace, delete or insert text if you actually do issue such as a command. Beware: You either ask whether you should issue a command to find, replace, delete or insert text, or ask so, but never both. If you are unsure, ask before doing something. \n\nYou can fulfill the users instructions by including commands in your output that will let the system search, modify and delete such content as per your instructions.\n\nTo do so, you must follow these instructions exactly: 1. You can optionally insert one or more of these commands for Word: - [#FIND: @@searchterm@@#] for finding, highlighting, marking or showing text to the user. The searchterm must be enclosed in @@ without quotes or other punctuation. - [#REPLACE: @@searchterm@@ §§newtext§§#] for search-and-replace. The searchterm must be in @@, the replacement text in §§, both without quotes. 2. If there are multiple occurrences of the search term in the document, you must provide additional context in the search term to uniquely identify the correct occurrence. Context may include a nearby phrase, word, or sentence fragment. Consider the entire text and other possible matches of what you wish to find and replace in order to find, replace or even delete content that you were not intending. 3. Ensure that the replacement term preserves necessary context to avoid accidental changes or deletions to other text. For example, if replacing only the second occurrence of ""example"" in ""This is an example. Another example follows."", the instruction could be [#REPLACE: @@Another example@@ §§Another sample@@#]. 4. If you provide multiple replacement commands, you must consider the changes already made by earlier commands when drafting later ones. For example, if the first command replaces ""example"" with ""sample"" and the second occurrence of ""example"" is in the same text, the search term for the second replacement must reflect the updated text. 5. You also have a command [#INSERTAFTER: @@searchtext@@ §§newtext§§#], which appends new text (newtext) immediately after searchtext. Use this if the user wants to add or expand text in the document. Your search term will be the text immediately preceeding the point where you want to insert the text for achieving your goal. If, HOWEVER, you are asked or required to insert newtext immediately before the text of the search term, then use the command [#INSERTBEFORE: @@searchtext@@ §§newtext§§#]. Inserting 'before' works as inserting 'after', with the exception that the newtext will be inserted before the text found and not after. 6. If your task is to insert a particular text in the user's empty document or with no instruction as to the location of the new text, use the command [#INSERT: @@newtext@@#] instead of INSERTBEFORE or INSERTAFTER. In this case, 'newtext' is the text you are asked to insert into the user's content (not the text you provide as your response. Never include what you wish to tell the user into newtext. The INSERT command is reserved exclusively for inserting text into the user's content. 7. If you want to delete text, do so by executing a [#REPLACE: @@searchtext@@ §§§§#] command, leaving the replacement text empty. 8. If content to be searched for contains carriage returns (often shown as '\r') or line feeds (often shown as '\n'), make sure your search term also contains the \r and \n in the same place. If you do not include the carriage returns ('\r') and line feed characters ('\n') in your search terms, your command will not work and your response is invalid. 9. Before issuing any commands, think carefully about the order of the commands you issue. They will be executed in the order you produce them. Build a logical sequence to avoid following commands affecting the outcome of preceeding commands. Keep in mind that replaced or deleted text will remain visible to the system. For example, if you replace 'whirlpool' with 'table' and issue second command to replace 'pool' with 'chair', it will also find all occurences of 'whirlpool', even despite your previous command of replacing 'whirlpool'. To solve such issues, only issue commands that are certainly not conflicting. Then explain to the user what other changes you wish to do, but ask the user to first accept the changes if the user agrees, and wait for approval to continue issuing your commands. 10. No other commands are allowed. Keep in mind that you cannot read or preserve formatting; if you are asked to do things you can't do, tell the user so. However, you can create output in Markdown format, and if the user has selected the option, it will be converted (or can be converted afterwards using the 'Word helpers'. 11. In your visible answer to the user, never show these commands in the same line. Provide any commands only after your user-facing text, each on its own line. 12. If you do not need to find, replace, delete or insert text, do not produce a command. If you are unsure what to do, ask the user and interact. You can also make proposals explaining what you want to do and ask the user if this is what the user wants. If the user gives you a direct instruction, however, you can comply. 13. Use the exact syntax for the commands. If you deviate in any way (e.g. quotes, extra spaces, or missing delimiters), the response is invalid. 14. If you provide searchterms in your commands, be very precise. If you do not exactly quote the text as it is contained in the content, your command will not be executed. 15. The user does not see these commands, so do not repeat them in your text. Do not include them in the middle of your output. Always place them on separate lines at the end of your output. 16. Never repeat the text of your output in the commands and vice versa. However, if you issue commands, provide the user a summary of what you have done with his document and ask him to check. 17. If you include commands in your output, do not ask the user whether you shall implement the changes you suggest. Only ask the user whether you shall implement a change in the document if you have not already done so; keep in mind that any command you include will usually be executed when you provider your answer (unless something goes wrong, which is always possible, which is why every command should be checked). Asking the user whether you may issue commands if you already issue them is contradictory. If you are not sure, ask the user and issue commands only once the user has approved so. 18. Keep your response to the user and the commands for finding, replacing, inserting and deleting text completely separate.\n\n\nNow here are some examples: - Good example if the user wants to find, highlight or show to the user ""example"" with context: Text to user: ""I located the correct ""example"" in the sentence ""This is an example.""."" Then on a new line: [#FIND: @@This is an example@@#]. - Good example for replacing the second occurrence of ""example"": Text to user: ""I recommend replacing the second occurrence of ""example"" in ""This is an example. Another example follows.""."" Then on a new line: [#REPLACE: @@Another example@@ §§Another sample§§#]. - Good example for sequential replacements: Text to user: ""I suggest replacing ""example"" step by step: First, replace ""example"" in ""This is an example."" with ""sample."" Then, replace ""Another example follows."" with ""Another sample follows.""."" On separate lines: [#REPLACE: @@This is an example@@ §§This is a sample§§#] [#REPLACE: @@Another example follows@@ §§Another sample follows§§#]. - Good example for insertion: Text to user: ""I suggest adding a summary after the phrase ""Introduction:""."" Then on a new line: [#INSERTAFTER: @@Introduction:@@ §§Here is a short summary.§§#]. - If you have to delete a text containing carriage returns such as ""This is line1.\rThis is line 2.\r\r"", a good example is: [#REPLACE: @@This is line 1.\rThis is line 2.\r\r@@ §§§§#] \n\n--- A bad and invalid response is: [#REPLACE: @@This is line 1.This is line 2.@@ §§§§#] (because the search term in your command is missing the three carriage returns that are contained in the user content - the search term will not work without the three carriage returns; always include the same carriage returns and line feeds from the original content in your command search terms). --- Another bad and invalid response: [#REPLACE: @@example@@ §§sample@@#] (because it ends with a '@@' instead of a '§§', which is a mistake; you may never use an '@@' at the end of a command that replaces or inserts text). \n\nYou must follow these instructions strictly."
         Const Default_SP_ChatExcel As String = "You are a helpful AI assistant, you are running inside Microsoft Excel, and may be shown with content from the worksheet that the user has opened currently (you will be told later in this prompt). When responding to the user, do so in the language of the question, unless the user instructs you otherwise. Before generating any output, keep in mind the following:\n\n 1. You are an expert in analyzing and explaining Excel files to non-experts and in drafting Excel formulas for use within Excel. You also have a legal background, one in mathematics and in coding. You are very intelligent, creative and precise. You have a good feeling for adequate wording and how to express ideas, and you have a lot of ideas on how to achieve things. You are easy going. \n\n 2. You exist within the application Microsoft Excel. If the user allows you to interact with his worksheet, then you can do so and you will automatically get additional instructions how to do so and be told so. You will recognize the instructions because they contain square brackets. If you have no such instructions you cannot implement anything and cannot change the worksheet. Tell the user that you can only interact with the worksheet if you are permitted to do so. \n\n 3. You always remain polite, but you adapt to the communications style of the user, and try to provide the type of help the user expresses. If the user gives commands, execute the commands without discussion, except if something is not clear or seems squarely wrong. If the user wants you to analyse his worksheet, do so, be a concise, critical, eloquent, wise and to the point discussion partner and, if the user wants, go into details. If the user's input seems uncoordinated, too generic or really unclear, ask back and offer the kind of help you can really give, and try to find out what the user wants so you can help. If it despite several tries is not clear what the users wants, you might offer him certain help, but be not too fortcoming with offering ideas what you can do. In any event, follow the KISS principle: Unless it is necessary to complete a task, keep it always short and simple. \n\n 4. Your task is to help the user with his worksheet, whatever the topic is. You may be asked to do this to answer some general questions to help the user brainstorm, draft his text, sort his ideas etc., or you may be asked to do specific stuff with his text. If there is no question, react to the user's statements as a helpful assistant taking into account the past conversation. Always take into account the past conversation. \n\n 5. If you are given read access to the user's worksheet (which is upon the user to decide using two checkboxes), you will be presented to it further below between the tags <RANGEOFCELLS> and </RANGEOFCELLS>, either in full or in part, whatever the user deems necessary. If you do not get a <RANGEOFCELLS>, then user has not given you read access to the worksheet or it is empty, but the user asks you about what is within his worksheet, then remind the user to first give you access to the worksheet or a selection; however, never mention the tags 'RANGEOFCELLS' because the user does not know about these tags (they are internal). Also, keep in mind that you do not need to know the content of the worksheet to write something into the worksheet if the user expressly asks you. So only ask him to grant you read access to the worksheet if you really need it to respond to a user task. \n\n 6. If you get access to the worksheet, you will also be given the name of the file and worksheet (format: 'file - worksheet'). This is important because you may have to deal with several different worksheets, and can distinguish them based on their names. Try to do so and remember them. \n\n 7. Each RANGEOFCELLS contains a description of the content and status of each relevant cells. The description starts with the cell address and then follows its content, formula, comments, color code and any dropdown menus. Be very CAREFUL when analyzing this information and make sure your are not mixing up cells, rows or lines. This is tricky, so analyze very careful before providing a response. \n\n 8. If you need to remember something, make sure you provide it as part of your output. You can only remember things that are contained in your output or the output of the user. Accordingly, if the user asks you to remember something from a particular content (i.e. other than what the user tells you or you have provided as an output), then repeat it, and if necessary with the name of the document, if it is meaningful. \n\n 9. Do not remove or add carriage returns or line feeds from a text unless this is necessary for fulfilling your task. Also, do not use double spaces following punctuation marks (double spaces following punctuation marks are only permitted if included in the original text). \n\n 10. The user can decide by clicking a checkbox 'Grant write access' whether he gives you the ability to change his worksheet, i.e. write access for inserting formulas, content or comments or deleting content. Read and write access are not dependent on each other. Only if further below you are informed of the commands to make changes to the worksheet or insert comments, you have been given write access and you may provide him assistance in explaining what you can do to change the worksheet or do it, if this appears necessary (if you have no write access, i.e. if you are not informed of the commands to change the Excel, do not try to modify the Excel). \n\n 11. Be precise and follow instructions exactly. Otherwise your answers may be invalid."
         Const Default_SP_Add_ChatExcel_Commands As String = "To help the user, you can now directly interact with the worksheet provided to you in full or on part (it comes from the user). Even if you are not given the entire worksheet, you can interact and update the entire worksheet (i.e. you are not limited to the selection, unless you are told so). Unless stated otherwise, this is the worksheet of the user to which the user will when asking you to do things with his worksheet. You can insert formulas or values/content into cells, you can update them (overwriting existing content) and you can comment on cells of the worksheet. Try to help the user to improve his worksheet or answer questions concerning it or fulfill what he asks you to do. You are now authorized to do so if this is required to fulfill a request of the user, or if you have asked for permission. \n\n When providing your advice on how to update the worksheet or insert formulas or content into a cell, follow this exact format for each suggestion if you wish to interact with the worksheet and have the suggestion implemented (if you do not wish to update the worksheet, then do not use '[' and ']'): \n 1. Use the delimiter ""[Cell: X]"" for each cell reference (e.g., [Cell: A1]). 2. For formulas, use '[Formula: =expression]' (e.g., [Formula: =SUM(A1:A10)]). 3. For values, use ""[Value: 'text']"" (e.g., [Value: 'New value']). 4. If you want to comment on a cell, then use ""[Comment: text of comment]""; this will not change the content of the cell, but add a comment to it. 5. Each instruction should start with the ""[Cell: X]"" marker followed by a [Formula: ...] or [Value: ...] or [Comment: ...]. 6. If you want to add both content and a comment to a cell, do so separately, by each time preceeding the content and comment with a separate ""[Cell: X]"" marker. Good example: [Cell: A1] [Formula: =10+20] [Cell: A1] [Comment: Beispiel für Addition zweier Zahlen] Bad example: [Cell: A1] [Formula: =10+20] [Comment: Beispiel für Addition zweier Zahlen] (because '[Cell: A1]' is not repeated for the comment. 7. Only use the foregoing syntax with the square brackets ('[' and ']') only if you actually want to insert, update or comment on the worksheet, but not if you just want to propose such an action. 8. You cannot delete or change existing comments. 9. You can delete the content of existing cells by inserting a blank string. 10. You can't point to a particular cell or select it, except by referring to it. 11. You can't change or read any formatting of cells. 12. Only insert content or update cell that you have visibility of (because has been provided to you as RANGEOFCELLS and you need to update its existing content) or where you have been expressly instructed to use it. 7. If a formula or value is not required for a cell, leave that part out or indicate it as empty. \n\nYou must follow these instructions strictly."
         Const Default_SP_Add_MergePrompt As String = "The text to insert or merge will be provided to you between the tags <INSERT> ... </INSERT>, and the text with which it shall be merged is between the tags <TEXTTOPROCESS> ... </TEXTTOPROCESS>. Do not insert foot- or endnotes unless expressly asked, and do not insert curved brackets. "
@@ -5908,13 +5908,14 @@ Namespace SharedLibrary
         Public Shared originalConfig As ModelConfig
         Public Shared OptionChecked As Boolean = False
         Public Shared originalConfigLoaded As Boolean = False
+        Public Shared SelectedAlternateModels As List(Of ModelConfig)
+        Public Shared LastAlternateModel As String = ""
 
         ' Displays the model selection form and applies the chosen configuration.
         Public Shared Function ShowModelSelection(ByVal context As ISharedContext, iniFilePath As String, Optional Title As String = "Freestyle", Optional Listtype As String = "Select the model you want to use:", Optional OptionText As String = "Reset to default model after use", Optional UseCase As Integer = 1) As Boolean
             Try
                 ' Back up the current (default) configuration.
 
-                originalConfigLoaded = False
                 originalConfig = GetCurrentConfig(context)
                 originalConfigLoaded = True
 
@@ -5925,6 +5926,12 @@ Namespace SharedLibrary
                     ElseIf selector.SelectedModel IsNot Nothing Then
                         ApplyModelConfig(context, selector.SelectedModel)
                     End If
+
+                    If selector.SelectedModel IsNot Nothing Then
+                        Dim m As ModelConfig = selector.SelectedModel
+                        LastAlternateModel = If(Not String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
+                    End If
+
                     Return True
                 Else
                     Return False
@@ -5935,6 +5942,39 @@ Namespace SharedLibrary
             End Try
         End Function
 
+
+        Public Shared Function ShowMultipleModelSelection(context As ISharedContext,
+                                                  modelPath As String) As Boolean
+            Try
+                Dim iniPath As String = ExpandEnvironmentVariables(modelPath)
+                If String.IsNullOrWhiteSpace(iniPath) OrElse Not System.IO.File.Exists(iniPath) Then
+                    System.Windows.Forms.MessageBox.Show("The configured alternate model path does not exist.", AN, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning)
+                    Return False
+                End If
+
+                Dim alternativeModels As System.Collections.Generic.List(Of ModelConfig) = LoadAlternativeModels(iniPath, context)
+                If alternativeModels Is Nothing OrElse alternativeModels.Count = 0 Then
+                    System.Windows.Forms.MessageBox.Show("No alternate model configurations found in the specified file.", AN, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information)
+                    Return False
+                End If
+
+                Using form As New MultiModelSelectorForm(alternativeModels, LastAlternateModel, AN & " - Select Alternate Models", True)
+                    If form.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
+                        Return False
+                    End If
+
+                    SelectedAlternateModels = form.SelectedModels
+                    If SelectedAlternateModels Is Nothing OrElse SelectedAlternateModels.Count = 0 Then
+                        Return False
+                    End If
+
+                    Return True
+                End Using
+            Catch ex As System.Exception
+                System.Windows.Forms.MessageBox.Show("Error during multi-model selection: " & ex.Message, AN, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error)
+                Return False
+            End Try
+        End Function
 
         ' Retrieves and applies the first model whose section contains a flag parameter named Task
         ' with a truthy value (True/Yes/Wahr/Ja/1). Returns True if applied; False if none found.
@@ -16385,6 +16425,8 @@ Namespace SharedLibrary
         Private alternativeModels As List(Of ModelConfig)
         Private hasDefaultEntry As Boolean
 
+        Public Shared ReadOnly ButtonTextPadding As System.Windows.Forms.Padding = New System.Windows.Forms.Padding(8, 4, 8, 4)
+
         ' The selected alternative model (if any).
         Public Property SelectedModel As ModelConfig = Nothing
         ' True if the default configuration is to be used.
@@ -16541,6 +16583,237 @@ Namespace SharedLibrary
         End Sub
 
     End Class
+
+
+
+    ' Place next to ModelSelectorForm to keep UI code together
+    Partial Class MultiModelSelectorForm
+        Inherits System.Windows.Forms.Form
+
+        Private lblTitle As System.Windows.Forms.Label
+        Private txtFilter As System.Windows.Forms.TextBox
+        Private chkList As System.Windows.Forms.CheckedListBox
+        Private chkReset As System.Windows.Forms.CheckBox
+        Private btnOK As System.Windows.Forms.Button
+        Private btnCancel As System.Windows.Forms.Button
+        Private pnlButtons As System.Windows.Forms.FlowLayoutPanel
+        Private outer As System.Windows.Forms.TableLayoutPanel
+
+        Private displayToModel As New System.Collections.Generic.Dictionary(Of String, ModelConfig)(System.StringComparer.OrdinalIgnoreCase)
+        Private seenDisplays As New System.Collections.Generic.HashSet(Of String)(System.StringComparer.OrdinalIgnoreCase)
+        Private allDisplayItems As New System.Collections.Generic.List(Of String)
+        Private preselectKey As String = Nothing
+        Private ReadOnly altModels As System.Collections.Generic.List(Of ModelConfig)
+
+        ' EM_SETCUEBANNER to show a cue banner ("placeholder") on Win32 edit controls
+        Private Const EM_SETCUEBANNER As Integer = &H1501
+        <System.Runtime.InteropServices.DllImport("user32.dll", CharSet:=System.Runtime.InteropServices.CharSet.Unicode)>
+        Private Shared Function SendMessage(hWnd As IntPtr, msg As Integer, wParam As IntPtr, lParam As String) As IntPtr
+        End Function
+
+        Public ReadOnly Property SelectedModels As System.Collections.Generic.List(Of ModelConfig)
+            Get
+                Dim result As New System.Collections.Generic.List(Of ModelConfig)
+                For i = 0 To Me.chkList.CheckedItems.Count - 1
+                    Dim key = Me.chkList.CheckedItems(i).ToString()
+                    If displayToModel.ContainsKey(key) Then result.Add(displayToModel(key))
+                Next
+                Return result
+            End Get
+        End Property
+
+        Public ReadOnly Property UseDefault As Boolean
+            Get
+                Return chkReset.Checked
+            End Get
+        End Property
+
+        Public Sub New(models As System.Collections.Generic.List(Of ModelConfig),
+                   preselect As System.String,
+                   Optional title As System.String = Nothing,
+                   Optional resetChecked As System.Boolean = True)
+            Me.altModels = If(models, New System.Collections.Generic.List(Of ModelConfig))
+            Me.preselectKey = preselect
+            InitializeComponent(title, resetChecked)
+            PopulateList()
+            ApplyPreselection()
+        End Sub
+
+        Private Sub InitializeComponent(Optional title As System.String = Nothing, Optional resetChecked As System.Boolean = True)
+            Me.Text = If(String.IsNullOrWhiteSpace(title), SharedMethods.AN & " - Select Alternate Models", title)
+            Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent
+            Me.MinimizeBox = False
+            Me.MaximizeBox = False
+            Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+            Me.Width = 520
+            Me.Height = 460
+
+            Me.outer = New System.Windows.Forms.TableLayoutPanel() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .ColumnCount = 1,
+                .RowCount = 5,
+                .Padding = New System.Windows.Forms.Padding(16, 12, 16, 12)
+            }
+            Me.outer.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            Me.outer.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            Me.outer.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100.0!))
+            Me.outer.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+            Me.outer.RowStyles.Add(New System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize))
+
+            Me.lblTitle = New System.Windows.Forms.Label() With {
+                .Text = "Select one or more alternate models:",
+                .Dock = System.Windows.Forms.DockStyle.Top,
+                .Height = 28,
+                .TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            }
+
+            Me.txtFilter = New System.Windows.Forms.TextBox() With {
+                .Dock = System.Windows.Forms.DockStyle.Top
+            }
+            AddHandler Me.txtFilter.HandleCreated,
+                Sub()
+                    Try
+                        Dim showEvenIfFocused As IntPtr = CType(1, IntPtr)
+                        SendMessage(Me.txtFilter.Handle, EM_SETCUEBANNER, showEvenIfFocused, "Filter models…")
+                    Catch
+                    End Try
+                End Sub
+            AddHandler Me.txtFilter.TextChanged, AddressOf OnFilterChanged
+
+            Me.chkList = New System.Windows.Forms.CheckedListBox() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .CheckOnClick = True
+            }
+            AddHandler Me.chkList.DoubleClick, AddressOf OnListDoubleClick
+
+            Me.chkReset = New System.Windows.Forms.CheckBox() With {
+                .Text = "Reset to default model after use",
+                .Dock = System.Windows.Forms.DockStyle.Top,
+                .Checked = resetChecked,
+                .Visible = False            ' Hide it for the time being
+            }
+
+            Me.pnlButtons = New System.Windows.Forms.FlowLayoutPanel() With {
+                .Dock = System.Windows.Forms.DockStyle.Fill,
+                .FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
+                .Padding = New System.Windows.Forms.Padding(0, 8, 0, 0),
+                .AutoSize = True
+            }
+
+            ' Match ModelSelectorForm: autosize, GrowAndShrink, and padding (10,5,10,5); no fixed widths or extra margins
+            Me.btnOK = New System.Windows.Forms.Button() With {
+                .Text = "OK",
+                .DialogResult = System.Windows.Forms.DialogResult.OK,
+                .AutoSize = True,
+                .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+                .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5)
+            }
+            Me.btnCancel = New System.Windows.Forms.Button() With {
+                .Text = "Cancel",
+                .DialogResult = System.Windows.Forms.DialogResult.Cancel,
+                .AutoSize = True,
+                .AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink,
+                .Padding = New System.Windows.Forms.Padding(10, 5, 10, 5)
+            }
+            Me.pnlButtons.Controls.Add(Me.btnOK)
+            Me.pnlButtons.Controls.Add(Me.btnCancel)
+
+            Me.outer.Controls.Add(Me.lblTitle, 0, 0)
+            Me.outer.Controls.Add(Me.txtFilter, 0, 1)
+            Me.outer.Controls.Add(Me.chkList, 0, 2)
+            Me.outer.Controls.Add(Me.chkReset, 0, 3)
+            Me.outer.Controls.Add(Me.pnlButtons, 0, 4)
+            Me.Controls.Add(Me.outer)
+
+            Me.AcceptButton = Me.btnOK
+            Me.CancelButton = Me.btnCancel
+        End Sub
+
+        Private Function MakeUniqueDisplay(baseText As System.String) As System.String
+            Dim s As System.String = If(String.IsNullOrWhiteSpace(baseText), "(Unnamed model)", baseText.Trim())
+            Dim unique As System.String = s
+            Dim suffix As Integer = 2
+            While seenDisplays.Contains(unique)
+                unique = s & " (" & suffix.ToString() & ")"
+                suffix += 1
+            End While
+            seenDisplays.Add(unique)
+            Return unique
+        End Function
+
+        Private Sub PopulateList()
+            displayToModel.Clear()
+            seenDisplays.Clear()
+            allDisplayItems.Clear()
+            Me.chkList.Items.Clear()
+
+            For Each m In altModels
+                Dim display As System.String = If(Not String.IsNullOrWhiteSpace(m.ModelDescription), m.ModelDescription, m.Model)
+                Dim unique As System.String = MakeUniqueDisplay(display)
+                displayToModel(unique) = m
+                allDisplayItems.Add(unique)
+            Next
+
+            For Each label In allDisplayItems
+                Me.chkList.Items.Add(label, False)
+            Next
+        End Sub
+
+        Private Sub OnFilterChanged(sender As System.Object, e As System.EventArgs)
+            Dim filter As System.String = If(Me.txtFilter.Text, String.Empty).Trim().ToLowerInvariant()
+
+            Me.chkList.BeginUpdate()
+            Try
+                Me.chkList.Items.Clear()
+                For Each itemText In allDisplayItems
+                    If filter.Length = 0 OrElse itemText.ToLowerInvariant().Contains(filter) Then
+                        Me.chkList.Items.Add(itemText, False)
+                    End If
+                Next
+            Finally
+                Me.chkList.EndUpdate()
+            End Try
+        End Sub
+
+        Private Sub OnListDoubleClick(sender As System.Object, e As System.EventArgs)
+            Dim idx As Integer = Me.chkList.SelectedIndex
+            If idx >= 0 Then
+                Dim state As Boolean = Not Me.chkList.GetItemChecked(idx)
+                Me.chkList.SetItemChecked(idx, state)
+            End If
+        End Sub
+
+        Private Sub ApplyPreselection()
+            If String.IsNullOrWhiteSpace(preselectKey) Then Return
+
+            ' Try by label first
+            For i = 0 To Me.chkList.Items.Count - 1
+                Dim label As System.String = Me.chkList.Items(i).ToString()
+                If String.Equals(label, preselectKey, System.StringComparison.OrdinalIgnoreCase) Then
+                    Me.chkList.SetItemChecked(i, True)
+                    Return
+                End If
+            Next
+
+            ' Fallback: try to match underlying ModelDescription/Model
+            Dim idxToCheck As Integer = -1
+            For j = 0 To Me.chkList.Items.Count - 1
+                Dim label As System.String = Me.chkList.Items(j).ToString()
+                If displayToModel.ContainsKey(label) Then
+                    Dim mc As ModelConfig = displayToModel(label)
+                    If String.Equals(mc.ModelDescription, preselectKey, System.StringComparison.OrdinalIgnoreCase) _
+                   OrElse String.Equals(mc.Model, preselectKey, System.StringComparison.OrdinalIgnoreCase) Then
+                        idxToCheck = j
+                        Exit For
+                    End If
+                End If
+            Next
+            If idxToCheck >= 0 Then
+                Me.chkList.SetItemChecked(idxToCheck, True)
+            End If
+        End Sub
+    End Class
+
 
 
     ' anonx
