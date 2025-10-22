@@ -10,6 +10,10 @@ Red Ink is an alternative AI assistant add-in for Microsoft Office on Windows th
 
 Unlike some other offerings, Red Ink allows you to freely choose the AI provider you want to work with. If you don't trust any of these providers or they don't offer you the necessary assurances, you can also configure Red Ink to use a self-hosted LLM. The source code is open, and we have no access to your data. We don't want that either, because we originally developed the tool for ourselves. For the time being, we provide the tool for free. Since API access is also very cheap today, this solution is much less expensive to use for such applications than some other offers.
 
-Red Ink has originally been developed by David Rosenthal, partner at the Swiss law firm VISCHER and head of its data & privacy and AI practice for its own internal purposes, but is now making available Generation 2 of the tool to the public. You will find more information (including a demo video) on https://vischer.com/redink and the executables on https://apps.vischer.com. 
+Red Ink has originally been developed by David Rosenthal, partner at the Swiss law firm VISCHER and head of its data & privacy and AI practice for its own internal purposes, but is now making available Generation 2 of the tool to the public. You will find more information (including a demo video) on https://vischer.com/redink and the executables on https://apps.vischer.com.
 
-In the current beta test phase the software is free to everyone, and the source code is open here for review. The license conditions are described in the license file. 
+In the current beta test phase the software is free to everyone, and the source code is open here for review. The license conditions are described in the license file.
+
+## Additional deployment documentation
+
+- [Outlook Gateway Integration Checklist](Documentation%20and%20more/Outlook_Gateway_Integration.md) – network, authentication, policy, and offline requirements for connecting Outlook clients to an internal Red Ink gateway.
