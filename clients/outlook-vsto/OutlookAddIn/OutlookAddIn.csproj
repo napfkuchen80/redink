@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{BEF26616-9458-42A4-A68A-FE9A57A51002}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>RedInk.OutlookAddIn</RootNamespace>
+    <AssemblyName>RedInk.OutlookAddIn</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <ProjectTypeGuids>{BAA0C2D2-18E2-41B9-852F-F413020CAA33};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <OfficeApplication>Outlook</OfficeApplication>
+    <LoadBehavior>3</LoadBehavior>
+    <BootstrapperEnabled>true</BootstrapperEnabled>
+    <PublishUrl>publish\</PublishUrl>
+    <Install>true</Install>
+    <InstallFrom>Web</InstallFrom>
+    <UpdateEnabled>true</UpdateEnabled>
+    <UpdateMode>Foreground</UpdateMode>
+    <UpdateInterval>7</UpdateInterval>
+    <UpdateIntervalUnits>Days</UpdateIntervalUnits>
+    <ApplicationVersion>1.0.0.%2a</ApplicationVersion>
+    <IsWebBootstrapper>false</IsWebBootstrapper>
+    <UseApplicationTrust>false</UseApplicationTrust>
+    <TargetFrameworkProfile />
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>TRACE;DEBUG</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="Microsoft.Office.Interop.Outlook" />
+    <Reference Include="Office" />
+    <Reference Include="Microsoft.Office.Tools" />
+    <Reference Include="Microsoft.Office.Tools.Common" />
+    <Reference Include="Microsoft.Office.Tools.Common.v4.0.Utilities" />
+    <Reference Include="Microsoft.Office.Tools.Outlook" />
+    <Reference Include="Microsoft.Office.Tools.Outlook.v4.0.Utilities" />
+    <Reference Include="Microsoft.Office.Tools.Runtime" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Configuration\AddInConfiguration.cs" />
+    <Compile Include="Configuration\LlmGatewayOptions.cs" />
+    <Compile Include="Globals.cs" />
+    <Compile Include="Models\MailItemContext.cs" />
+    <Compile Include="Models\MailParticipant.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Ribbon\MailAssistantRibbon.cs" />
+    <Compile Include="Ribbon\MailAssistantRibbon.Designer.cs">
+      <DependentUpon>MailAssistantRibbon.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Services\LlmGatewayClient.cs" />
+    <Compile Include="Services\LlmRequestPayload.cs" />
+    <Compile Include="Services\LlmIntent.cs" />
+    <Compile Include="TaskPane\AssistantTaskPaneControl.cs" />
+    <Compile Include="ThisAddIn.cs" />
+    <Compile Include="ThisAddIn.Designer.cs">
+      <DependentUpon>ThisAddIn.cs</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Import Project="$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v10.0\OfficeTools\Microsoft.Office.Tools.OfficeTargets.targets" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v10.0\OfficeTools\Microsoft.Office.Tools.OfficeTargets.targets')" />
+  <Import Project="$(MSBuildExtensionsPath)\Microsoft\VisualStudio\ToolsOffice\Microsoft.VisualStudio.Tools.Office.targets" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\VisualStudio\ToolsOffice\Microsoft.VisualStudio.Tools.Office.targets')" />
+</Project>
