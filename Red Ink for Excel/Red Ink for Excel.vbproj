@@ -365,16 +365,11 @@
   <PropertyGroup>
     <SignManifests>false</SignManifests>
   </PropertyGroup>
-  <PropertyGroup>
-    <ManifestKeyFile>
-    </ManifestKeyFile>
-  </PropertyGroup>
-  <PropertyGroup>
-    <ManifestCertificateThumbprint>50229D23A3CA721BCA66C2ECC258074E6C6D6456</ManifestCertificateThumbprint>
-  </PropertyGroup>
-  <PropertyGroup>
-    <ManifestTimestampUrl>http://timestamp.digicert.com</ManifestTimestampUrl>
-  </PropertyGroup>
+  <!--
+    Manifest signing is disabled for local builds so that missing certificates do not
+    interrupt development.  Re-enable signing via the project settings when a certificate
+    is available.
+  -->
   <PropertyGroup>
     <SignAssembly>false</SignAssembly>
   </PropertyGroup>

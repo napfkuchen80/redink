@@ -386,9 +386,11 @@
   <PropertyGroup>
     <SignManifests>false</SignManifests>
   </PropertyGroup>
-  <PropertyGroup>
-    <ManifestCertificateThumbprint>50229D23A3CA721BCA66C2ECC258074E6C6D6456</ManifestCertificateThumbprint>
-  </PropertyGroup>
+  <!--
+    Manifest signing is disabled for local builds to prevent missing certificates from
+    causing build failures.  Reconfigure the Signing settings when a certificate is
+    available.
+  -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
     <DebugSymbols>true</DebugSymbols>
     <DefineDebug>true</DefineDebug>
